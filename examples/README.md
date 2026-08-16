@@ -8,11 +8,11 @@ conversation depth, and tool-chain length; about one row in five is a
 labeled failure (reward 0.0 or 0.5), because graded negatives are part of
 the product.
 
-- `explore/` — every row a brand-new situation. lawfirm and github agents.
-- `sft/` — differently phrased openers of known situations. lawfirm and coding agents.
+- `explore/` — every row a brand-new situation. lawfirm and gmail agents.
+- `sft/` — differently phrased openers of known situations. coding and instagram agents.
 - `rl/` — repeated rollouts of the same opener. Each file opens with a
   contrastive pair: the same request, one trajectory rewarded 1.0 and one
-  rewarded 0.0. lawfirm and github agents.
+  rewarded 0.0. github and amazon agents.
 
 Selection favored multi-turn threads, honestly handled tool faults, longer
 tool chains, and adversarial openers. Generated with
