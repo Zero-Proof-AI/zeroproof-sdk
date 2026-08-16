@@ -9,8 +9,7 @@ labeled failure (reward 0.0 or 0.5), because graded negatives are part of
 the product.
 
 - `explore/` — every row a brand-new situation. lawfirm and github agents.
-- `sft/` — differently phrased openers of known situations. lawfirm and
-  Victoria's Secret agents.
+- `sft/` — differently phrased openers of known situations. lawfirm and coding agents.
 - `rl/` — repeated rollouts of the same opener. Each file opens with a
   contrastive pair: the same request, one trajectory rewarded 1.0 and one
   rewarded 0.0. lawfirm and github agents.
