@@ -37,3 +37,7 @@ zeroproof_simulations/_experimental/
 # editor config and local notes
 .cursor/
 AUDIT_*.md
+
+# curated example outputs ship; bulk runs stay local
+!examples/
+!examples/**
