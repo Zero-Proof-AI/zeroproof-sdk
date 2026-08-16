@@ -1,0 +1,39 @@
+# generated runs
+outputs/
+output/
+*.jsonl
+*.progress.json
+*.meta.json
+play_*
+bench_*
+
+# extra docs (not the product)
+SDK_BRIEF.md
+*.html
+
+# secrets and local junk
+.env
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+
+# example specs the tests read ship; the rest stay local
+specs/*
+!specs/github/
+!specs/github/**
+!specs/linear/
+!specs/linear/**
+
+# helpers, not the product
+scripts/
+simulate.ipynb
+test.ipynb
+zeroproof_simulations/_experimental/
+
+# editor config and local notes
+.cursor/
+AUDIT_*.md
