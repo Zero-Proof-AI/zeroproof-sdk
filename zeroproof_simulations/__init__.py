@@ -18,13 +18,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .adapters import (claude_code, connect, inspect, resolve, ConnectedAgent,
-                       AgentProfile)
+                       AgentProfile, resolve_system_prompt)
 from .agents import (hosted_model, local_model, missing_hosted_key,
                        parse_backend_spec, touch_hosted, default_max_turns)
 from .coverage import (NEW_SIGNATURE_FLOOR, SATURATION_COPIES,
                        build_coverage_summary, cell_key as _cell_key_from_row,
                        copies_remaining, coverage_point, space_saturated)
 from .diversity import (MAX_NOVELTY_RESTARTS, NOVELTY_RESTART_FLOOR,
+                        adaptive_allocator, allocator_slot_counts,
                         behavior_tier, cap_scenario_families,
                         conversation_features, mix_items_by_tier,
                         new_turn_stats, record_turns, sample_cell_tags,
@@ -40,6 +41,8 @@ from .generator import (ModelSimulator, assistant_kind, make_default_generator,
 from .grading import behavior_signature, conduct_grade
 from .llm_judge import (MISSING_JUDGE_KEY, apply_llm_grade,
                        resolve_judge_key)
+from .quality import (rank as rank_source, rank_rows, score_row,
+                      summarize as summarize_quality)
 from .sandbox import MockEnvironment
 from .scenarios import (DEFAULT_FAULT_RATE, SEARCH_ARMS, build_dimensions,
                         keep_fault_plan,
@@ -50,13 +53,13 @@ from .scenarios import (DEFAULT_FAULT_RATE, SEARCH_ARMS, build_dimensions,
 
 __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "hosted_model",
-           "MockEnvironment", "llm_grade",
+           "MockEnvironment", "llm_grade", "rank", "rank_rows", "score_row",
            "conduct_grade", "behavior_signature", "build_dimensions",
            "policy_sections", "scenario_regions", "open_ended_probes",
            "make_candidate_generator",
            "novelty", "connect", "inspect", "claude_code", "ConnectedAgent",
            "AgentProfile", "ModelSimulator", "write_scene_brief",
-           "resolve_topology"]
+           "resolve_topology", "adaptive_allocator", "allocator_slot_counts"]
 
 _SATURATION_CAP = 50_000
 _SEARCH_ARMS = dict(SEARCH_ARMS)
@@ -184,6 +187,11 @@ def _export_row(row: dict) -> dict:
     if "llm_reward" in row:
         out["llm_reward"] = row.get("llm_reward")
         out["llm_reason"] = row.get("llm_reason")
+    if row.get("quality") is not None:
+        out["quality"] = row["quality"]
+        out["quality_reason"] = row.get("quality_reason") or ""
+        if row.get("quality_scores"):
+            out["quality_scores"] = row["quality_scores"]
     return out
 
 
@@ -216,8 +224,8 @@ class SimulationData:
     search: dict = field(default_factory=dict)
     budget: int = 0
     path: str = ""
-    mode: str = "adaptive"
-    repeat_policy: str = "adaptive"
+    mode: str = "explore"
+    repeat_policy: str = "none"
     n_situations: int | None = None
     requests_per_situation: int = 1
     rollouts_per_request: int = 1
@@ -278,6 +286,16 @@ class SimulationData:
             api_key=api_key, concurrency=concurrency, degraded=self.degraded)
         self._rewrite(path)
         return self
+
+    def rank(self, *, path: str | None = None) -> dict:
+        """Second-pass quality scores. Leaves conduct ``reward`` untouched.
+
+        Writes ``quality``, ``quality_reason``, ``quality_scores`` on each
+        trajectory and rewrites the saved JSONL, or ``path`` if you pass one.
+        """
+        rank_rows(self.trajectories)
+        self._rewrite(path)
+        return summarize_quality(self.trajectories)
 
     def rows(self) -> list[dict]:
         return [_export_row(t) for t in self.trajectories]
@@ -349,6 +367,16 @@ def llm_grade(data: SimulationData, *, spec: str | None = None,
     """Module helper: advisory LLM scores on an existing SimulationData."""
     return data.llm_grade(spec=spec, concurrency=concurrency,
                          api_key=api_key, path=path)
+
+
+def rank(source, *, output: str | None = None,
+         min_quality: float | None = None) -> dict:
+    """Score already-generated rows. ``source`` is a JSONL path, a row list,
+    or a ``SimulationData``. Does not change ``simulate()`` or ``reward``.
+    """
+    if isinstance(source, SimulationData):
+        return source.rank(path=output)
+    return rank_source(source, output=output, min_quality=min_quality)
 
 
 
@@ -508,7 +536,8 @@ def _spec_from_path(text: str) -> dict | None:
     return None
 
 
-_SPEC_SKIP = {"tools", "policy", "instructions", "rules", "situations",
+_SPEC_SKIP = {"tools", "policy", "system_prompt", "system", "instructions",
+              "rules", "situations",
               "name", "id", "version", "model", "backend", "simulator"}
 
 
@@ -548,7 +577,9 @@ def _apply_spec(spec: Any, tools: list | None, policy: str | None,
         return tools, policy, extra_sit
     if spec.get("tools"):
         tools = list(tools or []) + list(spec["tools"])
-    blob = spec.get("policy") or spec.get("instructions") or spec.get("rules")
+    blob = (spec.get("system_prompt") or spec.get("system")
+            or spec.get("policy") or spec.get("instructions")
+            or spec.get("rules"))
     if isinstance(blob, list):
         blob = "\n".join(str(item) for item in blob)
     extra = _spec_extra_text(spec)
@@ -614,12 +645,13 @@ _MODE_PRESETS = {
 }
 
 _ALIAS_NAMES = {
-    "unique", "repeats", "rollouts_per_prompt", "n", "repeat_policy",
+    "unique", "repeats", "rollouts_per_prompt", "n", "phrasings",
+    "repeat_policy", "policy",
 }
 _MOVED_NAMES = {
     "concurrency", "dimensions", "simulator", "backend", "fault_rate", "risk",
     "texture", "max_turns", "avg_turns", "temperature", "seed", "grader",
-    "llm_grade", "llm_spec", "embedder", "seed_prompts", "extra_situations",
+    "llm_spec", "embedder", "seed_prompts", "extra_situations",
 }
 
 
@@ -657,19 +689,21 @@ def _merge_advanced(advanced: dict | None, passed: dict) -> tuple[dict, dict]:
 def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = None,
                      unique: bool = False, unique_situations: bool = False,
                      requests_per_situation: int | None = None,
-                     n: int | None = None, rollouts_per_request: int | None = None,
+                     n: int | None = None, phrasings: int | None = None,
+                     rollouts_per_request: int | None = None,
                      repeats: int | None = None,
                      rollouts_per_prompt: int | None = None) -> dict[str, Any]:
-    """Map public N/n/k knobs. n is openers per card; k is rollouts per opener."""
+    """Map public knobs. Phrasings (n) are wordings per situation; repeats (k) are reruns per phrasing."""
     k_vals = [int(x) for x in (rollouts_per_request, repeats, rollouts_per_prompt)
               if x is not None]
     if len(set(k_vals)) > 1:
         raise ValueError("pass rollouts_per_request= or repeats=, not both")
-    if (requests_per_situation is not None and n is not None
-            and int(requests_per_situation) != int(n)):
-        raise ValueError("pass requests_per_situation= or n=, not both")
+    n_vals = [int(x) for x in (requests_per_situation, n, phrasings)
+              if x is not None]
+    if len(set(n_vals)) > 1:
+        raise ValueError("pass requests_per_situation=, phrasings=, or n=, not both")
     k_explicit = bool(k_vals)
-    n_explicit = requests_per_situation is not None or n is not None
+    n_explicit = bool(n_vals)
     new_cards = bool(unique_situations or unique)
     mode_name = str(mode or "").strip().lower() or None
     policy_name = str(repeat_policy or "").strip().lower() or None
@@ -684,8 +718,9 @@ def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = Non
     elif mode_name is None and policy_name == "adaptive":
         mode_name = "adaptive"
     elif mode_name is None:
-        mode_name = "adaptive"
-        policy_name = "adaptive"
+        mode_name = "explore"
+        policy_name = "none"
+        new_cards = True
     if mode_name not in _MODE_PRESETS:
         raise ValueError(
             "mode= must be explore, sft, rl, or adaptive")
@@ -695,7 +730,7 @@ def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = Non
     n_req = int(preset["n_req"])
     k = int(preset["k"])
     if n_explicit:
-        n_req = max(1, int(requests_per_situation if requests_per_situation is not None else n))
+        n_req = max(1, n_vals[0])
     if k_explicit:
         k = max(1, k_vals[0])
     if new_cards:
@@ -719,44 +754,51 @@ def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = Non
 
 
 def simulate(agent: Any = None, *, spec: Any = None,
-             tools: list[dict] | None = None, policy: str | None = None,
+             tools: list[dict] | None = None, system_prompt: str | None = None,
              budget: int | None = 1000, time_budget: float | None = 60,
-             until: str = "compute", mode: str = "adaptive",
+             until: str = "compute", mode: str = "explore",
              situations: int | None = None,
              requests_per_situation: int | None = None,
-             rollouts_per_request: int | None = 1,
+             rollouts_per_request: int | None = None,
              unique_situations: bool = False,
-             grade: bool = True, output: str | None = None,
+             grade: bool = True, llm_grade: bool = False,
+             output: str | None = None,
              advanced: dict | None = None,
              **passed: Any) -> SimulationData:
     """Inspect an agent, generate situations, roll them out, then grade.
 
-    Topology is N/n/k and those layers do not collapse:
-    ``situations`` (N) is distinct situation cards; ``requests_per_situation``
-    (n) is different user openers of the same card; ``rollouts_per_request``
-    (k) is independent agent trajectories of the same opener. Follow-ups
-    branch on that rollout. ``unique_situations=True`` keeps picking new
-    cards (n=1, k=1 unless you set them). Silent aliases: ``n`` for
-    requests_per_situation, ``repeats`` / ``rollouts_per_prompt`` for k,
-    ``unique`` for unique_situations. Writer completions are
+    Search is diversity-first over the agent's tools and stances. It spends
+    ``budget`` rows and ``time_budget`` seconds on new coverage, then stops.
+
+    Variation is three independent counts. Do not collapse them.
+    ``situations`` (N) is distinct worlds. ``requests_per_situation`` /
+    ``phrasings`` (n) is different human wordings of one world.
+    ``rollouts_per_request`` / ``repeats`` (k) is independent agent runs of
+    the same wording. Follow-ups branch on that run.
+    ``unique_situations=True`` keeps picking new worlds (n=1, k=1 unless you
+    set them). Silent aliases: ``n`` / ``phrasings`` for n, ``repeats`` /
+    ``rollouts_per_prompt`` for k, ``unique`` for unique_situations,
+    ``policy`` for system_prompt. Writer completions are
     ``advanced["completions_per_request"]``. Seed openers are
     ``advanced["seed_prompts"]``.
     """
     cfg, aliases = _merge_advanced(advanced, passed)
+    policy = resolve_system_prompt(system_prompt, aliases.get("policy"))
     unique_flag = bool(unique_situations or aliases.get("unique", False))
     repeats = aliases.get("repeats")
     rollouts_per_prompt = aliases.get("rollouts_per_prompt")
     n_alias = aliases.get("n")
+    phrasings_alias = aliases.get("phrasings")
     repeat_policy = aliases.get("repeat_policy")
     k_arg = rollouts_per_request
-    if k_arg == 1 and (repeats is not None or rollouts_per_prompt is not None
-                       or str(mode or "adaptive") != "adaptive"):
-        # The default k defers to a legacy alias or a mode preset.
+    if k_arg == 1 and (repeats is not None or rollouts_per_prompt is not None):
+        # A leftover default 1 plus an alias means the alias wins.
         k_arg = None
     topo = resolve_topology(
         mode=mode, repeat_policy=repeat_policy, unique=unique_flag,
         unique_situations=unique_flag,
         requests_per_situation=requests_per_situation, n=n_alias,
+        phrasings=phrasings_alias,
         rollouts_per_request=k_arg, repeats=repeats,
         rollouts_per_prompt=rollouts_per_prompt)
     seed_prompts: list[str] = []
@@ -784,7 +826,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     temperature = cfg.pop("temperature", None)
     seed = int(cfg.pop("seed", 0))
     grader = cfg.pop("grader", None)
-    llm_grade = bool(cfg.pop("llm_grade", False))
+    llm_grade = bool(llm_grade or cfg.pop("llm_grade", False))
     llm_spec = cfg.pop("llm_spec", None)
     embedder = cfg.pop("embedder", "hash")
     until_key = str(until or "compute").strip().lower()
@@ -804,10 +846,16 @@ def simulate(agent: Any = None, *, spec: Any = None,
     repeat_count = int(topo["k"])
     n_req = int(topo["n_req"])
     unique_cards = bool(topo["unique_situations"])
+    if topo["mode"] == "adaptive" and not unique_cards:
+        adapt = adaptive_allocator(time_budget, until_key)
+        if not topo["n_explicit"]:
+            n_req = int(adapt["n_req"])
+        if not topo["k_explicit"]:
+            repeat_count = int(adapt["k"])
     # Topology caps n/k. Do not shrink writer flight or skip ingest.
     explore_only = False
-    k_immediate = bool(topo["k_explicit"] or topo["mode"] == "rl"
-                       or repeat_count > 1)
+    # Adaptive defers extra k so verify can react to behavior.
+    k_immediate = bool(topo["k_explicit"] or topo["mode"] == "rl")
     started = time.monotonic()
     # Report setup immediately; callers should never stare at an absent file
     # while inspection or backend construction is in progress.
@@ -843,7 +891,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     advanced.pop("scene_brief", None)
     tools, policy, spec_sits = _apply_spec(spec, tools, policy, [])
     seed_prompts.extend(str(s).strip() for s in spec_sits if str(s).strip())
-    profile = inspect(agent, tools=tools, policy=policy)
+    profile = inspect(agent, tools=tools, system_prompt=policy)
     tools = list(profile.tools or [])
     policy = str(profile.policy or "")
     writer_kind = _kind_from_spec(spec, policy)
@@ -1511,6 +1559,36 @@ def simulate(agent: Any = None, *, spec: Any = None,
 
             batch = []
             row_by_text = {row["text"]: row for row in selected}
+            filled = {"explore": 0, "expand": 0, "verify": 0}
+            slots = None
+            if topo["mode"] == "adaptive" and not unique_cards and take:
+                live_plan = adaptive_allocator(
+                    time_budget, until_key,
+                    elapsed=time.monotonic() - started)
+                slots = allocator_slot_counts(take, live_plan)
+
+            def _card_action(meta: dict, prompt: str) -> str:
+                sk = _situation_key_from_meta(meta, prompt)
+                rid = str((meta or {}).get("region_id") or "")
+                if sk and sk in used_situations:
+                    return "expand"
+                if slots is not None and rid and rid in used_scenario_ids:
+                    return "expand"
+                return "explore"
+
+            def _add_job(prompt: str, meta: dict, row: dict, action: str) -> int:
+                sk = _situation_key_from_meta(meta, prompt)
+                if action == "explore" and n_situations_target and (
+                        sk not in used_situations
+                        and len(used_situations) >= n_situations_target):
+                    return 0
+                before = len(batch)
+                _schedule_prompt(batch, prompt, meta, row, action)
+                added = len(batch) - before
+                if added:
+                    filled[action] = filled.get(action, 0) + added
+                return added
+
             # Named seed openers are extra requests, not writer completions.
             # Schedule them before hash selection can bury them.
             if seed_prompts and take:
@@ -1524,47 +1602,71 @@ def simulate(agent: Any = None, *, spec: Any = None,
                     row = row_by_text.get(prompt) or {
                         "text": prompt, "cluster": None, "novelty": None,
                         "reason": "seed"}
-                    sk = _situation_key_from_meta(meta, prompt)
-                    action = "expand" if sk and sk in used_situations else "explore"
-                    if action == "explore" and n_situations_target and (
-                            sk not in used_situations
-                            and len(used_situations) >= n_situations_target):
-                        continue
-                    _schedule_prompt(batch, prompt, meta, row, action)
+                    action = _card_action(meta, prompt)
+                    _add_job(prompt, meta, row, action)
+            verify_cap = take if slots is None else slots["verify"]
             if (not k_immediate and repeat_count > 1
                     and verify_queue):
                 still: list[tuple] = []
                 for prompt, meta, row in verify_queue:
-                    if len(batch) >= take:
+                    if (len(batch) >= take
+                            or filled["verify"] >= verify_cap):
                         still.append((prompt, meta, row))
                         continue
                     if prompt_rollouts.get(prompt, 0) >= repeat_count:
                         continue
-                    _schedule_prompt(batch, prompt, dict(meta), row, "verify")
+                    _add_job(prompt, dict(meta), row, "verify")
                     if prompt_rollouts.get(prompt, 0) < repeat_count:
                         still.append((prompt, meta, row))
                 verify_queue[:] = still
             stratified = _stratified_prompts(
                 [row["text"] for row in selected], take, generator,
                 used_situations=used_situations)
-            for prompt in stratified:
-                if len(batch) >= take:
-                    break
+
+            def _prompt_job(prompt: str):
                 row = row_by_text.get(prompt)
                 if not row:
-                    continue
+                    return None
                 meta = dict(generator.meta.get(prompt)
                             or generator.last_candidate_provenance.get(prompt) or {})
                 meta.setdefault("arm", generator.provenance.get(prompt, "unattributed"))
                 meta.setdefault("seed", seed)
-                sk = _situation_key_from_meta(meta, prompt)
-                action = "expand" if sk and sk in used_situations else "explore"
-                if action == "explore" and n_situations_target and (
-                        sk not in used_situations
-                        and len(used_situations) >= n_situations_target):
-                    continue
-                _schedule_prompt(batch, prompt, meta, row, action)
-                scenario_families.append(scenario_family(prompt))
+                action = _card_action(meta, prompt)
+                return prompt, meta, row, action
+
+            jobs = [job for prompt in stratified
+                    if (job := _prompt_job(prompt))]
+            if slots is None:
+                for prompt, meta, row, action in jobs:
+                    if len(batch) >= take:
+                        break
+                    _add_job(prompt, meta, row, action)
+                    scenario_families.append(scenario_family(prompt))
+            else:
+                scheduled: set[str] = set()
+                expand_cands = [j for j in jobs if j[3] == "expand"]
+                explore_cands = [j for j in jobs if j[3] == "explore"]
+
+                def _fill(cands: list, action: str, limit: int) -> None:
+                    for prompt, meta, row, _act in cands:
+                        if len(batch) >= take or filled[action] >= limit:
+                            return
+                        if prompt in scheduled:
+                            continue
+                        if _add_job(prompt, meta, row, action):
+                            scheduled.add(prompt)
+                            scenario_families.append(scenario_family(prompt))
+
+                _fill(expand_cands, "expand", slots["expand"])
+                _fill(explore_cands, "explore", slots["explore"])
+                for prompt, meta, row, action in explore_cands + expand_cands:
+                    if len(batch) >= take:
+                        break
+                    if prompt in scheduled:
+                        continue
+                    if _add_job(prompt, meta, row, action):
+                        scheduled.add(prompt)
+                        scenario_families.append(scenario_family(prompt))
 
             # Offline templates only. Live writer steers via cards and
             # search context. At most one mutation and one gap per batch.
@@ -1800,10 +1902,21 @@ def simulate(agent: Any = None, *, spec: Any = None,
             failing_regions = [region_index[t["scenario_id"]] for t in failing_rows
                                if t["scenario_id"] in region_index]
             for t, job in zip(results, jobs_for):
-                if not _mutation_worthy(t):
-                    continue
                 prompt = str(t.get("prompt") or job[0] or "")
                 if not prompt or prompt_rollouts.get(prompt, 0) >= repeat_count:
+                    continue
+                want_verify = _mutation_worthy(t)
+                if (not want_verify and topo["mode"] == "adaptive"
+                        and not k_immediate):
+                    nsig = len(region_sigs.get(t.get("scenario_id"), ()))
+                    live = adaptive_allocator(
+                        time_budget, until_key,
+                        elapsed=time.monotonic() - started)
+                    # Short/messy clocks peek for different outcomes.
+                    # Long/saturation only re-rolls when behavior already differs.
+                    if nsig > 1 or live["explore"] < 0.55:
+                        want_verify = True
+                if not want_verify:
                     continue
                 meta = job[2] if len(job) > 2 else {}
                 sel = job[3] if len(job) > 3 else {}

@@ -66,14 +66,13 @@ def default_max_turns(context_tokens: int | None = None, *,
 
 def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
     """Best-effort GET /v1/models. Keeps the reserved replica awake."""
-    key = (os.environ.get("VLLM_API_KEY")
-           or os.environ.get("OPENAI_API_KEY") or "")
     url = base_url
     if not url:
         try:
             url, _ = parse_backend_spec(default_agent_spec())
         except ValueError:
             return
+    key = resolve_completion_key(url)
     if missing_hosted_key(url, key):
         return
     raw = url if "://" in str(url) else "https://" + str(url)
@@ -104,21 +103,50 @@ def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
         return
 
 
-def missing_hosted_key(base_url: str | None = None,
-                       api_key: str | None = None) -> str | None:
-    """One-sentence auth error for hosted Qwen, or None if a key is present."""
-    key = api_key or os.environ.get("VLLM_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
-    if key:
-        return None
+USER_TURN_MARK = "\n<USER_TURN>\n"
+
+
+def split_user_turns(message: str) -> list[str]:
+    """Split a writer prompt on USER_TURN into separate user lines."""
+    turns = [part.strip() for part in str(message).split(USER_TURN_MARK)
+             if part.strip()]
+    return turns or [str(message)]
+
+
+def _hosted_qwen_url(base_url: str | None) -> bool:
     url = base_url
     if not url:
         try:
             url, _ = parse_backend_spec(default_agent_spec())
         except ValueError:
-            return None
+            return False
     raw = url if "://" in str(url) else "https://" + str(url)
     host = (urlparse(raw).hostname or "").lower()
-    if host.endswith("modal.run") or "zeroproof" in host:
+    return host.endswith("modal.run") or "zeroproof" in host
+
+
+def resolve_completion_key(base_url: str | None = None,
+                           api_key: str | None = None) -> str:
+    """Key for an OpenAI-compatible completion URL.
+
+    Hosted Qwen on *.modal.run uses VLLM_API_KEY (or an explicit api_key).
+    OPENAI_API_KEY is not a fallback there. Other URLs still accept either.
+    """
+    if api_key:
+        return str(api_key).strip()
+    vllm = str(os.environ.get("VLLM_API_KEY") or "").strip()
+    if _hosted_qwen_url(base_url):
+        return vllm
+    return vllm or str(os.environ.get("OPENAI_API_KEY") or "").strip()
+
+
+def missing_hosted_key(base_url: str | None = None,
+                       api_key: str | None = None) -> str | None:
+    """One-sentence auth error for hosted Qwen, or None if a key is present."""
+    key = resolve_completion_key(base_url, api_key)
+    if key:
+        return None
+    if _hosted_qwen_url(base_url):
         return "Hosted Qwen needs VLLM_API_KEY set in the environment."
     return None
 
@@ -158,7 +186,7 @@ def complete(base_url: str, model: str, messages: list[dict], *,
     ``n>1`` asks vLLM for several samples on one prefill. The first choice is
     the return value; extra choices are on ``_all`` when the server honors ``n``.
     """
-    key = api_key or os.environ.get("VLLM_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    key = resolve_completion_key(base_url, api_key)
     auth_err = missing_hosted_key(base_url, key)
     if auth_err:
         raise RuntimeError(auth_err)
@@ -711,8 +739,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
         world = str(plan.pop("world_state", "") or "")
         local.env = MockEnvironment(tools, faults=plan, world_state=world,
                                     result_shapes=shapes)
-        turns = [part.strip() for part in str(message).split("\n<USER_TURN>\n")
-                 if part.strip()] or [str(message)]
+        turns = split_user_turns(message)
         messages = ([{"role": "system", "content": policy_text}] if policy_text else []) + [
             {"role": "user", "content": turns[0]},
         ]

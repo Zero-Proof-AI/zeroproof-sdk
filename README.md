@@ -1,6 +1,6 @@
 # zeroproof-simulations
 
-Simulated training data for any AI agent. We invent unique situations, write a human request, run the agent, and save the conversation plus tool calls. Default `explore`: every row is a unique situation.
+Training data for any AI agent, across the situations it should actually see. From the tools and system prompt we sample a grid of cases, write a human request, run the agent in a fake world built for that agent, and save the conversation plus tool calls. Default `explore`: every row is a unique situation.
 
 ## Overview
 
@@ -8,18 +8,20 @@ Spec in. JSONL out. Your agent, your grader.
 
 | | Call | What it does |
 |---|---|---|
-| Connect | `inspect` / `connect` | Read tools and system prompt. Wrap any agent (spec, callable, LangChain, HTTP) |
-| World | `MockEnvironment` / `hosted_model` | Schema sandbox (files, shells, records, faults). Hosted Qwen, or any OpenAI-compatible URL |
-| Generate | `simulate(...)` | Same model writes the user and plays the agent. Tools hit a fake world. Search spends your row and time budget on new coverage, including broken tools |
+| Connect | `inspect` / `connect` | Read tools and system prompt. Wrap any agent (spec, callable, LangChain, HTTP). Hosted Qwen, or any OpenAI-compatible URL |
+| World | `MockEnvironment` | A fake world for this agent. Tools return plausible results, including failures |
+| Generate | `simulate(...)` | Same model writes the user and plays the agent. Samples every kind of situation until the row or time budget hits |
 | | `SimulationData` | The run: rows, coverage, `save`, `rank`, `grade` |
 | Export | `conversation` / `save` / `rows` | Trainer JSONL: `prompt`, `messages`, `steps`, `final_text` |
 | Score | `conduct_grade` / `rank` | Conduct `reward`, or your `grade=`. Rank is a second pass on humanness |
 
 ## How it searches
 
-The row cap and the clock are the goal. Spend them on diversity, not copies.
+We sample all the axes that make a situation different, not one happy path.
 
-Search is diversity-first over the agent's tools and stances: ordinary asks first, then ambiguous, boundary, adversarial. Same model writes the user and plays the agent. Tools hit a fake world that can timeout, deny, or return junk, so the agent has to cope.
+The grid comes from this agent: which tool, which rule in the system prompt, how the user shows up (ordinary, vague, hurried, adversarial), what the world looks like, whether the tool works or fails, whether they have been here before. Ordinary asks first, then the edges. Same model writes the user and plays the agent.
+
+The row cap and the clock are the goal. Spend them on diversity, not copies.
 
 Variation is three independent knobs. Do not mix them up.
 

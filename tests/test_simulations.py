@@ -12,7 +12,8 @@ _PUBLIC = {"prompt", "messages", "scenario_id", "steps", "final_text",
            "world_state", "faults", "fault_detected", "reward", "reason",
            "tier", "ask_family", "intent_known", "tool_known",
            "stance", "tone", "length", "ask", "vagueness", "phrasing",
-           "pressure", "user", "texture", "history"}
+           "pressure", "user", "texture", "history",
+           "quality", "quality_reason", "quality_scores"}
 
 
 def test_conversation_drops_stale_final_text():
@@ -165,7 +166,7 @@ def test_tiny_grid_compute_does_not_stop_on_saturation():
         lambda m: {"steps": [], "final_text": "ok"},
         tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
         concurrency=8, until="compute", dimensions=_TINY_DIMS,
-        simulator=False, time_budget=None,
+        simulator=False, time_budget=None, mode="adaptive",
         advanced={"per_round": 4, "mutate_failures": False})
     assert data.stopped_because == "budget"
     assert data.coverage.get("saturation") is False

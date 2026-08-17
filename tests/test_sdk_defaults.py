@@ -10,45 +10,72 @@ def test_default_budget_is_500():
     sig = inspect.signature(zps.simulate)
     params = sig.parameters
     public = [
-        "agent", "spec", "tools", "policy", "budget", "time_budget", "until",
+        "agent", "spec", "tools", "system_prompt", "budget", "time_budget", "until",
         "mode", "situations", "requests_per_situation", "rollouts_per_request",
-        "unique_situations", "grade", "output", "advanced",
+        "unique_situations", "grade", "llm_grade", "output", "advanced",
     ]
     named = [name for name, p in params.items()
              if p.kind is not inspect.Parameter.VAR_KEYWORD]
     assert named == public
     assert params["budget"].default == 1000
     assert params["until"].default == "compute"
-    assert params["mode"].default == "adaptive"
+    assert params["mode"].default == "explore"
     assert params["requests_per_situation"].default is None
-    assert params["rollouts_per_request"].default == 1
+    assert params["rollouts_per_request"].default is None
     assert params["unique_situations"].default is False
     assert params["situations"].default is None
     assert params["grade"].default is True
+    assert params["llm_grade"].default is False
     assert params["time_budget"].default == 60
     assert params["spec"].default is None
     assert params["output"].default is None
     assert params["advanced"].default is None
     for moved in ("concurrency", "dimensions", "simulator", "backend",
                   "fault_rate", "risk", "texture", "max_turns", "avg_turns",
-                  "temperature", "seed", "grader", "llm_grade", "llm_spec",
-                  "embedder", "unique", "repeats", "n", "repeat_policy",
-                  "extra_situations", "rollouts_per_prompt"):
+                  "temperature", "seed", "grader", "llm_spec",
+                  "embedder", "unique", "repeats", "n", "phrasings", "repeat_policy",
+                  "extra_situations", "rollouts_per_prompt", "policy"):
         assert moved not in params
     assert "length" not in params
     assert "turns" not in params
     assert "seconds" not in params
 
 
-def test_adaptive_defaults_n_and_k_are_one():
+def test_system_prompt_alias_policy():
+    data = zps.simulate(
+        scripted_agent, tools=TOOLS, system_prompt=POLICY, budget=4, seed=0,
+        grade=False, time_budget=None,
+        advanced={"simulator": False, "concurrency": 4, "per_round": 6,
+                  "mutate_failures": False})
+    assert data.profile.system_prompt == POLICY
+    alias = zps.simulate(
+        scripted_agent, tools=TOOLS, policy=POLICY, budget=4, seed=0,
+        grade=False, time_budget=None,
+        advanced={"simulator": False, "concurrency": 4, "per_round": 6,
+                  "mutate_failures": False})
+    assert alias.profile.policy == POLICY
+    try:
+        zps.simulate(
+            scripted_agent, tools=TOOLS, system_prompt="a", policy="b",
+            budget=1, grade=False, time_budget=None,
+            advanced={"simulator": False, "concurrency": 4})
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "system_prompt" in str(exc)
+
+
+def test_adaptive_defaults_follow_allocator_not_n1_k1():
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=4, grade=False,
-        time_budget=None,
+        time_budget=None, mode="adaptive",
         advanced={"simulator": False, "concurrency": 4, "seed": 0,
                   "per_round": 6, "mutate_failures": False})
+    plan = zps.adaptive_allocator(None, "compute")
     assert data.mode == "adaptive"
-    assert data.requests_per_situation == 1
-    assert data.rollouts_per_request == 1
+    assert data.requests_per_situation == plan["n_req"]
+    assert data.rollouts_per_request == plan["k"]
+    assert data.requests_per_situation > 1
+    assert data.rollouts_per_request > 1
 
 
 def test_time_budget_none_or_zero_is_unlimited():

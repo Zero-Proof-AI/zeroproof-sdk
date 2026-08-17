@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc">
+  <title id="title">ZeroProof simulation pipeline</title>
+  <desc id="desc">Architecture from agent specification through coverage-guided scenario production, request and rollout topology, sandboxed conversations, trajectory storage, feedback, and optional grading.</desc>
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10233f"/>
+      <stop offset="1" stop-color="#193a60"/>
+    </linearGradient>
+    <linearGradient id="producer" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9f8f3"/>
+      <stop offset="1" stop-color="#d7f2e8"/>
+    </linearGradient>
+    <linearGradient id="rollout" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eeeafe"/>
+      <stop offset="1" stop-color="#e3ddfb"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#10233f" flood-opacity="0.13"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#53657a"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#138a68"/>
+    </marker>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #fff; }
+      .subtitle { font: 400 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #d6e3f0; }
+      .section { font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 1.6px; fill: #607287; }
+      .boxTitle { font: 700 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #14263d; }
+      .body { font: 400 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #405167; }
+      .small { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #53657a; }
+      .pill { font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17304d; }
+      .whiteTitle { font: 700 19px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #fff; }
+      .whiteBody { font: 400 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #edf4fa; }
+      .arrow { stroke: #53657a; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .feedback { stroke: #138a68; stroke-width: 2.6; stroke-dasharray: 8 7; fill: none; marker-end: url(#arrowGreen); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1120" rx="24" fill="#f6f8fb"/>
+  <rect width="1600" height="112" rx="24" fill="url(#header)"/>
+  <rect y="88" width="1600" height="24" fill="url(#header)"/>
+  <text x="70" y="52" class="title">ZeroProof simulation pipeline</text>
+  <text x="70" y="82" class="subtitle">From any agent specification to diverse, complete training trajectories</text>
+  <text x="1530" y="61" text-anchor="end" class="subtitle">zps.simulate(...)</text>
+
+  <text x="70" y="151" class="section">INPUTS</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="170" width="430" height="92" rx="16" fill="#fff" stroke="#dce4ed"/>
+    <text x="95" y="205" class="boxTitle">Agent</text>
+    <text x="95" y="231" class="body">Callable, HTTP endpoint, framework object,</text>
+    <text x="95" y="251" class="body">or hosted Qwen</text>
+
+    <rect x="585" y="170" width="430" height="92" rx="16" fill="#fff" stroke="#dce4ed"/>
+    <text x="610" y="205" class="boxTitle">Tools + system prompt</text>
+    <text x="610" y="231" class="body">Passed directly or loaded from a spec folder</text>
+    <text x="610" y="251" class="body">and merged with inspected agent metadata</text>
+
+    <rect x="1100" y="170" width="430" height="92" rx="16" fill="#fff" stroke="#dce4ed"/>
+    <text x="1125" y="205" class="boxTitle">Run controls</text>
+    <text x="1125" y="231" class="body">Mode, N / n / k, row budget, time budget,</text>
+    <text x="1125" y="251" class="body">fault rate, grading, and stopping rule</text>
+  </g>
+
+  <path d="M285 262 V292 H800" class="arrow"/>
+  <path d="M800 262 V292" class="arrow"/>
+  <path d="M1315 262 V292 H800" class="arrow"/>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="306" width="1460" height="112" rx="18" fill="#fff" stroke="#dce4ed"/>
+    <rect x="70" y="306" width="245" height="112" rx="18" fill="#173b62"/>
+    <rect x="295" y="306" width="20" height="112" fill="#173b62"/>
+    <text x="95" y="348" class="whiteTitle">Inspect + normalize</text>
+    <text x="95" y="374" class="whiteBody">One internal agent profile</text>
+    <text x="95" y="396" class="whiteBody">without framework coupling</text>
+
+    <text x="350" y="343" class="boxTitle">Prepare the simulation world alongside startup</text>
+    <rect x="350" y="360" width="300" height="36" rx="18" fill="#edf3fa"/>
+    <text x="500" y="383" text-anchor="middle" class="pill">coverage grid from tools + system prompt</text>
+    <rect x="675" y="360" width="260" height="36" rx="18" fill="#edf3fa"/>
+    <text x="805" y="383" text-anchor="middle" class="pill">human scene brief</text>
+    <rect x="960" y="360" width="300" height="36" rx="18" fill="#edf3fa"/>
+    <text x="1110" y="383" text-anchor="middle" class="pill">domain-shaped tool results</text>
+    <rect x="1285" y="360" width="210" height="36" rx="18" fill="#edf3fa"/>
+    <text x="1390" y="383" text-anchor="middle" class="pill">action-shape targets</text>
+  </g>
+
+  <path d="M800 418 V452" class="arrow"/>
+  <text x="70" y="459" class="section">ASYNCHRONOUS SEARCH</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="478" width="405" height="170" rx="18" fill="url(#producer)" stroke="#b9dfd2"/>
+    <text x="98" y="516" class="boxTitle">Scenario producers</text>
+    <text x="98" y="544" class="body">Several Qwen requests run ahead</text>
+    <text x="98" y="566" class="body">with different coverage cards.</text>
+    <rect x="98" y="588" width="102" height="32" rx="16" fill="#fff"/>
+    <rect x="211" y="588" width="102" height="32" rx="16" fill="#fff"/>
+    <rect x="324" y="588" width="102" height="32" rx="16" fill="#fff"/>
+    <text x="149" y="609" text-anchor="middle" class="pill">writer 1</text>
+    <text x="262" y="609" text-anchor="middle" class="pill">writer 2</text>
+    <text x="375" y="609" text-anchor="middle" class="pill">writer 3…</text>
+    <text x="98" y="638" class="small">No rollout worker waits on generation.</text>
+
+    <rect x="565" y="478" width="405" height="170" rx="18" fill="#fff" stroke="#dce4ed"/>
+    <text x="593" y="516" class="boxTitle">Candidate queue</text>
+    <text x="593" y="544" class="body">Natural user requests remain tagged with</text>
+    <text x="593" y="566" class="body">their private situation and provenance.</text>
+    <rect x="593" y="590" width="72" height="26" rx="8" fill="#eaf5ff"/>
+    <rect x="675" y="590" width="72" height="26" rx="8" fill="#f3efff"/>
+    <rect x="757" y="590" width="72" height="26" rx="8" fill="#fff3dc"/>
+    <rect x="839" y="590" width="72" height="26" rx="8" fill="#e9f8f3"/>
+    <text x="629" y="608" text-anchor="middle" class="small">ordinary</text>
+    <text x="711" y="608" text-anchor="middle" class="small">ambiguous</text>
+    <text x="793" y="608" text-anchor="middle" class="small">boundary</text>
+    <text x="875" y="608" text-anchor="middle" class="small">failure</text>
+
+    <rect x="1060" y="478" width="470" height="170" rx="18" fill="#fff" stroke="#dce4ed"/>
+    <text x="1088" y="516" class="boxTitle">Batch embed + select</text>
+    <text x="1088" y="544" class="body">Cluster and spread candidates; prefer unseen</text>
+    <text x="1088" y="566" class="body">cells, tool shapes, behaviors, and request families.</text>
+    <rect x="1088" y="590" width="128" height="32" rx="16" fill="#edf3fa"/>
+    <rect x="1228" y="590" width="128" height="32" rx="16" fill="#edf3fa"/>
+    <rect x="1368" y="590" width="128" height="32" rx="16" fill="#edf3fa"/>
+    <text x="1152" y="611" text-anchor="middle" class="pill">embedding</text>
+    <text x="1292" y="611" text-anchor="middle" class="pill">k-center</text>
+    <text x="1432" y="611" text-anchor="middle" class="pill">dedup</text>
+  </g>
+
+  <path d="M475 563 H565" class="arrow"/>
+  <path d="M970 563 H1060" class="arrow"/>
+  <path d="M1295 648 V687" class="arrow"/>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="687" width="1460" height="112" rx="18" fill="#fff" stroke="#dce4ed"/>
+    <text x="98" y="727" class="boxTitle">Topology allocator</text>
+    <text x="98" y="754" class="body">Separates situation diversity from phrasing diversity and stochastic agent behavior.</text>
+    <rect x="690" y="711" width="222" height="54" rx="14" fill="#e9f8f3"/>
+    <rect x="932" y="711" width="222" height="54" rx="14" fill="#eaf5ff"/>
+    <rect x="1174" y="711" width="222" height="54" rx="14" fill="#eeeafe"/>
+    <text x="801" y="734" text-anchor="middle" class="pill">N situations</text>
+    <text x="801" y="753" text-anchor="middle" class="small">different moments to cover</text>
+    <text x="1043" y="734" text-anchor="middle" class="pill">n requests / situation</text>
+    <text x="1043" y="753" text-anchor="middle" class="small">different human phrasings</text>
+    <text x="1285" y="734" text-anchor="middle" class="pill">k rollouts / request</text>
+    <text x="1285" y="753" text-anchor="middle" class="small">independent agent outcomes</text>
+    <path d="M912 738 H932" class="arrow"/>
+    <path d="M1154 738 H1174" class="arrow"/>
+  </g>
+
+  <path d="M800 799 V834" class="arrow"/>
+  <text x="70" y="838" class="section">CONCURRENT TWO-PERSON ROLLOUTS</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="857" width="460" height="152" rx="18" fill="url(#rollout)" stroke="#cfc5f4"/>
+    <text x="98" y="895" class="boxTitle">Rollout workers</text>
+    <text x="98" y="922" class="body">The connected agent receives its system prompt and tools.</text>
+    <text x="98" y="944" class="body">A separate user simulator writes follow-ups from</text>
+    <text x="98" y="966" class="body">conversation history without seeing the agent system prompt.</text>
+    <text x="98" y="993" class="small">multi-turn user ↔ agent • configurable sampling • parallel requests</text>
+
+    <rect x="570" y="857" width="390" height="152" rx="18" fill="#fff3dc" stroke="#efd79f"/>
+    <text x="598" y="895" class="boxTitle">Sandboxed tool world</text>
+    <text x="598" y="922" class="body">Validates arguments, preserves entity state, and</text>
+    <text x="598" y="944" class="body">returns useful domain-shaped data.</text>
+    <text x="598" y="973" class="body">Optional faults: timeout, stale, malformed, denied.</text>
+
+    <rect x="1000" y="857" width="530" height="152" rx="18" fill="#173b62"/>
+    <text x="1028" y="895" class="whiteTitle">Complete trajectory</text>
+    <text x="1028" y="922" class="whiteBody">Every user message, assistant message, tool call,</text>
+    <text x="1028" y="944" class="whiteBody">tool result, final answer, situation, and behavior signature.</text>
+    <rect x="1028" y="967" width="150" height="26" rx="13" fill="#28527d"/>
+    <rect x="1190" y="967" width="150" height="26" rx="13" fill="#28527d"/>
+    <rect x="1352" y="967" width="150" height="26" rx="13" fill="#28527d"/>
+    <text x="1103" y="985" text-anchor="middle" class="whiteBody">JSONL rows</text>
+    <text x="1265" y="985" text-anchor="middle" class="whiteBody">coverage meta</text>
+    <text x="1427" y="985" text-anchor="middle" class="whiteBody">progress</text>
+  </g>
+
+  <path d="M530 933 H570" class="arrow"/>
+  <path d="M960 933 H1000" class="arrow"/>
+
+  <g>
+    <rect x="70" y="1040" width="450" height="52" rx="15" fill="#fff" stroke="#dce4ed"/>
+    <text x="295" y="1072" text-anchor="middle" class="pill">Stop: rows • time • estimated saturation</text>
+    <rect x="1080" y="1040" width="450" height="52" rx="15" fill="#fff" stroke="#dce4ed"/>
+    <text x="1305" y="1062" text-anchor="middle" class="pill">Optional grading after generation</text>
+    <text x="1305" y="1082" text-anchor="middle" class="small">built-in conduct score or LLM judge</text>
+  </g>
+  <path d="M1265 1009 V1040" class="arrow"/>
+
+  <path d="M1095 1009 C1095 1095 680 1102 680 1024 V674 C680 657 676 650 670 648" class="feedback"/>
+  <rect x="665" y="1029" width="355" height="28" rx="14" fill="#e9f8f3"/>
+  <text x="842" y="1048" text-anchor="middle" class="small" fill="#13795d">feedback: coverage gaps • behaviors • failures</text>
+</svg>

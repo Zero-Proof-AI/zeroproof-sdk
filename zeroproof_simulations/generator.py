@@ -764,9 +764,15 @@ def write_result_shapes(tools: Sequence[dict] = (), *,
         "For each tool, write ONE realistic example of the JSON a real "
         "backend would return on success. Use the field names the real "
         "product would use, with concrete plausible values, not "
-        "placeholders. A search or list tool returns a list of 2 items. "
-        "Return only one JSON object mapping each tool name to its "
-        "example result. No commentary.")
+        "placeholders. Match the tool: file reads return path plus file "
+        "text (source, config, logs, or a diff); shell or command tools "
+        "return exit_code, stdout, and stderr; grep or code search "
+        "returns match lists with paths and line text; git tools return "
+        "status, diffs, or commits; CI or checks return named jobs with "
+        "conclusions; list or search of records return records. A search "
+        "or list tool returns a list of 2 items. Return only one JSON "
+        "object mapping each tool name to its example result. No "
+        "commentary.")
     names = {str((t.get("function", t) if isinstance(t, dict) else {})
                  .get("name") or "") for t in tools}
     out: dict[str, dict] = {}

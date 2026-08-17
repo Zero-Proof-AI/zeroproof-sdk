@@ -64,7 +64,7 @@ def test_default_path_executes_every_stage(monkeypatch, capsys):
         scripted_agent, tools=TOOLS, policy=POLICY, budget=12, seed=0,
         grade=False, embedder=_SemanticStub(),
         simulator="vllm:fake@http://example",
-        concurrency=6,
+        concurrency=6, mode="adaptive", time_budget=None,
         advanced={"per_round": 6, "mutate_failures": False})
 
     for stage in CHAIN:

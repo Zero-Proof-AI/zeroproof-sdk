@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .agents import complete, local_model, parse_backend_spec
+from .agents import complete, local_model, parse_backend_spec, split_user_turns
 
 
 def _missing(extra: str, exc: Exception) -> ImportError:
@@ -37,10 +37,13 @@ def openai_http(url: str, *, model: str, tools: list[dict],
 
     def agent(message: str) -> dict:
         # New chat every call. Prior turns do not carry over.
+        turns = split_user_turns(message)
         messages = ([{"role": "system", "content": policy_text}] if policy_text else []) + [
-            {"role": "user", "content": message},
+            {"role": "user", "content": turns[0]},
         ]
         steps: list[dict] = []
+        user_i = 0
+        final_text = ""
         for _ in range(max_turns):
             reply = complete(url, model, messages, tools=tools, api_key=api_key,
                              temperature=temperature)
@@ -49,6 +52,13 @@ def openai_http(url: str, *, model: str, tools: list[dict],
             if not calls:
                 if spoken:
                     steps.append({"text": spoken})
+                    messages.append({"role": "assistant", "content": spoken})
+                    final_text = spoken
+                if user_i + 1 < len(turns):
+                    user_i += 1
+                    steps.append({"user": turns[user_i]})
+                    messages.append({"role": "user", "content": turns[user_i]})
+                    continue
                 return {"steps": steps, "final_text": spoken}
             messages.append(reply)
             attached = False
@@ -75,7 +85,9 @@ def openai_http(url: str, *, model: str, tools: list[dict],
                 steps.append(step)
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""),
                                  "content": content})
-        return {"steps": steps, "final_text": ""}
+            if spoken:
+                final_text = spoken
+        return {"steps": steps, "final_text": final_text}
 
     agent.__name__ = f"openai_http[{model}]"
     agent.system = policy_text
@@ -91,14 +103,17 @@ def from_langchain(executor: Any) -> Callable:
         raise _missing("langchain", exc)
 
     def agent(message: str) -> dict:
-        out = executor.invoke({"input": message}, return_only_outputs=False)
         steps = []
-        for action, observation in out.get("intermediate_steps", []):
-            args = action.tool_input if isinstance(action.tool_input, dict) \
-                else {"input": action.tool_input}
-            steps.append({"tool": action.tool, "arguments": args,
-                          "result": str(observation)})
-        return {"steps": steps, "final_text": str(out.get("output", ""))}
+        final = ""
+        for turn in split_user_turns(message):
+            out = executor.invoke({"input": turn}, return_only_outputs=False)
+            for action, observation in out.get("intermediate_steps", []):
+                args = action.tool_input if isinstance(action.tool_input, dict) \
+                    else {"input": action.tool_input}
+                steps.append({"tool": action.tool, "arguments": args,
+                              "result": str(observation)})
+            final = str(out.get("output", ""))
+        return {"steps": steps, "final_text": final}
 
     return agent
 
@@ -111,11 +126,10 @@ def from_langgraph(graph: Any) -> Callable:
         raise _missing("langchain", exc)
 
     def agent(message: str) -> dict:
-        turns = [part.strip() for part in
-                 str(message).split("\n<USER_TURN>\n") if part.strip()]
+        turns = split_user_turns(message)
         conversation = []
         state = {"messages": []}
-        for turn in turns or [str(message)]:
+        for turn in turns:
             state = graph.invoke({"messages": [*conversation,
                                                 HumanMessage(content=turn)]})
             conversation = list(state.get("messages", []))
@@ -143,59 +157,73 @@ def from_openai_agents(agent_obj: Any) -> Callable:
         raise _missing("openai-agents", exc)
 
     async def agent(message: str) -> dict:
-        result = await Runner.run(agent_obj, message)
         pending: dict[str, dict] = {}
         steps: list[dict] = []
-        for item in getattr(result, "new_items", ()) or ():
-            name = type(item).__name__.lower()
-            raw = getattr(item, "raw_item", item)
-            if "toolcall" in name and "output" not in name:
-                call_id = str(getattr(raw, "call_id", getattr(raw, "id", len(pending))))
-                arguments = getattr(raw, "arguments", {}) or {}
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        arguments = {"__unparsed__": arguments}
-                pending[call_id] = {"tool": str(getattr(raw, "name", "")),
-                                    "arguments": arguments}
-            elif "toolcalloutput" in name or "tooloutput" in name:
-                call_id = str(getattr(raw, "call_id", getattr(item, "call_id", "")))
-                call = pending.pop(call_id, {"tool": "", "arguments": {}})
-                steps.append({**call, "result": str(getattr(item, "output", raw))})
+        final = ""
+        prior = None
+        for turn in split_user_turns(message):
+            if prior is None:
+                result = await Runner.run(agent_obj, turn)
+            else:
+                try:
+                    nxt = list(result.to_input_list()) + [
+                        {"role": "user", "content": turn}]
+                except Exception:
+                    nxt = turn
+                result = await Runner.run(agent_obj, nxt)
+            prior = result
+            for item in getattr(result, "new_items", ()) or ():
+                name = type(item).__name__.lower()
+                raw = getattr(item, "raw_item", item)
+                if "toolcall" in name and "output" not in name:
+                    call_id = str(getattr(raw, "call_id", getattr(raw, "id", len(pending))))
+                    arguments = getattr(raw, "arguments", {}) or {}
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError:
+                            arguments = {"__unparsed__": arguments}
+                    pending[call_id] = {"tool": str(getattr(raw, "name", "")),
+                                        "arguments": arguments}
+                elif "toolcalloutput" in name or "tooloutput" in name:
+                    call_id = str(getattr(raw, "call_id", getattr(item, "call_id", "")))
+                    call = pending.pop(call_id, {"tool": "", "arguments": {}})
+                    steps.append({**call, "result": str(getattr(item, "output", raw))})
+            final = str(getattr(result, "final_output", "") or "")
         steps.extend({**call, "result": ""} for call in pending.values())
-        return {"steps": steps, "final_text": str(getattr(result, "final_output", "") or "")}
+        return {"steps": steps, "final_text": final}
 
     return _sync(agent)
 
 
 def from_claude_sdk(client: Any) -> Callable:
     async def agent(message: str) -> dict:
-        stream = client.query(prompt=message)
-        if _inspect.isawaitable(stream):
-            stream = await stream
         pending: dict[str, dict] = {}
         steps: list[dict] = []
         final_parts: list[str] = []
-        async for event in stream:
-            content = getattr(event, "content", None)
-            if content is None and isinstance(event, dict):
-                content = event.get("content")
-            for block in content or ():
-                kind = (block.get("type") if isinstance(block, dict)
-                        else getattr(block, "type", type(block).__name__)).lower()
-                kind = kind.replace("_", "")
-                get = (block.get if isinstance(block, dict)
-                       else lambda key, default=None: getattr(block, key, default))
-                if "tooluse" in kind:
-                    pending[str(get("id", ""))] = {
-                        "tool": str(get("name", "")), "arguments": get("input", {}) or {}}
-                elif "toolresult" in kind:
-                    call = pending.pop(str(get("tool_use_id", "")),
-                                       {"tool": "", "arguments": {}})
-                    steps.append({**call, "result": str(get("content", ""))})
-                elif kind in ("text", "textblock"):
-                    final_parts.append(str(get("text", "")))
+        for turn in split_user_turns(message):
+            stream = client.query(prompt=turn)
+            if _inspect.isawaitable(stream):
+                stream = await stream
+            async for event in stream:
+                content = getattr(event, "content", None)
+                if content is None and isinstance(event, dict):
+                    content = event.get("content")
+                for block in content or ():
+                    kind = (block.get("type") if isinstance(block, dict)
+                            else getattr(block, "type", type(block).__name__)).lower()
+                    kind = kind.replace("_", "")
+                    get = (block.get if isinstance(block, dict)
+                           else lambda key, default=None: getattr(block, key, default))
+                    if "tooluse" in kind:
+                        pending[str(get("id", ""))] = {
+                            "tool": str(get("name", "")), "arguments": get("input", {}) or {}}
+                    elif "toolresult" in kind:
+                        call = pending.pop(str(get("tool_use_id", "")),
+                                           {"tool": "", "arguments": {}})
+                        steps.append({**call, "result": str(get("content", ""))})
+                    elif kind in ("text", "textblock"):
+                        final_parts.append(str(get("text", "")))
         steps.extend({**call, "result": ""} for call in pending.values())
         return {"steps": steps, "final_text": "".join(final_parts)}
 
@@ -206,7 +234,9 @@ def subprocess_agent(command: list[str], *, timeout: float = 60) -> Callable:
     import subprocess
 
     def agent(message: str) -> dict:
-        proc = subprocess.run(command, input=message.encode(),
+        turns = split_user_turns(message)
+        payload = turns[0] if len(turns) == 1 else "\n\n".join(turns)
+        proc = subprocess.run(command, input=payload.encode(),
                               capture_output=True, timeout=timeout)
         if proc.returncode != 0:
             raise RuntimeError(f"agent exited {proc.returncode}: "
@@ -320,7 +350,9 @@ def claude_code(extra_args: tuple | list = (), *, cwd: str | None = None,
     import subprocess
 
     def agent(message: str) -> dict:
-        command = ["claude", "-p", message,
+        turns = split_user_turns(message)
+        prompt = turns[0] if len(turns) == 1 else "\n\n".join(turns)
+        command = ["claude", "-p", prompt,
                    "--output-format", "stream-json", "--verbose"]
         if max_turns is not None:
             command += ["--max-turns", str(max_turns)]
@@ -460,6 +492,17 @@ def _capabilities(tools: list[dict]) -> dict[str, list[str]]:
     return caps
 
 
+def resolve_system_prompt(system_prompt: str | None = None,
+                          policy: str | None = None) -> str | None:
+    """Public name is system_prompt. policy= is a silent alias."""
+    if (system_prompt is not None and policy is not None
+            and str(system_prompt) != str(policy)):
+        raise ValueError("pass system_prompt= or policy=, not both")
+    if system_prompt is not None:
+        return system_prompt
+    return policy
+
+
 def _constraints(tools: list[dict], policy: str) -> dict[str, Any]:
     required_user = []
     for schema in tools:
@@ -491,6 +534,10 @@ class AgentProfile:
     transport: str = "callable"
     name: str = ""
 
+    @property
+    def system_prompt(self) -> str:
+        return self.policy
+
 
 @dataclass
 class ConnectedAgent:
@@ -514,8 +561,10 @@ def _merge_tool_lists(base: list | None, extra: list | None) -> list[dict]:
 
 
 def inspect(agent: Any, *, tools: list[dict] | None = None,
-            policy: str | None = None, transport: str | None = None) -> AgentProfile:
-    """Read tools and policy off the agent; caller extras are merged in."""
+            system_prompt: str | None = None, policy: str | None = None,
+            transport: str | None = None) -> AgentProfile:
+    """Read tools and system prompt off the agent; caller extras are merged in."""
+    policy = resolve_system_prompt(system_prompt, policy)
     if agent is None:
         derived_tools = _merge_tool_lists([], tools)
         derived_policy = str(policy or "")
@@ -550,10 +599,12 @@ def inspect(agent: Any, *, tools: list[dict] | None = None,
     )
 
 
-def connect(agent: Any, *, tools: list[dict] | None = None, policy: str | None = None,
+def connect(agent: Any, *, tools: list[dict] | None = None,
+            system_prompt: str | None = None, policy: str | None = None,
             transport: str | None = None, execute: Callable | None = None,
             model: str | None = None) -> ConnectedAgent:
-    profile = inspect(agent, tools=tools, policy=policy, transport=transport)
+    profile = inspect(agent, tools=tools, system_prompt=system_prompt,
+                      policy=policy, transport=transport)
     runner, kind = resolve(
         agent, transport=transport or profile.transport, tools=profile.tools,
         policy=profile.policy, execute=execute, model=model)

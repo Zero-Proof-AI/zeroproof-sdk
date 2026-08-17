@@ -113,6 +113,45 @@ def test_list_valued_shape_normalized(monkeypatch):
     assert "results" in shapes["search_email"]
 
 
+def test_listing_items_are_distinct_entities_despite_parent_ref():
+    tools = [{"type": "function", "function": {
+        "name": "list_deadlines", "description": "docket deadlines",
+        "parameters": {"type": "object", "properties": {
+            "matter_id": {"type": "string"}},
+            "required": ["matter_id"]}}}]
+    env = MockEnvironment(tools)
+    env._exists = lambda value: True
+    out = env.call("list_deadlines", {"matter_id": "78902"})
+    items = out["data"]["items"]
+    assert len(items) >= 2
+    ids = [i["id"] for i in items]
+    assert len(set(ids)) == len(ids)
+    assert len({json.dumps(i, sort_keys=True) for i in items}) == len(items)
+    assert all(i.get("matter_id") == "78902" for i in items)
+
+
+def test_already_done_world_still_answers_reads():
+    tools = [
+        {"type": "function", "function": {
+            "name": "get_order", "description": "read one order",
+            "parameters": {"type": "object", "properties": {
+                "order_id": {"type": "string"}},
+                "required": ["order_id"]}}},
+        {"type": "function", "function": {
+            "name": "cancel_order", "description": "cancel an order",
+            "parameters": {"type": "object", "properties": {
+                "order_id": {"type": "string"}},
+                "required": ["order_id"]}}},
+    ]
+    env = MockEnvironment(tools, world_state="entity already acted on")
+    env._exists = lambda value: True
+    read = env.call("get_order", {"order_id": "9917"})
+    assert read["status"] == "ok"
+    assert isinstance(read.get("data"), dict)
+    act = env.call("cancel_order", {"order_id": "9917"})
+    assert act["status"] == "already_done"
+
+
 def test_write_result_shapes_parses_fenced_and_filters_unknown(monkeypatch):
     from zeroproof_simulations import generator
 
@@ -182,3 +221,145 @@ def test_write_result_shapes_chunks_and_merges_large_lists(monkeypatch):
     assert len(shapes) == n_tools
     assert set(shapes) == {f"tool_{i}" for i in range(n_tools)}
     assert all(shapes[name]["id"] == name for name in shapes)
+
+
+CODING_TOOLS = [
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": "Read a file from the workspace.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}}, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "run_command",
+        "description": "Run a shell command.",
+        "parameters": {"type": "object", "properties": {
+            "command": {"type": "string"}}, "required": ["command"]}}},
+    {"type": "function", "function": {
+        "name": "grep",
+        "description": "Search files for a pattern.",
+        "parameters": {"type": "object", "properties": {
+            "pattern": {"type": "string"}, "path": {"type": "string"}},
+            "required": ["pattern"]}}},
+]
+
+
+def test_coding_tools_are_not_person_records():
+    env = MockEnvironment(CODING_TOOLS)
+    env._exists = lambda value: True
+    file_out = env.call("read_file", {"path": "src/app.py"})
+    data = file_out["data"]
+    assert file_out["status"] == "ok"
+    assert isinstance(data.get("content"), str)
+    assert "\n" in data["content"]
+    assert "def " in data["content"] or "from " in data["content"]
+    assert data.get("owner") is None
+    assert data.get("status") not in {"completed", "in_progress", "pending"}
+    shell = env.call("run_command", {"command": "pytest -q"})
+    payload = shell.get("data") or shell
+    assert "stdout" in payload or "exit_code" in payload
+    assert payload.get("owner") is None
+    assert "exit_code" in payload
+    grep = env.call("grep", {"pattern": "TODO", "path": "src"})
+    matches = (grep.get("data") or grep).get("matches")
+    assert matches
+    assert "path" in matches[0] and "text" in matches[0]
+    assert matches[0].get("owner") is None
+
+
+def test_order_tools_still_get_records():
+    tools = [
+        {"type": "function", "function": {
+            "name": "search_orders", "description": "find orders",
+            "parameters": {"type": "object", "properties": {
+                "query": {"type": "string"}}, "required": ["query"]}}},
+    ]
+    env = MockEnvironment(tools)
+    env._exists = lambda value: True
+    listing = env.call("search_orders", {"query": "recent"})
+    item = listing["data"]["items"][0]
+    assert "owner" in item
+    assert "status" in item
+    assert "name" in item
+
+
+def test_unknown_spec_still_gets_payloads():
+    tools = [
+        {"type": "function", "function": {
+            "name": "frobnicate_gadget",
+            "description": "Twiddle a gadget.",
+            "parameters": {"type": "object", "properties": {
+                "gadget_id": {"type": "string"}},
+                "required": ["gadget_id"]}}},
+        {"type": "function", "function": {
+            "name": "read_blueprint",
+            "description": "Read a blueprint file.",
+            "parameters": {"type": "object", "properties": {
+                "path": {"type": "string"}}, "required": ["path"]}}},
+    ]
+    env = MockEnvironment(tools)
+    env._exists = lambda value: True
+    rec = env.call("frobnicate_gadget", {"gadget_id": "G-1"})
+    assert rec.get("status") in {"ok", "created"}
+    assert rec.get("data") or rec.get("id")
+    fil = env.call("read_blueprint", {"path": "docs/plan.md"})
+    content = (fil.get("data") or {}).get("content")
+    assert isinstance(content, str) and len(content) > 20
+    assert "#" in content or "plan" in content.lower() or "\n" in content
+
+
+def test_github_get_file_and_commits_are_code_shaped():
+    from pathlib import Path
+
+    spec_path = Path(__file__).resolve().parents[1] / "specs" / "github" / "spec.json"
+    spec = json.loads(spec_path.read_text())
+    env = MockEnvironment(spec["tools"])
+    env._exists = lambda value: True
+    file_out = env.call("get_file", {
+        "repo": "acme/app", "path": "src/main.py", "ref": "main"})
+    data = file_out["data"]
+    assert isinstance(data.get("content"), str)
+    assert "\n" in data["content"]
+    assert data.get("owner") is None
+    commits = env.call("list_commits", {"repo": "acme/app"})
+    item = commits["data"]["items"][0]
+    assert "sha" in item and "message" in item
+    checks = env.call("list_checks", {"repo": "acme/app", "number": 12})
+    job = checks["data"]["items"][0]
+    assert "name" in job and "conclusion" in job
+
+
+def test_run_tests_is_shell_not_a_person_record():
+    tools = [
+        {"type": "function", "function": {
+            "name": "run_tests",
+            "description": "Run the project test suite.",
+            "parameters": {"type": "object", "properties": {
+                "command": {"type": "string"}}}}},
+    ]
+    env = MockEnvironment(tools)
+    env._exists = lambda value: True
+    out = env.call("run_tests", {"command": "pytest"})
+    data = out.get("data") or {}
+    assert "owner" not in data
+    assert "updated_at" not in data
+    assert "stdout" in data or "exit_code" in data
+
+
+def test_record_shaped_example_does_not_override_run_tests():
+    tools = [
+        {"type": "function", "function": {
+            "name": "run_tests",
+            "description": "Run the project test suite.",
+            "parameters": {"type": "object", "properties": {
+                "command": {"type": "string"}}}}},
+    ]
+    env = MockEnvironment(tools, result_shapes={
+        "run_tests": {
+            "id": "1", "name": "manual test", "owner": "nina brooks",
+            "status": "completed", "updated_at": "2026-04-12",
+        },
+    })
+    env._exists = lambda value: True
+    data = env.call("run_tests", {"command": "pytest"}).get("data") or {}
+    assert "owner" not in data
+    assert "stdout" in data or "exit_code" in data

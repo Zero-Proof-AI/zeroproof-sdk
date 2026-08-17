@@ -84,7 +84,7 @@ def test_llm_grade_helper_and_unreachable(monkeypatch):
 def test_simulate_llm_grade_flag_runs_after_rollout(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", _fake_judge_complete)
-    data = zps.simulate(scripted_agent, **_offline(budget=4, advanced={"llm_grade": True}))
+    data = zps.simulate(scripted_agent, **_offline(budget=4, llm_grade=True))
     assert all(t["llm_reward"] == 0.5 for t in data.trajectories)
     assert all(t["reward"] is not None for t in data.trajectories)
 

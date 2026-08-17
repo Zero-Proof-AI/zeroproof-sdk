@@ -467,6 +467,68 @@ def sampling_plan(time_budget: float | None) -> dict[str, Any]:
     }
 
 
+def adaptive_allocator(time_budget: float | None, until: str = "compute",
+                       *, elapsed: float | None = None) -> dict[str, Any]:
+    """Adaptive mix. Short remaining clock is messier; saturation walks more cards.
+
+    Shares are explore / expand / verify. n_req and k are caps so expand and
+    verify can actually run. Not a pinned n=1 k=1 policy.
+    """
+    until_key = str(until or "compute").strip().lower()
+    if until_key in {"first", "saturation"}:
+        until_key = "saturation"
+    elif until_key in {"compute", "budget_only", "budget", "time"}:
+        until_key = "compute"
+    sat = until_key == "saturation"
+    if time_budget is None or float(time_budget) <= 0:
+        total = 600.0
+        left = 600.0
+    else:
+        total = float(time_budget)
+        spent = 0.0 if elapsed is None else max(0.0, float(elapsed))
+        left = max(0.0, total - spent)
+    # Saturation keeps covering the grid even on a short clock.
+    clock = max(left, 120.0) if sat else left
+    scale = min(1.0, max(0.0, (clock - 15.0) / 165.0))
+    explore = 0.30 + 0.50 * scale
+    rest = 1.0 - explore
+    expand = rest * 0.55
+    verify = rest * 0.45
+    return {
+        "explore": explore,
+        "expand": expand,
+        "verify": verify,
+        "n_req": 3,
+        "k": 3 if sat or total >= 90.0 else 2,
+        "until": until_key,
+        "seconds": total,
+        "remaining": left,
+    }
+
+
+def allocator_slot_counts(take: int, plan: dict | None) -> dict[str, int]:
+    """Integer explore/expand/verify slots from mix shares."""
+    take = max(0, int(take))
+    if take <= 0 or not plan:
+        return {"explore": take, "expand": 0, "verify": 0}
+    expand_s = float(plan.get("expand") or 0.0)
+    verify_s = float(plan.get("verify") or 0.0)
+    messy_s = expand_s + verify_s
+    messy_n = int(round(take * messy_s))
+    if take >= 2:
+        messy_n = max(1, min(take - 1, messy_n))
+    explore_n = take - messy_n
+    if messy_n <= 0:
+        return {"explore": take, "expand": 0, "verify": 0}
+    v_part = verify_s / messy_s if messy_s else 0.5
+    verify_n = int(round(messy_n * v_part))
+    verify_n = min(messy_n, max(0, verify_n))
+    if messy_n >= 2 and verify_n == 0 and v_part > 0:
+        verify_n = 1
+    expand_n = messy_n - verify_n
+    return {"explore": explore_n, "expand": expand_n, "verify": verify_n}
+
+
 def new_turn_stats() -> dict[str, Any]:
     """Shared running mean of observed conversation turns."""
     return {"n": 0, "sum": 0, "lock": threading.Lock()}

@@ -1141,11 +1141,32 @@ def test_scene_brief_is_derived_from_spec(monkeypatch):
     monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
     root = Path(__file__).resolve().parents[1] / "specs"
     gh = json.loads((root / "github" / "spec.json").read_text())
-    bank = json.loads((root / "bank" / "spec.json").read_text())
+    bank_path = root / "bank" / "spec.json"
+    if bank_path.is_file():
+        other = json.loads(bank_path.read_text())
+    else:
+        other = {
+            "tools": [
+                {"type": "function", "function": {
+                    "name": "get_balance",
+                    "description": "Account balance.",
+                    "parameters": {"type": "object", "properties": {
+                        "account_id": {"type": "string"}},
+                        "required": ["account_id"]}}},
+                {"type": "function", "function": {
+                    "name": "transfer",
+                    "description": "Move funds.",
+                    "parameters": {"type": "object", "properties": {
+                        "from_id": {"type": "string"},
+                        "to_id": {"type": "string"}},
+                        "required": ["from_id", "to_id"]}}},
+            ],
+            "policy": "Do not invent account numbers.",
+        }
     a = write_scene_brief(
         gh["tools"], gh["policy"], backend_spec="vllm:m@http://example")
     b = write_scene_brief(
-        bank["tools"], bank["policy"], backend_spec="vllm:m@http://example")
+        other["tools"], other["policy"], backend_spec="vllm:m@http://example")
     assert "get_pr" in seen[0] or "search_issues" in seen[0]
     assert "get_balance" in seen[1] or "transfer" in seen[1]
     assert a and b
@@ -1171,6 +1192,7 @@ def test_simulate_writes_scene_brief_once(monkeypatch):
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
         grade=False, concurrency=4, simulator="vllm:fake@http://example",
+        mode="adaptive", time_budget=None,
         advanced={"per_round": 8, "mutate_failures": False,
                   "scenario_concurrency": 2})
     assert calls["n"] == 1

@@ -45,7 +45,7 @@ def test_coverage_tracks_cells_without_halting():
         lambda m: {"steps": [], "final_text": "ok"},
         tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
         concurrency=8, until="compute", dimensions=dims, simulator=False,
-        time_budget=None,
+        time_budget=None, mode="adaptive",
         advanced={"per_round": 4, "mutate_failures": False})
     assert data.stopped_because == "budget"
     assert data.coverage["saturation"] is False
@@ -65,7 +65,7 @@ def test_until_saturation_halts_on_tiny_grid():
         lambda m: {"steps": [], "final_text": "ok"},
         tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
         concurrency=4, until="saturation", dimensions=dims, simulator=False,
-        time_budget=None, rollouts_per_request=5,
+        time_budget=None, rollouts_per_request=5, mode="adaptive",
         advanced={"per_round": 4, "mutate_failures": False})
     assert data.stopped_because == "saturation"
     assert len(data.trajectories) < 80

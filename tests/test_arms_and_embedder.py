@@ -126,7 +126,8 @@ def test_llm_guided_with_mocked_model(monkeypatch, tmp_path):
         grade=True,
         embedder="hash",
         simulator="vllm:fake@http://127.0.0.1:9",
-        concurrency=12, until="budget_only",
+        concurrency=12, until="budget_only", mode="adaptive",
+        time_budget=None,
         advanced={"per_round": 12, "mutate_failures": True},
     )
     arms = set(data.arm_yield)

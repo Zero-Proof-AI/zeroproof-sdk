@@ -1,4 +1,4 @@
-"""Public simulate() knobs: aliases, N/n/k, and live-wired behavior."""
+"""Public simulate() knobs: aliases, situations / phrasings / repeats, and live-wired behavior."""
 from __future__ import annotations
 
 import json
@@ -22,16 +22,21 @@ def _offline(**kwargs):
 
 
 def test_resolve_topology_defaults_and_aliases():
-    adaptive = zps.resolve_topology()
+    default = zps.resolve_topology()
+    assert default["mode"] == "explore"
+    assert default["repeat_policy"] == "none"
+    assert default["unique_situations"] is True
+    assert default["n_req"] == 1
+    assert default["k"] == 1
+    assert default["k_explicit"] is False
+    adaptive = zps.resolve_topology(mode="adaptive")
     assert adaptive["mode"] == "adaptive"
     assert adaptive["repeat_policy"] == "adaptive"
-    assert adaptive["n_req"] == 1
-    assert adaptive["k"] == 1
-    assert adaptive["k_explicit"] is False
 
     by_n = zps.resolve_topology(n=4)
     by_req = zps.resolve_topology(requests_per_situation=4)
-    assert by_n["n_req"] == by_req["n_req"] == 4
+    by_phrasings = zps.resolve_topology(phrasings=4)
+    assert by_n["n_req"] == by_req["n_req"] == by_phrasings["n_req"] == 4
     assert by_n["k"] == 1
 
     by_k = zps.resolve_topology(repeats=5)
@@ -115,8 +120,8 @@ def test_public_n_is_requests_per_situation_not_completions(monkeypatch):
 
     monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
     data = zps.simulate(
-        scripted_agent, n=5, repeats=1, budget=6, seed=0, grade=False,
-        concurrency=4, simulator="vllm:fake@http://127.0.0.1:9",
+        scripted_agent, mode="adaptive", n=5, repeats=1, budget=6, seed=0,
+        grade=False, concurrency=4, simulator="vllm:fake@http://127.0.0.1:9",
         time_budget=60,
         advanced={"per_round": 6, "mutate_failures": False})
     assert data.requests_per_situation == 5
@@ -126,8 +131,8 @@ def test_public_n_is_requests_per_situation_not_completions(monkeypatch):
 
     seen.clear()
     data2 = zps.simulate(
-        scripted_agent, n=1, repeats=1, budget=4, seed=0, grade=False,
-        concurrency=4, simulator="vllm:fake@http://127.0.0.1:9",
+        scripted_agent, mode="adaptive", n=1, repeats=1, budget=4, seed=0,
+        grade=False, concurrency=4, simulator="vllm:fake@http://127.0.0.1:9",
         time_budget=60,
         advanced={"per_round": 6, "mutate_failures": False,
                   "completions_per_request": 6})
@@ -160,8 +165,8 @@ def test_mode_sft_rl_explore_change_n_and_k():
     assert len({t["prompt"] for t in explore.trajectories}) == len(explore.trajectories)
 
 
-def test_n_openers_are_not_k_rollouts():
-    """n = different openers of one card. k = same opener, k trajectories."""
+def test_n_phrasings_are_not_k_repeats():
+    """n = different phrasings of one situation. k = same phrasing, k repeats."""
     from collections import Counter
 
     n_run = zps.simulate(
@@ -208,6 +213,15 @@ def test_unique_situations_keeps_new_cards_unless_n_k_set():
     assert alias.rollouts_per_request == 1
 
 
+def test_phrasings_alias_is_requests_per_situation():
+    data = zps.simulate(
+        scripted_agent, phrasings=3, repeats=1, budget=12, **_offline())
+    assert data.requests_per_situation == 3
+    assert data.rollouts_per_request == 1
+    with pytest.raises(ValueError, match="not both"):
+        zps.resolve_topology(phrasings=3, n=4)
+
+
 def test_unique_is_topology_not_writer_flight():
     lock = threading.Lock()
     peaks = {"unique": 0, "default": 0}
@@ -232,9 +246,10 @@ def test_unique_is_topology_not_writer_flight():
         concurrency=8, simulator=make_writer("unique"), until="compute",
         time_budget=None, advanced={"mutate_failures": False})
     d = zps.simulate(
-        scripted_agent, unique=False, repeats=1, budget=24, seed=0, grade=False,
-        concurrency=8, simulator=make_writer("default"), until="compute",
-        time_budget=None, advanced={"mutate_failures": False})
+        scripted_agent, mode="adaptive", unique=False, repeats=1, budget=24,
+        seed=0, grade=False, concurrency=8, simulator=make_writer("default"),
+        until="compute", time_budget=None,
+        advanced={"mutate_failures": False})
     assert 1 <= peaks["unique"] <= 4
     assert 1 <= peaks["default"] <= 4
     assert peaks["unique"] == peaks["default"] or peaks["unique"] >= 2
@@ -252,7 +267,7 @@ def test_until_compute_vs_saturation_and_aliases():
     compute = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
         budget=40, until="budget_only", dimensions=dims, repeats=1,
-        **_offline())
+        mode="adaptive", **_offline())
     assert compute.stopped_because == "budget"
     assert compute.coverage["until"] == "compute"
     assert len(compute.trajectories) == 40
@@ -260,7 +275,7 @@ def test_until_compute_vs_saturation_and_aliases():
     halt = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
         budget=40, until="first", dimensions=dims, rollouts_per_request=5,
-        **_offline())
+        mode="adaptive", **_offline())
     assert halt.stopped_because == "saturation"
     assert halt.coverage["until"] == "saturation"
     assert len(halt.trajectories) < 40
@@ -371,15 +386,17 @@ def test_texture_reaches_writer_tag_draw(monkeypatch):
 
     monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
     zps.simulate(
-        scripted_agent, texture=0.0, repeats=1, budget=3, seed=0, grade=False,
-        concurrency=2, simulator="vllm:fake@http://127.0.0.1:9",
+        scripted_agent, mode="adaptive", texture=0.0, repeats=1, budget=3,
+        seed=0, grade=False, concurrency=2,
+        simulator="vllm:fake@http://127.0.0.1:9",
         time_budget=None, advanced={"per_round": 4, "mutate_failures": False})
     assert seen
     assert all(rate == 0.0 for rate in seen)
     seen.clear()
     zps.simulate(
-        scripted_agent, texture=1.0, repeats=1, budget=3, seed=0, grade=False,
-        concurrency=2, simulator="vllm:fake@http://127.0.0.1:9",
+        scripted_agent, mode="adaptive", texture=1.0, repeats=1, budget=3,
+        seed=0, grade=False, concurrency=2,
+        simulator="vllm:fake@http://127.0.0.1:9",
         time_budget=None, advanced={"per_round": 4, "mutate_failures": False})
     assert seen
     assert all(rate == 1.0 for rate in seen)
@@ -504,12 +521,54 @@ def test_k_does_not_clone_followups(monkeypatch):
     assert {"also check refund 1", "also check refund 2"} == set(follows)
 
 
+def test_adaptive_allocator_short_clock_is_messier():
+    short = zps.adaptive_allocator(20, "compute")
+    long = zps.adaptive_allocator(180, "compute")
+    sat = zps.adaptive_allocator(20, "saturation")
+    first = zps.adaptive_allocator(20, "first")
+    none = zps.adaptive_allocator(None, "compute")
+    early = zps.adaptive_allocator(60, "compute", elapsed=5)
+    late = zps.adaptive_allocator(60, "compute", elapsed=50)
+    assert short["n_req"] > 1 and short["k"] > 1
+    assert long["n_req"] > 1 and long["k"] > 1
+    assert short["expand"] + short["verify"] > long["expand"] + long["verify"]
+    assert long["explore"] > short["explore"]
+    assert sat["explore"] > short["explore"]
+    assert first["until"] == sat["until"] == "saturation"
+    assert none["explore"] >= long["explore"]
+    assert late["expand"] + late["verify"] > early["expand"] + early["verify"]
+    short_slots = zps.allocator_slot_counts(8, short)
+    long_slots = zps.allocator_slot_counts(8, long)
+    assert short_slots["expand"] + short_slots["verify"] > (
+        long_slots["expand"] + long_slots["verify"])
+    assert sum(short_slots.values()) == 8
+
+
 def test_adaptive_allocator_records_explore_expand_verify():
     data = zps.simulate(
-        scripted_agent, mode="adaptive", budget=16, **_offline())
+        scripted_agent, mode="adaptive", budget=16, **_offline(time_budget=15))
     assert data.mode == "adaptive"
     assert data.allocator
     assert data.allocator.get("explore", 0) >= 1
+    assert (data.allocator.get("expand", 0)
+            + data.allocator.get("verify", 0)) >= 1
+    assert data.requests_per_situation > 1
+    assert data.rollouts_per_request > 1
     assert data.coverage.get("mode") == "adaptive"
     assert data.coverage.get("requests_per_situation") == data.requests_per_situation
     assert data.coverage.get("rollouts_per_request") == data.rollouts_per_request
+
+
+def test_explore_cards_walk_different_tools_or_stances():
+    data = zps.simulate(
+        scripted_agent, mode="explore", budget=16, **_offline())
+    prompts = [t["prompt"] for t in data.trajectories]
+    assert prompts
+    assert len(prompts) == len(set(prompts))
+    tools = {(t.get("scenario_dimensions") or {}).get("tool")
+             for t in data.trajectories
+             if (t.get("scenario_dimensions") or {}).get("tool")}
+    stances = {(t.get("scenario_dimensions") or {}).get("stance")
+               for t in data.trajectories
+               if (t.get("scenario_dimensions") or {}).get("stance")}
+    assert len(tools) >= 2 or len(stances) >= 2
