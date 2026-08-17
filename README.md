@@ -22,15 +22,18 @@ uv sync
 export VLLM_API_KEY=...
 ```
 
-Hosted Qwen is the default writer and agent. `uv add /path/to/zeroproof-simulations` from another project. `uv run pytest` after `uv sync --extra dev`.
+ZeroProof hosts Qwen for evaluation. Ask us for a `VLLM_API_KEY` to try the default writer and agent. The endpoint is shared and rate limited.
+
+`uv add /path/to/zeroproof-simulations` from another project. `uv run pytest` after `uv sync --extra dev`.
 
 ```python
 import zeroproof_simulations as zps
 
-data = zps.simulate(spec="specs/github", output="rollout.jsonl")
-data = zps.simulate(tools=my_tools, system_prompt=my_system_prompt)
+data = zps.simulate(tools=my_tools, system_prompt=my_system_prompt, output="rollout.jsonl")
 data = zps.simulate(agent=my_agent)
 ```
+
+Pass `spec=` if you have a local tools-and-system-prompt folder. The generated datasets are on [Hugging Face](https://huggingface.co/datasets/zero-proof-ai/agent-simulations), organized by agent type instead of stored in this repo.
 
 | Knob | Default | |
 |---|---|---|
@@ -55,15 +58,15 @@ Depends on the use case. How each scenario is built is in [The recipe](#the-reci
 | A mix, until coverage plateaus | `adaptive` | New situations, phrasings, and repeats. Best with `until="saturation"` |
 
 ```python
-zps.simulate(spec="specs/github")                 # explore
-zps.simulate(spec="specs/github", mode="sft")
-zps.simulate(spec="specs/github", mode="rl")
-zps.simulate(spec="specs/github", mode="adaptive", until="saturation")
+zps.simulate(tools=my_tools, system_prompt=my_system_prompt)                 # explore
+zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="sft")
+zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="rl")
+zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", until="saturation")
 ```
 
 ## Speed
 
-2 min, airline spec.
+2 min, airline agent. Rates are from the hosted GPU (warm replicas, burst under load).
 
 | Mode | Rows | Rate | Unique openers |
 |---|---|---|---|
@@ -76,7 +79,7 @@ zps.simulate(spec="specs/github", mode="adaptive", until="saturation")
 | Parameter | Default | Meaning |
 |---|---|---|
 | `agent` | hosted Qwen | Rollout model |
-| `spec` | | Tools and system prompt path |
+| `spec` | | Local tools and system prompt path |
 | `tools`, `system_prompt` | from spec or agent | Tool list and agent system prompt |
 | `situations` | | Distinct situations (N) |
 | `requests_per_situation` | from mode | Phrasings per situation (n). Alias `phrasings=` / `n=` |

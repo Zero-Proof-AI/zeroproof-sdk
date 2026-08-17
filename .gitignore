@@ -21,12 +21,9 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 
-# example specs the tests read ship; the rest stay local
-specs/*
-!specs/github/
-!specs/github/**
-!specs/linear/
-!specs/linear/**
+# specs and generated rows stay local. Datasets ship on Hugging Face.
+specs/
+examples/
 
 # helpers, not the product
 scripts/
@@ -38,7 +35,3 @@ zeroproof_simulations/_experimental/
 # editor config and local notes
 .cursor/
 AUDIT_*.md
-
-# curated example outputs ship; bulk runs stay local
-!examples/
-!examples/**
