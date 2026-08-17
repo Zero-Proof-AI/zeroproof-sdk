@@ -6,7 +6,7 @@ import json
 import pytest
 
 import zeroproof_simulations as zps
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import simulate_offline
 from zeroproof_simulations.llm_judge import DEFAULT_JUDGE_SPEC, MISSING_JUDGE_KEY
 
 
@@ -14,15 +14,11 @@ def _fake_judge_complete(_url, _model, messages, **_kwargs):
     return {"content": json.dumps({"score": 0.5, "reason": "partial compliance"})}
 
 
-def _offline(**kwargs):
-    adv = {"per_round": 6, "mutate_failures": False, "simulator": False,
-           "concurrency": 4, "seed": 0}
-    adv.update(kwargs.pop("advanced", {}))
-    public = dict(
-        tools=TOOLS, policy=POLICY, budget=kwargs.pop("budget", 6),
-        grade=kwargs.pop("grade", True), advanced=adv)
-    public.update(kwargs)
-    return public
+def _run(**kwargs):
+    kwargs.setdefault("grade", True)
+    kwargs.setdefault("budget", 6)
+    kwargs.setdefault("per_round", 6)
+    return simulate_offline(**kwargs)
 
 
 def test_simulate_default_does_not_llm_grade(monkeypatch):
@@ -33,7 +29,7 @@ def test_simulate_default_does_not_llm_grade(monkeypatch):
         return {"content": '{"score": 1, "reason": "ok"}'}
 
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", tracked)
-    data = zps.simulate(scripted_agent, **_offline(budget=8))
+    data = _run(budget=8)
     assert len(data.trajectories) == 8
     assert all(t.get("llm_reward") is None for t in data.trajectories)
     assert calls == []
@@ -41,7 +37,7 @@ def test_simulate_default_does_not_llm_grade(monkeypatch):
 
 def test_grade_llm_true_writes_fields(monkeypatch, tmp_path):
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", _fake_judge_complete)
-    data = zps.simulate(scripted_agent, **_offline())
+    data = _run()
     before = [(t["reward"], t.get("grader_reason")) for t in data.trajectories]
     data.grade(llm=True, api_key="sk-test")
     assert all(t["llm_reward"] == 0.5 for t in data.trajectories)
@@ -62,7 +58,7 @@ def test_grade_llm_true_writes_fields(monkeypatch, tmp_path):
 def test_llm_grade_needs_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("VLLM_API_KEY", raising=False)
-    data = zps.simulate(scripted_agent, **_offline(budget=4))
+    data = _run(budget=4)
     with pytest.raises(RuntimeError, match="API key") as exc:
         data.grade(llm=True)
     assert str(exc.value) == MISSING_JUDGE_KEY
@@ -75,7 +71,7 @@ def test_llm_grade_helper_and_unreachable(monkeypatch):
         raise OSError("judge offline")
 
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", blocked)
-    data = zps.simulate(scripted_agent, **_offline(budget=4))
+    data = _run(budget=4)
     zps.llm_grade(data, api_key="sk-test")
     assert all(t["llm_reward"] is None for t in data.trajectories)
     assert "llm_judge_unreachable" in data.degraded
@@ -84,7 +80,7 @@ def test_llm_grade_helper_and_unreachable(monkeypatch):
 def test_simulate_llm_grade_flag_runs_after_rollout(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", _fake_judge_complete)
-    data = zps.simulate(scripted_agent, **_offline(budget=4, llm_grade=True))
+    data = _run(budget=4, llm_grade=True)
     assert all(t["llm_reward"] == 0.5 for t in data.trajectories)
     assert all(t["reward"] is not None for t in data.trajectories)
 
@@ -97,7 +93,7 @@ def test_llm_judge_uses_openai_not_hosted(monkeypatch):
         return {"content": '{"score": 1, "reason": "ok"}'}
 
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", fake)
-    data = zps.simulate(scripted_agent, **_offline(budget=4))
+    data = _run(budget=4)
     data.grade(llm=True, api_key="sk-test")
     assert seen
     assert "modal.run" not in seen[0][0]
@@ -110,7 +106,7 @@ def test_llm_judge_uses_openai_not_hosted(monkeypatch):
 def test_llm_grade_rewrites_same_jsonl(monkeypatch, tmp_path):
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", _fake_judge_complete)
     dest = tmp_path / "out.jsonl"
-    data = zps.simulate(scripted_agent, output=str(dest), **_offline(budget=4))
+    data = _run(output=str(dest), budget=4)
     first = json.loads(dest.read_text().splitlines()[0])
     assert "llm_reward" not in first
     assert first["scenario_id"]

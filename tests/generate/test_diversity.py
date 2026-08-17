@@ -1,6 +1,6 @@
 import random
 
-from tests.helpers import TOOLS, POLICY, scripted_agent
+from tests.helpers import TOOLS, POLICY, REPO_ROOT, scripted_agent
 import zeroproof_simulations as zps
 from zeroproof_simulations.diversity import accept_anneal_candidate, sample_request_axes
 from zeroproof_simulations.generator import ModelSimulator
@@ -104,7 +104,7 @@ def test_writer_tags_are_sparse_and_generic():
                          "phrasing", "texture", "tone", "ask", "pressure",
                          "user", "history", "world_state",
                          "tool_condition"}
-    sdk = Path(__file__).resolve().parents[1] / "zeroproof_simulations"
+    sdk = REPO_ROOT / "zeroproof_simulations"
     for path in sdk.glob("*.py"):
         src = path.read_text()
         assert "_KIND_ASKS" not in src

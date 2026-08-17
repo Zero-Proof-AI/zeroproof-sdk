@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import REPO_ROOT, simulate_offline
 import zeroproof_simulations as zps
 from zeroproof_simulations.quality import DIMENSIONS, FAIL, score_row
 
@@ -276,11 +276,7 @@ def test_steps_only_row_uses_conversation():
 
 
 def test_simulate_does_not_write_quality_until_rank(tmp_path):
-    data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=4, seed=0,
-        grade=False, time_budget=None,
-        advanced={"simulator": False, "concurrency": 4,
-                  "per_round": 6, "mutate_failures": False})
+    data = simulate_offline(budget=4, per_round=6)
     assert all(t.get("quality") is None for t in data.trajectories)
     path = data.save(str(tmp_path / "u.jsonl"))
     raw = json.loads(open(path).readline())
@@ -294,8 +290,7 @@ def test_simulate_does_not_write_quality_until_rank(tmp_path):
 
 
 def test_live_example_sample_scores():
-    from pathlib import Path
-    path = Path(__file__).resolve().parents[1] / "examples" / "sft" / "coding.jsonl"
+    path = REPO_ROOT / "examples" / "sft" / "coding.jsonl"
     if not path.is_file():
         return
     rows = [json.loads(line) for line in path.read_text().splitlines() if line][:8]

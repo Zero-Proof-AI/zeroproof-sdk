@@ -1,7 +1,14 @@
-"""Scripted trajectory callable used by unit tests. Never hits a GPU."""
+"""Shared offline fixtures. Not part of the SDK."""
 from __future__ import annotations
 
 import re
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = REPO_ROOT / "tests" / "fixtures"
+GITHUB_SPEC = FIXTURES / "github"
+LINEAR_SPEC = FIXTURES / "linear"
 
 TOOLS = [
     {"type": "function", "function": {"name": "lookup_order", "parameters": {
@@ -38,3 +45,33 @@ def scripted_agent(message: str) -> dict:
               "arguments": {"order_id": order, "amount": amount},
               "result": {"status": "created", "id": f"re_{amount}"}}]
     return {"steps": steps, "final_text": f"Refunded ${amount}."}
+
+
+def offline(**kwargs: Any) -> dict[str, Any]:
+    """Kwargs for an offline ``simulate()`` call. Never hits a GPU."""
+    advanced = {"per_round": 8, "mutate_failures": False}
+    extra = dict(kwargs.pop("advanced", None) or {})
+    if "per_round" in kwargs:
+        extra.setdefault("per_round", kwargs.pop("per_round"))
+    if "mutate_failures" in kwargs:
+        extra.setdefault("mutate_failures", kwargs.pop("mutate_failures"))
+    advanced.update(extra)
+    kw: dict[str, Any] = {
+        "seed": 0,
+        "grade": False,
+        "concurrency": 4,
+        "simulator": False,
+        "time_budget": None,
+        "advanced": advanced,
+    }
+    if "spec" not in kwargs:
+        kw["tools"] = TOOLS
+        kw["policy"] = POLICY
+    kw.update(kwargs)
+    return kw
+
+
+def simulate_offline(agent: Any = None, **kwargs: Any):
+    import zeroproof_simulations as zps
+    return zps.simulate(
+        scripted_agent if agent is None else agent, **offline(**kwargs))

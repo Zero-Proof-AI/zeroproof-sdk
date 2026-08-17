@@ -14,5 +14,15 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
-include = ["zeroproof_simulations*"]
+where = ["."]
+include = ["zeroproof_simulations"]
+exclude = ["tests*", "examples*", "docs*", "specs*"]
+namespaces = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

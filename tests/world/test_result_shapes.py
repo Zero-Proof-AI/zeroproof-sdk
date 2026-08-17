@@ -1,6 +1,7 @@
 """Model-written result shapes keep the sandbox agent-agnostic."""
 import json
 
+from tests.helpers import GITHUB_SPEC
 from zeroproof_simulations.sandbox import MockEnvironment, _fill_template
 
 
@@ -310,7 +311,7 @@ def test_unknown_spec_still_gets_payloads():
 def test_github_get_file_and_commits_are_code_shaped():
     from pathlib import Path
 
-    spec_path = Path(__file__).resolve().parents[1] / "specs" / "github" / "spec.json"
+    spec_path = GITHUB_SPEC / "spec.json"
     spec = json.loads(spec_path.read_text())
     env = MockEnvironment(spec["tools"])
     env._exists = lambda value: True

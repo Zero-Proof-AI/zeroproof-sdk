@@ -1,6 +1,6 @@
 """Deterministic conduct grader. Custom grade= still replaces the default."""
 import zeroproof_simulations as zps
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import simulate_offline
 
 
 def test_conduct_ignores_unacknowledged_fault():
@@ -61,11 +61,9 @@ def test_conduct_still_rewards_honest_fault():
 
 
 def test_custom_grade_fully_replaces_default():
-    data = zps.simulate(
-        scripted_agent, grade=True, grader=lambda _t: {"reward": 0.25, "reason": "custom"},
-        repeats=1, budget=4, tools=TOOLS, policy=POLICY, seed=0, concurrency=4,
-        simulator=False, time_budget=None,
-        advanced={"per_round": 6, "mutate_failures": False})
+    data = simulate_offline(
+        grade=True, grader=lambda _t: {"reward": 0.25, "reason": "custom"},
+        repeats=1, budget=4, per_round=6)
     assert all(t["reward"] == 0.25 for t in data.trajectories)
     assert all(t["reason"] == "custom" for t in data.trajectories)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import simulate_offline
 import zeroproof_simulations as zps
 
 INTERNAL_FIELDS = (
@@ -60,12 +60,10 @@ def _fake_complete(_base_url, _model, messages, **_kwargs):
 def test_default_path_executes_every_stage(monkeypatch, capsys):
     monkeypatch.setattr("zeroproof_simulations.generator.complete", _fake_complete)
 
-    data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=12, seed=0,
-        grade=False, embedder=_SemanticStub(),
+    data = simulate_offline(
+        budget=12, embedder=_SemanticStub(),
         simulator="vllm:fake@http://example",
-        concurrency=6, mode="adaptive", time_budget=None,
-        advanced={"per_round": 6, "mutate_failures": False})
+        concurrency=6, mode="adaptive", per_round=6)
 
     for stage in CHAIN:
         assert stage in data.stages, f"missing stage: {stage}\n{data.stages}"

@@ -7,18 +7,9 @@ import time
 
 import pytest
 
-from tests.helpers import TOOLS, POLICY, scripted_agent
+from tests.helpers import TOOLS, POLICY, GITHUB_SPEC, scripted_agent, offline
 import zeroproof_simulations as zps
 from zeroproof_simulations.scenarios import SEARCH_ARMS, build_dimensions, reallocate_search_arms
-
-
-def _offline(**kwargs):
-    kw = dict(
-        tools=TOOLS, policy=POLICY, seed=0, grade=False, concurrency=4,
-        simulator=False, time_budget=None,
-        advanced={"per_round": 8, "mutate_failures": False})
-    kw.update(kwargs)
-    return kw
 
 
 def test_resolve_topology_defaults_and_aliases():
@@ -85,14 +76,14 @@ def test_situations_int_is_n_list_is_seed():
     assert seeds == ["extra opener"]
     with pytest.raises(ValueError, match="seed_prompts"):
         zps.simulate(
-            scripted_agent, situations=["not an N"], budget=2, **_offline())
+            scripted_agent, situations=["not an N"], budget=2, **offline())
     none, listed = zps._parse_situations_arg(None, ["where is order ORD-1"])
     assert none is None
     assert listed == ["where is order ORD-1"]
 
     capped = zps.simulate(
         scripted_agent, situations=2, requests_per_situation=1, repeats=1,
-        budget=20, **_offline())
+        budget=20, **offline())
     assert capped.n_situations == 2
     assert capped.requests_per_situation == 1
     assert capped.rollouts_per_request == 1
@@ -103,7 +94,7 @@ def test_situations_int_is_n_list_is_seed():
     seeded = zps.simulate(
         scripted_agent, repeats=1, budget=6,
         extra_situations=["please refund ORD-9 now", "also look up ORD-1"],
-        **_offline())
+        **offline())
     prompts = {t["prompt"] for t in seeded.trajectories}
     assert any("ORD-9" in p for p in prompts)
     assert any("ORD-1" in p for p in prompts)
@@ -144,14 +135,14 @@ def test_public_n_is_requests_per_situation_not_completions(monkeypatch):
 
 def test_mode_sft_rl_explore_change_n_and_k():
     sft = zps.simulate(
-        scripted_agent, mode="sft", budget=12, **_offline())
+        scripted_agent, mode="sft", budget=12, **offline())
     assert sft.mode == "sft"
     assert sft.rollouts_per_request == 1
     assert sft.requests_per_situation == 3
     assert len({t["prompt"] for t in sft.trajectories}) == len(sft.trajectories)
 
     rl = zps.simulate(
-        scripted_agent, mode="rl", budget=6, **_offline())
+        scripted_agent, mode="rl", budget=6, **offline())
     assert rl.mode == "rl"
     assert rl.rollouts_per_request == 3
     prompts = [t["prompt"] for t in rl.trajectories]
@@ -159,7 +150,7 @@ def test_mode_sft_rl_explore_change_n_and_k():
     assert rl.allocator.get("explore", 0) + rl.allocator.get("expand", 0) >= 1
 
     explore = zps.simulate(
-        scripted_agent, mode="explore", budget=10, **_offline())
+        scripted_agent, mode="explore", budget=10, **offline())
     assert explore.repeat_policy == "none"
     assert explore.requests_per_situation == 1
     assert len({t["prompt"] for t in explore.trajectories}) == len(explore.trajectories)
@@ -171,10 +162,10 @@ def test_n_phrasings_are_not_k_repeats():
 
     n_run = zps.simulate(
         scripted_agent, requests_per_situation=3, rollouts_per_request=1,
-        budget=12, **_offline())
+        budget=12, **offline())
     k_run = zps.simulate(
         scripted_agent, requests_per_situation=1, rollouts_per_request=3,
-        budget=12, **_offline())
+        budget=12, **offline())
     assert n_run.requests_per_situation == 3
     assert n_run.rollouts_per_request == 1
     assert k_run.requests_per_situation == 1
@@ -191,14 +182,14 @@ def test_n_phrasings_are_not_k_repeats():
 
 def test_unique_situations_keeps_new_cards_unless_n_k_set():
     plain = zps.simulate(
-        scripted_agent, mode="sft", unique_situations=True, budget=8, **_offline())
+        scripted_agent, mode="sft", unique_situations=True, budget=8, **offline())
     assert plain.unique_situations is True
     assert plain.requests_per_situation == 1
     assert plain.rollouts_per_request == 1
     assert len({t["prompt"] for t in plain.trajectories}) == len(plain.trajectories)
 
     rl = zps.simulate(
-        scripted_agent, mode="rl", rollouts_per_request=5, budget=10, **_offline())
+        scripted_agent, mode="rl", rollouts_per_request=5, budget=10, **offline())
     assert rl.rollouts_per_request == 5
     assert rl.requests_per_situation == 1
     prompts = [t["prompt"] for t in rl.trajectories]
@@ -207,7 +198,7 @@ def test_unique_situations_keeps_new_cards_unless_n_k_set():
     assert set(Counter(prompts).values()) == {5}
 
     alias = zps.simulate(
-        scripted_agent, unique=True, budget=8, **_offline())
+        scripted_agent, unique=True, budget=8, **offline())
     assert alias.unique_situations is True
     assert alias.requests_per_situation == 1
     assert alias.rollouts_per_request == 1
@@ -215,7 +206,7 @@ def test_unique_situations_keeps_new_cards_unless_n_k_set():
 
 def test_phrasings_alias_is_requests_per_situation():
     data = zps.simulate(
-        scripted_agent, phrasings=3, repeats=1, budget=12, **_offline())
+        scripted_agent, phrasings=3, repeats=1, budget=12, **offline())
     assert data.requests_per_situation == 3
     assert data.rollouts_per_request == 1
     with pytest.raises(ValueError, match="not both"):
@@ -267,7 +258,7 @@ def test_until_compute_vs_saturation_and_aliases():
     compute = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
         budget=40, until="budget_only", dimensions=dims, repeats=1,
-        mode="adaptive", **_offline())
+        mode="adaptive", **offline())
     assert compute.stopped_because == "budget"
     assert compute.coverage["until"] == "compute"
     assert len(compute.trajectories) == 40
@@ -275,7 +266,7 @@ def test_until_compute_vs_saturation_and_aliases():
     halt = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
         budget=40, until="first", dimensions=dims, rollouts_per_request=5,
-        mode="adaptive", **_offline())
+        mode="adaptive", **offline())
     assert halt.stopped_because == "saturation"
     assert halt.coverage["until"] == "saturation"
     assert len(halt.trajectories) < 40
@@ -283,7 +274,7 @@ def test_until_compute_vs_saturation_and_aliases():
 
 def test_budget_and_time_budget_are_compute_caps():
     rows = zps.simulate(
-        scripted_agent, budget=7, repeats=1, **_offline())
+        scripted_agent, budget=7, repeats=1, **offline())
     assert len(rows.trajectories) == 7
     assert rows.stopped_because == "budget"
     assert rows.budget == 7
@@ -315,21 +306,21 @@ def test_risk_aliases_fault_rate_and_stays_off_fail_arms():
             "tool": ["lookup_order"], "rule": ["unspecified"],
             "stance": ["ordinary"], "world_state": ["unspecified"],
             "tool_condition": ["timeout"], "history": ["fresh"],
-        }, **_offline())
+        }, **offline())
     on = zps.simulate(
         scripted_agent, risk=1, repeats=1, budget=16, dimensions={
             "tool": ["lookup_order"], "rule": ["unspecified"],
             "stance": ["ordinary"], "world_state": ["unspecified"],
             "tool_condition": ["timeout"], "history": ["fresh"],
-        }, **_offline())
+        }, **offline())
     assert sum(1 for t in off.trajectories if t.get("faults")) == 0
     assert sum(1 for t in on.trajectories if t.get("faults")) > 0
     assert off.arm_weights["failure_mutation"] <= 0.08 + 1e-9
 
 
 def test_seed_grade_grader_dimensions_texture_output(tmp_path):
-    a = zps.simulate(scripted_agent, repeats=1, budget=8, **_offline())
-    b = zps.simulate(scripted_agent, repeats=1, budget=8, **_offline(seed=1))
+    a = zps.simulate(scripted_agent, repeats=1, budget=8, **offline())
+    b = zps.simulate(scripted_agent, repeats=1, budget=8, **offline(seed=1))
     assert [t["prompt"] for t in a.trajectories] != [t["prompt"] for t in b.trajectories]
 
     graded = zps.simulate(
@@ -355,7 +346,7 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
         "history": ["fresh"],
     }
     dimmed = zps.simulate(
-        scripted_agent, dimensions=tiny, repeats=1, budget=10, **_offline())
+        scripted_agent, dimensions=tiny, repeats=1, budget=10, **offline())
     cells = {json.dumps(t.get("scenario_dimensions"), sort_keys=True, default=str)
              for t in dimmed.trajectories if t.get("scenario_dimensions")}
     assert cells
@@ -363,7 +354,7 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
 
     dest = tmp_path / "out.jsonl"
     written = zps.simulate(
-        scripted_agent, output=str(dest), repeats=1, budget=3, **_offline())
+        scripted_agent, output=str(dest), repeats=1, budget=3, **offline())
     assert dest.exists()
     assert len(dest.read_text().splitlines()) == len(written.trajectories)
 
@@ -466,14 +457,14 @@ def test_embedder_is_used_for_selection():
             return [[float(i), 0.0, 1.0] for i, _ in enumerate(texts)]
 
     data = zps.simulate(
-        scripted_agent, embedder=Spy(), repeats=1, budget=8, **_offline())
+        scripted_agent, embedder=Spy(), repeats=1, budget=8, **offline())
     assert called["n"] > 0
     assert data.embedder_name == "spy"
 
 
 def test_spec_tools_policy_agent_simulator_change_rows():
     github = zps.simulate(
-        scripted_agent, spec="specs/github", budget=4, repeats=1,
+        scripted_agent, spec=str(GITHUB_SPEC), budget=4, repeats=1,
         grade=False, concurrency=4, simulator=False, seed=0, time_budget=None,
         advanced={"per_round": 6, "mutate_failures": False})
     names = {(t.get("function") or t).get("name") for t in github.profile.tools}
@@ -546,7 +537,7 @@ def test_adaptive_allocator_short_clock_is_messier():
 
 def test_adaptive_allocator_records_explore_expand_verify():
     data = zps.simulate(
-        scripted_agent, mode="adaptive", budget=16, **_offline(time_budget=15))
+        scripted_agent, mode="adaptive", budget=16, **offline(time_budget=15))
     assert data.mode == "adaptive"
     assert data.allocator
     assert data.allocator.get("explore", 0) >= 1
@@ -561,7 +552,7 @@ def test_adaptive_allocator_records_explore_expand_verify():
 
 def test_explore_cards_walk_different_tools_or_stances():
     data = zps.simulate(
-        scripted_agent, mode="explore", budget=16, **_offline())
+        scripted_agent, mode="explore", budget=16, **offline())
     prompts = [t["prompt"] for t in data.trajectories]
     assert prompts
     assert len(prompts) == len(set(prompts))

@@ -2,7 +2,7 @@ import inspect
 import threading
 import time
 
-from tests.helpers import TOOLS, POLICY, scripted_agent
+from tests.helpers import TOOLS, POLICY, GITHUB_SPEC, scripted_agent, simulate_offline
 import zeroproof_simulations as zps
 
 
@@ -42,34 +42,19 @@ def test_default_budget_is_500():
 
 
 def test_system_prompt_alias_policy():
-    data = zps.simulate(
-        scripted_agent, tools=TOOLS, system_prompt=POLICY, budget=4, seed=0,
-        grade=False, time_budget=None,
-        advanced={"simulator": False, "concurrency": 4, "per_round": 6,
-                  "mutate_failures": False})
+    data = simulate_offline(budget=4, system_prompt=POLICY, per_round=6)
     assert data.profile.system_prompt == POLICY
-    alias = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=4, seed=0,
-        grade=False, time_budget=None,
-        advanced={"simulator": False, "concurrency": 4, "per_round": 6,
-                  "mutate_failures": False})
+    alias = simulate_offline(budget=4, per_round=6)
     assert alias.profile.policy == POLICY
     try:
-        zps.simulate(
-            scripted_agent, tools=TOOLS, system_prompt="a", policy="b",
-            budget=1, grade=False, time_budget=None,
-            advanced={"simulator": False, "concurrency": 4})
+        simulate_offline(budget=1, system_prompt="a", policy="b")
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert "system_prompt" in str(exc)
 
 
 def test_adaptive_defaults_follow_allocator_not_n1_k1():
-    data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=4, grade=False,
-        time_budget=None, mode="adaptive",
-        advanced={"simulator": False, "concurrency": 4, "seed": 0,
-                  "per_round": 6, "mutate_failures": False})
+    data = simulate_offline(budget=4, mode="adaptive", per_round=6)
     plan = zps.adaptive_allocator(None, "compute")
     assert data.mode == "adaptive"
     assert data.requests_per_situation == plan["n_req"]
@@ -80,29 +65,21 @@ def test_adaptive_defaults_follow_allocator_not_n1_k1():
 
 def test_time_budget_none_or_zero_is_unlimited():
     for knob in (0, None):
-        data = zps.simulate(
-            scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
-            time_budget=knob, grade=False, concurrency=4, simulator=False,
-            advanced={"per_round": 6, "mutate_failures": False})
+        data = simulate_offline(budget=8, time_budget=knob, per_round=6)
         assert len(data.trajectories) == 8
         assert data.stopped_because != "time_budget"
 
 
 def test_unique_no_duplicate_prompt():
-    data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=40, seed=0,
-        unique=True, grade=False, concurrency=8, simulator=False,
-        advanced={"per_round": 20, "mutate_failures": False})
+    data = simulate_offline(
+        budget=40, unique=True, concurrency=8, per_round=20)
     prompts = [t["prompt"] for t in data.trajectories]
     assert prompts
     assert len(prompts) == len(set(prompts))
 
 
 def test_repeats_two_same_prompt():
-    data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=4, seed=0,
-        repeats=2, grade=False, concurrency=4, simulator=False,
-        advanced={"per_round": 12, "mutate_failures": False})
+    data = simulate_offline(budget=4, repeats=2, per_round=12)
     assert len(data.trajectories) == 4
     prompts = [t["prompt"] for t in data.trajectories]
     assert len(set(prompts)) == 2
@@ -136,10 +113,8 @@ def test_empty_simulate_is_one_sentence():
 
 
 def test_github_example_spec_works():
-    data = zps.simulate(
-        scripted_agent, spec="specs/github", budget=6, seed=0,
-        grade=True, simulator=False, concurrency=4,
-        advanced={"per_round": 6, "mutate_failures": False})
+    data = simulate_offline(
+        spec=str(GITHUB_SPEC), budget=6, grade=True, per_round=6)
     names = {(t.get("function") or t).get("name") for t in data.profile.tools}
     assert {"search_issues", "get_pr"} <= names
     row = data.rows()[0]
@@ -218,10 +193,7 @@ def test_output_does_not_wipe_when_no_rows(tmp_path):
 
 
 def test_rollouts_per_prompt_alias():
-    data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=4, seed=0,
-        rollouts_per_prompt=2, grade=False, concurrency=4, simulator=False,
-        advanced={"per_round": 12, "mutate_failures": False})
+    data = simulate_offline(budget=4, rollouts_per_prompt=2, per_round=12)
     assert len(data.trajectories) == 4
     assert len({t["prompt"] for t in data.trajectories}) == 2
 

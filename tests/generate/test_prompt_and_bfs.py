@@ -1,6 +1,6 @@
 import json
 
-from tests.helpers import TOOLS, POLICY, scripted_agent
+from tests.helpers import TOOLS, POLICY, REPO_ROOT, GITHUB_SPEC, LINEAR_SPEC, scripted_agent
 from zeroproof_simulations.agents import complete as _real_complete
 from zeroproof_simulations.generator import ModelSimulator
 import zeroproof_simulations as zps
@@ -56,7 +56,7 @@ def test_writer_prompt_forbids_copying_policy_as_user_line():
     from zeroproof_simulations.diversity import sample_cell_tags
     from zeroproof_simulations.scenarios import policy_sections
 
-    spec_path = Path(__file__).resolve().parents[1] / "specs" / "linear" / "spec.json"
+    spec_path = LINEAR_SPEC / "spec.json"
     spec = json.loads(spec_path.read_text())
     sim = ModelSimulator(tools=spec["tools"], policy=spec["policy"], seed=1)
     prompt = sim._prompt(0, sim.regions[:8])
@@ -170,7 +170,7 @@ def test_message_realizes_tags_and_writer_omits_raw_labels():
     assert not usable_user_message("Short length, ordinary behavior, check the PR")
     assert not usable_user_message("you're frustrated and you keep it brief")
 
-    spec_path = Path(__file__).resolve().parents[1] / "specs" / "github" / "spec.json"
+    spec_path = GITHUB_SPEC / "spec.json"
     spec = json.loads(spec_path.read_text())
     sim = ModelSimulator(tools=spec["tools"], policy=spec["policy"], seed=1)
     prompt = sim._prompt(0, sim.regions[:8])
@@ -286,7 +286,7 @@ def test_github_writer_knows_kind_not_tools():
     from zeroproof_simulations.generator import (
         _omit_assistant_kind, assistant_kind)
 
-    spec_path = Path(__file__).resolve().parents[1] / "specs" / "github" / "spec.json"
+    spec_path = GITHUB_SPEC / "spec.json"
     spec = json.loads(spec_path.read_text())
     assert assistant_kind(spec["policy"]) == "GitHub"
     sim = ModelSimulator(tools=spec["tools"], policy=spec["policy"], seed=1)
@@ -324,7 +324,7 @@ def test_coding_writer_prompt_fits_context():
     from pathlib import Path
     from zeroproof_simulations.agents import CONTEXT_TOKENS
     from zeroproof_simulations.generator import _token_estimate
-    spec_path = Path(__file__).resolve().parents[1] / "specs" / "coding" / "spec.json"
+    spec_path = REPO_ROOT / "specs" / "coding" / "spec.json"
     if not spec_path.is_file():
         return
     spec = json.loads(spec_path.read_text())
@@ -1005,9 +1005,7 @@ def test_writer_cards_prefer_unused_tools_before_repeats():
 def test_hosted_agent_gets_spec_policy_unchanged(monkeypatch):
     from pathlib import Path
 
-    spec = json.loads(
-        (Path(__file__).resolve().parents[1] / "specs" / "github" / "spec.json"
-         ).read_text())
+    spec = json.loads((GITHUB_SPEC / "spec.json").read_text())
     seen = {}
 
     def fake_hosted(tools, system="", **kwargs):
@@ -1016,7 +1014,7 @@ def test_hosted_agent_gets_spec_policy_unchanged(monkeypatch):
 
     monkeypatch.setattr("zeroproof_simulations.hosted_model", fake_hosted)
     zps.simulate(
-        spec="specs/github", budget=2, seed=0, grade=False, simulator=False,
+        spec=str(GITHUB_SPEC), budget=2, seed=0, grade=False, simulator=False,
         concurrency=2, advanced={"per_round": 4, "mutate_failures": False})
     assert seen["system"] == spec["policy"]
 
@@ -1139,9 +1137,8 @@ def test_scene_brief_is_derived_from_spec(monkeypatch):
         })}
 
     monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
-    root = Path(__file__).resolve().parents[1] / "specs"
-    gh = json.loads((root / "github" / "spec.json").read_text())
-    bank_path = root / "bank" / "spec.json"
+    gh = json.loads((GITHUB_SPEC / "spec.json").read_text())
+    bank_path = REPO_ROOT / "specs" / "bank" / "spec.json"
     if bank_path.is_file():
         other = json.loads(bank_path.read_text())
     else:
