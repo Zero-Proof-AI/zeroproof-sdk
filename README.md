@@ -6,14 +6,16 @@ The SDK inspects the agent, simulates a world consistent with those tools (objec
 
 ## Overview
 
-| | Call | What it does |
-|---|---|---|
-| Connect | `inspect` / `connect` | Read tools and system prompt. Wrap any agent (spec, callable, LangChain, HTTP). Hosted Qwen, or any OpenAI-compatible URL |
-| World | `MockEnvironment` | Full world for this agent: objects, tool results, failures, mutations |
-| Generate | `simulate(...)` | Sample a scenario, run the conversation, stop on the row or time budget |
-| | `SimulationData` | The run: rows, coverage, `save`, `rank`, `grade` |
-| Export | `conversation` / `save` / `rows` | Trainer JSONL: `prompt`, `messages`, `steps`, `final_text` |
-| Score | `conduct_grade` / `rank` | Conduct `reward`, or your `grade=`. Rank is a second pass on humanness |
+`simulate()` is a pipeline.
+
+1. **Read the agent.** Tools and system prompt. That is the spec of the world.
+2. **Build a fake world from those tools.** Objects, plausible results, and faults (timeout, deny, junk).
+3. **Write users.** A separate writer (same hosted model, different prompt, no agent policy) samples situations across tools, stance, history, and so on.
+4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of “refund this.”
+5. **Play the agent.** It talks, calls tools, gets results, talks again. All of that is stored: user text, agent text, tool calls, tool results, `final_text`.
+6. **Grade.** Deterministic conduct score by default. Attach an LLM if you want. Or pass your own `grade=`.
+
+Stop when the row cap or the clock hits.
 
 ## How to use
 
