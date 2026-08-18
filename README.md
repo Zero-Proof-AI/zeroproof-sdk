@@ -11,7 +11,7 @@ The SDK inspects the agent, simulates a world consistent with those tools (objec
 1. **Read the agent.** Tools and system prompt. That is the spec of the world.
 2. **Build a fake world from those tools.** Objects, plausible results, and faults (timeout, deny, junk).
 3. **Write users.** A separate writer (same hosted model, different prompt, no agent policy) samples situations across tools, stance, history, and so on.
-4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of “refund this.”
+4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of same prompy.
 5. **Play the agent.** It talks, calls tools, gets results, talks again. All of that is stored: user text, agent text, tool calls, tool results, `final_text`.
 6. **Grade.** Deterministic conduct score by default. Attach an LLM if you want. Or pass your own `grade=`.
 
