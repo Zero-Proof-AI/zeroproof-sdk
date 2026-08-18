@@ -24,7 +24,8 @@ uv sync
 export VLLM_API_KEY=...
 ```
 
-ZeroProof hosts Qwen for evaluation. Ask us for a `VLLM_API_KEY` to try the default writer and agent. The endpoint is shared and rate limited.
+ZeroProof hosts Qwen for simulation: it powers the default user writer and rollout agent.
+Ask us for a `VLLM_API_KEY` to try it. The endpoint is shared and rate limited.
 
 `uv add /path/to/zeroproof-simulations` from another project. `uv run pytest` after `uv sync --extra dev`.
 
@@ -68,7 +69,8 @@ zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", un
 
 ## Speed
 
-2 min, airline agent. Rates are from the hosted GPU (warm replicas, burst under load).
+Two-minute airline runs using ZeroProof-hosted Qwen. Results were measured on the
+hosted GPU with warm replicas and burst under load.
 
 | Mode | Rows | Rate | Unique openers |
 |---|---|---|---|
