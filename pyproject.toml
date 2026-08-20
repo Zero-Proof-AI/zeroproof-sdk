@@ -4,12 +4,39 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zeroproof-simulations"
-version = "0.1.0"
-description = "Generate synthetic scenario and agent-response training data. No dependencies."
+version = "1.01"
+description = "Generate diverse training conversations for any agent, grounded in its tools and system prompt."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 dependencies = []
+authors = [{name = "Zero Proof AI"}]
+keywords = [
+    "rl", "reinforcement-learning", "grpo", "synthetic-data", "agents",
+    "tool-use", "evaluation", "simulation", "llm",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/Zero-Proof-AI/zeroproof-simulations"
+Repository = "https://github.com/Zero-Proof-AI/zeroproof-simulations"
+Issues = "https://github.com/Zero-Proof-AI/zeroproof-simulations/issues"
+Datasets = "https://huggingface.co/datasets/zero-proof-ai/agent-simulations"
+
+[project.scripts]
+zeroproof-simulations = "zeroproof_simulations.quality:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

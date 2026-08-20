@@ -1,0 +1,84 @@
+name: publish
+
+# Publishing is gated on a version bump, not on the push itself. Every merge to
+# main runs this; only a merge that cuts a new version actually releases.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: version gate
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install packaging
+      # Blocks a release that skips versions, moves backwards, or is not a plain
+      # MAJOR.MINOR. A version already on PyPI is a no-op, not a failure, so
+      # ordinary merges to main do not turn the branch red.
+      - id: check
+        run: python .github/scripts/check_version.py
+
+  test:
+    name: tests
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run pytest -q
+
+  publish:
+    name: build and publish
+    needs: [gate, test]
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/zeroproof-simulations
+    permissions:
+      id-token: write   # PyPI Trusted Publishing, no API token stored anywhere
+      contents: write   # to push the release tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv build
+      - run: uvx twine check dist/*
+      # uv publish reads UV_PUBLISH_TOKEN from the environment. With no token
+      # set it falls back to Trusted Publishing over OIDC, which needs no stored
+      # credential. Either path works without editing this file.
+      - name: publish
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN || secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -n "$UV_PUBLISH_TOKEN" ]; then
+            uv publish
+          else
+            uv publish --trusted-publishing always
+          fi
+      - name: tag the release
+        env:
+          V: ${{ needs.gate.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$V" -m "zeroproof-simulations $V"
+          git push origin "v$V"

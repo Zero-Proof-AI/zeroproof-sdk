@@ -27,7 +27,19 @@ export VLLM_API_KEY=...
 ZeroProof hosts Qwen for simulation: it powers the default user writer and rollout agent.
 Ask us for a `VLLM_API_KEY` to try it. The endpoint is shared and rate limited.
 
-`uv add /path/to/zeroproof-simulations` from another project. `uv run pytest` after `uv sync --extra dev`.
+From another project:
+
+```bash
+pip install zeroproof-simulations   # or: uv add zeroproof-simulations
+```
+
+Zero runtime dependencies, Python 3.10+. Installing from PyPI rather than a
+path or a git URL matters if you build a Prime Intellect environment on this:
+the Environments Hub installs a pushed env with plain pip, so a `[tool.uv.sources]`
+git pin resolves locally and then fails on their runtime with a
+`ModuleNotFoundError`.
+
+`uv run pytest` after `uv sync --extra dev`.
 
 ```python
 import zeroproof_simulations as zps
