@@ -10,6 +10,7 @@ the rest of the pipeline is unchanged.
 ## Run it
 
 ```bash
+pip install zeroproof-simulations
 export VLLM_API_KEY=...            # ask ZeroProof for a key
 uv run python generate.py --situations 100 --k 8
 uv run python diagnose.py data/rl.jsonl
@@ -70,11 +71,42 @@ user would type, and they make broken tasks. On the run below this removed 7 of
 | 0.50 | 71% | 0.345 | 0.526 | -0.465 |
 | 0.15 | **77%** | **0.378** | 0.576 | -0.451 |
 
-Groups were uniform at k=8 in both runs. 77% live is a healthy dataset: roughly
-three of every four prompts produce a usable advantage.
+77% live is a healthy dataset: roughly three of every four prompts produce a
+usable advantage.
+
+Group uniformity needs care across multiple generation runs. A single
+`generate.py` call gives every prompt the same k, but accumulating several runs
+into one pool does not: prompts recur between runs and their rollouts add up. A
+pool built from five rounds came out with group sizes `{8: 263, 16: 1, 40: 7}`,
+which `diagnose.py` fails. Key the rollout budget by prompt across runs, or
+diagnose the pool you actually train on rather than the batch you just made.
 
 `export_prompts.py` turned the 100 prompts into 79 tasks: 7 dropped as seed
 probes, 14 as duplicate phrasings of a situation already covered.
+
+## What happened when this was trained
+
+Two Prime Intellect hosted GRPO runs, Qwen3.5-0.8B, 30 steps, identical model,
+prompts, batch size, group size and learning rate. The only difference was the
+reward function.
+
+| | tool calls per task | its own reward on holdout |
+|---|---|---|
+| `conduct_grade` | 4.67 -> **0.90** | 0.300 -> **0.004** |
+| fitted reward | 4.91 -> **7.60** | 0.498 -> **0.550** |
+
+The offline diagnostic predicted this. `conduct_grade` scored -0.468 on effort
+correlation, which says the cheapest policy is to call no tools. Trained on it,
+the policy found exactly that: by step 30 it answered `"No"` in two tokens and
+collected a reward of 1.0.
+
+Identical hyperparameters in both arms, so training instability does not explain
+a divergence that tracks the reward.
+
+The trap is in the curve. At step 5 the `conduct_grade` arm posted 0.554, the
+best holdout score of either arm in the whole experiment. Checkpoint on reward
+and you ship that model. **A broken reward goes up.** That is why the gate has to
+run before training rather than during it.
 
 ## Read the effort correlation before you train
 
@@ -129,6 +161,12 @@ make cheap.
 `sandbox.MockEnvironment` is seeded on a hash of the tool name and arguments, so
 all k rollouts of a prompt see an identical world. That determinism is what makes
 the within-group comparison meaningful.
+
+One packaging note if you push the environment to the Environments Hub: it is
+installed there with plain pip, so every dependency has to be pip-resolvable. A
+`[tool.uv.sources]` git pin installs locally, passes the hub's CI, and then kills
+every env server at training time with a `ModuleNotFoundError`. Depend on
+`zeroproof-simulations` from PyPI rather than from a git URL.
 
 ## Files
 
