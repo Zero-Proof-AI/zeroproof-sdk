@@ -29,7 +29,7 @@ examples/*
 !examples/prime-intellect-rl/
 
 # helpers, not the product
-scripts/
+/scripts/
 simulate.ipynb
 test.ipynb
 quick_tests.ipynb
