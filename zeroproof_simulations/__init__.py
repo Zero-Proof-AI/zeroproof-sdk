@@ -1,8 +1,15 @@
-"""Generate scenario + agent-response training rows.
+"""Generate training conversations from an intent or an agent.
+
+Input is a system prompt, tools, or both. The SDK sets a world from that
+spec, writes human requests across a grid (simple, complex, vague, ordinary,
+malicious), and rolls the agent. Grade 0/1 later. Optimize for post-training.
 
     import zeroproof_simulations as zps
-    data = zps.simulate(agent)
+    data = zps.simulate(system_prompt=policy)          # prompt-only agent
+    data = zps.simulate(tools=tools, system_prompt=policy)
     data.save("rollout.jsonl")
+    zps.grade("rollout.jsonl")                         # hosted Qwen 0/1
+    zps.optimize("rollout.jsonl", output="train.jsonl")
 """
 from __future__ import annotations
 
@@ -20,7 +27,8 @@ from typing import Any, Callable
 from .adapters import (claude_code, connect, inspect, resolve, ConnectedAgent,
                        AgentProfile, resolve_system_prompt)
 from .agents import (hosted_model, local_model, missing_hosted_key,
-                       parse_backend_spec, touch_hosted, default_max_turns)
+                       parse_backend_spec, public_llm_error, touch_hosted,
+                       default_max_turns)
 from .coverage import (NEW_SIGNATURE_FLOOR, SATURATION_COPIES,
                        build_coverage_summary, cell_key as _cell_key_from_row,
                        copies_remaining, coverage_point, space_saturated)
@@ -43,6 +51,7 @@ from .platform import (PlatformError, datasets, delete as delete_dataset,
                        pull, push_file, push_rows)
 from .llm_judge import (MISSING_JUDGE_KEY, apply_llm_grade,
                        resolve_judge_key)
+from .grade_llm import apply_grade_llm, require_judge_key
 from .quality import (rank as rank_source, rank_rows, score_row,
                       summarize as summarize_quality)
 from .sandbox import MockEnvironment
@@ -57,7 +66,8 @@ __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "datasets", "pull", "push_file", "push_rows", "delete_dataset",
            "PlatformError",
            "hosted_model",
-           "MockEnvironment", "llm_grade", "rank", "rank_rows", "score_row",
+           "MockEnvironment", "llm_grade", "grade", "grade_llm",
+           "rank", "rank_rows", "score_row",
            "conduct_grade", "behavior_signature", "build_dimensions",
            "policy_sections", "scenario_regions", "open_ended_probes",
            "make_candidate_generator",
@@ -72,6 +82,24 @@ _reallocate = reallocate_search_arms
 # Ping-pong is several HTTP calls; 24s dropped healthy 2-person traces
 # and the replacement oversubscribed the GPU.
 _HUNG_SLOT_S = 45.0
+_RAW_TOOL_MARKUP = re.compile(r"</?tool_call>", re.I)
+_TOOL_SCHEMA_DUMP = re.compile(
+    r'"name"\s*:\s*"[^"]+".{0,500}"description"\s*:'
+    r'.{0,500}"parameters"\s*:', re.I | re.S)
+
+
+def _usable_rollout(row: dict) -> bool:
+    """Infrastructure and parser failures are not training trajectories."""
+    final = str((row or {}).get("final_text") or "").strip()
+    if not final or final.lower().startswith("<agent error"):
+        return False
+    assistant_text = [final]
+    for step in (row or {}).get("steps") or []:
+        if isinstance(step, dict) and step.get("text") is not None:
+            assistant_text.append(str(step["text"]))
+    visible = "\n".join(assistant_text)
+    return not (_RAW_TOOL_MARKUP.search(visible)
+                or _TOOL_SCHEMA_DUMP.search(visible))
 
 
 def _collect_finished(pending: dict, wait_s: float, *, retry: bool = False):
@@ -187,7 +215,11 @@ def _export_row(row: dict) -> dict:
         out["fault_detected"] = True
     if row.get("reward") is not None:
         out["reward"] = row["reward"]
-        out["reason"] = row.get("grader_reason") or row.get("reason") or ""
+        reason = row.get("grader_reason") or row.get("reason")
+        if reason:
+            out["reason"] = reason
+    if row.get("qwen_reward") is not None:
+        out["qwen_reward"] = row["qwen_reward"]
     if "llm_reward" in row:
         out["llm_reward"] = row.get("llm_reward")
         out["llm_reason"] = row.get("llm_reason")
@@ -244,23 +276,24 @@ class SimulationData:
     def grade(self, grader=None, *, llm: bool = False, llm_spec: str | None = None,
               api_key: str | None = None, path: str | None = None,
               concurrency: int = 32, llm_concurrency: int = 16):
-        """Score trajectories after rollouts. Deterministic by default.
+        """Grade after simulation with hosted Qwen or a custom callable.
 
-        ``grade()`` runs ``conduct_grade`` only. ``grade(llm=True, api_key=...)``
-        adds ``llm_reward`` / ``llm_reason`` without changing ``reward``.
-        Rewrites the saved JSONL, or ``path`` if you pass one.
+        With no callable, this is the binary hosted-Qwen grader and reads
+        ``VLLM_API_KEY`` from the environment. Pass a callable for a custom
+        score. Simulation itself never invokes this method by default.
         """
         if llm:
             return self.llm_grade(spec=llm_spec, concurrency=llm_concurrency,
                                  api_key=api_key, path=path)
+        if not callable(grader):
+            return self.grade_llm(spec=llm_spec, concurrency=llm_concurrency,
+                                  api_key=api_key, path=path)
         def score(t):
-            base = conduct_grade(t, self.declared_tools)
-            flagged = bool(base.get("fault_detected") or t.get("faults"))
-            if grader is None:
-                return base["reward"], base["reason"], flagged
-            out = grader({**t, "conduct": base})
+            out = grader(t)
+            flagged = bool(t.get("faults"))
             if isinstance(out, dict):
-                return float(out.get("reward", 0.0)), str(out.get("reason", "")), flagged
+                return (float(out.get("reward", 0.0)), str(out.get("reason", "")),
+                        flagged or bool(out.get("fault_detected")))
             return float(out), "graded", flagged
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
             for t, (reward, reason, flagged) in zip(
@@ -290,6 +323,22 @@ class SimulationData:
             api_key=api_key, concurrency=concurrency, degraded=self.degraded)
         self._rewrite(path)
         return self
+
+    def grade_llm(self, *, spec: str | None = None, base_url: str | None = None,
+                  model: str | None = None, concurrency: int = 16,
+                  api_key: str | None = None, path: str | None = None,
+                  limit: int | None = None, prompt: str | None = None):
+        """Binary 0/1 situation grade. Default brain is hosted Qwen."""
+        require_judge_key(api_key, spec=spec, base_url=base_url, model=model)
+        policy = str(self.profile.policy or "") if self.profile else ""
+        tools = list(self.profile.tools) if self.profile else []
+        report = apply_grade_llm(
+            self.trajectories, policy=policy, tools=tools, backend_spec=spec,
+            base_url=base_url, model=model, api_key=api_key,
+            prompt=prompt, concurrency=concurrency, limit=limit,
+            degraded=self.degraded)
+        self._rewrite(path)
+        return report
 
     def rank(self, *, path: str | None = None) -> dict:
         """Second-pass quality scores. Leaves conduct ``reward`` untouched.
@@ -384,6 +433,50 @@ def llm_grade(data: SimulationData, *, spec: str | None = None,
                          api_key=api_key, path=path)
 
 
+def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
+              model: str | None = None, concurrency: int = 16,
+              api_key: str | None = None, path: str | None = None,
+              limit: int | None = None, output: str | None = None,
+              prompt: str | None = None):
+    """Binary 0/1 situation grade. Default brain is hosted Qwen.
+
+    ``source`` is a ``SimulationData``, a JSONL path, or a row list.
+    Writes ``reward`` 0 or 1 and a one-sentence ``reason``. Keeps the
+    previous score as ``qwen_reward`` when present. Does not run during
+    ``simulate()``. Search does not read ``reward``. ``limit`` grades
+    that many rows then stops. Hosted Qwen reads ``VLLM_API_KEY``.
+    """
+    if isinstance(source, SimulationData):
+        return source.grade_llm(spec=spec, base_url=base_url, model=model,
+                                concurrency=concurrency, api_key=api_key,
+                                path=path or output, limit=limit, prompt=prompt)
+    from .quality import _load_jsonl, _write_jsonl
+    if isinstance(source, (str, Path)):
+        rows = _load_jsonl(source)
+        src = str(source)
+    else:
+        rows = list(source)
+        src = ""
+    report = apply_grade_llm(
+        rows, backend_spec=spec, base_url=base_url, model=model,
+        api_key=api_key, prompt=prompt, concurrency=concurrency, limit=limit)
+    dest = path or output or src
+    if dest:
+        _write_jsonl(dest, rows)
+    if isinstance(source, list):
+        for dst, src_row in zip(source, rows):
+            dst["reward"] = src_row.get("reward")
+            if src_row.get("reason"):
+                dst["reason"] = src_row.get("reason")
+            if src_row.get("qwen_reward") is not None:
+                dst["qwen_reward"] = src_row.get("qwen_reward")
+    report["path"] = dest or src
+    return report
+
+
+grade = grade_llm
+
+
 def rank(source, *, output: str | None = None,
          min_quality: float | None = None) -> dict:
     """Score already-generated rows. ``source`` is a JSONL path, a row list,
@@ -397,11 +490,12 @@ def rank(source, *, output: str | None = None,
 
 
 def _mutation_worthy(row: dict) -> bool:
-    if row.get("reward") is not None and row["reward"] < 1.0:
-        return True
+    """Re-roll and mutate on tool/sandbox faults. Ignores any score column."""
     if row.get("faults"):
         return True
     for step in row.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
         status = str((step.get("result") or {}).get("status", "")).lower()
         if status in {"error", "timeout", "not_found", "denied", "malformed"}:
             return True
@@ -665,7 +759,7 @@ _ALIAS_NAMES = {
 }
 _MOVED_NAMES = {
     "concurrency", "dimensions", "simulator", "backend", "fault_rate", "risk",
-    "texture", "max_turns", "avg_turns", "temperature", "seed", "grader",
+    "texture", "max_turns", "avg_turns", "min_user_turns", "temperature", "seed", "grader",
     "llm_spec", "embedder", "seed_prompts", "extra_situations",
     "prefer_success",
 }
@@ -777,14 +871,18 @@ def simulate(agent: Any = None, *, spec: Any = None,
              requests_per_situation: int | None = None,
              rollouts_per_request: int | None = None,
              unique_situations: bool = False,
-             grade: bool = True, llm_grade: bool = False,
+             grade: bool = False, llm_grade: bool = False,
              output: str | None = None,
              advanced: dict | None = None,
              **passed: Any) -> SimulationData:
-    """Inspect an agent, generate situations, roll them out, then grade.
+    """Inspect an agent, generate situations, and roll them out.
 
-    Search is diversity-first over the agent's tools and stances. It spends
-    ``budget`` rows and ``time_budget`` seconds on new coverage, then stops.
+    Input is an intent or an agent: ``system_prompt`` alone, ``tools``
+    plus a prompt, or ``spec=``. Search writes a grid of human requests
+    (ordinary, vague, complex, adversarial) and a spread of agent replies.
+    It spends ``budget`` rows and ``time_budget`` seconds on new coverage.
+    No default ``reward``. Grade later with ``grade()``. A callable
+    ``grader=`` is the only in-simulate score hook.
 
     Variation is three independent counts. Do not collapse them.
     ``situations`` (N) is distinct worlds. ``requests_per_situation`` /
@@ -828,7 +926,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
             seed_prompts.append(text)
     n_situations_target, seed_prompts = _parse_situations_arg(
         situations, seed_prompts)
-    concurrency = int(cfg.pop("concurrency", 192))
+    concurrency = int(cfg.pop("concurrency", 32))
     dimensions = cfg.pop("dimensions", None)
     simulator = cfg.pop("simulator", None)
     backend = cfg.pop("backend", None)
@@ -842,6 +940,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     texture = cfg.pop("texture", None)
     max_turns = cfg.pop("max_turns", None)
     avg_turns = float(cfg.pop("avg_turns", 4))
+    min_user_turns = max(1, int(cfg.pop("min_user_turns", 1)))
     temperature = cfg.pop("temperature", None)
     seed = int(cfg.pop("seed", 0))
     grader = cfg.pop("grader", None)
@@ -902,7 +1001,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     if "completions_per_request" in advanced:
         n_ceiling = max(1, min(8, int(advanced["completions_per_request"])))
     else:
-        n_ceiling = 3
+        n_ceiling = 1
     advanced.pop("completions_per_request", None)
     completions_per_request = n_ceiling
     extra_cards = max(0, int(advanced.pop("extra_cards", 1)))
@@ -914,8 +1013,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
     tools = list(profile.tools or [])
     policy = str(profile.policy or "")
     writer_kind = _kind_from_spec(spec, policy)
-    if agent is None and not tools:
-        raise ValueError("simulate needs an agent or tools=")
+    if agent is None and not tools and not policy:
+        raise ValueError(
+            "simulate needs an agent, tools=, or a system prompt.")
 
     data = SimulationData(profile=profile, arm_weights=dict(_SEARCH_ARMS))
     data.mode = topo["mode"]
@@ -961,7 +1061,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
     turn_stats = new_turn_stats()
     runner_kw: dict[str, Any] = {
         "fault_plans": fault_plans, "max_turns": turns,
-        "avg_turns": float(avg_turns), "turn_stats": turn_stats,
+        "avg_turns": float(avg_turns), "min_user_turns": min_user_turns,
+        "turn_stats": turn_stats,
     }
     if temperature is not None:
         runner_kw["temperature"] = float(temperature)
@@ -1053,7 +1154,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         try:
             raw = runner(prompt)
         except Exception as exc:
-            raw = {"steps": [], "final_text": f"<agent error: {exc}>"}
+            raw = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>"}
         raw = raw if isinstance(raw, dict) else {"steps": [], "final_text": str(raw)}
         t = {
             "scenario_id": meta.get("region_id") or f"probe_{hash(prompt) & 0xffffff:x}",
@@ -1435,10 +1536,13 @@ def simulate(agent: Any = None, *, spec: Any = None,
                     try:
                         t = fut.result()
                     except Exception as exc:
-                        t = {"steps": [], "final_text": f"<agent error: {exc}>",
+                        t = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>",
                              "arm": (job[2] or {}).get("arm") or "unattributed",
                              "prompt": job[0], "reward": None}
                         t["behavior_signature"] = behavior_signature(t)
+                    if not _usable_rollout(t):
+                        _note(data, "rollout failure discarded")
+                        continue
                     if not data.first_row_seconds:
                         data.first_row_seconds = time.monotonic() - started
                     data.trajectories.append(t)
@@ -1545,12 +1649,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
                 family_batch = list(scenario_families)
                 selected, family_rejected = cap_scenario_families(
                     selected, family_batch, cap=2)
-            # Family cap still backfills leftover similar prompts so the
-            # batch does not shrink. Exact-prompt dedup is separate.
-            fill_to = min(take, len(selected) + len(family_rejected))
-            backfill_n = max(0, fill_to - len(selected))
-            selected.extend(family_rejected[:backfill_n])
-            family_rejected = family_rejected[backfill_n:]
+                if generator.model is None:
+                    fill_to = min(take, len(selected) + len(family_rejected))
+                    backfill_n = max(0, fill_to - len(selected))
+                    selected.extend(family_rejected[:backfill_n])
+                    family_rejected = family_rejected[backfill_n:]
             for row in family_rejected:
                 used.add(row["text"])
             if family_rejected:
@@ -1784,7 +1887,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                         results.append(fut.result())
                         jobs_for.append(job)
                     except Exception as exc:
-                        t = {"steps": [], "final_text": f"<agent error: {exc}>",
+                        t = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>",
                              "arm": (job[2] or {}).get("arm") or "unattributed",
                              "prompt": job[0], "reward": None}
                         t["behavior_signature"] = behavior_signature(t)
@@ -1794,6 +1897,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
                     # Leave the future in inflight so we do not launch a
                     # replacement on top of a still-running request.
                     continue
+            paired = [(t, job) for t, job in zip(results, jobs_for)
+                      if _usable_rollout(t)]
+            if len(paired) != len(results):
+                _note(data, "rollout failure discarded")
+            results = [t for t, _ in paired]
+            jobs_for = [job for _, job in paired]
             room = cap - len(data.trajectories)
             results, jobs_for = results[:room], jobs_for[:room]
             if len(data.trajectories) + len(results) >= cap:
@@ -2027,12 +2136,15 @@ def simulate(agent: Any = None, *, spec: Any = None,
         scenario_pool.shutdown(wait=False)
         pool.shutdown(wait=False)
         if scene_thread is not None:
-            scene_thread.join(timeout=8.0)
+            left = 8.0
+            if time_budget is not None:
+                left = max(0.2, min(1.0, time_budget - (time.monotonic() - started)))
+            scene_thread.join(timeout=left)
             data.scene_brief = scene_box["brief"]
             if not data.scene_brief and "scene_brief_unavailable" not in data.degraded:
                 data.degraded.append("scene_brief_unavailable")
     data.declared_tools = declared
-    if grade or grader is not None:
+    if callable(grader):
         data.grade(grader)
     if llm_grade:
         data.llm_grade(spec=llm_spec)
