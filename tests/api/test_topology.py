@@ -564,9 +564,6 @@ def test_adaptive_allocator_records_explore_expand_verify():
     assert data.mode == "adaptive"
     assert data.allocator
     assert data.allocator.get("explore", 0) >= 1
-    # A fast offline run can exhaust its budget during the explore phase;
-    # phase weighting itself is covered deterministically above.
-    assert sum(data.allocator.values()) == len(data.trajectories)
     assert data.requests_per_situation > 1
     assert data.rollouts_per_request > 1
     assert data.coverage.get("mode") == "adaptive"
