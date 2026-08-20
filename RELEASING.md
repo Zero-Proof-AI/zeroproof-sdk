@@ -35,9 +35,26 @@ That is the normal path for a merge that is not a release.
 
 ## Authentication
 
-Publishing uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/),
-so no API token is stored in the repository. One-time setup on PyPI, under the
-project's *Publishing* settings:
+Either path works. The workflow prefers a token secret when one exists and
+falls back to Trusted Publishing when it does not.
+
+### Option A: token (fastest)
+
+Add the PyPI token to **this** repository as `PYPI_API_TOKEN` (or
+`UV_PUBLISH_TOKEN`, matching the convention used elsewhere in the org):
+
+```bash
+gh secret set PYPI_API_TOKEN --repo Zero-Proof-AI/zeroproof-simulations
+```
+
+GitHub secrets are write-only, so a token held in another repository cannot be
+copied across. Retrieve it from PyPI or your password manager and paste it into
+the prompt above.
+
+### Option B: Trusted Publishing (no stored credential)
+
+Preferred for anything long-lived: a repository token is a standing credential,
+OIDC is not. One-time setup on PyPI, under the project's *Publishing* settings:
 
 | field | value |
 |---|---|
