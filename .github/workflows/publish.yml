@@ -57,20 +57,23 @@ jobs:
       contents: write   # to push the release tag
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: pip install build twine
-      - run: python -m build
-      - run: python -m twine check dist/*
-      # Two supported auth paths. Trusted Publishing (OIDC) needs no secret and
-      # is preferred: nothing long-lived is stored in the repo. If a token
-      # secret is present it wins, which matches the UV_PUBLISH_TOKEN
-      # convention already used elsewhere in the org. Setting neither fails the
-      # step with PyPI's own error.
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN || secrets.UV_PUBLISH_TOKEN }}
+      - run: uv build
+      - run: uvx twine check dist/*
+      # uv publish reads UV_PUBLISH_TOKEN from the environment. With no token
+      # set it falls back to Trusted Publishing over OIDC, which needs no stored
+      # credential. Either path works without editing this file.
+      - name: publish
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN || secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -n "$UV_PUBLISH_TOKEN" ]; then
+            uv publish
+          else
+            uv publish --trusted-publishing always
+          fi
       - name: tag the release
         env:
           V: ${{ needs.gate.outputs.version }}

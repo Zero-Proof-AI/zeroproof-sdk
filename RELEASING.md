@@ -27,8 +27,12 @@ release tuples for this reason, so write either spelling.
    accept it after merge.
 3. Merge to `main`.
 
-On merge: the gate re-checks the version, tests run on 3.10 and 3.13, the
-distributions are built and checked, PyPI publishes, and `vX.YZ` is tagged.
+On merge: the gate re-checks the version, tests run on 3.10 and 3.13, `uv build`
+produces both distributions, `twine check` validates them, `uv publish` uploads,
+and `vX.YZ` is tagged.
+
+Prefer a token scoped to this project rather than an account-wide one. A
+project-scoped token that leaks cannot touch the other packages on the account.
 
 If the version is unchanged, the gate prints `nothing to cut` and exits clean.
 That is the normal path for a merge that is not a release.
@@ -40,12 +44,15 @@ falls back to Trusted Publishing when it does not.
 
 ### Option A: token (fastest)
 
-Add the PyPI token to **this** repository as `PYPI_API_TOKEN` (or
-`UV_PUBLISH_TOKEN`, matching the convention used elsewhere in the org):
+Add the PyPI token to **this** repository as `UV_PUBLISH_TOKEN`, matching the
+convention used elsewhere in the org:
 
 ```bash
-gh secret set PYPI_API_TOKEN --repo Zero-Proof-AI/zeroproof-simulations
+gh secret set UV_PUBLISH_TOKEN --repo Zero-Proof-AI/zeroproof-simulations
 ```
+
+`uv publish` reads `UV_PUBLISH_TOKEN` directly, which is why that name is
+preferred; `PYPI_API_TOKEN` is accepted as a fallback.
 
 GitHub secrets are write-only, so a token held in another repository cannot be
 copied across. Retrieve it from PyPI or your password manager and paste it into
