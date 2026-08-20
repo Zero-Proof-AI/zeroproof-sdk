@@ -38,3 +38,5 @@ zeroproof_simulations/_experimental/
 # editor config and local notes
 .cursor/
 AUDIT_*.md
+dist/
+build/
