@@ -388,12 +388,23 @@ def scenario_regions(tools: list[dict], policy: str = "", strength: int = 2, *,
                      behavior_value: Callable[[dict], float] | None = None,
                      alpha: float = ALPHA, beta: float = BETA,
                      gamma: float = GAMMA, delta: float = DELTA,
-                     dimensions: dict | None = None) -> list[dict]:
-    """Weighted target regions over a pairwise covering set of the dimensions."""
+                     dimensions: dict | None = None,
+                     mode: str | None = None,
+                     prefer_success: bool | None = None) -> list[dict]:
+    """Weighted target regions over a pairwise covering set of the dimensions.
+
+    ``prefer_success`` defaults off in ``mode="rl"`` so fault cells survive
+    for covering-grid RL data. Explicit True/False always wins.
+    """
     dimensions = dimensions or build_dimensions(tools, policy)
     counts = observed_counts or {}
     regions = []
-    for assignment in _prefer_success(_covering_assignments(dimensions, strength)):
+    assignments = _covering_assignments(dimensions, strength)
+    if prefer_success is None:
+        prefer_success = str(mode or "").strip().lower() != "rl"
+    if prefer_success:
+        assignments = _prefer_success(assignments)
+    for assignment in assignments:
         rid = _region_id(assignment)
         regions.append({
             "id": rid,
@@ -736,11 +747,14 @@ def make_candidate_generator(tools: list[dict], policy: str = "",
                              behavior_value: Callable[[dict], float] | None = None,
                              yield_feedback: Callable[[int], dict] | None = None,
                              dimensions: dict | None = None,
+                             mode: str | None = None,
+                             prefer_success: bool | None = None,
                              ) -> Callable[..., list[str]]:
     """Structured region samples plus open-ended probes. Adaptive arm split."""
     regions = scenario_regions(tools, policy, observed_counts=observed_counts,
                                novelty=novelty, behavior_value=behavior_value,
-                               dimensions=dimensions)
+                               dimensions=dimensions, mode=mode,
+                               prefer_success=prefer_success)
     total = sum(_ARM_START.values())
     arm_weights = {arm: value / total for arm, value in _ARM_START.items()}
     applied_rounds: set[int] = set()

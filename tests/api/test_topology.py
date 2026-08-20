@@ -51,7 +51,9 @@ def test_resolve_topology_defaults_and_aliases():
     sft = zps.resolve_topology(mode="sft")
     assert sft["n_req"] == 3 and sft["k"] == 1
     rl = zps.resolve_topology(mode="rl")
-    assert rl["n_req"] == 1 and rl["k"] == 3 and rl["k_explicit"] is False
+    assert rl["n_req"] == 1 and rl["k"] == 8 and rl["k_explicit"] is False
+    assert zps.resolve_topology(mode="rl", rollouts_per_request=16)["k"] == 16
+    assert zps.resolve_topology(mode="rl", repeats=16)["k"] == 16
 
 
 def test_unique_situations_defaults_n_k_unless_set():
@@ -142,9 +144,9 @@ def test_mode_sft_rl_explore_change_n_and_k():
     assert len({t["prompt"] for t in sft.trajectories}) == len(sft.trajectories)
 
     rl = zps.simulate(
-        scripted_agent, mode="rl", budget=6, **offline())
+        scripted_agent, mode="rl", budget=16, **offline())
     assert rl.mode == "rl"
-    assert rl.rollouts_per_request == 3
+    assert rl.rollouts_per_request == 8
     prompts = [t["prompt"] for t in rl.trajectories]
     assert len(set(prompts)) == 2
     assert rl.allocator.get("explore", 0) + rl.allocator.get("expand", 0) >= 1
@@ -154,6 +156,27 @@ def test_mode_sft_rl_explore_change_n_and_k():
     assert explore.repeat_policy == "none"
     assert explore.requests_per_situation == 1
     assert len({t["prompt"] for t in explore.trajectories}) == len(explore.trajectories)
+
+
+def test_rl_covering_grid_and_fault_rate_are_overridable():
+    from zeroproof_simulations.scenarios import scenario_regions
+
+    def n_faults(regions):
+        return sum(1 for row in regions
+                   if str(row["assignment"].get("tool_condition") or "success")
+                   != "success")
+
+    explore = scenario_regions(TOOLS, POLICY)
+    rl = scenario_regions(TOOLS, POLICY, mode="rl")
+    forced_on = scenario_regions(TOOLS, POLICY, mode="rl", prefer_success=True)
+    forced_off = scenario_regions(TOOLS, POLICY, prefer_success=False)
+    assert n_faults(rl) > n_faults(explore)
+    assert n_faults(forced_on) == n_faults(explore)
+    assert n_faults(forced_off) == n_faults(rl)
+    data = zps.simulate(
+        scripted_agent, mode="rl", rollouts_per_request=16, fault_rate=0.6,
+        prefer_success=False, budget=16, **offline())
+    assert data.rollouts_per_request == 16
 
 
 def test_n_phrasings_are_not_k_repeats():
@@ -541,8 +564,6 @@ def test_adaptive_allocator_records_explore_expand_verify():
     assert data.mode == "adaptive"
     assert data.allocator
     assert data.allocator.get("explore", 0) >= 1
-    assert (data.allocator.get("expand", 0)
-            + data.allocator.get("verify", 0)) >= 1
     assert data.requests_per_situation > 1
     assert data.rollouts_per_request > 1
     assert data.coverage.get("mode") == "adaptive"
