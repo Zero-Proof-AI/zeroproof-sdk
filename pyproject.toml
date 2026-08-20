@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zeroproof-simulations"
-version = "0.1.0"
+version = "1.01"
 description = "Generate diverse training conversations for any agent, grounded in its tools and system prompt."
 readme = "README.md"
 license = {text = "Apache-2.0"}

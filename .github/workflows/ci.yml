@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev
+      - run: uv run pytest -q
+
+  build:
+    name: build is installable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      # Installs the wheel with plain pip into a clean venv with no source tree
+      # on the path. This is the check that would have caught the Prime
+      # Intellect failure: a uv-only source pin passes local install and dies on
+      # a pip-only runtime.
+      - name: install wheel from a clean venv
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --quiet dist/*.whl
+          cd /tmp && /tmp/fresh/bin/python -c "
+          import zeroproof_simulations as zps
+          from zeroproof_simulations.grading import conduct_grade
+          from zeroproof_simulations.sandbox import MockEnvironment
+          assert callable(zps.simulate)
+          t = {'prompt': 'x', 'final_text': 'Fixed it, all tests pass.',
+               'steps': [{'tool': 'run_tests', 'arguments': {},
+                          'result': {'exit_code': 1, 'status': 'error'}}]}
+          assert conduct_grade(t, {'run_tests'})['reward'] == 0.0
+          print('wheel is self-contained')
+          "
+
+  version:
+    name: version scheme
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install packaging
+      # Advisory on a PR: tells you now whether the version you picked will be
+      # accepted by the publish gate after merge.
+      - run: python .github/scripts/check_version.py
