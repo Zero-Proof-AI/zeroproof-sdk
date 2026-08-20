@@ -23,7 +23,10 @@ __pycache__/
 
 # specs and generated rows stay local. Datasets ship on Hugging Face.
 specs/
-examples/
+examples/*
+# ...except checked-in examples, which are scripts and docs, not data.
+# Generated rows there are still covered by the *.jsonl rule above.
+!examples/prime-intellect-rl/
 
 # helpers, not the product
 scripts/
