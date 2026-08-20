@@ -79,6 +79,28 @@ zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="rl")
 zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", until="saturation")
 ```
 
+## Store datasets on Zero Proof Labs
+
+Push a run to your Zero Proof Labs account so the optimization framework
+can iterate on it. Auth is your `zp_` API key from
+https://www.zeroproofai.com/platform (env `ZEROPROOF_API_KEY`).
+
+```python
+data = zps.simulate(spec="specs/github")
+v1 = data.push("github-explore-v1")            # -> {"datasetId": "ds_...", ...}
+
+# iterate, then push the next version with lineage
+v2 = data.push("github-explore-v2", parent=v1["datasetId"])
+
+zps.datasets()                                  # list yours + storage used
+rows = zps.pull(v1["datasetId"])               # rows, or pass path= for a file
+zps.push_file("rollout.jsonl")                 # upload an existing JSONL
+zps.delete_dataset(v1["datasetId"])            # permanent
+```
+
+Storage is private per account, 5 GB free. `parent=` records dataset
+lineage so iterations show as a family on the platform.
+
 ## Speed
 
 Two-minute airline runs using ZeroProof-hosted Qwen. Results were measured on the

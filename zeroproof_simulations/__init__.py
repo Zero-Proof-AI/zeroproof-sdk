@@ -39,6 +39,8 @@ from .explore import mutate_pool
 from .generator import (ModelSimulator, assistant_kind, make_default_generator,
                        write_result_shapes, write_scene_brief)
 from .grading import behavior_signature, conduct_grade
+from .platform import (PlatformError, datasets, delete as delete_dataset,
+                       pull, push_file, push_rows)
 from .llm_judge import (MISSING_JUDGE_KEY, apply_llm_grade,
                        resolve_judge_key)
 from .quality import (rank as rank_source, rank_rows, score_row,
@@ -52,6 +54,8 @@ from .scenarios import (DEFAULT_FAULT_RATE, SEARCH_ARMS, build_dimensions,
                         scenario_regions, _intent_for_tool)
 
 __all__ = ["simulate", "SimulationData", "conversation", "local_model",
+           "datasets", "pull", "push_file", "push_rows", "delete_dataset",
+           "PlatformError",
            "hosted_model",
            "MockEnvironment", "llm_grade", "rank", "rank_rows", "score_row",
            "conduct_grade", "behavior_signature", "build_dimensions",
@@ -299,6 +303,17 @@ class SimulationData:
 
     def rows(self) -> list[dict]:
         return [_export_row(t) for t in self.trajectories]
+
+    def push(self, name: str, *, api_key: str | None = None,
+             parent: str | None = None) -> dict:
+        """Upload this run to your Zero Proof Labs account as a dataset.
+
+        ``api_key`` defaults to the ``ZEROPROOF_API_KEY`` env var; get one at
+        https://www.zeroproofai.com/platform. Pass ``parent`` (a ``ds_...``
+        id) when this run iterates on an existing dataset, so lineage shows
+        on the platform. Returns the registry entry with ``datasetId``.
+        """
+        return push_rows(self.rows(), name, api_key=api_key, parent=parent)
 
     def sft_rows(self, failures_only: bool = True) -> list[dict]:
         return [{"prompt": t["prompt"], "rejected_response": t["final_text"],
