@@ -640,7 +640,7 @@ def _situation_key_from_meta(meta: dict, prompt: str = "") -> str:
 _MODE_PRESETS = {
     "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
     "sft": {"n_req": 3, "k": 1, "repeat_policy": "adaptive"},
-    "rl": {"n_req": 1, "k": 3, "repeat_policy": "adaptive"},
+    "rl": {"n_req": 1, "k": 8, "repeat_policy": "adaptive"},
     "adaptive": {"n_req": 1, "k": 1, "repeat_policy": "adaptive"},
 }
 
@@ -652,6 +652,7 @@ _MOVED_NAMES = {
     "concurrency", "dimensions", "simulator", "backend", "fault_rate", "risk",
     "texture", "max_turns", "avg_turns", "temperature", "seed", "grader",
     "llm_spec", "embedder", "seed_prompts", "extra_situations",
+    "prefer_success",
 }
 
 
@@ -816,10 +817,13 @@ def simulate(agent: Any = None, *, spec: Any = None,
     dimensions = cfg.pop("dimensions", None)
     simulator = cfg.pop("simulator", None)
     backend = cfg.pop("backend", None)
+    explicit_fault = "fault_rate" in cfg or "risk" in cfg
     fault_rate = float(cfg.pop("fault_rate", DEFAULT_FAULT_RATE))
     risk = cfg.pop("risk", None)
     if risk is not None:
         fault_rate = float(risk)
+    elif str(topo["mode"]) == "rl" and not explicit_fault:
+        fault_rate = 0.8
     texture = cfg.pop("texture", None)
     max_turns = cfg.pop("max_turns", None)
     avg_turns = float(cfg.pop("avg_turns", 4))
@@ -964,7 +968,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         completions_per_request=completions_per_request,
         distinct_cards=distinct_cards, extra_cards=extra_cards,
         scene_brief=scene_box["brief"], time_budget=time_budget,
-        run_started=started, **advanced)
+        run_started=started, mode=topo["mode"], **advanced)
     search = dict(_SEARCH_ARMS)
     generator.arm_weights = dict(_SEARCH_ARMS)
     model_obj = getattr(generator, "model", None)

@@ -1058,7 +1058,9 @@ class ModelSimulator:
                  texture_rate: float | None = None, kind: str | None = None,
                  scene_brief: str = "", out_tokens: int | None = None,
                  time_budget: float | None = None,
-                 run_started: float | None = None):
+                 run_started: float | None = None,
+                 mode: str | None = None,
+                 prefer_success: bool | None = None):
         self.texture_rate = (DEFAULT_TEXTURE_RATE if texture_rate is None
                              else max(0.0, float(texture_rate)))
         self.backend_spec = backend_spec or default_simulator_spec()
@@ -1084,7 +1086,8 @@ class ModelSimulator:
         self.extra_cards = max(0, min(4, int(extra_cards)))
         self.seed = int(seed)
         self.timeout = timeout
-        self.regions = scenario_regions(list(tools), policy, dimensions=dimensions)
+        self.regions = scenario_regions(list(tools), policy, dimensions=dimensions,
+                                        mode=mode, prefer_success=prefer_success)
         self.region_index = {r["id"]: r for r in self.regions}
         self.last_errors: dict[str, str] = {}
         self.last_candidate_provenance: dict[str, dict[str, Any]] = {}
@@ -1561,9 +1564,12 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
     time_budget = template_kwargs.pop("time_budget", None)
     run_started = template_kwargs.pop("run_started", None)
     kind = template_kwargs.pop("kind", kind)
+    mode = template_kwargs.pop("mode", None)
+    prefer_success = template_kwargs.pop("prefer_success", None)
     templates = make_candidate_generator(
         tools, policy=policy, per_round=max(6, min(16, int(per_round) // 8)),
-        seed=seed, dimensions=dimensions, **template_kwargs)
+        seed=seed, dimensions=dimensions, mode=mode,
+        prefer_success=prefer_success, **template_kwargs)
     model = None
     if simulator is False:
         model = None
@@ -1578,7 +1584,8 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
             completions=completions, distinct_cards=distinct_cards,
             extra_cards=extra_cards, texture_rate=texture_rate, kind=kind,
             scene_brief=scene_brief, out_tokens=out_tokens,
-            time_budget=time_budget, run_started=run_started)
+            time_budget=time_budget, run_started=run_started, mode=mode,
+            prefer_success=prefer_success)
 
     def _ingest_templates(round_index: int, dataset: Any, texts: list[str],
                           provenance: dict[str, dict]) -> None:
