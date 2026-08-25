@@ -201,6 +201,22 @@ def _transient_http(status: int, body: str) -> bool:
     return _is_lost_track(body)
 
 
+def _wire_tools(tools: list[dict] | None) -> list[dict]:
+    """OpenAI wire shape for the tools array. Bare specs get the function
+    envelope; local-only keys such as returns and mock stay off the wire."""
+    out: list[dict] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        if "function" in tool:
+            out.append(tool)
+            continue
+        fn = {k: tool[k] for k in ("name", "description", "parameters")
+              if k in tool}
+        out.append({"type": "function", "function": fn})
+    return out
+
+
 def public_llm_error(exc: BaseException | str | None) -> str:
     """Studio/JSONL-safe message. Strip Modal internals from dropped requests."""
     text = str(exc or "").strip()
@@ -272,7 +288,7 @@ def complete(base_url: str, model: str, messages: list[dict], *,
     if samples > 1:
         payload["n"] = samples
     if tools:
-        payload["tools"] = tools
+        payload["tools"] = _wire_tools(tools)
     headers = {"Content-Type": "application/json", "Connection": "keep-alive"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
@@ -315,9 +331,12 @@ def complete(base_url: str, model: str, messages: list[dict], *,
                         if not key else
                         f"Hosted Qwen rejected the API key ({resp.status}).")
                 if resp.status == 400:
+                    if "context" in err.lower() or "input tokens" in err.lower():
+                        raise RuntimeError(
+                            f"hosted Qwen rejected the prompt ({resp.status}); "
+                            f"it exceeded the {_CONTEXT_TOKENS}-token context.")
                     raise RuntimeError(
-                        f"hosted Qwen rejected the prompt ({resp.status}); "
-                        f"it exceeded the {_CONTEXT_TOKENS}-token context.")
+                        f"hosted Qwen rejected the request (400): {err[:200]}")
                 if _transient_http(resp.status, err):
                     raise RuntimeError(_TRANSIENT_RETRY)
                 raise RuntimeError(
