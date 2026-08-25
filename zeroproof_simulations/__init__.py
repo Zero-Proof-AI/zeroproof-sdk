@@ -69,6 +69,8 @@ from .otel import rows_from_otel
 from .traces import (dimensions_from_traces, drop_leaky_rows, flaw_rows,
                      leakage_report, mine_traces, simulate_from_traces,
                      split_pseudo_production)
+from .preflight import (FAILURE_CLASSES, classify_failure, dataset_report,
+                        format_dataset_report, preflight)
 
 __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "datasets", "pull", "push_file", "push_rows", "delete_dataset",
@@ -87,7 +89,9 @@ __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "trim_unanimous_groups", "training_rows", "export_training",
            "mine_traces", "dimensions_from_traces", "split_pseudo_production",
            "flaw_rows", "leakage_report", "drop_leaky_rows",
-           "simulate_from_traces", "rows_from_otel"]
+           "simulate_from_traces", "rows_from_otel",
+           "preflight", "dataset_report", "format_dataset_report",
+           "classify_failure", "FAILURE_CLASSES"]
 
 _SATURATION_CAP = 50_000
 _SEARCH_ARMS = dict(SEARCH_ARMS)

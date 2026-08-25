@@ -387,6 +387,11 @@ def apply_grade_llm(trajectories: Sequence[dict], *,
             row["reason"] = reason
         else:
             row.pop("reason", None)
+        if int(reward) == 0:
+            from .preflight import classify_failure
+            row["failure_class"] = classify_failure(row)
+        else:
+            row.pop("failure_class", None)
         graded += 1
         if int(reward) == 0:
             n0 += 1
