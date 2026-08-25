@@ -25,6 +25,7 @@ sys.path.insert(0, str(STUDIO))
 
 from api import agents, audit, data, grade, simulate, train  # noqa: E402
 from api import auth  # noqa: E402
+from token_gate import check_key, record_usage, InvalidKey, QuotaExceeded  # noqa: E402
 
 HOST = os.environ.get("STUDIO_HOST") or "0.0.0.0"
 PORT = int(os.environ.get("PORT") or os.environ.get("STUDIO_PORT") or "8765")
@@ -59,6 +60,27 @@ def _json_body(handler) -> dict:
 
 def _q(parsed, key: str, default: str = "") -> str:
     return (parse_qs(parsed.query).get(key) or [default])[0]
+
+
+def _check_api_key(handler) -> tuple[int, str] | None:
+    """Validate X-Api-Key header.
+
+    Returns:
+      - None if authorized
+      - (status_code, message) when authorization fails
+    """
+    api_key = str(handler.headers.get("x-api-key") or handler.headers.get("X-Api-Key") or "").strip()
+    try:
+        check_key(api_key)
+    except InvalidKey:
+        return 401, "invalid or missing API key"
+    except QuotaExceeded as e:
+        return 429, str(e)
+    except Exception:
+        # Infrastructure/runtime fault (AWS credentials, DynamoDB outage, etc.).
+        # Do not leak internals to callers.
+        return 503, "authorization backend unavailable"
+    return None
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -112,11 +134,16 @@ class Handler(SimpleHTTPRequestHandler):
             return self._send(payload, set_cookie=cookie)
         if parsed.path == "/api/auth/hosted":
             return self._send(auth.set_hosted(body))
+        gate_err = _check_api_key(self)
+        if gate_err:
+            status, message = gate_err
+            return self._send({"error": message}, status)
+        api_key = str(self.headers.get("x-api-key") or self.headers.get("X-Api-Key") or "").strip()
         routes = {
             "/api/agents": lambda: agents.create_agent(body),
             "/api/tags": lambda: data.set_tags(body),
             "/api/import": lambda: data.import_data(body),
-            "/api/simulate": lambda: simulate.start(body),
+            "/api/simulate": lambda: simulate.start({**body, "_api_key": api_key}),
             "/api/grade": lambda: grade.grade_now(body),
             "/api/merge": lambda: data.merge_runs(body),
         }
@@ -132,6 +159,10 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/auth/status":
             payload, cookie = auth.status(self.headers.get("Cookie"))
             return self._send(payload, set_cookie=cookie)
+        gate_err = _check_api_key(self)
+        if gate_err:
+            status, message = gate_err
+            return self._send({"error": message}, status)
         routes = {
             "/api/agents": lambda: agents.list_agents(),
             "/api/starters": lambda: agents.list_starters(),

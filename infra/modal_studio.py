@@ -48,7 +48,10 @@ app = modal.App("zeroproof-studio-api", image=image)
     max_containers=1,
     scaledown_window=300,
     timeout=900,
-    secrets=[modal.Secret.from_name("stressd-vllm-key")],
+    secrets=[
+        modal.Secret.from_name("stressd-vllm-key"),
+        modal.Secret.from_name("zeroproof-token-gate"),
+    ],
 )
 @modal.concurrent(max_inputs=32)
 @modal.web_server(port=PORT, startup_timeout=60)

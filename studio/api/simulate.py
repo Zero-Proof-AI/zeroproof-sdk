@@ -470,6 +470,17 @@ def _execute(job_id: str, spec: dict) -> None:
                 job["status"] = "done"
                 job["error"] = None
                 job.update(stats)
+        # Record token usage: estimate from number of completed simulation rows.
+        # Each row represents one agent rollout consuming model tokens.
+        # Replace with real token counts when zeroproof_simulations exposes usage.
+        api_key = str(spec.get("_api_key") or "").strip()
+        n_rows = stats.get("n") or 0
+        if api_key and n_rows > 0:
+            try:
+                from token_gate import record_usage
+                record_usage(api_key, input_tokens=n_rows * 500, output_tokens=n_rows * 200)
+            except Exception:
+                pass
     except Exception as exc:
         err = studio_error(_redact(str(exc), secrets))
         trace = _redact(traceback.format_exc()[-2000:], secrets)
