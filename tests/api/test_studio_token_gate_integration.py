@@ -6,6 +6,7 @@ from tests.helpers import REPO_ROOT
 MODAL_SRC = (REPO_ROOT / "infra" / "modal_studio.py").read_text()
 SERVE_SRC = (REPO_ROOT / "studio" / "serve.py").read_text()
 SIM_SRC = (REPO_ROOT / "studio" / "api" / "simulate.py").read_text()
+GATE_SRC = (REPO_ROOT / "studio" / "token_gate.py").read_text()
 
 
 def test_modal_studio_attaches_token_gate_secret():
@@ -23,3 +24,8 @@ def test_simulate_records_usage_for_api_key_calls():
     assert 'api_key = str(spec.get("_api_key") or "").strip()' in SIM_SRC
     assert "from token_gate import record_usage" in SIM_SRC
     assert "record_usage(api_key" in SIM_SRC
+
+
+def test_token_gate_bounds_key_cache_growth():
+    assert "_KEY_CACHE_MAX" in GATE_SRC
+    assert "if len(_key_cache) >= _KEY_CACHE_MAX:" in GATE_SRC

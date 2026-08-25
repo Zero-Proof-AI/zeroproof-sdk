@@ -17,5 +17,6 @@ def test_studio_modal_is_cpu_kept_warm():
 
 def test_studio_modal_reuses_existing_vllm_secret_and_serve_py():
     assert 'Secret.from_name("stressd-vllm-key")' in SRC
+    assert 'pip_install("boto3")' in SRC
     assert "studio/serve.py" in SRC
     assert "huggingface-secret" not in SRC

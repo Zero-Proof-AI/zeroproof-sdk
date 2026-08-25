@@ -16,22 +16,22 @@ def _offline_hosted_simulator(monkeypatch):
     try:
         import zeroproof_simulations.generator as _gen
         monkeypatch.setattr(_gen, "complete", blocked)
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     try:
         import zeroproof_simulations.agents as _agents
         monkeypatch.setattr(_agents, "complete", blocked)
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     try:
         import zeroproof_simulations.llm_judge as _judge
         monkeypatch.setattr(_judge, "complete", blocked)
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     try:
         import zeroproof_simulations.embeddings as _emb
         monkeypatch.setattr(_emb.ModalEmbedder, "embed", embed_blocked)
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ZEROPROOF_API_KEY", raising=False)

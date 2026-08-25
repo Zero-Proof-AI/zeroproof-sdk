@@ -99,7 +99,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header(
             "Access-Control-Allow-Headers",
-            "Content-Type, Authorization, ngrok-skip-browser-warning",
+            "Content-Type, Authorization, X-Api-Key, ngrok-skip-browser-warning",
         )
         self.send_header("Access-Control-Max-Age", "86400")
 
@@ -159,6 +159,8 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/auth/status":
             payload, cookie = auth.status(self.headers.get("Cookie"))
             return self._send(payload, set_cookie=cookie)
+        if not parsed.path.startswith("/api/"):
+            return super().do_GET()
         gate_err = _check_api_key(self)
         if gate_err:
             status, message = gate_err
@@ -179,7 +181,7 @@ class Handler(SimpleHTTPRequestHandler):
         }
         fn = routes.get(parsed.path)
         if not fn:
-            return super().do_GET()
+            return self._send({"error": "not found"}, 404)
         return self._send(fn())
 
 
