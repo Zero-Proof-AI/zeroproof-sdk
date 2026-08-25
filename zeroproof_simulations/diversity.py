@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import random
 import re
 import threading
@@ -45,7 +46,10 @@ _USER_TYPES = ("first time", "returning", "in a hurry", "careful", "brief")
 DEFAULT_TEXTURE_RATE = 0.35
 
 NOVELTY_RESTART_FLOOR = 0.025
-MAX_NOVELTY_RESTARTS = 5
+# Writer restarts before a run concedes ask_exhausted. Five stalled a
+# 2,400-row budget at 298 rows while the behavior curve was still
+# climbing; the space was never the limit, the retry budget was.
+MAX_NOVELTY_RESTARTS = int(os.environ.get("ZP_NOVELTY_RESTARTS") or 24)
 
 _FAMILY_STOP = {
     "a", "about", "again", "all", "an", "and", "any", "are", "be", "can",

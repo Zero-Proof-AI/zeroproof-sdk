@@ -1242,6 +1242,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
     empty_streak = 0
     writer_idle = 0
     restart_count = 0
+    # Restarts scale with the job: a 10k-row budget cannot live on the
+    # same retry allowance as a smoke run.
+    max_restarts = max(MAX_NOVELTY_RESTARTS, int(cap or 0) // 100)
     failing_regions: list[dict] = []
     failing_rows: list[dict] = []
     used: set[str] = set()
@@ -1261,7 +1264,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
 
     def _novelty_restart(round_id: int, info: dict, *, clear_avoid: bool) -> int:
         nonlocal restart_count
-        if restart_count >= MAX_NOVELTY_RESTARTS or generator.model is None:
+        if restart_count >= max_restarts or generator.model is None:
             return round_id
         restart_count += 1
         bump = round_id + restart_count * 997
@@ -1693,7 +1696,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                     selection_seed=seed + round_index,
                     selection_round=round_index)
             if (selected and _mean_novelty(selected) < NOVELTY_RESTART_FLOOR
-                    and restart_count < MAX_NOVELTY_RESTARTS):
+                    and restart_count < max_restarts):
                 bump = _novelty_restart(round_index, info, clear_avoid=True)
                 unused = _available()
                 if unused:
@@ -1907,7 +1910,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                             # of already-used asks as avoid pressure:
                             # reseeding alone reconverges to the same
                             # asks (measured: 26 vs the old ceiling 28).
-                            if restart_count < MAX_NOVELTY_RESTARTS:
+                            if restart_count < max_restarts:
                                 seen = sorted(used)
                                 lo_i = (restart_count * 8) % max(1, len(seen))
                                 window = (seen[lo_i:lo_i + 8]
