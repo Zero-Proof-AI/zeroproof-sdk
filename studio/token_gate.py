@@ -37,6 +37,7 @@ Usage items carry a TTL so the table stays small.
 import os
 import time
 import datetime
+import threading
 
 import boto3
 
@@ -52,6 +53,8 @@ USAGE_TTL_DAYS = 14
 # api_key -> (owner_user_id or None if invalid, fetched_at)
 _key_cache: dict[str, tuple[str | None, float]] = {}
 _KEY_CACHE_TTL = 60.0
+_KEY_CACHE_MAX = 10_000
+_key_cache_lock = threading.Lock()
 
 
 class InvalidKey(Exception):
@@ -78,14 +81,24 @@ def _owner(api_key: str) -> str:
     if not api_key or not api_key.startswith("zp_"):
         raise InvalidKey("missing or malformed key")
     now = time.time()
-    cached = _key_cache.get(api_key)
+    with _key_cache_lock:
+        cached = _key_cache.get(api_key)
     if cached and now - cached[1] < _KEY_CACHE_TTL:
         owner = cached[0]
     else:
         item = _db().get_item(TableName=KEYS_TABLE, Key={"apiKey": {"S": api_key}}).get("Item")
         active = bool(item and item.get("active", {}).get("BOOL"))
         owner = item["userId"]["S"] if (active and item and "userId" in item) else None
-        _key_cache[api_key] = (owner, now)
+        with _key_cache_lock:
+            if len(_key_cache) >= _KEY_CACHE_MAX:
+                # Evict stale entries first; if still too large, drop cache.
+                stale_before = now - _KEY_CACHE_TTL
+                stale_keys = [k for k, (_, fetched_at) in _key_cache.items() if fetched_at < stale_before]
+                for k in stale_keys:
+                    _key_cache.pop(k, None)
+                if len(_key_cache) >= _KEY_CACHE_MAX:
+                    _key_cache.clear()
+            _key_cache[api_key] = (owner, now)
     if not owner:
         raise InvalidKey("unknown or deactivated key")
     return owner

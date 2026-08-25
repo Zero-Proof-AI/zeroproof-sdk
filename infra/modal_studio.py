@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PORT = 8765
 IGNORE = ["**/__pycache__/**", "**/.DS_Store", "**/.env", "**/.env.*"]
 
-image = modal.Image.debian_slim(python_version="3.12").env({
+image = modal.Image.debian_slim(python_version="3.12").pip_install("boto3").env({
     "PYTHONUNBUFFERED": "1",
     "STUDIO_HOST": "0.0.0.0",
     "PORT": str(PORT),

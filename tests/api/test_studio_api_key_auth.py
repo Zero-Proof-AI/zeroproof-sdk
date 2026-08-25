@@ -11,6 +11,7 @@ def test_api_key_header_is_the_auth_credential():
     assert 'handler.headers.get("x-api-key")' in SRC
     assert 'handler.headers.get("X-Api-Key")' in SRC
     assert "check_key(api_key)" in SRC
+    assert '"Content-Type, Authorization, X-Api-Key, ngrok-skip-browser-warning"' in SRC
     # Local desk cookie bypass was intentionally removed.
     assert "email_from_cookie" not in SRC
 
@@ -29,6 +30,8 @@ def test_auth_endpoints_are_exempt_but_business_endpoints_are_protected():
     assert 'if parsed.path == "/api/auth/logout":' in SRC
     assert 'if parsed.path == "/api/auth/hosted":' in SRC
     assert 'if parsed.path == "/api/auth/status":' in SRC
+    assert 'if not parsed.path.startswith("/api/"):' in SRC
+    assert 'return super().do_GET()' in SRC
 
     # Business endpoints are still routed behind the auth gate.
     assert '"/api/simulate": lambda: simulate.start({**body, "_api_key": api_key})' in SRC
