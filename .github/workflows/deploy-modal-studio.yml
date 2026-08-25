@@ -1,0 +1,41 @@
+name: deploy-modal-studio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/modal_studio.py
+      - studio/**
+      - zeroproof_simulations/**
+      - .github/workflows/deploy-modal-studio.yml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-modal-studio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install modal cli
+        run: pip install --upgrade modal
+
+      - name: validate modal auth secrets
+        run: |
+          test -n "$MODAL_TOKEN_ID" || (echo "Missing MODAL_TOKEN_ID" && exit 1)
+          test -n "$MODAL_TOKEN_SECRET" || (echo "Missing MODAL_TOKEN_SECRET" && exit 1)
+
+      - name: deploy studio api
+        run: modal deploy infra/modal_studio.py
