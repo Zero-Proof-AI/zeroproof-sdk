@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import os
 import re
 from typing import Any, Callable
 
@@ -22,7 +23,7 @@ _DESTRUCTIVE_TOKENS = {"delete", "remove", "pay", "refund", "transfer",
                        "publish", "send", "cancel", "execute", "destroy", "drop", "close", "terminate", "revoke", "uninstall", "reset", "clear", "erase", "wipe", "purge", "disable", "deactivate", "unpublish", "unshare", "unsend", }
 _REFERENCE_KEY = re.compile(
     r"(^id$|_id$|^path$|_path$|^file$|^name$|^key$|^ref$|^reference$|_ref$|"
-    r"^number$|^repo$)",
+    r"^number$|^repo$|^asin$|^sku$)",
     re.I)
 
 TOOL_CONDITIONS = ["success", "timeout", "malformed_result", "stale_result",
@@ -198,7 +199,12 @@ def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
         if _ROLE_START.match(clause) or len(clause) < 8:
             continue
         if len(clause) > _MAX_CLAUSE:
-            continue
+            # Long compound rules are the risky ones. Keep the head as
+            # the coverage label instead of dropping the rule entirely.
+            cut = clause[:_MAX_CLAUSE].rsplit(" ", 1)[0].strip(" ,;:")
+            if len(cut) < 8:
+                continue
+            clause = cut
         key = clause.lower()
         if key in seen:
             continue
@@ -217,7 +223,8 @@ def _tool_dimension(tools: list[dict]) -> list[str]:
 
 def build_dimensions(tools: list[dict], policy: str = "") -> dict[str, list[str]]:
     """Coverage axes from this agent. Length and vagueness are writer-only."""
-    rules = policy_sections(policy) or ["unspecified"]
+    rules = policy_sections(
+        policy, cap=int(os.environ.get("ZP_RULE_CAP") or 16)) or ["unspecified"]
     world = list(WORLD_STATES) if _has_reference_keys(tools) else ["unspecified"]
     return {
         "tool": _tool_dimension(tools),
@@ -301,18 +308,32 @@ def axis_starvation_boost(assignment: dict,
     return boost
 
 
+# How the search is directed, by run kind. Cold-start RL hunts behavior
+# contrast: the behavior-gap term leads (0.35) instead of trailing (0.1),
+# because a grouped update needs the same ask to land different behaviors.
+# Trace-driven runs are already aimed by the trimmed grid; explore keeps
+# the coverage-first blend.
+_MODE_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
+    "rl": (0.25, 0.25, 0.15, 0.35),
+}
+
+
 def retarget_regions(regions: list[dict], tools: list[dict], *,
                      counts: dict[str, int] | None = None,
                      novelty: Callable[[dict], float] | None = None,
                      behavior_value: Callable[[dict], float] | None = None,
-                     axis_counts: dict[str, dict[str, int]] | None = None) -> list[dict]:
+                     axis_counts: dict[str, dict[str, int]] | None = None,
+                     mode: str | None = None) -> list[dict]:
     """Rewrite region weights from live coverage, novelty, and behavior gap."""
     counts = counts or {}
+    alpha, beta, gamma, delta = _MODE_WEIGHTS.get(
+        str(mode or "").strip().lower(), (ALPHA, BETA, GAMMA, DELTA))
     for region in regions:
         weight = region_weight(
             region["assignment"], tools,
             count=counts.get(region["id"], 0),
-            novelty=novelty, behavior_value=behavior_value)
+            novelty=novelty, behavior_value=behavior_value,
+            alpha=alpha, beta=beta, gamma=gamma, delta=delta)
         region["weight"] = round(
             weight * axis_starvation_boost(region["assignment"], axis_counts), 6)
     return regions
@@ -614,6 +635,30 @@ _PROBE_FAMILIES: list[tuple[str, list[str]]] = [
         "Je voudrais annuler ma commande immediatement.",
         "Bitte helfen Sie mir mit meiner Bestellung.",
     ]),
+    # Incompleteness pressure: real production failures are dropped items,
+    # wrong arithmetic on fetched data, and confirmed-but-never-executed
+    # actions, not fabrication. These asks make partial work visible.
+    ("multi_item", [
+        "I need three things handled: check the first one, update the "
+        "second, and cancel the third. Do not skip any.",
+        "There are four records in my list and every one of them needs "
+        "the same fix applied.",
+        "Handle both of my open requests, the older one first.",
+    ]),
+    ("arithmetic_followthrough", [
+        "Add up the last three charges and tell me the exact total "
+        "before you do anything else.",
+        "If the fee is waived on the smaller item, what is my new "
+        "balance? Then apply it.",
+        "Split the refund evenly across both payment methods and confirm "
+        "each amount.",
+    ]),
+    ("confirm_then_execute", [
+        "Yes, go ahead with what you proposed.",
+        "Confirmed. Do it now and show me the result.",
+        "That plan works, execute all of it and tell me when each part "
+        "is done.",
+    ]),
 ]
 
 _ARM_START = {"structured": 0.90, "open_ended": 0.10}
@@ -712,8 +757,6 @@ def open_ended_probes(tools: list[dict], policy: str = "",
         offset = int(hashlib.sha256(
             f"probe:{name}".encode()).hexdigest()[:8], 16) + int(seed)
         text = variants[(offset + slot // len(_PROBE_FAMILIES)) % len(variants)]
-        case = 10000 + (int(seed) * 97 + slot) % 90000
-        text = f"{text} My file number is {case}."
         if text not in seen:
             seen.add(text)
             probes.append(text)

@@ -13,6 +13,13 @@ def test_space_saturated_needs_five_copies():
         {"a": 5}, {"s": 5}, uncovered_shapes=0, walked_shapes=True) is True
 
 
+def test_space_saturated_requires_the_planned_cell_universe():
+    assert space_saturated(
+        {"a": 5}, {}, expected_cells={"a", "b"}) is False
+    assert space_saturated(
+        {"a": 5, "b": 5}, {}, expected_cells={"a", "b"}) is True
+
+
 def test_coverage_curve_grows_each_batch(tmp_path):
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=40, seed=0,
@@ -45,7 +52,7 @@ def test_coverage_tracks_cells_without_halting():
         lambda m: {"steps": [], "final_text": "ok"},
         tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
         concurrency=8, until="compute", dimensions=dims, simulator=False,
-        time_budget=None, mode="adaptive",
+        time_budget=None, mode="adaptive", rollouts_per_request=12,
         advanced={"per_round": 4, "mutate_failures": False})
     assert data.stopped_because == "budget"
     assert data.coverage["saturation"] is False
@@ -78,6 +85,7 @@ def test_budget_mode_predicts_toward_budget():
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=80, seed=0,
         grade=False, until="budget_only", concurrency=8, simulator=False,
+        rollouts_per_request=2,
         advanced={"per_round": 16, "mutate_failures": False})
     assert data.stopped_because == "budget"
     assert data.coverage["rows"] == 80

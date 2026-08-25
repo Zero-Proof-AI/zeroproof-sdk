@@ -14,12 +14,15 @@ def space_saturated(
     cell_counts: dict[str, int],
     shape_counts: dict[str, int],
     *,
+    expected_cells: set[str] | None = None,
     uncovered_shapes: int = 0,
     walked_shapes: bool = False,
     copies: int = SATURATION_COPIES,
 ) -> bool:
     """Whole walked grid, enough copies. Not a one-hash flatline."""
     if not cell_counts:
+        return False
+    if expected_cells and not expected_cells.issubset(cell_counts):
         return False
     if min(cell_counts.values()) < copies:
         return False

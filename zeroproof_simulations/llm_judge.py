@@ -73,16 +73,18 @@ def _render_payload(trajectory: dict, *, policy: str = "",
             "reward": trajectory.get("reward"),
             "reason": trajectory.get("grader_reason") or trajectory.get("reason"),
         }
+    # Verdict-critical fields serialize before steps so an oversized
+    # payload loses step 14, never the final answer or the rules.
     blob = {
         "tools": _tool_names(tools),
         "user_request": str(trajectory.get("prompt", ""))[:4000],
-        "steps": steps,
         "final_text": str(trajectory.get("final_text", ""))[:2000],
         "conduct_score": conduct.get("reward"),
         "conduct_reason": conduct.get("reason"),
     }
     if policy.strip():
         blob["agent_policy"] = policy.strip()[:2000]
+    blob["steps"] = steps
     return json.dumps(blob, default=str)[:8000]
 
 

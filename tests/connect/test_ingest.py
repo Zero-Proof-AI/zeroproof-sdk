@@ -60,14 +60,14 @@ def test_user_situations_and_spec_feed_simulate():
     assert "Do not refund twice." in data.profile.policy
 
 
-def test_grades_after_rollout_by_default():
+def test_does_not_grade_after_rollout_by_default():
     from tests.helpers import TOOLS as REFUND_TOOLS, POLICY, scripted_agent
     data = zps.simulate(
         scripted_agent, tools=REFUND_TOOLS, policy=POLICY, budget=8, seed=0,
         concurrency=8, simulator=False,
         advanced={"per_round": 8, "mutate_failures": False})
-    assert all(t["reward"] is not None for t in data.trajectories)
-    assert all(t["grader_reason"] for t in data.trajectories)
+    assert all(t["reward"] is None for t in data.trajectories)
+    assert all(not t.get("grader_reason") for t in data.trajectories)
 
 
 def test_inspect_reads_tools_policy_capabilities():
@@ -155,7 +155,8 @@ def test_hash_embedder_does_not_claim_semantic_diversity():
 
 
 def test_refuses_to_mix_lexical_and_semantic_vectors():
-    from zeroproof_simulations.embeddings import EmbeddingArchive, select_execution_batch
+    from zeroproof_simulations.embeddings import (
+        EmbeddingArchive, HashEmbedder, select_execution_batch)
 
     class Sem:
         name = "stub-semantic"
@@ -164,7 +165,7 @@ def test_refuses_to_mix_lexical_and_semantic_vectors():
         def embed(self, texts):
             return [[1.0, 0.0] for _ in texts]
 
-    archive = EmbeddingArchive("hash-word-bigram", False)
+    archive = EmbeddingArchive(HashEmbedder.name, False)
     archive.add([[0.0, 1.0]])
     _, info = select_execution_batch(
         ["hello there friend"], embedder=Sem(), archive=archive, batch_size=1, seed=0)

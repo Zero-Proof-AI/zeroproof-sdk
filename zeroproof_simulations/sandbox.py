@@ -10,7 +10,8 @@ _CREATE = re.compile(r"^(create|generate|write|add|upload|insert|make|post|new)"
 _READ = re.compile(r"^(get|read|list|inspect|search|fetch|find|show|describe|cat|view)", re.I)
 _DELETE = re.compile(r"^(delete|remove|drop|destroy)", re.I)
 _REFERENCE_KEY = re.compile(
-    r"(^id$|_id$|^path$|_path$|^file$|^name$|^key$|^ref$|^number$)",
+    r"(^id$|_id$|^path$|_path$|^file$|^name$|^key$|^ref$|^number$|"
+    r"^asin$|^sku$)",
     re.I)
 
 
@@ -57,12 +58,21 @@ _ISSUED_ID = re.compile(r"^[a-z]+_[0-9a-f]{12}$")
 # read plausibly for checks, commits, tickets, students, clauses, or listings.
 _PEOPLE = ("alex kim", "priya patel", "sam garcia", "elena chen",
            "marcus reed", "dana okafor", "tom silva", "maya novak",
-           "chris tanaka", "nina brooks", "luis weber", "jordan ali")
+           "chris tanaka", "nina brooks", "luis weber", "jordan ali",
+           "grace lin", "omar haddad", "ivy castillo", "peter novy",
+           "rosa marino", "kenji sato", "amara diallo", "leo brandt",
+           "sofia petrov", "david oyelaran", "hana kova", "raj mehta",
+           "claire dubois", "yusuf demir", "mei wong", "arthur kelly",
+           "lucia ferrara", "noah lindqvist", "zara khan", "felix braun")
 _ADJECTIVES = ("nightly", "routine", "primary", "draft", "updated",
                "automated", "manual", "initial", "final", "weekly",
-               "legacy", "follow-up")
+               "legacy", "follow-up", "quarterly", "urgent", "archived",
+               "revised", "secondary", "provisional", "recurring",
+               "expedited", "deferred", "standing", "seasonal", "interim")
 _TOPICS = ("config", "cleanup", "handoff", "review", "rollout",
-           "migration", "sync", "audit", "onboarding", "renewal")
+           "migration", "sync", "audit", "onboarding", "renewal",
+           "billing", "escalation", "inventory", "compliance", "backlog",
+           "outreach", "reconciliation", "staging", "triage", "closeout")
 _ITEM_STATUSES = ("completed", "in_progress", "pending", "failed",
                   "active", "queued", "approved", "open")
 
@@ -72,9 +82,10 @@ def _pick(pool: tuple, k: int, salt: int) -> str:
 
 
 def _iso_date(k: int, i: int) -> str:
+    year = 2022 + (k // 13 + i * 3) % 5
     month = 1 + (k // 31 + i) % 12
     day = 1 + (k + i * 7) % 28
-    return f"2026-{month:02d}-{day:02d}"
+    return f"{year}-{month:02d}-{day:02d}"
 
 
 def _item_noun(tool: str) -> str:
@@ -393,7 +404,12 @@ def _invented_payload(tool: str, arguments: dict, n: int, digest: str,
     if kind == "ci":
         return _invented_ci(arguments, n)
     if kind == "money":
-        return {"amount": 100 + (n % 4900), "currency": "USD"}
+        # Spread across magnitudes; cents on most. A flat 100-4999 band
+        # taught models that money is always a small round number.
+        scale = (1, 1, 10, 100)[(n // 7) % 4]
+        cents = (n // 3) % 100 if n % 3 else 0
+        return {"amount": (17 + n % 483) * scale + cents / 100,
+                "currency": "USD"}
     return _invented_record(tool, arguments, n, digest)
 
 
@@ -417,6 +433,107 @@ def _record_fields(k: int, i: int, noun: str = "") -> dict[str, Any]:
     }
 
 
+def _evaluate_expression(tool: str, arguments: dict) -> dict[str, Any] | None:
+    """Real arithmetic for calculator tools. Junk math results taught
+    agents to do mental math, and they got it wrong (measured: 7 of 9
+    calculate answers in one airline run). Non-math tools return None."""
+    expr = None
+    for key in ("expression", "expr", "formula"):
+        if isinstance(arguments.get(key), str):
+            expr = arguments[key]
+            break
+    if expr is None or not re.search(r"^(calc|compute|eval|math)", tool, re.I):
+        return None
+    import ast
+    import operator as op
+    ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
+           ast.Div: op.truediv, ast.Mod: op.mod, ast.Pow: op.pow,
+           ast.FloorDiv: op.floordiv, ast.USub: op.neg, ast.UAdd: op.pos}
+
+    def walk(node):
+        if isinstance(node, ast.Expression):
+            return walk(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](walk(node.left), walk(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in ops:
+            return ops[type(node.op)](walk(node.operand))
+        raise ValueError("unsupported")
+
+    try:
+        value = walk(ast.parse(expr.strip(), mode="eval"))
+    except Exception:
+        return {"status": "rejected", "reason": "invalid_expression",
+                "expression": str(expr)[:200]}
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return {"status": "ok", "data": {"expression": str(expr)[:200],
+                                     "result": value}}
+
+
+def _hint_from_args(arguments: dict | None) -> str:
+    """Caller-named object, if any. Used to fill identity strings per call."""
+    for key in ("query", "q", "category", "subject", "pattern", "topic"):
+        val = (arguments or {}).get(key)
+        if isinstance(val, str) and len(val.strip()) >= 2:
+            return re.sub(r"\s+", " ", val.strip())[:40]
+    return ""
+
+
+_IDENTITY_KEYS = frozenset({
+    "title", "name", "description", "product_name", "summary", "subject",
+})
+
+
+def _identity_label(hint: str, n: int, i: int, noun: str) -> str:
+    adj = _pick(_ADJECTIVES, n + i * 7919, 7)
+    stem = hint or noun or "item"
+    return f"{adj} {stem}"
+
+
+def _ground_identity(data: Any, arguments: dict, n: int, tool: str) -> Any:
+    """Replace frozen example titles with this call's object. Not a catalog."""
+    noun = _item_noun(tool)
+    hint = _hint_from_args(arguments)
+
+    def walk(obj: Any, i: int) -> Any:
+        if isinstance(obj, list):
+            return [walk(item, i * 7 + j + 1) for j, item in enumerate(obj)]
+        if not isinstance(obj, dict):
+            return obj
+        out = dict(obj)
+        label = _identity_label(hint, n, i, noun)
+        for key, val in list(out.items()):
+            lk = str(key).lower()
+            if lk in _IDENTITY_KEYS and isinstance(val, str):
+                out[key] = label if lk != "description" else f"{label}."
+            elif lk in {"images", "image"} and isinstance(val, list) and val:
+                slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "item"
+                out[key] = [
+                    f"https://example.com/images/{slug}-{j + 1}.jpg"
+                    for j, _ in enumerate(val)
+                ]
+            elif isinstance(val, (dict, list)):
+                out[key] = walk(val, i)
+        return out
+
+    return walk(data, 0)
+
+
+def _record_entries(data: dict) -> list[dict]:
+    entries: list[dict] = []
+    nested = False
+    for key in ("items", "products", "results"):
+        val = data.get(key)
+        if isinstance(val, list) and val and isinstance(val[0], dict):
+            nested = True
+            entries.extend(item for item in val if isinstance(item, dict))
+    if not nested:
+        entries.append(data)
+    return entries
+
+
 def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[str, Any]:
     """Domain-shaped read result. Content varies with the exact arguments.
 
@@ -428,7 +545,9 @@ def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[st
     name = str(tool or "").lower()
     noun = _item_noun(name)
     if "search" in name or name.startswith("list"):
-        count = 2 + n % 2
+        # 1 to 6 hits: fixed 2-3 taught models that searches always
+        # return two or three results.
+        count = 1 + n % 6
         items = []
         for i in range(count):
             # The record's own id comes first so entity identity is the
@@ -450,7 +569,8 @@ def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[st
 
 
 _KEY_DATEISH = re.compile(r"(date|_at$|^at$|time$|day$|when)", re.I)
-_KEY_IDISH = re.compile(r"(^id$|_id$|number$|^sku$|^ref$|^pnr$|^code$)", re.I)
+_KEY_IDISH = re.compile(
+    r"(^id$|_id$|number$|^sku$|^ref$|^pnr$|^code$|^asin$)", re.I)
 _KEY_PERSONISH = re.compile(r"(^from$|owner|author|assignee|sender|^by$)", re.I)
 
 
@@ -502,7 +622,7 @@ def _fill_template(value: Any, k: int, i: int = 0, key: str = "") -> Any:
         return {kk: _fill_template(vv, k, i, str(kk)) for kk, vv in value.items()}
     if isinstance(value, list):
         if value and isinstance(value[0], dict):
-            count = 2 + (k + i) % 2
+            count = 1 + (k + i) % 5
             return [_fill_template(value[0], k, i * 7 + j + 1) for j in range(count)]
         return list(value)
     if isinstance(value, bool):
@@ -595,6 +715,10 @@ class MockEnvironment:
         return None
 
     def _exists(self, value: str) -> bool:
+        if self.world_state in {"entity exists", "exists"}:
+            return value not in self.deleted
+        if self.world_state in {"entity missing", "missing"}:
+            return False
         if value in self.entities:
             return True
         if value in self.deleted or _ISSUED_ID.match(value):
@@ -620,6 +744,11 @@ class MockEnvironment:
         spec = self.specs.get(tool) or {}
         shape = self.result_shapes.get(tool)
         kind = _result_kind(tool, spec, args)
+        if references:
+            stored = self.entities.get(str(references[0][1])) or {}
+            prior = stored.get("data")
+            if isinstance(prior, dict) and prior:
+                return {"data": dict(prior)}
         if isinstance(shape, dict) and shape:
             filled = _fill_template(shape, n)
             for key, val in args.items():
@@ -637,11 +766,26 @@ class MockEnvironment:
                         else:
                             filled[key] = [_entity_consistent(item, item_template)
                                            for item in val]
-                return {"data": filled}
+                return {"data": self._finish_record(tool, args, n, kind, filled)}
         invented = _invented_payload(tool, args, n, digest, spec)
         if _result_kind(tool, spec, args) == "money":
             return invented
+        if isinstance(invented, dict):
+            invented = self._finish_record(tool, args, n, kind, invented)
         return {"data": invented}
+
+    def _finish_record(self, tool: str, arguments: dict, n: int,
+                       kind: str, data: dict) -> dict:
+        """Per-call identity, then remember the record for later reads."""
+        if kind not in {"file", "files", "grep", "shell", "git", "ci"}:
+            data = _ground_identity(data, arguments, n, tool)
+        if isinstance(data, dict):
+            for rec in _record_entries(data):
+                ident = rec.get("asin") or rec.get("id")
+                if ident not in (None, ""):
+                    slot = self.entities.setdefault(str(ident), {})
+                    slot["data"] = rec
+        return data
 
     def call(self, tool: str, arguments: dict | None = None) -> dict[str, Any]:
         arguments = arguments or {}
@@ -650,6 +794,9 @@ class MockEnvironment:
         fault = self._fault_for(tool, arguments)
         if fault is not None:
             return fault
+        computed = _evaluate_expression(tool, arguments)
+        if computed is not None:
+            return computed
         if self.world_state in {"entity missing", "missing"}:
             refs = [v for _, v in _reference_values(arguments)]
             return {"status": "not_found",

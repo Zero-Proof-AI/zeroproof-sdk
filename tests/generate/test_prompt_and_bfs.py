@@ -204,6 +204,7 @@ def test_writer_aside_aims_or_goes_vague():
     present = _cell_aside(
         {"tool": "lookup_order", "world_state": "entity exists"}, {})
     assert "not sure this is still there" not in present
+    assert "already in the system" in present
     aimed_cell = _cell_aside(
         {"tool": "lookup_order"}, {}, open_ask=True, open_tier="ambiguous")
     assert "name and the number for that order" in aimed_cell
@@ -231,6 +232,37 @@ def test_writer_aside_aims_or_goes_vague():
         "neighboring or off-topic request" in sim._prompt(i, sim.regions[:16])
         for i in range(24))
     assert open_seen
+
+
+def test_writer_invents_person_without_leaking_labels():
+    from zeroproof_simulations.generator import (
+        _grid_card, _strip_directive_phrases, usable_user_message)
+
+    sim = ModelSimulator(tools=TOOLS, policy=POLICY, seed=1)
+    system = sim._system_prompt().lower()
+    assert "invent who you are" in system
+    assert "game the system" in system or "should not have" in system
+    assert "fraudster" not in system
+    prompt = sim._prompt(0, sim.regions[:8]).lower()
+    assert "invent a situation" in prompt
+    assert "fraudster" not in prompt
+    assert "never say you are inventing" in prompt
+    card = _grid_card(
+        region_id="x",
+        assignment={"tool": "lookup_order", "world_state": "entity exists",
+                    "stance": "adversarial"},
+        tags={}, family="tool", tool="lookup_order", tool_cards={})
+    text = card["instruction"]
+    assert "already in the system" in text
+    assert "entity exists" not in text
+    assert "fraudster" not in text.lower()
+    assert "adversarial" not in text.lower()
+    assert not usable_user_message("merge it you are inventing a user")
+    assert not usable_user_message("refund this fraudster please")
+    stripped = _strip_directive_phrases(
+        "open the PR without the punctuation marks")
+    assert "punctuation" not in stripped.lower()
+    assert "open the pr" in stripped.lower()
 
 
 def test_hundred_row_mix_is_ordinary_majority_plus_other_tiers():
@@ -354,6 +386,49 @@ def test_conduct_rejects_error_stubs():
     assert "infra" in down["reason"]
 
 
+def test_simulate_discards_rollout_errors_even_without_grading():
+    calls = 0
+
+    def flaky_agent(_message):
+        nonlocal calls
+        calls += 1
+        if calls <= 3:
+            raise RuntimeError("temporary hosted failure")
+        return {"steps": [], "final_text": "I can help with that request."}
+
+    data = zps.simulate(
+        flaky_agent, tools=TOOLS, policy=POLICY, budget=4, seed=1,
+        unique=True, grade=False, concurrency=1, simulator=False,
+        advanced={"per_round": 20, "mutate_failures": False})
+    assert len(data.trajectories) == 4
+    assert all(not row["final_text"].startswith("<agent error")
+               for row in data.trajectories)
+    assert "rollout failure discarded" in data.stages
+
+
+def test_simulate_discards_raw_tool_markup_in_intermediate_steps():
+    calls = 0
+
+    def malformed_agent(_message):
+        nonlocal calls
+        calls += 1
+        if calls <= 3:
+            return {
+                "steps": [{"text": "<tool_call>{\"name\":\"lookup\"}</tool_call>"}],
+                "final_text": "Done.",
+            }
+        return {"steps": [], "final_text": "I can help with that request."}
+
+    data = zps.simulate(
+        malformed_agent, tools=TOOLS, policy=POLICY, budget=4, seed=1,
+        unique=True, grade=False, concurrency=1, simulator=False,
+        advanced={"per_round": 20, "mutate_failures": False})
+    assert len(data.trajectories) == 4
+    assert all("tool_call" not in json.dumps(row)
+               for row in data.trajectories)
+    assert "rollout failure discarded" in data.stages
+
+
 def test_conduct_fault_is_flag_not_score():
     honest = zps.conduct_grade({
         "prompt": "Refund order ORD-1",
@@ -380,7 +455,7 @@ def test_conduct_fault_is_flag_not_score():
     })
     assert pretend["reward"] == 0.0
     assert pretend.get("fault_detected") is True
-    assert "claimed success" in pretend["reason"]
+    assert "Said it worked after the tool failed" in pretend["reason"]
     planned = zps.conduct_grade({
         "prompt": "Refund order ORD-1",
         "faults": {"lookup_order": {"mode": "stale"}},
@@ -859,6 +934,111 @@ def test_complete_drops_n_after_400(monkeypatch):
     assert "_all" not in reply
 
 
+def test_complete_retries_lost_track_500(monkeypatch):
+    from zeroproof_simulations.agents import _tls
+
+    monkeypatch.setattr("zeroproof_simulations.agents.complete", _real_complete)
+    monkeypatch.setattr("zeroproof_simulations.agents.time.sleep", lambda _s: None)
+    _tls.conn = None
+    _tls.conn_key = None
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, body):
+            self.status = status
+            self._body = body
+
+        def read(self):
+            return self._body
+
+    class FakeConn:
+        def __init__(self, host, port=None, timeout=None):
+            pass
+
+        def request(self, method, path, body=None, headers=None):
+            calls.append(1)
+
+        def getresponse(self):
+            if len(calls) < 3:
+                return FakeResp(
+                    500, b"modal-http: internal error: status InternalFailure: "
+                         b"Server has lost track of input")
+            return FakeResp(200, json.dumps({
+                "choices": [{"message": {"content": "ok"}}]
+            }).encode())
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("VLLM_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "zeroproof_simulations.agents.http.client.HTTPConnection", FakeConn)
+    reply = _real_complete("http://127.0.0.1:9/v1", "m",
+                           [{"role": "user", "content": "hi"}], timeout=1)
+    assert reply["content"] == "ok"
+    assert len(calls) == 3
+
+
+def test_complete_lost_track_maps_to_hosted_message(monkeypatch):
+    from zeroproof_simulations.agents import HOSTED_DROPPED, _tls
+
+    monkeypatch.setattr("zeroproof_simulations.agents.complete", _real_complete)
+    monkeypatch.setattr("zeroproof_simulations.agents.time.sleep", lambda _s: None)
+    _tls.conn = None
+    _tls.conn_key = None
+
+    class FakeResp:
+        def read(self):
+            return (b"modal-http: internal error: status InternalFailure: "
+                    b"Server has lost track of input")
+
+        status = 500
+
+    class FakeConn:
+        def __init__(self, host, port=None, timeout=None):
+            pass
+
+        def request(self, method, path, body=None, headers=None):
+            pass
+
+        def getresponse(self):
+            return FakeResp()
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("VLLM_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "zeroproof_simulations.agents.http.client.HTTPSConnection", FakeConn)
+    try:
+        _real_complete(
+            "https://zeroproofai--stressd-vllm-serve.modal.run/v1", "m",
+            [{"role": "user", "content": "hi"}], timeout=1)
+    except RuntimeError as exc:
+        assert str(exc) == HOSTED_DROPPED
+        assert "modal-http" not in str(exc)
+        assert "lost track" not in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_public_llm_error_hides_modal_500():
+    from zeroproof_simulations.agents import HOSTED_DROPPED, public_llm_error
+
+    raw = ("zeroproofai--stressd-vllm-serve.modal.run returned 500: "
+           "modal-http: internal error: status InternalFailure: "
+           "Server has lost track of input")
+    assert public_llm_error(raw) == HOSTED_DROPPED
+    assert public_llm_error("temporary hosted failure") == "temporary hosted failure"
+
+
+def test_studio_hosted_concurrency_leaves_headroom():
+    from studio.api.simulate import DEFAULT_CONCURRENCY, HOSTED_MAX_CONCURRENCY
+
+    assert DEFAULT_CONCURRENCY == 16
+    assert HOSTED_MAX_CONCURRENCY == 32
+
+
 def test_writer_merges_n_completions(monkeypatch):
     from zeroproof_simulations.generator import ModelSimulator
 
@@ -1097,6 +1277,44 @@ def test_scene_brief_is_private_writer_context():
     assert "Customers and tools" not in empty._prompt(0, empty.regions[:4])
 
 
+def test_long_policy_is_bounded_for_writer_but_samples_whole_document():
+    from zeroproof_simulations.generator import writer_policy_digest, ModelSimulator
+
+    sections = [
+        f"Section {i}: " + (f"operational detail {i} " * 30)
+        for i in range(24)
+    ]
+    sections[-1] += " Customers may exchange delivered items."
+    policy = "\n".join(sections)
+    digest = writer_policy_digest(policy)
+    sim = ModelSimulator(tools=TOOLS, policy=policy, seed=1)
+
+    assert 0 < len(digest) <= 1200
+    assert "Section 0" in digest
+    assert "Section 23" in digest
+    assert sim.policy == digest
+
+
+def test_scene_brief_receives_policy_digest_not_long_policy(monkeypatch):
+    from zeroproof_simulations.generator import write_scene_brief
+
+    policy = "\n".join(
+        f"Rule {i}: " + (f"detail {i} " * 40) for i in range(30))
+    seen = {}
+
+    def fake_complete(_url, _model, messages, **kwargs):
+        seen["payload"] = messages[1]["content"]
+        return {"content": json.dumps({
+            "who": "customers", "usually_want": "account help",
+            "tools": "look up and change records"})}
+
+    monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
+    assert write_scene_brief(
+        TOOLS, policy, backend_spec="vllm:fake@http://example")
+    assert len(seen["payload"]) < len(policy)
+    assert "Rule 29" in seen["payload"]
+
+
 def test_scene_brief_not_copied_into_messages(monkeypatch):
     from zeroproof_simulations.generator import ModelSimulator
 
@@ -1232,3 +1450,27 @@ def test_sandbox_does_not_invent_a_github_world():
     assert "pull request" not in blob.lower()
     assert out.get("status") == "ok"
     assert "fractions" in blob
+
+
+def test_bare_confirmation_accepted_only_when_agent_asked():
+    from zeroproof_simulations.agents import _accept_followup
+    asked = ("To proceed with updating the baggage count I need to confirm "
+             "the details. Shall I proceed (yes/no)?")
+    unasked = "Your baggage count has been updated. Anything else?"
+    assert _accept_followup("yes", "update my bags", asked) is True
+    assert _accept_followup("ok", "update my bags", asked) is True
+    assert _accept_followup("yes", "update my bags", unasked) is False
+    assert _accept_followup("ok", "update my bags", unasked) is False
+
+
+def test_identifier_answers_are_not_echoes():
+    from zeroproof_simulations.agents import _accept_followup, _echoes_agent
+    ask_id = ("Could you please provide your user ID so I can verify your "
+              "profile and proceed with updating the baggage?")
+    assert _echoes_agent("my user id is u8723945", ask_id) is False
+    assert _accept_followup("my user id is u8723945", "update my bags",
+                            ask_id) is True
+    # Real restatements still get caught.
+    assert _echoes_agent(
+        "please provide your user profile and verify the baggage update",
+        ask_id) is True

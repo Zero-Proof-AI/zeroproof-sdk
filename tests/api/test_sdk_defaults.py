@@ -12,7 +12,8 @@ def test_default_budget_is_500():
     public = [
         "agent", "spec", "tools", "system_prompt", "budget", "time_budget", "until",
         "mode", "situations", "requests_per_situation", "rollouts_per_request",
-        "unique_situations", "grade", "llm_grade", "output", "advanced",
+        "unique_situations", "grade", "llm_grade", "traces", "output",
+        "advanced",
     ]
     named = [name for name, p in params.items()
              if p.kind is not inspect.Parameter.VAR_KEYWORD]
@@ -24,9 +25,9 @@ def test_default_budget_is_500():
     assert params["rollouts_per_request"].default is None
     assert params["unique_situations"].default is False
     assert params["situations"].default is None
-    assert params["grade"].default is True
+    assert params["grade"].default is False
     assert params["llm_grade"].default is False
-    assert params["time_budget"].default == 60
+    assert params["time_budget"].default is None
     assert params["spec"].default is None
     assert params["output"].default is None
     assert params["advanced"].default is None
@@ -105,7 +106,7 @@ def test_empty_simulate_is_one_sentence():
     try:
         zps.simulate()
     except ValueError as exc:
-        assert "agent" in str(exc) and "tools=" in str(exc)
+        assert "agent" in str(exc) and "system prompt" in str(exc)
         assert "\n" not in str(exc)
         assert str(exc).count(".") <= 1
     else:
@@ -118,8 +119,9 @@ def test_github_example_spec_works():
     names = {(t.get("function") or t).get("name") for t in data.profile.tools}
     assert {"search_issues", "get_pr"} <= names
     row = data.rows()[0]
-    assert {"prompt", "messages", "steps", "final_text", "scenario_id",
-            "reward", "reason"} <= set(row)
+    assert {"prompt", "messages", "steps", "final_text", "scenario_id"} <= set(row)
+    assert "reward" not in row
+    assert "reason" not in row
     assert row["messages"][0] == {"role": "user", "content": row["prompt"]}
     assert "selection_reason" not in row
     assert "arm" not in row
@@ -141,6 +143,7 @@ def test_touch_hosted_gets_models(monkeypatch):
     seen = {}
 
     class FakeResp:
+        status = 200
         def read(self):
             return b'{"data":[]}'
 
@@ -178,6 +181,45 @@ def test_touch_hosted_skips_without_key(monkeypatch):
     from zeroproof_simulations.agents import touch_hosted
     touch_hosted("https://zeroproofai--stressd-vllm-serve.modal.run/v1")
     assert called == []
+
+
+def test_ping_hosted_false_on_500(monkeypatch):
+    monkeypatch.setenv("VLLM_API_KEY", "test-key")
+
+    class FakeResp:
+        status = 500
+        def read(self):
+            return b"lost track of input"
+
+    class FakeConn:
+        def __init__(self, *a, **k):
+            pass
+        def request(self, *a, **k):
+            pass
+        def getresponse(self):
+            return FakeResp()
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "zeroproof_simulations.agents.http.client.HTTPSConnection", FakeConn)
+    from zeroproof_simulations.agents import ping_hosted
+    assert ping_hosted(
+        "https://zeroproofai--stressd-vllm-serve.modal.run/v1") is False
+
+
+def test_ping_hosted_false_on_connection_error(monkeypatch):
+    monkeypatch.setenv("VLLM_API_KEY", "test-key")
+
+    class FakeConn:
+        def __init__(self, *a, **k):
+            raise TimeoutError("timed out")
+
+    monkeypatch.setattr(
+        "zeroproof_simulations.agents.http.client.HTTPSConnection", FakeConn)
+    from zeroproof_simulations.agents import ping_hosted
+    assert ping_hosted(
+        "https://zeroproofai--stressd-vllm-serve.modal.run/v1") is False
 
 
 def test_output_does_not_wipe_when_no_rows(tmp_path):
@@ -246,6 +288,38 @@ def test_unique_writer_flight_stays_small():
         advanced={"mutate_failures": False})
     assert 1 <= peak <= 4
     assert len(data.trajectories) == 40
+
+
+def test_unique_enables_distinct_model_cards(monkeypatch):
+    seen = []
+
+    class FakeModel:
+        regions = []
+
+    def fake_generator(*args, **kwargs):
+        seen.append(kwargs.get("distinct_cards"))
+
+        def writer(_dataset=None, index=0, include_model=True):
+            return [f"human request {index}-{i}" for i in range(8)]
+
+        writer.model = FakeModel()
+        writer.meta = {}
+        writer.provenance = {}
+        writer.last_candidate_provenance = {}
+        writer.fault_plans = {}
+        writer.last_errors = {}
+        writer.regions = []
+        writer.arm_weights = {}
+        writer.model_produced = True
+        return writer
+
+    monkeypatch.setattr(zps, "make_default_generator", fake_generator)
+    data = zps.simulate(
+        scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
+        unique=True, grade=False, concurrency=2, until="budget_only",
+        advanced={"mutate_failures": False})
+    assert len(data.trajectories) == 8
+    assert seen and all(seen)
 
 
 def test_refill_does_not_stall_inflight_rollouts():
@@ -320,7 +394,7 @@ def test_open_ended_probe_families_stay_intact():
     probes = open_ended_probes(TOOLS, POLICY, per_round=16, seed=0)
     blob = " ".join(probes).lower()
     assert "mongolia" in blob or "haiku" in blob or "asdf" in blob
-    assert "file number" in blob
+    assert "file number" not in blob
     assert "ignore" in blob
 
 

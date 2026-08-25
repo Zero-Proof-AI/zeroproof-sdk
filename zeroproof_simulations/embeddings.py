@@ -6,6 +6,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -28,8 +29,8 @@ def _cos(a: list[float], b: list[float]) -> float:
 
 def _hash_vector(text: str, dim: int = _DIM) -> list[float]:
     vec = [0.0] * dim
-    normalized = " ".join(str(text).lower().split())
-    words = normalized.split()
+    words = re.findall(r"[a-z]+|\d+", str(text).lower())
+    words = ["<num>" if word.isdigit() else word for word in words]
     tokens = [f"w:{w}" for w in words] + [
         f"b:{a}>{b}" for a, b in zip(words, words[1:])]
     for token in tokens:
@@ -39,7 +40,7 @@ def _hash_vector(text: str, dim: int = _DIM) -> list[float]:
 
 
 class HashEmbedder:
-    name = "hash-word-bigram"
+    name = "hash-word-bigram-v2"
     semantic = False
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
@@ -160,11 +161,52 @@ def _live_modal(url: str | None = None) -> ModalEmbedder | None:
     return candidate
 
 
+_BGE_MODEL = "BAAI/bge-small-en-v1.5"
+
+
+def _bge_device(preferred: str | None = None) -> str:
+    if preferred:
+        return preferred
+    try:
+        import torch
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def bge_embedder(model: str = _BGE_MODEL, device: str | None = None) -> CallableEmbedder:
+    """Local BGE-small via sentence-transformers. MPS, else CPU. No HTTP."""
+    from sentence_transformers import SentenceTransformer
+    chosen = _bge_device(device)
+    try:
+        st = SentenceTransformer(model, device=chosen)
+    except Exception:
+        if chosen == "cpu":
+            raise
+        chosen = "cpu"
+        st = SentenceTransformer(model, device=chosen)
+
+    def encode(texts: Sequence[str]):
+        cleaned = [str(t) if str(t).strip() else " " for t in texts]
+        return st.encode(
+            cleaned, batch_size=32, normalize_embeddings=True,
+            show_progress_bar=False)
+
+    embedder = CallableEmbedder(encode, name=f"sentence-transformers:{model}")
+    embedder.device = chosen
+    return embedder
+
+
 def resolve_embedder(embedder: Any = "hash") -> Any:
     if embedder is None or embedder == "hash":
         return HashEmbedder()
     if embedder == "modal":
         return _live_modal() or HashEmbedder()
+    if embedder in {"bge", "sentence-transformers"}:
+        return bge_embedder()
     if isinstance(embedder, str):
         kind, _, rest = embedder.partition(":")
         if kind == "ollama":
@@ -173,7 +215,10 @@ def resolve_embedder(embedder: Any = "hash") -> Any:
             return OpenAIEmbedder(rest or "text-embedding-3-small")
         if kind == "modal":
             return _live_modal(rest or None) or HashEmbedder()
-        raise ValueError("embedder must be hash, ollama:<model>, openai:<model>, or a callable")
+        if kind in {"bge", "sentence-transformers"}:
+            return bge_embedder(rest or _BGE_MODEL)
+        raise ValueError(
+            "embedder must be hash, bge, ollama:<model>, openai:<model>, or a callable")
     if hasattr(embedder, "embed"):
         return embedder
     if callable(embedder):

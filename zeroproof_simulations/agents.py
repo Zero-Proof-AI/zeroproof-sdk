@@ -7,6 +7,7 @@ import json
 import os
 import re
 import threading
+import time
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -51,32 +52,36 @@ def default_simulator_spec() -> str:
     return os.environ.get("ZEROPROOF_SURROGATE") or DEFAULT_SIMULATOR
 
 
-CONTEXT_TOKENS = 4096
+# Working context estimate for the rollout backend. Sized to hosted Qwen
+# by default; a bigger-window backend sets ZP_CONTEXT_TOKENS and every
+# derived budget (turn caps, shrink threshold) scales with it.
+CONTEXT_TOKENS = max(2048, int(os.environ.get("ZP_CONTEXT_TOKENS") or 4096))
 _CONTEXT_TOKENS = CONTEXT_TOKENS
 
 
 def default_max_turns(context_tokens: int | None = None, *,
                       n_tools: int = 0) -> int:
-    """Conversation cap. Right tail reaches 40; smaller windows scale down."""
+    """Conversation cap. Scales with the context window; small windows
+    reach 40 turns, large ones (ZP_CONTEXT_TOKENS) go long-horizon."""
     ctx = int(context_tokens if context_tokens is not None else CONTEXT_TOKENS)
     reserved = 2048 + min(1536, max(0, int(n_tools)) * 64)
     per_turn = 128
-    return max(8, min(40, max(1, ctx - reserved) // per_turn))
+    ceiling = 40 if ctx <= 8192 else 120
+    return max(8, min(ceiling, max(1, ctx - reserved) // per_turn))
 
 
-def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
-    """Best-effort GET /v1/models. Keeps the reserved replica awake."""
+def _models_url(base_url: str | None = None) -> tuple[str, Any] | None:
     url = base_url
     if not url:
         try:
             url, _ = parse_backend_spec(default_agent_spec())
         except ValueError:
-            return
-    key = resolve_completion_key(url)
-    if missing_hosted_key(url, key):
-        return
+            return None
     raw = url if "://" in str(url) else "https://" + str(url)
-    parsed = urlparse(raw)
+    return raw, urlparse(raw)
+
+
+def _models_path(parsed) -> str:
     path = parsed.path.rstrip("/")
     if path.endswith("/models"):
         get_path = path
@@ -86,6 +91,18 @@ def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
         get_path = (path or "") + "/v1/models"
     if not get_path.startswith("/"):
         get_path = "/" + get_path
+    return get_path
+
+
+def ping_hosted(base_url: str | None = None, *, timeout: float = 3.0) -> bool:
+    """True if hosted Qwen answers GET /v1/models. 5xx and connection errors are down."""
+    parsed_pair = _models_url(base_url)
+    if not parsed_pair:
+        return False
+    raw, parsed = parsed_pair
+    key = resolve_completion_key(raw)
+    if missing_hosted_key(raw, key):
+        return False
     headers = {"Connection": "keep-alive"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
@@ -96,11 +113,21 @@ def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
         else:
             conn = http.client.HTTPConnection(
                 parsed.hostname, parsed.port or 80, timeout=timeout)
-        conn.request("GET", get_path, headers=headers)
-        conn.getresponse().read()
+        conn.request("GET", _models_path(parsed), headers=headers)
+        resp = conn.getresponse()
+        status = int(getattr(resp, "status", 200) or 200)
+        resp.read()
         conn.close()
     except Exception:
-        return
+        return False
+    if status >= 500 or status == 404:
+        return False
+    return 200 <= status < 500
+
+
+def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
+    """Best-effort GET /v1/models. Keeps the reserved replica awake."""
+    ping_hosted(base_url, timeout=timeout)
 
 
 USER_TURN_MARK = "\n<USER_TURN>\n"
@@ -149,6 +176,37 @@ def missing_hosted_key(base_url: str | None = None,
     if _hosted_qwen_url(base_url):
         return "Hosted Qwen needs VLLM_API_KEY set in the environment."
     return None
+
+
+HOSTED_DROPPED = (
+    "Hosted Qwen dropped an in-flight request. "
+    "Lower concurrency or wait for the other simulate to finish.")
+_TRANSIENT_RETRY = "retry_transient"
+_TRANSIENT_TRIES = 3
+_TRANSIENT_STATUSES = {500, 502, 503, 504}
+
+
+def _is_lost_track(text: str) -> bool:
+    low = str(text or "").lower()
+    if "lost track of input" in low or "internalfailure" in low:
+        return True
+    if "modal-http" in low and ("500" in low or "internal error" in low):
+        return True
+    return "returned 500" in low and "modal.run" in low
+
+
+def _transient_http(status: int, body: str) -> bool:
+    if int(status) in _TRANSIENT_STATUSES:
+        return True
+    return _is_lost_track(body)
+
+
+def public_llm_error(exc: BaseException | str | None) -> str:
+    """Studio/JSONL-safe message. Strip Modal internals from dropped requests."""
+    text = str(exc or "").strip()
+    if _is_lost_track(text) or str(exc) == _TRANSIENT_RETRY:
+        return HOSTED_DROPPED
+    return text
 
 
 def _estimate_tokens(messages: list[dict], tools: list[dict] | None) -> int:
@@ -220,7 +278,8 @@ def complete(base_url: str, model: str, messages: list[dict], *,
         headers["Authorization"] = f"Bearer {key}"
     conn_key = (parsed.scheme or "https", parsed.hostname, parsed.port, timeout)
     last_err: Exception | None = None
-    for _ in range(5):
+    transient = 0
+    for _ in range(8):
         payload["messages"] = messages
         body = json.dumps(payload, separators=(",", ":")).encode()
         conn = getattr(_tls, "conn", None)
@@ -259,6 +318,8 @@ def complete(base_url: str, model: str, messages: list[dict], *,
                     raise RuntimeError(
                         f"hosted Qwen rejected the prompt ({resp.status}); "
                         f"it exceeded the {_CONTEXT_TOKENS}-token context.")
+                if _transient_http(resp.status, err):
+                    raise RuntimeError(_TRANSIENT_RETRY)
                 raise RuntimeError(
                     f"{parsed.hostname} returned {resp.status}: {err}")
             choices = json.loads(raw).get("choices") or []
@@ -276,9 +337,23 @@ def complete(base_url: str, model: str, messages: list[dict], *,
             except Exception:
                 pass
             _tls.conn = None
-            if str(exc) not in {"retry_max_tokens", "retry_shrink_input",
-                                "retry_drop_n"}:
-                break
+            kind = str(exc)
+            if kind in {"retry_max_tokens", "retry_shrink_input", "retry_drop_n"}:
+                continue
+            if kind == _TRANSIENT_RETRY and transient < _TRANSIENT_TRIES:
+                transient += 1
+                time.sleep(0.4 * (2 ** (transient - 1)))
+                continue
+            break
+    if last_err is not None and str(last_err) == _TRANSIENT_RETRY:
+        if _hosted_qwen_url(base_url):
+            raise RuntimeError(HOSTED_DROPPED)
+        raise RuntimeError(
+            f"{parsed.hostname} returned a transient error after retries")
+    if last_err is not None:
+        mapped = public_llm_error(last_err)
+        if mapped != str(last_err).strip():
+            raise RuntimeError(mapped)
     raise last_err  # type: ignore[misc]
 
 
@@ -518,7 +593,14 @@ def _render_user_trace(messages: list[dict] | None, steps: list[dict] | None,
                 lines.append(f"Result ({step.get('tool')}): {str(step.get('result') or '')[:300]}")
             elif step.get("text"):
                 lines.append(f"The agent replied: {step['text']}")
-    return "\n".join(lines)[:limit]
+    text = "\n".join(lines)
+    if len(text) <= limit:
+        return text
+    # Keep the newest turns: a follow-up must see what was just said,
+    # not the opening of a long thread.
+    tail = text[-limit:]
+    cut = tail.find("\n")
+    return tail[cut + 1:] if 0 <= cut < len(tail) // 4 else tail
 
 
 _RUBBER_STAMP = re.compile(
@@ -603,6 +685,13 @@ def _off_world_coding(text: str, prior: str, agent_text: str) -> bool:
     return bool(_CODING_MARK.search(text) and not _CODING_MARK.search(blob))
 
 
+_ASKS_CONFIRM = re.compile(
+    r"\byes/no\b|\(yes/no\)|\bplease confirm\b|\bconfirm (?:if|whether|that)\b|"
+    r"\bshall i (?:proceed|go ahead)\b|\bwould you like (?:me )?to proceed\b|"
+    r"\bdo you want me to\b[^.!\n]{0,60}\?|\bproceed with (?:the|this)\b"
+    r"[^.!\n]{0,60}\?", re.I)
+
+
 def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     from .generator import usable_user_message
     if not text or text == prior or len(text) > 2000:
@@ -610,6 +699,13 @@ def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     # A person never types call syntax: name_with_underscores( or a JSON dump.
     if re.search(r"\b\w+_\w+\s*\(", text) or text.count('"') >= 4:
         return False
+    # A bare yes is filler everywhere except where the agent asked for
+    # exactly that. Confirm-then-execute data depends on it, so it wins
+    # over the echo, stamp, and length gates below.
+    if (_ASKS_CONFIRM.search(str(agent_text or "")) and len(text) <= 60
+            and re.match(r"^(yes|yep|yeah|sure|ok(ay)?|confirmed|do it|"
+                         r"go ahead|no\b)", text, re.I)):
+        return True
     if _RUBBER_STAMP.match(text) or _CONFIRM_ONLY.match(text):
         return False
     if _mostly_thanks(text):
@@ -623,6 +719,23 @@ def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     if len(text) < 8:
         return False
     return usable_user_message(text)
+
+
+def _repeats_user_history(text: str, messages: list[dict] | None) -> bool:
+    current = set(re.findall(r"[a-z0-9]+", str(text).lower()))
+    if len(current) < 5:
+        return False
+    for message in messages or []:
+        if message.get("role") != "user":
+            continue
+        prior = set(re.findall(
+            r"[a-z0-9]+", str(message.get("content") or "").lower()))
+        if len(prior) < 5:
+            continue
+        overlap = len(current & prior) / min(len(current), len(prior))
+        if overlap >= 0.78:
+            return True
+    return False
 
 
 def _tool_world(tools: list | None) -> str:
@@ -642,7 +755,8 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
                    messages: list[dict] | None = None,
                    steps: list[dict] | None = None,
                    want: str = "",
-                   tools: list | None = None) -> str:
+                   tools: list | None = None,
+                   force: bool = False) -> str:
     from .generator import (clean_user_message,
                             _realize_typed_message, _strip_directive_phrases)
     trace = _render_user_trace(messages, steps)
@@ -663,7 +777,17 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
     if asked:
         nudge = (
             " They asked you a question. Answer it with one concrete detail "
-            "from this same world. One short line."
+            "from this same world. One short line. If they asked you to "
+            "confirm an action, a plain yes go ahead, or a no with a reason, "
+            "is a real answer."
+        )
+    elif force:
+        nudge = (
+            " The matter is not resolved yet. Add exactly one NEW relevant "
+            "fact, correction, constraint, observable problem, or related next "
+            "request. Never repeat an earlier request. Never explain the "
+            "assistant's tools or policies. Speak only as the human. Do not "
+            "thank them or end the conversation."
         )
     body = (
         f"This is what's been said so far:\n{trace}\n\n"
@@ -671,9 +795,12 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
     )
     retry_body = (
         f"This is what's been said so far:\n{trace}\n\n"
-        "Answer their last question with one concrete detail from this "
-        "same world. One short line. No thanks. No git repo unless this "
-        "thread is already about git."
+        + ("Answer their last question with one concrete detail from this "
+           "same world. " if asked else
+           "Continue with a different, concrete fact, correction, constraint, "
+           "or related next request that has not appeared earlier. ")
+        + "Never restate the request or describe tool limitations. One short "
+          "line. No thanks. No git repo unless this thread is already about git."
     )
     tags: dict = {}
     if persona and "every letter small" in persona:
@@ -682,8 +809,12 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
         tags["texture"] = "no_punctuation"
     if persona and "Capitalize normally" in persona and "texture" not in tags:
         tags["texture"] = "standard"
-    wait = min(8.0 if asked else 5.0, float(timeout or 5.0))
-    for attempt, content in enumerate((body, retry_body) if asked else (body,)):
+    # Floor, not ceiling: a 5s wait on a busy endpoint silently killed
+    # every follow-up and collapsed whole datasets to single-turn.
+    wait = max(8.0 if asked else 5.0, min(30.0, float(timeout or 30) / 2))
+    attempts = (body, retry_body, retry_body) if force else (
+        (body, retry_body) if asked else (body,))
+    for attempt, content in enumerate(attempts):
         try:
             reply = complete(
                 base_url, model,
@@ -697,7 +828,8 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
         text = _scrub_ai_traces(_realize_typed_message(
             _strip_directive_phrases(clean_user_message(reply.get("content") or "")),
             tags))
-        if _accept_followup(text, prior, agent_text):
+        if (_accept_followup(text, prior, agent_text)
+                and not _repeats_user_history(text, messages)):
             return text
     return ""
 
@@ -708,9 +840,13 @@ def _echoes_agent(user: str, agent: str) -> bool:
     Shared identifiers (order ids, ticket numbers) are normal ping-pong,
     not an echo. Compare letter tokens only, and require a high overlap.
     """
+    if re.search(r"\b\w*\d\w*\b", user or ""):
+        # Carries an identifier: that is the answer, not an echo.
+        return False
     u = set(re.findall(r"[a-z]{3,}", (user or "").lower()))
     a = set(re.findall(r"[a-z]{3,}", (agent or "").lower()))
-    if not u or not a:
+    if len(u) < 4 or not a:
+        # Too few words to call a restatement; short replies are answers.
         return False
     return (len(u & a) / len(u)) >= 0.70
 
@@ -718,6 +854,7 @@ def _echoes_agent(user: str, agent: str) -> bool:
 def local_model(base_url: str, model: str, *, tools: list[dict],
                 system: str = "", api_key: str | None = None,
                 max_turns: int | None = None, avg_turns: float = 6,
+                min_user_turns: int = 1,
                 turn_stats: dict | None = None,
                 temperature: float = 0.8,
                 fault_plans: dict | None = None,
@@ -728,6 +865,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
     shapes = result_shapes if result_shapes is not None else {}
     cap = (default_max_turns(n_tools=len(tools))
            if max_turns is None else max(1, int(max_turns)))
+    min_users = max(1, min(int(min_user_turns), max(1, cap // 2)))
     policy_text = str(system or "").strip()
 
     def agent(message: str) -> dict:
@@ -751,6 +889,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
         budget = sample_turn_budget(
             0, message, cap, avg_turns=avg_turns,
             running_mean=running_turn_mean(turn_stats))
+        budget = min(cap, max(budget, min_users * 2))
         remaining = budget
         turn_i = 0
         closing_bonus = False
@@ -759,7 +898,8 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
             turn_i += 1
             reply = complete(base_url, model, messages, tools=tools, api_key=api_key,
                              temperature=temperature, timeout=timeout,
-                             max_tokens=768)
+                             # A coding agent's diff does not fit in 768.
+                             max_tokens=768 if CONTEXT_TOKENS <= 8192 else 2048)
             calls, assistant = _calls_from_reply(reply)
             spoken = (_spoken_text(reply) or "").strip()
             if spoken:
@@ -819,14 +959,15 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 messages.append({"role": "user", "content": last_user})
                 continue
             need_first = n_user < 2
-            if (room or need_first) and _want_followup(
+            force_followup = n_user < min_users
+            if (room or need_first) and (force_followup or _want_followup(
                     message, turn_i, user_turns=n_user, budget=budget,
-                    agent_text=spoken):
+                    agent_text=spoken)):
                 follow = _user_followup(
                     base_url, model, last_user, spoken,
                     api_key=api_key, timeout=timeout,
                     messages=messages, steps=steps, want=turns[0],
-                    tools=tools)
+                    tools=tools, force=force_followup)
                 if follow:
                     last_user = follow
                     n_user += 1
@@ -835,6 +976,12 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                     if remaining <= 0:
                         remaining = 1
                     continue
+                if turn_stats is not None:
+                    # Wanted a follow-up, writer produced none. Many of
+                    # these means the dataset is going single-turn.
+                    with turn_stats["lock"]:
+                        turn_stats["followup_misses"] = (
+                            turn_stats.get("followup_misses", 0) + 1)
             return _finish_on_agent(steps, spoken or final_text)
         return _finish_on_agent(steps, final_text)
 

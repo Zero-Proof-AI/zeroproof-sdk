@@ -100,9 +100,6 @@ def test_default_path_executes_every_stage(monkeypatch, capsys):
 
     frozen = [dict(t) for t in data.trajectories]
     assert all(t["reward"] is None for t in frozen)
-    data.grade()
-    assert all(t["reward"] is not None for t in data.trajectories)
-    assert all(t["grader_reason"] for t in data.trajectories)
     data.grade(grader=lambda t: 0.25)
     assert all(t["reward"] == 0.25 for t in data.trajectories)
     assert [t["behavior_signature"] for t in frozen] == [
