@@ -84,3 +84,39 @@ def test_recommend_sizes_from_the_grid():
     assert rl["situations"] >= 2 * 400 // 8
     assert rl["simulate_kwargs"]["situations"] == rl["situations"]
     assert any("covering grid" in line for line in rl["reasoning"])
+
+
+def _row_with_arguments(arguments):
+    return {
+        "prompt": "look up issue 4412",
+        "reward": 1,
+        "messages": [
+            {"role": "user", "content": "look up issue 4412"},
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"name": "get_issue", "arguments": arguments}]},
+            {"role": "tool", "name": "get_issue", "content": '{"status": "ok"}'},
+            {"role": "assistant", "content": "Issue 4412 is open."},
+        ],
+    }
+
+
+def test_double_encoded_arguments_normalize_to_structured():
+    double = json.dumps(json.dumps({"number": 4412}))
+    rows = training_rows([_row_with_arguments(double)],
+                         system_prompt=POLICY, tools=TOOLS)
+    wire = rows[0]["messages"][2]["tool_calls"][0]["function"]["arguments"]
+    assert json.loads(wire) == {"number": 4412}
+
+
+def test_export_refuses_unparseable_tool_arguments():
+    import pytest
+    from zeroproof_simulations.export import tool_call_roundtrip
+    bad = _row_with_arguments("number equals 4412")
+    with pytest.raises(ValueError, match="tool_call_roundtrip_invalid"):
+        export_training([bad], system_prompt=POLICY, tools=TOOLS)
+    report = export_training([bad], system_prompt=POLICY, tools=TOOLS,
+                             validate=False)
+    assert report["tool_call_roundtrip"]["invalid"] == 1
+    clean = training_rows([ROW], system_prompt=POLICY, tools=TOOLS)
+    assert tool_call_roundtrip(clean) == {"checked": 1, "invalid": 0,
+                                          "rows": []}
