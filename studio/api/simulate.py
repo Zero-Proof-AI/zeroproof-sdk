@@ -478,9 +478,14 @@ def _execute(job_id: str, spec: dict) -> None:
         if api_key and n_rows > 0:
             try:
                 from token_gate import record_usage
-                record_usage(api_key, input_tokens=n_rows * 500, output_tokens=n_rows * 200)
-            except Exception:
-                pass
+                in_tokens = n_rows * 500
+                out_tokens = n_rows * 200
+                record_usage(api_key, input_tokens=in_tokens, output_tokens=out_tokens)
+                print(f"usage-recorded rows={n_rows} input={in_tokens} output={out_tokens}", flush=True)
+            except Exception as usage_exc:
+                print(f"usage-record-failed rows={n_rows} error={usage_exc}", flush=True)
+        else:
+            print(f"usage-record-skipped api_key={bool(api_key)} rows={n_rows}", flush=True)
     except Exception as exc:
         err = studio_error(_redact(str(exc), secrets))
         trace = _redact(traceback.format_exc()[-2000:], secrets)
