@@ -35,7 +35,7 @@ ORDINARY_SHARE = 0.60
 # Human texture: how the message is typed, independent of what it asks.
 _TEXTURES = ("lowercase", "abbreviations", "typo", "no_punctuation",
              "run_on", "clipped")
-_TONES = ("impatient", "frustrated", "chatty", "polite", "curt")
+_TONES = ("impatient", "frustrated", "chatty", "polite", "curt", "sarcastic")
 # User-side only. Most tagged cells are one question or one ask.
 # Rare compound: several asks, or tell the agent to do several things.
 _ASKS = ("question", "question", "ask")
@@ -141,6 +141,7 @@ _TONE_PROSE = {
     "chatty": "You are being chatty.",
     "curt": "You are curt.",
     "polite": "You are being nice.",
+    "sarcastic": "You are sarcastic about how this is going.",
 }
 
 

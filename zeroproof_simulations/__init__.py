@@ -61,6 +61,14 @@ from .scenarios import (DEFAULT_FAULT_RATE, SEARCH_ARMS, build_dimensions,
                         open_ended_probes, policy_sections,
                         reallocate_search_arms, retarget_regions,
                         scenario_regions, _intent_for_tool)
+from .export import export_training, training_rows
+from .optimize import (filter_rl_rows, group_signal, optimize,
+                       optimize_for_rl, recommend, select_for_rl,
+                       select_for_sft, trim_unanimous_groups)
+from .otel import rows_from_otel
+from .traces import (dimensions_from_traces, drop_leaky_rows, flaw_rows,
+                     leakage_report, mine_traces, simulate_from_traces,
+                     split_pseudo_production)
 
 __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "datasets", "pull", "push_file", "push_rows", "delete_dataset",
@@ -73,7 +81,13 @@ __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "make_candidate_generator",
            "novelty", "connect", "inspect", "claude_code", "ConnectedAgent",
            "AgentProfile", "ModelSimulator", "write_scene_brief",
-           "resolve_topology", "adaptive_allocator", "allocator_slot_counts"]
+           "resolve_topology", "adaptive_allocator", "allocator_slot_counts",
+           "optimize", "optimize_for_rl", "filter_rl_rows", "group_signal",
+           "recommend", "select_for_sft", "select_for_rl",
+           "trim_unanimous_groups", "training_rows", "export_training",
+           "mine_traces", "dimensions_from_traces", "split_pseudo_production",
+           "flaw_rows", "leakage_report", "drop_leaky_rows",
+           "simulate_from_traces", "rows_from_otel"]
 
 _SATURATION_CAP = 50_000
 _SEARCH_ARMS = dict(SEARCH_ARMS)
@@ -397,6 +411,11 @@ class SimulationData:
                 rows_by_minute[key] = rows_by_minute.get(key, 0) + 1
             with open(sidecar, "w") as fh:
                 json.dump({
+                    # The agent spec: a trainer loading this JSONL later
+                    # needs the policy and tool schemas the run knew.
+                    "system_prompt": str(getattr(self.profile, "policy", "")
+                                         or ""),
+                    "tools": list(getattr(self.profile, "tools", None) or []),
                     "stopped_because": self.stopped_because,
                     "coverage": self.coverage,
                     "coverage_curve": self.coverage_curve,
@@ -437,7 +456,8 @@ def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
               model: str | None = None, concurrency: int = 16,
               api_key: str | None = None, path: str | None = None,
               limit: int | None = None, output: str | None = None,
-              prompt: str | None = None):
+              prompt: str | None = None, policy: str = "",
+              tools: list | None = None):
     """Binary 0/1 situation grade. Default brain is hosted Qwen.
 
     ``source`` is a ``SimulationData``, a JSONL path, or a row list.
@@ -445,6 +465,8 @@ def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
     previous score as ``qwen_reward`` when present. Does not run during
     ``simulate()``. Search does not read ``reward``. ``limit`` grades
     that many rows then stops. Hosted Qwen reads ``VLLM_API_KEY``.
+    For a path or row list, pass ``policy=`` and ``tools=`` so the judge
+    sees the agent's rules; a ``SimulationData`` supplies its own.
     """
     if isinstance(source, SimulationData):
         return source.grade_llm(spec=spec, base_url=base_url, model=model,
@@ -458,7 +480,8 @@ def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
         rows = list(source)
         src = ""
     report = apply_grade_llm(
-        rows, backend_spec=spec, base_url=base_url, model=model,
+        rows, policy=str(policy or ""), tools=list(tools or []),
+        backend_spec=spec, base_url=base_url, model=model,
         api_key=api_key, prompt=prompt, concurrency=concurrency, limit=limit)
     dest = path or output or src
     if dest:
@@ -865,13 +888,14 @@ def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = Non
 
 def simulate(agent: Any = None, *, spec: Any = None,
              tools: list[dict] | None = None, system_prompt: str | None = None,
-             budget: int | None = 1000, time_budget: float | None = 60,
+             budget: int | None = 1000, time_budget: float | None = None,
              until: str = "compute", mode: str = "explore",
              situations: int | None = None,
              requests_per_situation: int | None = None,
              rollouts_per_request: int | None = None,
              unique_situations: bool = False,
              grade: bool = False, llm_grade: bool = False,
+             traces: Any = None,
              output: str | None = None,
              advanced: dict | None = None,
              **passed: Any) -> SimulationData:
@@ -883,6 +907,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
     It spends ``budget`` rows and ``time_budget`` seconds on new coverage.
     No default ``reward``. Grade later with ``grade()``. A callable
     ``grader=`` is the only in-simulate score hook.
+
+    ``traces=`` (rows or a JSONL path of production traces) aims the
+    covering grid at the behaviors those traces show instead of the whole
+    space, and drops any generated row that near-copies a source trace,
+    so held-out traces stay out of training. Without it the grid comes
+    from the agent's tools and policy alone (cold start).
 
     Variation is three independent counts. Do not collapse them.
     ``situations`` (N) is distinct worlds. ``requests_per_situation`` /
@@ -997,7 +1027,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
         scenario_concurrency = max(1, int(_writer_raw))
     writer_flight = max(1, scenario_concurrency)
     scenarios_per_request = max(1, int(advanced.pop("scenarios_per_request", 8)))
-    distinct_cards = bool(advanced.pop("distinct_cards", False))
+    # A unique-situation run must walk the planned grid. Previously the
+    # public unique=True knob still left the model writer in weighted
+    # resampling mode unless callers also knew about this private switch.
+    distinct_cards = bool(advanced.pop("distinct_cards", unique_cards))
     if "completions_per_request" in advanced:
         n_ceiling = max(1, min(8, int(advanced["completions_per_request"])))
     else:
@@ -1016,6 +1049,16 @@ def simulate(agent: Any = None, *, spec: Any = None,
     if agent is None and not tools and not policy:
         raise ValueError(
             "simulate needs an agent, tools=, or a system prompt.")
+    trace_rows: list[dict] = []
+    if traces is not None:
+        if isinstance(traces, (str, Path)):
+            from .quality import _load_jsonl
+            trace_rows = [r for r in _load_jsonl(str(traces))
+                          if isinstance(r, dict)]
+        else:
+            trace_rows = [r for r in traces if isinstance(r, dict)]
+        if trace_rows and dimensions is None:
+            dimensions = dimensions_from_traces(trace_rows, tools, policy)
 
     data = SimulationData(profile=profile, arm_weights=dict(_SEARCH_ARMS))
     data.mode = topo["mode"]
@@ -1066,14 +1109,17 @@ def simulate(agent: Any = None, *, spec: Any = None,
     }
     if temperature is not None:
         runner_kw["temperature"] = float(temperature)
+    # Slow customer backends need more than the tuned 60s per completion.
+    rollout_timeout = float(cfg.pop("timeout", 60) or 60)
     if backend:
         spec_backend = _backend_spec(backend)
         url, model_name = parse_backend_spec(spec_backend)
         runner = local_model(url, model_name, tools=tools, system=policy,
-                             timeout=60, result_shapes=shape_box, **runner_kw)
+                             timeout=rollout_timeout,
+                             result_shapes=shape_box, **runner_kw)
         simulator = simulator if simulator is not None else spec_backend
     elif agent is None or kind not in {"callable", "backend_spec", "http"}:
-        runner = hosted_model(tools, system=policy, timeout=60,
+        runner = hosted_model(tools, system=policy, timeout=rollout_timeout,
                               result_shapes=shape_box, **runner_kw)
     else:
         runner, kind = resolve(agent, tools=tools, policy=policy, **runner_kw)
@@ -1085,6 +1131,13 @@ def simulate(agent: Any = None, *, spec: Any = None,
         distinct_cards=distinct_cards, extra_cards=extra_cards,
         scene_brief=scene_box["brief"], time_budget=time_budget,
         run_started=started, mode=topo["mode"], **advanced)
+    planned_cell_keys = {
+        json.dumps(region["assignment"], sort_keys=True, default=str)
+        for region in (getattr(generator, "regions", None) or [])
+        if isinstance(region, dict)
+        and isinstance(region.get("assignment"), dict)
+        and region["assignment"]
+    }
     search = dict(_SEARCH_ARMS)
     generator.arm_weights = dict(_SEARCH_ARMS)
     model_obj = getattr(generator, "model", None)
@@ -1192,6 +1245,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     failing_regions: list[dict] = []
     failing_rows: list[dict] = []
     used: set[str] = set()
+    discarded: set[str] = set()
     used_situations: set[str] = set()
     region_counts: dict[str, int] = {}
     region_sigs: dict[str, set] = {}
@@ -1230,7 +1284,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     used_scenario_ids: set[str] = set()
 
     def _prompt_available(prompt: str) -> bool:
-        if prompt in used:
+        if prompt in used or prompt in discarded:
             return False
         meta = generator.meta.get(prompt) or {}
         sk = _situation_key_from_meta(meta, prompt)
@@ -1399,8 +1453,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
         n_cards = max(2, int(cards or scenarios_per_request))
         n_comp = max(1, min(8, int(
             completions if completions is not None else completions_per_request)))
+        # ~130 tokens per card: long-prompt cards must be realizable.
+        # The old 768 ceiling gave 12-card batches 64 tokens per message.
         token_cap = out_tokens if out_tokens is not None else max(
-            256, min(768, 80 * n_cards + 64))
+            256, min(2048, 130 * n_cards + 128))
         local = make_default_generator(
             tools, policy=policy, per_round=pool_size, seed=seed,
             dimensions=dimensions, simulator=simulator, kind=writer_kind,
@@ -1645,17 +1701,17 @@ def simulate(agent: Any = None, *, spec: Any = None,
                         unused, batch_size=max(1, take),
                         selection_seed=seed + bump, selection_round=bump)
             family_rejected: list[dict] = []
-            if not data.semantic:
+            if not data.semantic and not unique_cards:
                 family_batch = list(scenario_families)
                 selected, family_rejected = cap_scenario_families(
-                    selected, family_batch, cap=2)
+                    selected, family_batch, cap=max(16, n_req * 4))
                 if generator.model is None:
                     fill_to = min(take, len(selected) + len(family_rejected))
                     backfill_n = max(0, fill_to - len(selected))
                     selected.extend(family_rejected[:backfill_n])
                     family_rejected = family_rejected[backfill_n:]
             for row in family_rejected:
-                used.add(row["text"])
+                discarded.add(row["text"])
             if family_rejected:
                 info["family_rejected"] = len(family_rejected)
             if info.get("mixed_spaces_refused") and "embedding_space_mismatch" not in data.degraded:
@@ -1846,7 +1902,26 @@ def simulate(agent: Any = None, *, spec: Any = None,
                     if generator.model is not None and remaining > 0:
                         if (writer_idle >= 4 and not unique_cards
                                 and time_budget is None):
-                            break
+                            # Writer stalled on duplicates. Restart it
+                            # with a rotated seed AND a rotating window
+                            # of already-used asks as avoid pressure:
+                            # reseeding alone reconverges to the same
+                            # asks (measured: 26 vs the old ceiling 28).
+                            if restart_count < MAX_NOVELTY_RESTARTS:
+                                seen = sorted(used)
+                                lo_i = (restart_count * 8) % max(1, len(seen))
+                                window = (seen[lo_i:lo_i + 8]
+                                          or seen[:8])
+                                round_index = _novelty_restart(
+                                    round_index,
+                                    {"concentrated": window},
+                                    clear_avoid=False)
+                                writer_idle = 0
+                                empty_streak = 0
+                                _note(data, "writer restart after ask starvation")
+                            else:
+                                data.stopped_because = "ask_exhausted"
+                                break
                         slots = max(0, writer_flight - len(scenario_futs))
                         _launch_writers(min(slots, writer_flight))
                     elif generator.model is None:
@@ -2015,12 +2090,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
 
             retarget_regions(generator.regions, tools, counts=region_counts,
                              novelty=novelty_fn, behavior_value=behavior_fn,
-                             axis_counts=axis_counts)
+                             axis_counts=axis_counts, mode=topo["mode"])
             model_obj = getattr(generator, "model", None)
             if model_obj is not None and getattr(model_obj, "regions", None):
                 retarget_regions(model_obj.regions, tools, counts=region_counts,
                                  novelty=novelty_fn, behavior_value=behavior_fn,
-                                 axis_counts=axis_counts)
+                                 axis_counts=axis_counts, mode=topo["mode"])
             templates = getattr(generator, "templates", None)
             if templates is not None:
                 templates.regions = generator.regions
@@ -2126,7 +2201,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
                 mean_batch_novelty=_mean_novelty(selected) if selected else None)
             flat = flat + 1 if space_rate < NEW_SIGNATURE_FLOOR else 0
             data.search["plateau_batches"] = flat
-            if until_sat and space_saturated(cell_counts, shape_counts):
+            if until_sat and space_saturated(
+                    cell_counts, shape_counts,
+                    expected_cells=planned_cell_keys):
                 data.stopped_because = "saturation"
                 inflight.clear()
                 inflight_started.clear()
@@ -2148,6 +2225,32 @@ def simulate(agent: Any = None, *, spec: Any = None,
         data.grade(grader)
     if llm_grade:
         data.llm_grade(spec=llm_spec)
+    if trace_rows:
+        # Source traces shaped the grid; they must not shape the rows.
+        # A generated near-copy of a held-out trace is training leakage.
+        mined = mine_traces(trace_rows)
+        kept_rows, leak = drop_leaky_rows(data.trajectories, trace_rows,
+                                          embedder=resolved_embedder)
+        data.trajectories[:] = kept_rows
+        data.search["trace_mining"] = {
+            "n_traces": mined["n"],
+            "n_flaw_rows": len(mined["flaw_rows"]),
+            "faults": mined["faults"],
+            "tools": {name: dict(slot)
+                      for name, slot in mined["tools"].items()},
+            "focused_dimensions": {axis: list(values) for axis, values
+                                   in (dimensions or {}).items()},
+        }
+        data.search["trace_leakage"] = {
+            key: leak[key] for key in
+            ("n", "n_sources", "threshold", "n_leaky", "n_dropped",
+             "max_similarity")}
+    misses = int(turn_stats.get("followup_misses", 0) or 0)
+    if misses:
+        data.search["followup_misses"] = misses
+        if (misses >= 8 and misses >= len(data.trajectories) // 4
+                and "followups_starved" not in data.degraded):
+            data.degraded.append("followups_starved")
     data.elapsed_seconds = time.monotonic() - started
     n = len(data.trajectories)
     data.rows_per_second = (n / data.elapsed_seconds) if data.elapsed_seconds else 0.0

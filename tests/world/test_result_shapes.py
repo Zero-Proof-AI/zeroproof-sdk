@@ -364,3 +364,50 @@ def test_record_shaped_example_does_not_override_run_tests():
     data = env.call("run_tests", {"command": "pytest"}).get("data") or {}
     assert "owner" not in data
     assert "stdout" in data or "exit_code" in data
+
+
+def test_search_follows_query_not_frozen_example():
+    tools = [{"type": "function", "function": {
+        "name": "search_products",
+        "description": "Search the catalog.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string"}}, "required": ["query"]}}}]
+    frozen = {"products": [{
+        "asin": "B08X9QY8WZ",
+        "title": "Wireless Bluetooth Headphones with Noise Cancellation",
+        "price": 79.99,
+        "description": "Premium noise-cancelling headphones.",
+        "images": ["https://example.com/images/headphones-1.jpg"],
+    }]}
+    env = MockEnvironment(
+        tools, world_state="entity exists",
+        result_shapes={"search_products": frozen})
+    towels = env.call("search_products", {"query": "towels"})
+    blob = json.dumps(towels).lower()
+    assert towels["status"] == "ok"
+    assert "headphone" not in blob
+    assert "towel" in blob
+    jackets = env.call("search_products", {"query": "jackets"})
+    other = json.dumps(jackets).lower()
+    assert "jacket" in other
+    assert "towel" not in other
+    missing = MockEnvironment(
+        tools, world_state="entity missing",
+        result_shapes={"search_products": frozen})
+    out = missing.call("search_products", {"query": "towels"})
+    assert out["status"] == "not_found"
+
+
+def test_calculator_tools_return_real_arithmetic():
+    from zeroproof_simulations.sandbox import MockEnvironment
+    tools = [{"type": "function", "function": {"name": "calculate", "parameters": {
+        "type": "object", "properties": {"expression": {"type": "string"}},
+        "required": ["expression"]}}}]
+    env = MockEnvironment(tools)
+    out = env.call("calculate", {"expression": "345 * 678 - 200"})
+    assert out["status"] == "ok"
+    assert out["data"]["result"] == 233710
+    out = env.call("calculate", {"expression": "1500 * 0.87 + 234 - 100"})
+    assert abs(out["data"]["result"] - 1439) < 0.01
+    bad = env.call("calculate", {"expression": "__import__('os')"})
+    assert bad["status"] == "rejected"

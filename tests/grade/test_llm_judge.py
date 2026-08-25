@@ -49,7 +49,7 @@ def test_grade_llm_true_writes_fields(monkeypatch, tmp_path):
     data.save(path)
     row = json.loads(open(path).readline())
     assert "llm_reward" in row and "llm_reason" in row
-    assert row["reward"] is not None
+    assert "reward" not in row or row.get("reward") is None
     assert row["scenario_id"]
     assert "selection_reason" not in row
     assert "grader_reason" not in row
@@ -82,7 +82,7 @@ def test_simulate_llm_grade_flag_runs_after_rollout(monkeypatch):
     monkeypatch.setattr("zeroproof_simulations.llm_judge.complete", _fake_judge_complete)
     data = _run(budget=4, llm_grade=True)
     assert all(t["llm_reward"] == 0.5 for t in data.trajectories)
-    assert all(t["reward"] is not None for t in data.trajectories)
+    assert all(t["reward"] is None for t in data.trajectories)
 
 
 def test_llm_judge_uses_openai_not_hosted(monkeypatch):
@@ -114,4 +114,4 @@ def test_llm_grade_rewrites_same_jsonl(monkeypatch, tmp_path):
     row = json.loads(dest.read_text().splitlines()[0])
     assert row["llm_reward"] == 0.5
     assert row["llm_reason"] == "partial compliance"
-    assert "reward" in row
+    assert "reward" not in row

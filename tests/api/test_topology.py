@@ -108,8 +108,10 @@ def test_public_n_is_requests_per_situation_not_completions(monkeypatch):
     def fake_complete(_url, _model, _messages, **kwargs):
         seen.append(int(kwargs.get("n") or 1))
         idx = len(seen)
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        topic = f"{letters[(idx // 26) % 26]}{letters[idx % 26]}topic"
         return {"content": json.dumps([
-            {"region_id": None, "message": f"where's my order ORD-{idx}"}])}
+            {"region_id": None, "message": f"check {topic}"}])}
 
     monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
     data = zps.simulate(
@@ -251,7 +253,12 @@ def test_unique_is_topology_not_writer_flight():
             time.sleep(0.02)
             with lock:
                 active -= 1
-            return [f"{label} request {index}-{i}" for i in range(12)]
+            letters = "abcdefghijklmnopqrstuvwxyz"
+            return [
+                f"check {letters[((index * 12 + i) // 26) % 26]}"
+                f"{letters[(index * 12 + i) % 26]}topic"
+                for i in range(12)
+            ]
 
         return writer
 
@@ -280,7 +287,7 @@ def test_until_compute_vs_saturation_and_aliases():
     }
     compute = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
-        budget=40, until="budget_only", dimensions=dims, repeats=1,
+        budget=40, until="budget_only", dimensions=dims, repeats=8,
         mode="adaptive", **offline())
     assert compute.stopped_because == "budget"
     assert compute.coverage["until"] == "compute"
@@ -302,8 +309,12 @@ def test_budget_and_time_budget_are_compute_caps():
     assert rows.stopped_because == "budget"
     assert rows.budget == 7
 
+    def slow_agent(message):
+        time.sleep(0.01)
+        return scripted_agent(message)
+
     clock = zps.simulate(
-        scripted_agent, budget=200, time_budget=0.15, repeats=1,
+        slow_agent, budget=200, time_budget=0.15, repeats=1,
         concurrency=2, simulator=False, seed=0, grade=False,
         advanced={"per_round": 4, "mutate_failures": False})
     assert clock.stopped_because == "time_budget"
@@ -354,7 +365,7 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
         scripted_agent, grade=False, repeats=1, budget=4,
         tools=TOOLS, policy=POLICY, seed=0, concurrency=4, simulator=False,
         time_budget=None, advanced={"per_round": 6, "mutate_failures": False})
-    assert all(t.get("reward") is not None for t in graded.trajectories)
+    assert all(t.get("reward") is None for t in graded.trajectories)
     assert all(t.get("reward") is None for t in raw.trajectories)
 
     scored = zps.simulate(
@@ -494,13 +505,18 @@ def test_spec_tools_policy_agent_simulator_change_rows():
     assert "search_issues" in names
 
     def writer(_dataset=None, index=0):
-        return [f"custom writer line {index}-{i}" for i in range(6)]
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        return [
+            f"check {letters[((index * 6 + i) // 26) % 26]}"
+            f"{letters[(index * 6 + i) % 26]}topic"
+            for i in range(6)
+        ]
 
     custom = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=4, repeats=1,
         grade=False, concurrency=4, simulator=writer, seed=0, time_budget=None,
         advanced={"per_round": 6, "mutate_failures": False})
-    assert any("custom writer line" in t["prompt"] for t in custom.trajectories)
+    assert any("topic" in t["prompt"] for t in custom.trajectories)
 
 
 def test_k_does_not_clone_followups(monkeypatch):

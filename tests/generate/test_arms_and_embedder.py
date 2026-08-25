@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import re
 import time
@@ -39,6 +40,7 @@ CALENDAR_POLICY = (
     "Always list existing events before creating a duplicate. "
     "Report tool failures honestly."
 )
+_FAKE_WAVES = itertools.count()
 
 
 def _calendar_agent(message: str) -> dict:
@@ -68,12 +70,19 @@ def _fake_complete(_url, _model, messages, **_kwargs):
     prompt = messages[-1]["content"]
     region_ids = re.findall(r'"region_id":\s*"(sc-[^"]+)"', prompt)
     rnd = int(hashlib.sha256(prompt.encode()).hexdigest()[:6], 16) % 1000
+    wave = next(_FAKE_WAVES)
     payload = []
     for i, region_id in enumerate(region_ids[:6]):
+        token = wave * 6 + i
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        topic = (
+            f"{letters[(token // 676) % 26]}"
+            f"{letters[(token // 26) % 26]}"
+            f"{letters[token % 26]}topic"
+        )
         payload.append({
             "region_id": region_id,
-            "message": (f"Please block March {10 + i} for a dentist visit "
-                        f"start_date 2026-03-{10 + i} (pass {rnd})."),
+            "message": f"Please check {topic}.",
         })
     payload.append({"region_id": None,
                     "message": f"What is the capital of Mongolia? ({rnd})"})
@@ -95,6 +104,15 @@ def test_modal_dead_url_falls_back_to_hash():
     assert len(vecs) == 2
 
 
+def test_hash_embedder_does_not_treat_changed_ids_as_novel():
+    embedder = HashEmbedder()
+    first, second = embedder.embed([
+        "check order 123456 for me",
+        "check order 987654 for me",
+    ])
+    assert first == second
+
+
 def test_offline_fallback_arms():
     """Without a model: structured, open_ended, behavior_targeted, failure_mutation."""
     data = zps.simulate(
@@ -109,7 +127,7 @@ def test_offline_fallback_arms():
         concurrency=8,
         advanced={"per_round": 10, "mutate_failures": True},
     )
-    arms = set(data.arm_yield)
+    arms = {t.get("arm") for t in data.trajectories}
     assert {"structured", "open_ended"} <= arms
     assert "behavior_targeted" in arms
     assert "failure_mutation" in arms
@@ -130,7 +148,7 @@ def test_llm_guided_with_mocked_model(monkeypatch, tmp_path):
         time_budget=None,
         advanced={"per_round": 12, "mutate_failures": True},
     )
-    arms = set(data.arm_yield)
+    arms = {t.get("arm") for t in data.trajectories}
     assert "llm_guided" in arms
     assert {"structured", "open_ended"} & arms
     for t in data.trajectories:
@@ -139,12 +157,13 @@ def test_llm_guided_with_mocked_model(monkeypatch, tmp_path):
         assert not prompt.startswith("The exact request I")
         assert not prompt.startswith("User request payload")
     assert len(data.trajectories) == 48
-    assert all(t["reward"] is not None for t in data.trajectories)
     assert all(t["behavior_signature"] for t in data.trajectories)
     path = str(tmp_path / "calendar_rollout.jsonl")
     data.save(path)
     row = json.loads(open(path).readline())
-    assert {"prompt", "reward", "reason", "steps", "final_text"} <= set(row)
+    assert {"prompt", "steps", "final_text"} <= set(row)
+    assert "reward" not in row
+    assert "reason" not in row
     assert "selection_reason" not in row
     assert "arm" not in row
     assert "behavior_signature" not in row

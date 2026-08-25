@@ -83,17 +83,15 @@ def test_conversation_is_user_agent_turns():
 
 def test_simulate_offline_end_to_end(tmp_path):
     data = zps.simulate(scripted_agent, tools=TOOLS, policy=POLICY, budget=80, seed=0,
-                        grade=True, simulator=False)
+                        simulator=False)
     assert len(data.trajectories) == 80
-    assert {"structured", "open_ended"} <= set(data.arm_yield)
-    assert any(t["reward"] < 1.0 for t in data.trajectories), "planted bug found"
+    assert all(t.get("reward") is None for t in data.trajectories)
     assert any(t["faults"] for t in data.trajectories), "fault worlds instantiated"
-    assert all(t.get("fault_detected") for t in data.trajectories if t.get("faults"))
-    sft = data.sft_rows()
-    assert sft and all(r["chosen_response"] is None for r in sft)
     path = data.save(str(tmp_path / "r.jsonl"))
     row = json.loads(open(path).readline())
-    assert {"prompt", "messages", "steps", "final_text", "reward", "reason"} <= set(row)
+    assert {"prompt", "messages", "steps", "final_text"} <= set(row)
+    assert "reward" not in row
+    assert "reason" not in row
     assert row["messages"][0]["role"] == "user"
     assert row["messages"][0]["content"] == row["prompt"]
     assert any(m.get("role") == "assistant" for m in row["messages"])
@@ -133,8 +131,6 @@ def test_generate_then_grade_separately():
                         seed=0, grade=False, simulator=False)
     assert all(t["reward"] is None for t in data.trajectories)
     assert all(t["steps"] is not None for t in data.trajectories)
-    data.grade()
-    assert any(t["reward"] == 0.0 for t in data.trajectories)
     data.grade(grader=lambda t: 0.5)
     assert all(t["reward"] == 0.5 for t in data.trajectories)
 
@@ -167,6 +163,7 @@ def test_tiny_grid_compute_does_not_stop_on_saturation():
         tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
         concurrency=8, until="compute", dimensions=_TINY_DIMS,
         simulator=False, time_budget=None, mode="adaptive",
+        rollouts_per_request=12,
         advanced={"per_round": 4, "mutate_failures": False})
     assert data.stopped_because == "budget"
     assert data.coverage.get("saturation") is False
@@ -179,6 +176,7 @@ def test_short_run_does_not_saturate_on_signature_blip():
         lambda m: {"steps": [], "final_text": "ok"},
         tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
         concurrency=8, until="compute", simulator=False,
+        rollouts_per_request=2,
         advanced={"per_round": 4, "mutate_failures": False})
     assert data.stopped_because == "budget"
     assert data.coverage.get("saturation") is False

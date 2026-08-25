@@ -283,6 +283,7 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
             policy: str = "", execute: Callable | None = None,
             model: str | None = None, fault_plans: dict | None = None,
             max_turns: int = 5, avg_turns: float = 6,
+            min_user_turns: int = 1,
             turn_stats: dict | None = None,
             temperature: float | None = None) -> tuple[Any, str]:
     if isinstance(target, ConnectedAgent):
@@ -297,6 +298,7 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
         url, spec_model = parse_backend_spec(target)
         return local_model(url, spec_model, tools=tools or [], system=policy,
                            fault_plans=fault_plans, avg_turns=avg_turns,
+                           min_user_turns=min_user_turns,
                            turn_stats=turn_stats, **loop_kw), kind
     if kind == "http":
         if not tools:
