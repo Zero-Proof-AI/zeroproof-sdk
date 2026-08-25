@@ -29,3 +29,8 @@ def test_simulate_records_usage_for_api_key_calls():
 def test_token_gate_bounds_key_cache_growth():
     assert "_KEY_CACHE_MAX" in GATE_SRC
     assert "if len(_key_cache) >= _KEY_CACHE_MAX:" in GATE_SRC
+
+
+def test_token_gate_uses_lock_for_cache_access():
+    assert "_key_cache_lock = threading.Lock()" in GATE_SRC
+    assert "with _key_cache_lock:" in GATE_SRC
