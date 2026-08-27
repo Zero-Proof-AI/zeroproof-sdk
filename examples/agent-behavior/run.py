@@ -43,8 +43,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--personas", default="", help="comma-separated persona names (default: the weighted mix)")
     p.add_argument("--max-steps", type=int, default=12, help="tool rounds before a turn is cancelled")
     p.add_argument("--seed", type=int, default=None, help="make the task and persona draw reproducible")
-    p.add_argument("--api-key", default=None, help="zp_ key (default: $ZEROPROOF_API_KEY)")
-    p.add_argument("--gate", default=None, help=f"platform API base (default: {gate.DEFAULT_GATE})")
+    p.add_argument("--api-key", default=None,
+                   help=f"zp_ key, or set ${gate.API_KEY_ENV}")
+    p.add_argument("--gate", default=None,
+                   help=f"platform API base. Required, or set ${gate.API_URL_ENV}.")
     p.add_argument("--model-url", default=None,
                    help=f"OpenAI-compatible base URL ending in /v1. Required, or set ${agents.MODEL_URL_ENV}.")
     p.add_argument("--model-key", default=None,

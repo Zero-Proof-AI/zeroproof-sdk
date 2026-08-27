@@ -2,8 +2,8 @@
 
 Two endpoints on the Zero Proof gate, and this file is the whole client:
 
-    POST <gate>/v1/traces    the run: spans, prompts, tool calls, tokens
-    POST <gate>/v1/scores    opinions about a run that has already been sent
+    POST $ZEROPROOF_API_URL/v1/traces    the run: spans, prompts, tool calls, tokens
+    POST $ZEROPROOF_API_URL/v1/scores    opinions about a run already sent
 
 The split matters. A judge answers after the turn it is judging has closed:
 scoring costs a model call, nobody wants it in the request path, and a human
@@ -34,7 +34,11 @@ import secrets
 import urllib.error
 import urllib.request
 
-DEFAULT_GATE = "https://wch04mgo2k.execute-api.us-east-1.amazonaws.com"
+#: No default, deliberately. The API base is infrastructure and it can move.
+#: You get it, with your key, from https://www.zeroproofai.com/platform after
+#: signing in. It belongs in the environment, never in a public repo.
+API_URL_ENV = "ZEROPROOF_API_URL"
+API_KEY_ENV = "ZEROPROOF_API_KEY"
 
 #: One attribute, clipped. Keeps a batch under the store's 8 MB limit.
 MAX_ATTR_BYTES = 8000
@@ -278,11 +282,18 @@ class Client:
     """The two POSTs, with the API key on every one of them."""
 
     def __init__(self, api_key: str | None = None, gate: str | None = None) -> None:
-        self.gate = (gate or os.environ.get("ZEROPROOF_API_URL") or DEFAULT_GATE).rstrip("/")
-        self.api_key = api_key or os.environ.get("ZEROPROOF_API_KEY", "")
+        base = gate or os.environ.get(API_URL_ENV, "")
+        if not base:
+            raise GateError(
+                f"No platform API URL. Set {API_URL_ENV} or pass --gate. "
+                "Sign in at https://www.zeroproofai.com/platform; the API base and your "
+                "key are both on that page."
+            )
+        self.gate = base.rstrip("/")
+        self.api_key = api_key or os.environ.get(API_KEY_ENV, "")
         if not self.api_key:
             raise GateError(
-                "No API key. Set ZEROPROOF_API_KEY or pass --api-key. "
+                f"No API key. Set {API_KEY_ENV} or pass --api-key. "
                 "Get one at https://www.zeroproofai.com/platform"
             )
 
@@ -310,4 +321,4 @@ class Client:
         return json.loads(payload) if payload else {}
 
 
-__all__ = ["Trace", "Client", "GateError", "DEFAULT_GATE", "trace_id", "span_id"]
+__all__ = ["Trace", "Client", "GateError", "API_URL_ENV", "API_KEY_ENV", "trace_id", "span_id"]

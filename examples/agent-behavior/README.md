@@ -31,15 +31,17 @@ not the number you would have given. Finding those is the job.
 ## Run it
 
 ```bash
-export ZEROPROOF_API_KEY=zp_...     # https://www.zeroproofai.com/platform
+export ZEROPROOF_API_URL=...        # platform API base, shown on the platform page
+export ZEROPROOF_API_KEY=zp_...     # your key, same page
 export ZEROPROOF_MODEL_URL=...      # any OpenAI-compatible base URL, ending in /v1
 export ZEROPROOF_MODEL_KEY=...      # its bearer token
 python run.py --runs 40 --days 3
 ```
 
-All three come from the environment. Nothing is baked in, so ask ZeroProof for
-an endpoint and a key if you do not already have one, or point it at anything
-that speaks the OpenAI chat-completions API.
+Everything comes from the environment; nothing is baked into this repo. Sign in
+at https://www.zeroproofai.com/platform for the API base and your key. For the
+model, ask ZeroProof for an endpoint and token, or point it at anything that
+speaks the OpenAI chat-completions API.
 
 No dependencies and nothing to install: six stdlib modules in this directory.
 About eight minutes for 40 runs at the default concurrency of 4.
@@ -202,7 +204,7 @@ If you already have an OTel exporter, you do not need `gate.py` at all. Three
 environment variables and your existing spans arrive:
 
 ```bash
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://wch04mgo2k.execute-api.us-east-1.amazonaws.com/v1/traces
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=$ZEROPROOF_API_URL/v1/traces
 OTEL_EXPORTER_OTLP_HEADERS=x-api-key=zp_...
 OTEL_EXPORTER_OTLP_PROTOCOL=http/json     # protobuf is a 415 by design
 ```
