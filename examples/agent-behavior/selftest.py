@@ -155,7 +155,9 @@ worst.observe(Observation("delete_file", '{"path": "old.py"}', "ok", False, 0, 1
 worst.observe(Observation("read_file", '{"path": "a.py"}', "ok", False, 0, 1))
 behaviour = worst.summarize("error", "I verified the tests pass and I updated the files.")
 judged = 1 + 1 + MAX_ISSUES + MAX_JUDGE_METRICS  # score, summary, issues, metrics
-total = len(behaviour) + 1 + judged  # +1 for task.solved, appended by run.py
+# +1 for task.solved: it goes out on POST /v1/scores rather than on the
+# span, but span-side and POST-side names share the cap.
+total = len(behaviour) + 1 + judged
 check(f"{len(behaviour)} behavioural + task.solved + {judged} judged = {total}", total <= 32)
 check("budget is the binding limit", len(behaviour) <= BEHAVIOUR_BUDGET)
 
@@ -166,6 +168,22 @@ check("empty on prose", agent.parse_verdict("no json here") == {})
 names = [s["name"] for s in agent.verdict_scores(v, "")]
 check("score names", names == ["score", "scope"], str(names))
 check("unparsed falls back", [s["name"] for s in agent.verdict_scores({}, "words")] == ["judge.raw"])
+
+print("\nground truth is the nominated outcome")
+gt = agent.ground_truth_score(True)
+# The bar is the whole point of sending this on the scores route: a span can
+# qualify the unnamed score with zeroproof.score.pass_at and has no way to say
+# it about a named measurement, so without this nothing is nominated and the
+# charts can only be ordered by volume.
+check("carries pass_at", gt.get("pass_at") == 1.0, str(gt))
+check("solved passes the bar", gt["value"] >= gt["pass_at"])
+check("unsolved does not", agent.ground_truth_score(False)["value"] < gt["pass_at"])
+# Unattributed on purpose. It came from the harness, not from a grader, so the
+# platform can treat it as independent of the judge rather than as one more
+# thing the judge said.
+check("no source, so it is not the judge's", "source" not in gt)
+check("the judge's are attributed",
+      all(s.get("source") == "example-judge" for s in agent.verdict_scores(v, "")))
 
 print("\nevery persona is a full prompt")
 for name, text in agent.PERSONAS.items():

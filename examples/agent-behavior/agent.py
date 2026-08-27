@@ -425,6 +425,39 @@ def parse_verdict(text: str) -> dict:
     return {}
 
 
+def ground_truth_score(solved: bool) -> dict:
+    """The held-out suite's verdict, in the shape POST /v1/scores takes.
+
+    This goes out on the scores route rather than as a span attribute for one
+    reason: `pass_at`. A span can qualify the unnamed primary score with
+    `zeroproof.score.pass_at`, and there is no equivalent for a named
+    measurement, so `zeroproof.scores.task_solved` can carry a number and
+    nothing that says what the number has to beat.
+
+    Sending the bar is what nominates this as **the outcome**. The platform
+    then ranks every other measurement by whether runs carrying it land above
+    or below it, which is the difference between twenty-two charts and twenty-
+    two charts in a useful order.
+
+    It goes on ground truth rather than on the judge deliberately. The judge is
+    an opinion about the transcript and ranking it against itself measures its
+    self-consistency; the held-out suite is the only thing here the agent could
+    not edit. A production agent usually has no equivalent and has to nominate
+    its judge instead, which is worth knowing when you read the ranking.
+
+    Carries no `source`. It came from this harness rather than from a grader,
+    and leaving it unattributed is what lets the platform treat it as
+    independent of the judge's opinions.
+    """
+    return {
+        "name": "task.solved",
+        "value": 1.0 if solved else 0.0,
+        # Binary, so the bar is the only value that can pass.
+        "pass_at": 1.0,
+        "description": describe("task.solved") or _FALLBACK,
+    }
+
+
 def verdict_scores(verdict: dict, raw: str, source: str = "example-judge") -> list[dict]:
     """The measurement batch for one verdict, in the shape POST /v1/scores takes.
 

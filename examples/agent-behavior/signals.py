@@ -31,8 +31,9 @@ import re
 #: cap: the store merges the two sets and refuses the whole POST past it. So a
 #: greedy behavioural set would not be trimmed, it would cost the verdict.
 #:
-#: The budget below is what `summarize` returns. `run.py` appends `task.solved`
-#: after it, which is why this is 21 and not 22, and the arithmetic is:
+#: The budget below is what `summarize` returns. `task.solved` is sent on
+#: POST /v1/scores rather than on the span, but the cap is shared across both,
+#: so it still costs a name and the arithmetic is unchanged:
 #:
 #:     21 behavioural + 1 task.solved + score + summary + 2 issues + 5 judged = 31
 #:
