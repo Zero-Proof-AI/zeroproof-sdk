@@ -111,16 +111,34 @@ def rows_from_otel(source: Any) -> list[dict]:
     time order become ``steps``, later user turns become user steps, and
     the last assistant output becomes ``final_text``.
     """
-    groups: dict[str, list[tuple[int, dict, dict]]] = {}
+    reward_keys = ("zeroproof.reward",)
+    # Emitters like daisy set the conversation id on the root span only;
+    # child spans carry just the trace id. First let any span's
+    # conversation id claim its whole trace, then group.
+    spans: list[tuple[str, str, int, dict, dict]] = []
+    trace_conv: dict[str, str] = {}
     for span in _iter_spans(source):
         if not isinstance(span, dict):
             continue
         attrs = _attributes(span)
-        conv = str(_first(attrs, _CONVERSATION_KEYS)
-                   or span.get("traceId") or span.get("trace_id") or "")
+        trace = str(span.get("traceId") or span.get("trace_id") or "")
+        conv = str(_first(attrs, _CONVERSATION_KEYS) or "")
+        if conv and trace and trace not in trace_conv:
+            trace_conv[trace] = conv
         start = int(span.get("startTimeUnixNano")
                     or span.get("start_time_unix_nano") or 0)
-        groups.setdefault(conv, []).append((start, span, attrs))
+        if not start:
+            # Platform-gate span dumps stamp milliseconds, not nanos.
+            # Without a timestamp, step order silently becomes span
+            # arrival order, which OTLP batch exporters do not preserve.
+            ms = (span.get("startedMs") or span.get("started_ms")
+                  or span.get("startTimeMs") or 0)
+            start = int(ms) * 1_000_000
+        spans.append((trace, conv, start, span, attrs))
+    groups: dict[str, list[tuple[int, dict, dict]]] = {}
+    for trace, conv, start, span, attrs in spans:
+        key = conv or trace_conv.get(trace) or trace
+        groups.setdefault(key, []).append((start, span, attrs))
 
     rows: list[dict] = []
     for conv, entries in groups.items():
@@ -128,16 +146,44 @@ def rows_from_otel(source: Any) -> list[dict]:
         prompt = ""
         final_text = ""
         steps: list[dict] = []
+        reward = None
         seen_users: set[str] = set()
         for _, span, attrs in entries:
+            raw_reward = _first(attrs, reward_keys)
+            if raw_reward is not None and reward is None:
+                try:
+                    value = float(raw_reward)
+                except (TypeError, ValueError):
+                    value = None
+                if value is not None and 0.0 <= value <= 1.0:
+                    reward = int(value) if value in (0.0, 1.0) else value
             tool_args = _first(attrs, _TOOL_IN_KEYS)
             if tool_args is not None:
                 name = str(_first(attrs, _TOOL_NAME_KEYS)
                            or span.get("name") or "tool")
+                result = _parse(_first(attrs, _TOOL_OUT_KEYS))
+                # Emitters like daisy flag failures via gen_ai.tool.status
+                # rather than inside the result payload. Surface that as a
+                # canonical failure result so fault mining and trace aiming
+                # see the error instead of a plain-looking output.
+                tool_status = str(_first(attrs, ("gen_ai.tool.status",))
+                                  or "").lower()
+                if tool_status in {"error", "failed", "failure"} and not (
+                        isinstance(result, dict) and result.get("status")):
+                    error = ""
+                    for event in span.get("events") or []:
+                        for attr in (event or {}).get("attributes") or []:
+                            if attr.get("key") == "exception.message":
+                                error = str(_otlp_value(attr.get("value")))
+                                break
+                    wrapped: dict = {"status": "error", "output": result}
+                    if error:
+                        wrapped["error"] = error
+                    result = wrapped
                 steps.append({
                     "tool": name,
                     "arguments": _parse(tool_args),
-                    "result": _parse(_first(attrs, _TOOL_OUT_KEYS)),
+                    "result": result,
                 })
                 continue
             for text in _message_texts(_first(attrs, _MESSAGE_KEYS), "user"):
@@ -153,9 +199,14 @@ def rows_from_otel(source: Any) -> list[dict]:
             if outputs:
                 final_text = outputs[-1]
         if prompt or steps or final_text:
-            rows.append({"prompt": prompt, "steps": steps,
-                         "final_text": final_text,
-                         "conversation_id": conv})
+            row = {"prompt": prompt, "steps": steps,
+                   "final_text": final_text,
+                   "conversation_id": conv}
+            # zeroproof.reward span attributes are preserved when present
+            # and in [0, 1]; rows without them stay ungraded, first-class.
+            if reward is not None:
+                row["reward"] = reward
+            rows.append(row)
     return rows
 
 

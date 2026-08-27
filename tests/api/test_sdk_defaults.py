@@ -12,7 +12,8 @@ def test_default_budget_is_500():
     public = [
         "agent", "spec", "tools", "system_prompt", "budget", "time_budget", "until",
         "mode", "situations", "requests_per_situation", "rollouts_per_request",
-        "unique_situations", "grade", "llm_grade", "traces", "output",
+        "unique_situations", "grade", "llm_grade", "traces", "grader",
+        "strategy", "scaffold", "output",
         "advanced",
     ]
     named = [name for name, p in params.items()
@@ -33,7 +34,9 @@ def test_default_budget_is_500():
     assert params["advanced"].default is None
     for moved in ("concurrency", "dimensions", "simulator", "backend",
                   "fault_rate", "risk", "texture", "max_turns", "avg_turns",
-                  "temperature", "seed", "grader", "llm_spec",
+                  # grader graduated from moved-kwarg to a named param on
+                  # 2026-08-27 (doctrine sketch, Jacob-approved).
+                  "temperature", "seed", "llm_spec",
                   "embedder", "unique", "repeats", "n", "phrasings", "repeat_policy",
                   "extra_situations", "rollouts_per_prompt", "policy"):
         assert moved not in params

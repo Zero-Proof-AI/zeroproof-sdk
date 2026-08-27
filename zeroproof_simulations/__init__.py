@@ -61,16 +61,20 @@ from .scenarios import (DEFAULT_FAULT_RATE, SEARCH_ARMS, build_dimensions,
                         open_ended_probes, policy_sections,
                         reallocate_search_arms, retarget_regions,
                         scenario_regions, _intent_for_tool)
-from .export import export_training, training_rows
+from .export import (export_dataset, export_preference, export_training,
+                     training_rows)
 from .optimize import (filter_rl_rows, group_signal, optimize,
                        optimize_for_rl, recommend, select_for_rl,
                        select_for_sft, trim_unanimous_groups)
 from .otel import rows_from_otel
 from .traces import (dimensions_from_traces, drop_leaky_rows, flaw_rows,
-                     leakage_report, mine_traces, simulate_from_traces,
-                     split_pseudo_production)
+                     format_trace_report, leakage_report,
+                     load_traces, mine_traces, simulate_from_traces,
+                     split_pseudo_production, trace_report)
 from .preflight import (FAILURE_CLASSES, classify_failure, dataset_report,
                         format_dataset_report, preflight)
+from .judging import (ScoredData, build_preference_pairs, evaluate,
+                      normalize_judge_result, run_judge)
 
 __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "datasets", "pull", "push_file", "push_rows", "delete_dataset",
@@ -90,8 +94,15 @@ __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "mine_traces", "dimensions_from_traces", "split_pseudo_production",
            "flaw_rows", "leakage_report", "drop_leaky_rows",
            "simulate_from_traces", "rows_from_otel",
-           "preflight", "dataset_report", "format_dataset_report",
-           "classify_failure", "FAILURE_CLASSES"]
+           # format_* helpers are presentation, not mechanics; still
+           # importable for the CLI but out of the public contract
+           # (SDK-is-the-engine split, Sahana 2026-08-27).
+           "load_traces", "trace_report",
+           "preflight", "dataset_report",
+           "classify_failure", "FAILURE_CLASSES",
+           "run_judge", "evaluate", "ScoredData", "normalize_judge_result",
+           "export_dataset", "export_preference", "build_preference_pairs",
+           ]
 
 _SATURATION_CAP = 50_000
 _SEARCH_ARMS = dict(SEARCH_ARMS)
@@ -256,6 +267,7 @@ class SimulationData:
     stopped_because: str = "budget"
     declared_tools: set = field(default_factory=set)
     stages: list[str] = field(default_factory=list)
+    scaffold_chars: int = 0
     degraded: list[str] = field(default_factory=list)
     semantic: bool = False
     profile: AgentProfile | None = None
@@ -286,12 +298,33 @@ class SimulationData:
     unique_situations: bool = False
     allocator: dict = field(default_factory=dict)
 
+    @property
+    def metadata(self) -> dict:
+        """Small structured summary of how this run was generated.
+        Mechanics only — interpretation (evidence labels, percentages,
+        display copy) belongs to the consumer, never the SDK."""
+        strategy = self.search.get("strategy") or {}
+        mining = self.search.get("trace_mining") or {}
+        weight = strategy.get("steering_weight") or {}
+        targeted = sum(1 for r in self.trajectories
+                       if (r.get("steering") or {}).get("origin")
+                       == "targeted")
+        return {
+            "strategy": strategy.get("resolved"),
+            "trace_count": mining.get("n_traces", 0),
+            "trace_regions": mining.get("regions"),
+            "applied_steering_weight": weight.get("applied"),
+            "targeted_rows": targeted,
+            "background_rows": len(self.trajectories) - targeted,
+        }
+
     def _rewrite(self, path: str | None = None) -> None:
         dest = path or self.path
         if dest:
             self.save(dest)
 
-    def grade(self, grader=None, *, llm: bool = False, llm_spec: str | None = None,
+    def grade(self, grader=None, *, judge=None, llm: bool = False,
+              llm_spec: str | None = None,
               api_key: str | None = None, path: str | None = None,
               concurrency: int = 32, llm_concurrency: int = 16):
         """Grade after simulation with hosted Qwen or a custom callable.
@@ -299,7 +332,17 @@ class SimulationData:
         With no callable, this is the binary hosted-Qwen grader and reads
         ``VLLM_API_KEY`` from the environment. Pass a callable for a custom
         score. Simulation itself never invokes this method by default.
+
+        ``judge=`` is the contract path: any callable honoring the judge
+        contract (see ``zeroproof_simulations.judging``). It returns a
+        ``ScoredData`` of copies — trajectories here stay unmodified, judge
+        errors are marked per-row instead of coerced to 0 — and its output
+        feeds ``export_training`` and ``simulate(traces=...)`` directly.
         """
+        if judge is not None:
+            from .judging import run_judge
+            return run_judge(self.trajectories, judge, source="grade",
+                             concurrency=min(int(concurrency), 32))
         if llm:
             return self.llm_grade(spec=llm_spec, concurrency=llm_concurrency,
                                  api_key=api_key, path=path)
@@ -789,6 +832,10 @@ _MOVED_NAMES = {
     "texture", "max_turns", "avg_turns", "min_user_turns", "temperature", "seed", "grader",
     "llm_spec", "embedder", "seed_prompts", "extra_situations",
     "prefer_success",
+    # steering_weight stays an advanced knob until the tranche-1
+    # calibration lands (Sahana, 2026-08-27): strategy default is auto,
+    # raw weight hidden from the named surface.
+    "steering_weight",
 }
 
 
@@ -900,6 +947,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
              unique_situations: bool = False,
              grade: bool = False, llm_grade: bool = False,
              traces: Any = None,
+             grader: Any = None,
+             strategy: str = "auto",
+             scaffold: str | None = None,
              output: str | None = None,
              advanced: dict | None = None,
              **passed: Any) -> SimulationData:
@@ -918,6 +968,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
     so held-out traces stay out of training. Without it the grid comes
     from the agent's tools and policy alone (cold start).
 
+    ``scaffold=`` is generation-only guidance appended to the system prompt
+    of the MODEL-BACKED teacher during rollout (and to the scene writer).
+    It never enters ``profile.policy``, so exports and evals stay on the
+    plain policy; it is ignored for user-supplied callable agents. Measured
+    to help some agents and hurt others — configure per agent, no default.
+
     Variation is three independent counts. Do not collapse them.
     ``situations`` (N) is distinct worlds. ``requests_per_situation`` /
     ``phrasings`` (n) is different human wordings of one world.
@@ -932,6 +988,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
     """
     cfg, aliases = _merge_advanced(advanced, passed)
     policy = resolve_system_prompt(system_prompt, aliases.get("policy"))
+    # Generation-only teacher guidance. profile.policy and export stay plain.
+    scaffold_text = str(scaffold or "").strip()
     unique_flag = bool(unique_situations or aliases.get("unique", False))
     repeats = aliases.get("repeats")
     rollouts_per_prompt = aliases.get("rollouts_per_prompt")
@@ -977,7 +1035,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
     min_user_turns = max(1, int(cfg.pop("min_user_turns", 1)))
     temperature = cfg.pop("temperature", None)
     seed = int(cfg.pop("seed", 0))
-    grader = cfg.pop("grader", None)
+    # The named grader= parameter wins; advanced={"grader": ...} stays as
+    # the legacy spelling. Both route to one application path below.
+    grader = grader if grader is not None else cfg.pop("grader", None)
+    cfg.pop("grader", None)
     llm_grade = bool(llm_grade or cfg.pop("llm_grade", False))
     llm_spec = cfg.pop("llm_spec", None)
     embedder = cfg.pop("embedder", "hash")
@@ -1049,11 +1110,43 @@ def simulate(agent: Any = None, *, spec: Any = None,
     profile = inspect(agent, tools=tools, system_prompt=policy)
     tools = list(profile.tools or [])
     policy = str(profile.policy or "")
+    gen_policy = f"{policy}\n\n{scaffold_text}" if scaffold_text else policy
     writer_kind = _kind_from_spec(spec, policy)
     if agent is None and not tools and not policy:
         raise ValueError(
             "simulate needs an agent, tools=, or a system prompt.")
     trace_rows: list[dict] = []
+    # strategy= names the coverage stance explicitly (doctrine: traces
+    # change the coverage DISTRIBUTION, never the space). auto resolves
+    # descriptively and records its reason; it never picks "targeted" on
+    # its own - narrowing is an explicit user choice (early-bias risk,
+    # finding 46).
+    if strategy not in ("auto", "broad", "trace", "targeted"):
+        raise ValueError("strategy= must be auto, broad, trace, or targeted")
+    resolved_strategy = strategy
+    if strategy == "auto":
+        resolved_strategy = "trace" if traces is not None else "broad"
+    if resolved_strategy in ("trace", "targeted") and traces is None:
+        raise ValueError(f"strategy='{resolved_strategy}' needs traces=")
+    # steering_weight is the calibration knob for doctrine point 5 (how
+    # much the trace-aimed distribution outweighs background coverage).
+    # An advanced knob until tranche 1 lands; accepted via
+    # steering_weight= or advanced= and RECORDED here so eval rows can
+    # be joined back to the weight that produced their training set;
+    # density application lands with the steering module. None means
+    # "rule decides" (steering's sparse-capped default), an explicit
+    # number is an override.
+    steering_weight = cfg.pop("steering_weight", None)
+    if steering_weight is not None:
+        try:
+            steering_weight = float(steering_weight)
+        except (TypeError, ValueError):
+            raise ValueError("steering_weight= must be a number in [0, 1]")
+        if not 0.0 <= steering_weight <= 1.0:
+            raise ValueError("steering_weight= must be a number in [0, 1]")
+        if traces is None:
+            raise ValueError("steering_weight= needs traces=")
+
     if traces is not None:
         if isinstance(traces, (str, Path)):
             from .quality import _load_jsonl
@@ -1061,10 +1154,16 @@ def simulate(agent: Any = None, *, spec: Any = None,
                           if isinstance(r, dict)]
         else:
             trace_rows = [r for r in traces if isinstance(r, dict)]
-        if trace_rows and dimensions is None:
-            dimensions = dimensions_from_traces(trace_rows, tools, policy)
+        if (trace_rows and dimensions is None
+                and resolved_strategy != "broad"):
+            # trace: denser near observed behaviors, background kept.
+            # targeted: drop tools the traces never touched (narrow).
+            dimensions = dimensions_from_traces(
+                trace_rows, tools, policy,
+                broaden=resolved_strategy != "targeted")
 
     data = SimulationData(profile=profile, arm_weights=dict(_SEARCH_ARMS))
+    data.scaffold_chars = len(scaffold_text)
     data.mode = topo["mode"]
     data.repeat_policy = topo["repeat_policy"]
     data.n_situations = n_situations_target
@@ -1091,7 +1190,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
             elif "result_shapes_unavailable" not in data.degraded:
                 data.degraded.append("result_shapes_unavailable")
             brief = write_scene_brief(
-                tools, policy, backend_spec=scene_spec, kind=writer_kind)
+                tools, gen_policy, backend_spec=scene_spec, kind=writer_kind)
             scene_box["brief"] = brief
             data.scene_brief = brief
             data.scene_brief_seconds = time.monotonic() - scene_t0
@@ -1118,12 +1217,13 @@ def simulate(agent: Any = None, *, spec: Any = None,
     if backend:
         spec_backend = _backend_spec(backend)
         url, model_name = parse_backend_spec(spec_backend)
-        runner = local_model(url, model_name, tools=tools, system=policy,
+        runner = local_model(url, model_name, tools=tools, system=gen_policy,
                              timeout=rollout_timeout,
                              result_shapes=shape_box, **runner_kw)
         simulator = simulator if simulator is not None else spec_backend
     elif agent is None or kind not in {"callable", "backend_spec", "http"}:
-        runner = hosted_model(tools, system=policy, timeout=rollout_timeout,
+        runner = hosted_model(tools, system=gen_policy,
+                              timeout=rollout_timeout,
                               result_shapes=shape_box, **runner_kw)
     else:
         runner, kind = resolve(agent, tools=tools, policy=policy, **runner_kw)
@@ -2228,8 +2328,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
             if not data.scene_brief and "scene_brief_unavailable" not in data.degraded:
                 data.degraded.append("scene_brief_unavailable")
     data.declared_tools = declared
-    if callable(grader):
-        data.grade(grader)
+    # grader application happens once, at the end of simulate, through
+    # run_judge: full judge contract (judge_status, lineage, no silent
+    # zeros) instead of the legacy data.grade() write-back.
     if llm_grade:
         data.llm_grade(spec=llm_spec)
     if trace_rows:
@@ -2290,6 +2391,39 @@ def simulate(agent: Any = None, *, spec: Any = None,
     data.coverage["requests_per_situation"] = n_req
     data.coverage["rollouts_per_request"] = repeat_count
     data.allocator = dict(allocator_counts)
+    data.search["strategy"] = {
+        "requested": strategy,
+        "resolved": resolved_strategy,
+        "broaden": resolved_strategy != "targeted",
+        "reason": ("traces supplied -> aimed distribution"
+                   if resolved_strategy == "trace" and strategy == "auto"
+                   else "no traces -> broad exploration"
+                   if strategy == "auto" else "explicit"),
+        "steering_weight": {"requested": steering_weight,
+                            "applied": steering_weight,
+                            "source": ("override" if steering_weight
+                                       is not None else "rule")},
+    }
+    if grader is not None:
+        # Customer grader inside the loop (doctrine 8): score the
+        # generated rows with the caller's own judge, write the verdicts
+        # onto the trajectories, and disclose the split. Judge failures
+        # mark rows unjudged; they never become silent zeros.
+        from .judging import run_judge
+        scored = run_judge(data.trajectories, grader, source="grade")
+        for row, verdict in zip(data.trajectories, scored.rows):
+            for key in ("reward", "reason", "judge_status", "judge_name",
+                        "failure_class", "lineage"):
+                if key in verdict:
+                    row[key] = verdict[key]
+        data.search["grader"] = {
+            "judge": scored.judge_name,
+            "scored": len(scored),
+            "passes": len(scored.passes()),
+            "failures": len(scored.failures()),
+            "partials": len(scored.partials()),
+            "unjudged": len(scored.unjudged()),
+        }
     if out_path is not None and data.trajectories:
         data.save(str(out_path), meta=True)
     return data

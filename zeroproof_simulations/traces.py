@@ -35,8 +35,12 @@ _FAULT_TO_AXIS = {
 def _binary_reward(row: dict) -> int | None:
     for key in ("reward", "qwen_reward"):
         value = row.get(key)
-        if value is None or isinstance(value, bool):
+        if value is None:
             continue
+        if isinstance(value, bool):
+            # External rows label with True/False; a skipped False would
+            # hide that trace's flaw signal from mining.
+            value = int(value)
         try:
             number = float(value)
         except (TypeError, ValueError):
@@ -305,7 +309,256 @@ def simulate_from_traces(traces: Sequence[dict], agent: Any = None, *,
                      mode=mode, traces=traces, **kwargs)
 
 
+# --- canonical trace input --------------------------------------------------
+#
+# The one public trajectory schema everything trace-shaped normalizes to:
+#
+#     prompt:     str            first user ask
+#     steps:      list of {"user": str}
+#                       | {"tool": str, "arguments": dict, "result": Any}
+#                       | {"text": str}                  agent turns
+#     final_text: str            the agent's last message
+#     reward:     0 | 1          OPTIONAL; ungraded traces are first-class
+#
+# Every other key carries through untouched. ``simulate(traces=...)``
+# accepts anything ``load_traces`` accepts: ZeroProof simulation rows, eval
+# rollouts, raw JSONL exports, ``rows_from_otel`` output, graded or not.
+
+_PROMPT_KEYS = ("prompt", "question", "input", "task", "ask")
+_STEP_KEYS = ("steps", "tool_trace", "trace")
+_FINAL_KEYS = ("final_text", "final", "output", "response", "answer")
+
+
+def _steps_from_messages(messages: Sequence[dict]) -> list[dict]:
+    steps: list[dict] = []
+
+    def _attach(result: Any, name: str) -> None:
+        # Match by tool name first, then first-unfilled (FIFO). Never
+        # last-unfilled: parallel calls answered in order would swap
+        # payloads and mining would blame the wrong tool. An orphan result
+        # becomes its own step so its fault still reaches the miner.
+        unfilled = [s for s in steps if "tool" in s and "result" not in s]
+        target = None
+        if name:
+            target = next((s for s in unfilled if s.get("tool") == name),
+                          None)
+        if target is None and unfilled:
+            target = unfilled[0]
+        if target is None:
+            steps.append({"tool": name, "arguments": {}, "result": result})
+        else:
+            target["result"] = result
+
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        content = str(message.get("content") or "")
+        if role == "user":
+            steps.append({"user": content})
+        elif role == "assistant":
+            for call in message.get("tool_calls") or []:
+                fn = call.get("function") if isinstance(
+                    call.get("function"), dict) else call
+                raw = (fn or {}).get("arguments")
+                if isinstance(raw, str):
+                    try:
+                        raw = json.loads(raw)
+                    except ValueError:
+                        pass
+                steps.append({"tool": str((fn or {}).get("name") or ""),
+                              "arguments": raw if isinstance(raw, dict)
+                              else {}})
+            if content:
+                steps.append({"text": content})
+        elif role == "tool":
+            result: Any = content
+            try:
+                result = json.loads(content)
+            except ValueError:
+                pass
+            _attach(result, str(message.get("name") or ""))
+    return steps
+
+
+def _coerce_reward(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number in (0.0, 1.0) else None
+
+
+def load_traces(source) -> list[dict]:
+    """Normalize any supported trace source to the canonical schema above.
+
+    ``source`` is a JSONL path or an iterable of dicts. Rows carrying
+    ``tool_trace``/``trace`` instead of ``steps``, ``final``/``output``/
+    ``response`` instead of ``final_text``, or only OpenAI-style
+    ``messages`` are converted; ``reward`` is kept only when it coerces
+    cleanly to 0 or 1, and its absence is fine. Rows that are not dicts or
+    carry neither an ask nor any steps are dropped.
+    """
+    from pathlib import Path as _Path
+    if isinstance(source, (str, _Path)):
+        from .quality import _load_jsonl
+        rows = _load_jsonl(source)
+    else:
+        rows = list(source)
+    out: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row = dict(row)
+        # An empty steps list is absence, not content: real exports emit
+        # steps: [] next to a populated messages/tool_trace field.
+        steps = next((row[k] for k in _STEP_KEYS
+                      if isinstance(row.get(k), list) and row[k]), None)
+        if steps is None and isinstance(row.get("messages"), list):
+            steps = _steps_from_messages(row["messages"])
+        row["steps"] = [s for s in (steps or []) if isinstance(s, dict)]
+        prompt = next((str(row[k]) for k in _PROMPT_KEYS
+                       if row.get(k)), "")
+        if not prompt:
+            prompt = next((str(s["user"]) for s in row["steps"]
+                           if "user" in s), "")
+        row["prompt"] = prompt
+        final = next((str(row[k]) for k in _FINAL_KEYS if row.get(k)), "")
+        if not final:
+            final = next((str(s["text"]) for s in reversed(row["steps"])
+                          if "text" in s), "")
+        row["final_text"] = final
+        if "reward" in row:
+            reward = _coerce_reward(row["reward"])
+            if reward is None:
+                row.pop("reward")
+            else:
+                row["reward"] = reward
+        if row["prompt"] or row["steps"]:
+            out.append(row)
+    return out
+
+
+def trace_report(traces, tools: list[dict] | None = None,
+                 policy: str = "") -> dict[str, Any]:
+    """What these traces contain and what they will aim generation at.
+
+    Run before ``simulate(traces=...)``. With ``tools`` (and optionally
+    ``policy``) the report also computes the actual grid emphasis: which
+    axis values move forward in the coverage grid because of these traces.
+    Reward stays optional; ungraded counts are reported, never required.
+    ``advisory_labels`` counts rows carrying only a ``qwen_reward``: those
+    labels do steer trace mining, so they are disclosed, not hidden under
+    "ungraded". ``dropped`` counts input rows that carried no usable
+    signal and were discarded by normalization.
+    """
+    from pathlib import Path as _Path
+    if isinstance(traces, (str, _Path)):
+        from .quality import _load_jsonl
+        raw = _load_jsonl(traces)
+    else:
+        raw = list(traces)
+    rows = load_traces(raw)
+    mined = mine_traces(rows)
+    graded = [r for r in rows if r.get("reward") in (0, 1)]
+    advisory = [r for r in rows if r.get("reward") not in (0, 1)
+                and _coerce_reward(r.get("qwen_reward")) is not None]
+    passes = sum(r["reward"] for r in graded)
+    report: dict[str, Any] = {
+        "traces": len(rows),
+        "dropped": len(raw) - len(rows),
+        "unique_prompts": len({" ".join(str(r.get("prompt") or "")
+                                        .lower().split()) for r in rows}),
+        "tools_observed": mined["tools"],
+        "faults_observed": dict(mined["faults"]),
+        "world_states_observed": dict(mined.get("world_states") or {}),
+        "distinct_behaviors": mined["unique_behaviors"],
+        "graded": len(graded),
+        "passes": passes,
+        "fails": len(graded) - passes,
+        # A row is ungraded only when NO label is in play: advisory
+        # (qwen_reward-only) rows steer trace mining, so they are counted
+        # and disclosed separately, never folded into "ungraded".
+        "ungraded": len(rows) - len(graded) - len(advisory),
+        "advisory_labels": len(advisory),
+    }
+    if tools:
+        aimed = dimensions_from_traces(rows, tools, policy)
+        base = build_dimensions(tools, policy)
+        # Aiming works two ways: an axis NARROWS (unobserved values are
+        # dropped, so every retained value's budget share rises) or values
+        # REORDER toward the front. The clean contrast values stay in every
+        # aimed axis by design and receive no extra weight, so they are
+        # excluded from the claim.
+        clean = {"success", "entity exists", NO_FAULT}
+        emphasis: dict[str, list[str]] = {}
+        for axis in ("tool", "tool_condition", "world_state"):
+            base_axis = list(base.get(axis) or [])
+            aimed_axis = list(aimed.get(axis) or [])
+            base_pos = {v: i for i, v in enumerate(base_axis)}
+            narrowed = len(aimed_axis) < len(base_axis)
+            gained = [v for i, v in enumerate(aimed_axis)
+                      if v in base_pos and v not in clean
+                      and (narrowed or i < base_pos[v])]
+            if gained:
+                emphasis[axis] = gained
+        report["emphasis"] = emphasis
+        foreign = [name for name in mined["tools"]
+                   if name not in {str((t.get("function") or t).get("name")
+                                       or "") for t in tools}]
+        if foreign:
+            report["foreign_tools"] = foreign
+    return report
+
+
+def format_trace_report(report: dict[str, Any]) -> str:
+    """The trace report as a text block, aiming stated in plain words."""
+    lines = [
+        f"traces:             {report['traces']}",
+        f"unique prompts:     {report['unique_prompts']}",
+        f"distinct behaviors: {report['distinct_behaviors']}",
+        f"graded:             {report['graded']} "
+        f"(pass {report['passes']} / fail {report['fails']}), "
+        f"ungraded {report['ungraded']}"
+        + (f", advisory judge labels {report['advisory_labels']} "
+           "(these steer aiming)" if report.get("advisory_labels") else ""),
+        "tools observed:     " + (", ".join(
+            f"{name} x{slot['n']}"
+            + (f" ({slot['fault_n']} faulted)" if slot.get("fault_n") else "")
+            for name, slot in sorted(report["tools_observed"].items()))
+            or "none"),
+        "faults observed:    " + (", ".join(
+            f"{name} x{n}" for name, n in
+            sorted(report["faults_observed"].items())) or "none"),
+    ]
+    if report.get("dropped"):
+        lines.append(f"dropped rows:       {report['dropped']} "
+                     "(no usable signal after normalization)")
+    if report.get("foreign_tools"):
+        lines.append("warning: observed tools not in this agent's toolset: "
+                     + ", ".join(report["foreign_tools"][:5]))
+    emphasis = report.get("emphasis")
+    if emphasis:
+        parts = []
+        names = {"tool": "tools", "tool_condition": "faults",
+                 "world_state": "world states"}
+        for axis, values in emphasis.items():
+            shown = ", ".join(values[:5])
+            if len(values) > 5:
+                shown += f" (+{len(values) - 5} more)"
+            parts.append(f"{names.get(axis, axis)} {shown}")
+        lines.append("extra generation weight goes to: " + "; ".join(parts))
+    else:
+        lines.append("grid emphasis: computed against the agent's tools at "
+                     "simulate time (pass tools= to preview it here)")
+    return "\n".join(lines)
+
+
 __all__ = [
     "mine_traces", "dimensions_from_traces", "split_pseudo_production",
     "flaw_rows", "leakage_report", "drop_leaky_rows", "simulate_from_traces",
+    "trace_story",
+    "load_traces", "trace_report", "format_trace_report",
 ]

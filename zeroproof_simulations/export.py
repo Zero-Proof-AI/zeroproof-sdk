@@ -26,7 +26,8 @@ from .quality import _load_jsonl, _write_jsonl
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
 _CARRY_KEYS = ("reward", "qwen_reward", "reason", "prompt", "scenario_id",
-               "world_state", "faults", "label_source")
+               "world_state", "faults", "label_source",
+               "failure_class", "judge_status", "judge_name", "lineage")
 
 
 def _strip_think(text: str) -> str:
@@ -223,4 +224,57 @@ def export_training(source, output: str | None = None, *,
     return report
 
 
-__all__ = ["training_rows", "export_training", "tool_call_roundtrip"]
+# Product name: it exports a dataset, not a training run. The old name
+# stays as an alias so nothing written today breaks.
+export_dataset = export_training
+
+
+def export_preference(pairs: Sequence[dict], output: str | None = None, *,
+                      system_prompt: str | None = None,
+                      tools: Sequence[dict] | None = None,
+                      strip_think: bool = True,
+                      validate: bool = True) -> dict[str, Any]:
+    """Write chosen/rejected pairs as DPO-style JSONL.
+
+    Each line: ``{"prompt": ..., "chosen": [...messages...], "rejected":
+    [...messages...]}`` in the same wire format as ``export_dataset``,
+    with the roundtrip gate run over BOTH sides. Pairs come from
+    ``ScoredData.select_for_preference()`` / ``build_preference_pairs``.
+    """
+    from zeroproof_simulations import conversation
+    system = str(system_prompt or "")
+    out_rows: list[dict] = []
+    for pair in pairs:
+        if not isinstance(pair, dict):
+            continue
+        entry: dict[str, Any] = {"prompt": pair.get("prompt")}
+        for side in ("chosen", "rejected"):
+            row = pair.get(side) or {}
+            messages = row.get("messages") or conversation(row)
+            entry[side] = _convert_messages(messages, system=system,
+                                            strip_think=strip_think)
+        if tools:
+            entry["tools"] = list(tools)
+        for key in ("chosen_reason", "rejected_reason",
+                    "rejected_failure_class", "lineage"):
+            if pair.get(key) is not None:
+                entry[key] = pair[key]
+        out_rows.append(entry)
+    both_sides = [{"messages": r[side]} for r in out_rows
+                  for side in ("chosen", "rejected")]
+    roundtrip = tool_call_roundtrip(both_sides)
+    if validate and roundtrip["invalid"]:
+        raise ValueError(
+            f"tool_call_roundtrip_invalid: {roundtrip['invalid']} of "
+            f"{roundtrip['checked']} tool calls in the pairs do not parse "
+            "back to structured arguments. Fix the rows or pass "
+            "validate=False.")
+    report: dict[str, Any] = {"pairs": len(out_rows),
+                              "tool_call_roundtrip": roundtrip}
+    if output:
+        report["path"] = _write_jsonl(output, out_rows)
+    return report
+
+
+__all__ = ["training_rows", "export_training", "export_dataset",
+           "export_preference", "tool_call_roundtrip"]
