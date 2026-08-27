@@ -329,6 +329,35 @@ _STEP_KEYS = ("steps", "tool_trace", "trace")
 _FINAL_KEYS = ("final_text", "final", "output", "response", "answer")
 
 
+#: Names a tool step's argument and result fields arrive under. The platform's
+#: trace ingest writes `input`/`output`; OpenAI-style exports write
+#: `arguments`/`result`. Renaming them here rather than teaching every consumer
+#: both spellings, because the consumers that only knew one did not fail
+#: loudly: `tool_call_roundtrip` reported "checked: 0" on a whole dataset of
+#: ingested traces and every row passed the export gate without being looked at.
+_ARG_KEYS = ("arguments", "input", "args", "parameters")
+_RESULT_KEYS = ("result", "output", "response")
+
+
+def _normalize_step(step: dict) -> dict:
+    """One trajectory step in the canonical spelling.
+
+    Only tool steps are touched. A `{"user": ...}` or `{"text": ...}` step has
+    no arguments or result, and `input` on a non-tool step is somebody else's
+    field.
+    """
+    if "tool" not in step:
+        return step
+    out = dict(step)
+    for canonical, aliases in (("arguments", _ARG_KEYS), ("result", _RESULT_KEYS)):
+        if canonical in out:
+            continue
+        source = next((k for k in aliases if k in out), None)
+        if source is not None:
+            out[canonical] = out.pop(source)
+    return out
+
+
 def _steps_from_messages(messages: Sequence[dict]) -> list[dict]:
     steps: list[dict] = []
 
@@ -418,7 +447,8 @@ def load_traces(source) -> list[dict]:
                       if isinstance(row.get(k), list) and row[k]), None)
         if steps is None and isinstance(row.get("messages"), list):
             steps = _steps_from_messages(row["messages"])
-        row["steps"] = [s for s in (steps or []) if isinstance(s, dict)]
+        row["steps"] = [_normalize_step(s) for s in (steps or [])
+                        if isinstance(s, dict)]
         prompt = next((str(row[k]) for k in _PROMPT_KEYS
                        if row.get(k)), "")
         if not prompt:

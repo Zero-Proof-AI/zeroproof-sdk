@@ -109,12 +109,28 @@ def datasets(*, api_key: str | None = None) -> dict:
 def pull(dataset_id: str, path: str | None = None, *,
          api_key: str | None = None) -> str | list[dict]:
     """Download a dataset. Writes JSONL to ``path`` and returns the path,
-    or returns the parsed rows when ``path`` is omitted."""
+    or returns the parsed rows when ``path`` is omitted.
+
+    A dataset is stored as one or more parts, and the grant lists every one
+    of them. Datasets pushed with ``push_rows`` are a single part, which is
+    why reading only ``downloadUrl`` looked correct for so long; a dataset
+    filled by trace ingest is one part per trace, and that path returned the
+    first row of a 60-row dataset without saying so.
+    """
     grant = _call("GET", f"/datasets/{dataset_id}/download", api_key)
-    payload = _call("GET", "", api_key, raw_url=grant["downloadUrl"])
+    # `downloadUrl` is parts[0], kept for older grants that predate the list.
+    urls = [u for u in (grant.get("parts") or []) if isinstance(u, str)]
+    if not urls:
+        urls = [grant["downloadUrl"]]
+
+    payloads = [_call("GET", "", api_key, raw_url=url) for url in urls]
+    # Parts are whole JSONL objects but need not end in a newline, so joining
+    # blind would weld the last row of one part onto the first of the next.
+    payload = b"\n".join(p.strip() for p in payloads if p.strip())
+
     if path:
         with open(path, "wb") as fh:
-            fh.write(payload)
+            fh.write(payload + b"\n" if payload else payload)
         return path
     return [json.loads(line) for line in payload.decode().splitlines() if line.strip()]
 
