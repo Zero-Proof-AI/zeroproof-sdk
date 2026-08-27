@@ -27,6 +27,7 @@ examples/*
 # ...except checked-in examples, which are scripts and docs, not data.
 # Generated rows there are still covered by the *.jsonl rule above.
 !examples/prime-intellect-rl/
+!examples/agent-behavior/
 
 # helpers, not the product
 /scripts/
