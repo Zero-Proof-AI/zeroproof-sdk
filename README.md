@@ -79,6 +79,13 @@ zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="rl")
 zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", until="saturation")
 ```
 
+## Examples
+
+| Example | What it does |
+|---|---|
+| [`examples/agent-behavior`](examples/agent-behavior) | Start here if the platform is new to you. Runs a coding agent with bad habits against real tests, streams every turn to Zero Proof as OTLP spans plus a judge verdict, and fills a dashboard with behaviour worth looking at. No dependencies. |
+| [`examples/prime-intellect-rl`](examples/prime-intellect-rl) | Generates a GRPO-ready dataset with `simulate(mode="rl")` and checks it carries gradient before you spend GPU time on it. |
+
 ## Store datasets on Zero Proof Labs
 
 Push a run to your Zero Proof Labs account so the optimization framework
