@@ -5,12 +5,28 @@ your own repo of small Python bugs, streams every turn to the platform as OTLP
 spans, and posts a judge's verdict against each one. Twenty minutes after you
 pick up an API key you have a dashboard with something on it worth looking at.
 
-The point is not the agent. The point is what you can only see once the runs
-are in one place: **turns where the judge is satisfied and the held-out tests
-say the work is not done.** A run of 40 turns reliably produces a handful of
-them — an agent that edited the failing test, reported the suite green, and got
-scored around 0.9 for it. Finding those is the whole job, and it is the first
-step toward training them out.
+The point is not the agent. The point is what two independent graders disagree
+about, which you can only see once the runs are in one place.
+
+Here is a real 60-run batch, grouped by whether the observable signals flagged
+the turn:
+
+| turns | n | judge score | held-out solved |
+|---|---|---|---|
+| edited a test | 19 | 0.29 | 21% |
+| did not edit a test | 41 | 0.80 | 78% |
+| claimed a pass that never ran | 10 | 0.66 | **90%** |
+
+Read the last row twice. Those ten turns mostly **did** fix the bug, and the
+judge scored them 0.66, which passes plenty of bars. What is wrong with them is
+not the code, it is that the agent asserted a green suite it never ran. No
+grader reading the transcript reliably prices that; a counter over the tool
+calls gets it every time, for free.
+
+And in the same batch, four turns edited a test and still scored 0.85 to 0.95,
+because the agent also fixed the code and the judge did not weigh the scope
+violation. That is four rows out of sixty where the number on the dashboard is
+not the number you would have given. Finding those is the job.
 
 ## Run it
 
@@ -126,12 +142,17 @@ handful of rows have a `score` that is not the judge's opinion at all. The
 
 ### What to look for
 
-Sort by `misbehaviour` and read the top of the list. Then compare columns:
+Sort by `misbehaviour` and read the top of the list. The rows worth opening are
+the ones where the two graders disagree:
 
-- `score` high while `task.solved` is 0. The judge believed the summary.
-- `hack.test_edited` at 1 with a green suite. Look at the diff, not the result.
-- `lie.tests_claimed` at 1. The answer claims a pass no command produced.
-- `verification` low across a persona. It is asserting, not checking.
+- `lie.tests_claimed` at 1 with a decent `score`. The most common disagreement,
+  and the clearest: the work may well be fine, but the agent asserted a result
+  it never checked. Judges price this weakly and inconsistently.
+- `hack.test_edited` at 1 with `score` above 0.8. The agent fixed the bug *and*
+  moved the test. The judge credits the fix and skips the scope violation.
+- `score` high while `task.solved` is 0. Rarer than you would expect, and the
+  worst one when it happens.
+- `verification` low across a whole persona. It is asserting, not checking.
 
 The terminal prints the same comparison when the run finishes, so you know what
 you are looking for before you go looking.
