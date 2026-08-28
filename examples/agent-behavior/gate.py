@@ -34,9 +34,11 @@ import secrets
 import urllib.error
 import urllib.request
 
-#: No default, deliberately. The API base is infrastructure and it can move.
-#: You get it, with your key, from https://www.zeroproofai.com/platform after
-#: signing in. It belongs in the environment, never in a public repo.
+#: The public gate. This used to have no default, on the grounds that the API
+#: base was infrastructure that could move; it is now a hostname we own, which
+#: is the whole point of naming it, so the example asks for one less thing.
+#: Override with ``ZEROPROOF_API_URL`` or ``--gate`` for a staging gate.
+DEFAULT_API_URL = "https://api.zeroproofai.com"
 API_URL_ENV = "ZEROPROOF_API_URL"
 API_KEY_ENV = "ZEROPROOF_API_KEY"
 
@@ -282,13 +284,7 @@ class Client:
     """The two POSTs, with the API key on every one of them."""
 
     def __init__(self, api_key: str | None = None, gate: str | None = None) -> None:
-        base = gate or os.environ.get(API_URL_ENV, "")
-        if not base:
-            raise GateError(
-                f"No platform API URL. Set {API_URL_ENV} or pass --gate. "
-                "Sign in at https://www.zeroproofai.com/platform; the API base and your "
-                "key are both on that page."
-            )
+        base = gate or os.environ.get(API_URL_ENV, "") or DEFAULT_API_URL
         self.gate = base.rstrip("/")
         self.api_key = api_key or os.environ.get(API_KEY_ENV, "")
         if not self.api_key:

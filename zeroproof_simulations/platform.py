@@ -15,7 +15,11 @@ import os
 import urllib.error
 import urllib.request
 
-DEFAULT_API_URL = "https://wch04mgo2k.execute-api.us-east-1.amazonaws.com"
+#: Overridable with ``ZEROPROOF_API_URL``, which is what a self-hosted gate or
+#: a staging one uses. The default is a name we control rather than a generated
+#: one, so the platform can move region, account or gateway without stranding
+#: every copy of this package already installed somewhere.
+DEFAULT_API_URL = "https://api.zeroproofai.com"
 
 
 class PlatformError(RuntimeError):
