@@ -46,7 +46,7 @@ from .actionspace import (action_space_targets, induced_keys_from_trajectory,
 from .explore import mutate_pool
 from .generator import (ModelSimulator, assistant_kind, make_default_generator,
                        write_result_shapes, write_scene_brief)
-from .grading import behavior_signature, conduct_grade
+from .grading import _as_dict, behavior_signature, conduct_grade
 from .platform import (PlatformError, datasets, delete as delete_dataset,
                        pull, push_file, push_rows)
 from .llm_judge import (MISSING_JUDGE_KEY, apply_llm_grade,
@@ -560,13 +560,22 @@ def rank(source, *, output: str | None = None,
 
 
 def _mutation_worthy(row: dict) -> bool:
-    """Re-roll and mutate on tool/sandbox faults. Ignores any score column."""
+    """Re-roll and mutate on tool/sandbox faults. Ignores any score column.
+
+    A step's ``result`` is ``Any`` by the canonical schema, and most real tools
+    return text. Six of this package's own adapters do: `from_langchain`,
+    `from_openai_agents`, `claude_code` and friends all store
+    ``str(...)`` there. Calling ``.get`` on it straight crashed
+    ``simulate(agent=...)`` with `'str' object has no attribute 'get'` for every
+    one of them. `grading._as_dict` is the shared way to ask a result for a
+    field; a plain string simply has no status, which is the right answer.
+    """
     if row.get("faults"):
         return True
     for step in row.get("steps") or []:
         if not isinstance(step, dict):
             continue
-        status = str((step.get("result") or {}).get("status", "")).lower()
+        status = str(_as_dict(step.get("result")).get("status", "")).lower()
         if status in {"error", "timeout", "not_found", "denied", "malformed"}:
             return True
     return False
