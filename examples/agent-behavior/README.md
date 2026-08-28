@@ -70,8 +70,8 @@ One agent turn on one bug, under one persona:
 2. It reads, writes, deletes, and runs commands until it answers or gives up.
 3. A **held-out test suite** runs. The agent never saw it and could not edit it.
 4. A judge reads the transcript and returns a verdict.
-5. One OTLP batch goes to `POST /v1/traces`; the verdict goes to
-   `POST /v1/scores` against that trace id.
+5. One OTLP batch goes to `POST /v1/traces`; the held-out verdict and the
+   judge's go to `POST /v1/scores` against that trace id.
 
 Steps 3 and 4 are two different opinions about the same turn, and keeping them
 apart is the design. The judge sees what the agent said it did. The held-out
@@ -125,10 +125,18 @@ Two families of measurement, from two independent places.
 | `tool.failure_rate`, `cmd.failure_rate`, `tool.repeat` | flailing |
 
 **Judged**, from a second model call: `score`, `correctness`, `completeness`,
-`verification`, `scope`, plus a `summary` and up to two `issues`.
+`verification`, `scope`, plus a `summary` and up to two `issues`. All of them
+carry `"source": "example-judge"`, which is how the platform knows these five
+numbers are one grader's opinion rather than five independent signals.
 
 And one column you will not have on a real agent: `task.solved`, the held-out
-suite's verdict. It is in here as the ruler for the other two.
+suite's verdict. It is in here as the ruler for the other two, and it says so
+on the wire: it is sent on `POST /v1/scores` carrying `pass_at`, which is what
+nominates it as the outcome the charts are ranked against. It goes out on that
+route rather than as a span attribute for a boring reason. A span can qualify
+the unnamed primary score with `zeroproof.score.pass_at` and has no way to say
+the same thing about a named measurement, so `zeroproof.scores.task_solved`
+could carry a number and nothing that says what the number has to beat.
 
 Every flag that fires also writes the string that triggered it to
 `zeroproof.evidence.<name>`, so a false positive can be dismissed from the
@@ -144,8 +152,29 @@ handful of rows have a `score` that is not the judge's opinion at all. The
 
 ### What to look for
 
-Sort by `misbehaviour` and read the top of the list. The rows worth opening are
-the ones where the two graders disagree:
+Twenty-two charts is too many to read top to bottom, so the traces page will
+order them for you. Hit **problems** in the `SCORES` header and the cards are
+ranked by whether runs carrying them end below the bar:
+
+```
+hack.test_edited    fired 0.17 (12)  vs  not 0.89 (19)
+misbehaviour        fired 0.38 (16)  vs  not 0.87 (15)
+tool.failure_rate   r -0.47 over 31 runs
+```
+
+**best** is the same ranking from the other end. Neither hides anything; they
+only decide which card is in the top-left corner.
+
+That ordering is not built in. It works because this example sends
+`task.solved` with a `pass_at`, which is what nominates it as the outcome
+everything else gets ranked against. Point it at ground truth rather than at
+the judge whenever you have any: ranking a judge against itself measures the
+judge's self-consistency and tells you nothing about the agent. The judge's own
+measurements carry `"source": "example-judge"` for the same reason, so the
+platform can tell one grader's four opinions apart from four independent
+signals. See `agents.ground_truth_score`.
+
+Then read the rows where the two graders disagree:
 
 - `lie.tests_claimed` at 1 with a decent `score`. The most common disagreement,
   and the clearest: the work may well be fine, but the agent asserted a result
@@ -223,7 +252,9 @@ already emitting, and every one of them is optional.
 --tasks a,b         restrict to these task ids
 --personas a,b      restrict to these personas
 --seed N            reproducible task and persona draw
---no-judge          observable signals only, no second model call
+--no-judge          observable signals only, no second model call.
+                    Ground truth is still sent: it carries the pass_at that
+                    makes the charts rankable.
 --dry-run           run everything, send nothing
 ```
 

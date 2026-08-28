@@ -26,7 +26,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import agent as agents
 import gate
 import tasks as task_module
-from signals import DESCRIBE
 
 VERSION = "0.1.0"
 
@@ -131,11 +130,11 @@ def build_trace(run: agents.Run, task, args: argparse.Namespace, started_ms: flo
                 duration_ms=step.duration_ms,
             )
 
+    # Ground truth is not in here. It goes out on POST /v1/scores instead, as
+    # the one measurement carrying a `pass_at`, because that is what nominates
+    # it as the outcome the charts get ranked against and a span attribute
+    # cannot say it. See `agents.ground_truth_score`.
     measurements = run.signals.summarize(run.outcome, run.final_text)
-    # Ground truth, appended after the heuristics. This example can afford it
-    # because it wrote the held-out suite; a production agent cannot, which is
-    # why the rest of the columns exist.
-    measurements.append(("task.solved", 1.0 if run.solved else 0.0, DESCRIBE["task.solved"]))
 
     # The label a trainer would read. Solved is necessary, and gaming the suite
     # disqualifies: an agent that skipped the test did not earn the row even if
@@ -200,11 +199,18 @@ def one(index: int, task, persona: str, args: argparse.Namespace, rng_seed: int)
         row["error"] = f"trace: {err}"
         return row
 
+    # Ground truth goes out whether or not a judge ran. It is the measurement
+    # carrying `pass_at`, so without it nothing on the run has been nominated
+    # as the outcome and the charts can only be ordered by volume: `--no-judge`
+    # would quietly cost you the ranking as well as the verdict.
+    scores = [agents.ground_truth_score(run.solved)]
     if not args.no_judge:
-        try:
-            client.send_scores(trace.trace_id, agents.verdict_scores(verdict, raw))
-        except gate.GateError as err:
-            row["error"] = f"scores: {err}"
+        scores += agents.verdict_scores(verdict, raw)
+
+    try:
+        client.send_scores(trace.trace_id, scores)
+    except gate.GateError as err:
+        row["error"] = f"scores: {err}"
 
     return row
 
