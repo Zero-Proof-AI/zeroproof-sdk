@@ -3,13 +3,13 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zeroproof-simulations"
-version = "1.02"
-description = "Generate diverse training conversations for any agent, grounded in its tools and system prompt."
+name = "zeroproof"
+version = "0.03"
+description = "ZeroProof Python SDK: trace ingestion and verification client, plus agent simulations grounded in your tools and system prompt."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["requests>=2.25.0"]
 authors = [{name = "Zero Proof AI"}]
 keywords = [
     "rl", "reinforcement-learning", "grpo", "synthetic-data", "agents",
@@ -44,9 +44,12 @@ dev = ["pytest>=8.0"]
 [tool.setuptools]
 include-package-data = false
 
+[tool.setuptools.package-data]
+zeroproof = ["py.typed"]
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["zeroproof_simulations"]
+include = ["zeroproof", "zeroproof_simulations"]
 exclude = ["tests*", "examples*", "docs*", "specs*"]
 namespaces = false
 

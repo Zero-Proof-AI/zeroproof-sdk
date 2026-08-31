@@ -1,6 +1,11 @@
-# zeroproof-simulations
+# zeroproof
 
-Generate diverse training conversations for any agent, grounded in its tools and system prompt.
+The ZeroProof Python SDK. One package, two importable modules:
+
+- `zeroproof`: the platform client — trace ingestion, verification API.
+- `zeroproof_simulations`: generate diverse training conversations for any agent, grounded in its tools and system prompt.
+
+This repo absorbed the `zeroproof-simulations` package; `zeroproof-simulations` on PyPI is deprecated in favor of `zeroproof`.
 
 The SDK inspects the agent, simulates a world consistent with those tools (objects, results, failures), and samples scenarios across that space. The same model writes the user and plays the agent. Default `explore`: one unique situation per row.
 
@@ -30,10 +35,10 @@ Ask us for a `VLLM_API_KEY` to try it. The endpoint is shared and rate limited.
 From another project:
 
 ```bash
-pip install zeroproof-simulations   # or: uv add zeroproof-simulations
+pip install zeroproof   # or: uv add zeroproof
 ```
 
-Zero runtime dependencies, Python 3.10+. Installing from PyPI rather than a
+One runtime dependency (`requests`), Python 3.10+. Installing from PyPI rather than a
 path or a git URL matters if you build a Prime Intellect environment on this:
 the Environments Hub installs a pushed env with plain pip, so a `[tool.uv.sources]`
 git pin resolves locally and then fails on their runtime with a

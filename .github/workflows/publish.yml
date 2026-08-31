@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/zeroproof-simulations
+      url: https://pypi.org/p/zeroproof
     permissions:
       id-token: write   # PyPI Trusted Publishing, no API token stored anywhere
       contents: write   # to push the release tag
@@ -80,5 +80,5 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$V" -m "zeroproof-simulations $V"
+          git tag -a "v$V" -m "zeroproof $V"
           git push origin "v$V"
