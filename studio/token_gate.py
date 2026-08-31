@@ -41,8 +41,6 @@ import time
 import datetime
 import threading
 
-import boto3
-
 _dynamo = None
 
 KEYS_TABLE = os.environ.get("TABLE_API_KEYS", "zeroproof-api-keys")
@@ -70,6 +68,7 @@ class QuotaExceeded(Exception):
 def _db():
     global _dynamo
     if _dynamo is None:
+        import boto3
         _dynamo = boto3.client("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
     return _dynamo
 
