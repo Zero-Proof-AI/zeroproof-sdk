@@ -57,6 +57,7 @@ def _simulate_request(api_key: str) -> tuple[int, dict]:
     body = {
         "agent": "github",
         "mode": "explore",
+        "stop": "rows",
         "budget": 1,
     }
     return _api_call("POST", "/api/simulate", api_key, body)
