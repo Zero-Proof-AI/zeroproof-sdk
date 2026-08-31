@@ -162,8 +162,7 @@ def test_llm_guided_with_mocked_model(monkeypatch, tmp_path):
     data.save(path)
     row = json.loads(open(path).readline())
     assert {"prompt", "steps", "final_text"} <= set(row)
-    assert "reward" not in row
-    assert "reason" not in row
+    assert isinstance(row.get("reward"), (int, float))
     assert "selection_reason" not in row
     assert "arm" not in row
     assert "behavior_signature" not in row

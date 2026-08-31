@@ -443,6 +443,16 @@ def select_for_rl(rows: Sequence[dict], *, target: int = 1000,
         "target": goal,
         "signal": group_signal(selected, lo=lo, hi=hi),
     }
+    # A selection with no mixed group has no within-group contrast: GRPO
+    # advantage is zero everywhere and the run trains nothing. That is a
+    # grading or difficulty problem upstream, and it must not exit this
+    # function looking like a dataset.
+    if report["signal"].get("n_mixed", 0) == 0:
+        report["warning"] = (
+            "no_mixed_groups: every selected group is unanimous or single, "
+            "so group-relative advantages are all zero. Regrade with a "
+            "stricter rubric or raise difficulty (fault_rate, harder asks) "
+            "before training on this.")
     return selected, report
 
 

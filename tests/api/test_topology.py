@@ -365,7 +365,8 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
         scripted_agent, grade=False, repeats=1, budget=4,
         tools=TOOLS, policy=POLICY, seed=0, concurrency=4, simulator=False,
         time_budget=None, advanced={"per_round": 6, "mutate_failures": False})
-    assert all(t.get("reward") is None for t in graded.trajectories)
+    assert all(isinstance(t.get("reward"), (int, float))
+               for t in graded.trajectories)
     assert all(t.get("reward") is None for t in raw.trajectories)
 
     scored = zps.simulate(

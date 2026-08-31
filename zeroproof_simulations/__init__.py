@@ -256,6 +256,10 @@ def _export_row(row: dict) -> dict:
         reason = row.get("grader_reason") or row.get("reason")
         if reason:
             out["reason"] = reason
+        # Who labeled it travels with the label: a conduct score, a judge,
+        # and a human override must stay distinguishable on disk.
+        if row.get("label_source"):
+            out["label_source"] = row["label_source"]
     if row.get("qwen_reward") is not None:
         out["qwen_reward"] = row["qwen_reward"]
     if "llm_reward" in row:
@@ -977,7 +981,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
     plus a prompt, or ``spec=``. Search writes a grid of human requests
     (ordinary, vague, complex, adversarial) and a spread of agent replies.
     It spends ``budget`` rows and ``time_budget`` seconds on new coverage.
-    No default ``reward``. Grade later with ``grade()``. A callable
+    No default ``reward``. Pass ``grade=True`` for the deterministic
+    conduct grade, or grade later with ``grade()``. A callable
     ``grader=`` is the only in-simulate score hook.
 
     ``traces=`` (rows or a JSONL path of production traces) aims the
@@ -2060,6 +2065,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
                         slots = max(0, writer_flight - len(scenario_futs))
                         _launch_writers(min(slots, writer_flight))
                     elif generator.model is None:
+                        # The offline writer ran dry. Leaving the default
+                        # stopped_because="budget" here claimed a 300-row
+                        # budget was met by 106 rows.
+                        data.stopped_because = "writer_exhausted"
                         break
                     continue
             else:
@@ -2385,6 +2394,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
             key: leak[key] for key in
             ("n", "n_sources", "threshold", "n_leaky", "n_dropped",
              "max_similarity")}
+        # Dropped rows are not refilled (the loop has already ended), so a
+        # 39%-short dataset must say why instead of standing next to
+        # stopped_because="budget" as if the budget were met.
+        if leak.get("n_dropped"):
+            if "trace_leakage_dropped" not in data.degraded:
+                data.degraded.append("trace_leakage_dropped")
     misses = int(turn_stats.get("followup_misses", 0) or 0)
     if misses:
         data.search["followup_misses"] = misses
@@ -2456,6 +2471,23 @@ def simulate(agent: Any = None, *, spec: Any = None,
             "partials": len(scored.partials()),
             "unjudged": len(scored.unjudged()),
         }
+    if grade and grader is None and not llm_grade and data.trajectories:
+        # grade=True shipped a release as an accepted-and-ignored flag: the
+        # advertised one-call path returned ungraded rows, and select_for_rl
+        # then had nothing to select. It now applies the documented default —
+        # the deterministic conduct grade, offline and free. The hosted or
+        # LLM judges stay where they were: llm_grade=True, grader=, or
+        # grade() afterwards.
+        declared = {str((t.get("function") or t).get("name") or "")
+                    for t in (data.profile.tools or []) if isinstance(t, dict)}
+        for row in data.trajectories:
+            if row.get("reward") is not None:
+                continue
+            verdict = conduct_grade(row, declared or None)
+            row["reward"] = verdict.get("reward")
+            if verdict.get("reason") is not None:
+                row.setdefault("reason", verdict["reason"])
+            row["label_source"] = "conduct"
     if out_path is not None and data.trajectories:
         data.save(str(out_path), meta=True)
     return data

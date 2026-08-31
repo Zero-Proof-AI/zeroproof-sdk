@@ -15,7 +15,7 @@ def _fake_judge_complete(_url, _model, messages, **_kwargs):
 
 
 def _run(**kwargs):
-    kwargs.setdefault("grade", True)
+    kwargs.setdefault("grade", False)
     kwargs.setdefault("budget", 6)
     kwargs.setdefault("per_round", 6)
     return simulate_offline(**kwargs)

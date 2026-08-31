@@ -222,8 +222,9 @@ def test_github_example_spec_works():
     assert {"search_issues", "get_pr"} <= names
     row = data.rows()[0]
     assert {"prompt", "messages", "steps", "final_text", "scenario_id"} <= set(row)
-    assert "reward" not in row
-    assert "reason" not in row
+    # grade=True applies the deterministic conduct grade at return.
+    assert isinstance(row.get("reward"), (int, float))
+    assert row.get("label_source") == "conduct"
     assert row["messages"][0] == {"role": "user", "content": row["prompt"]}
     assert "selection_reason" not in row
     assert "arm" not in row
