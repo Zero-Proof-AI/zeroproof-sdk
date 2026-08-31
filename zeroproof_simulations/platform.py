@@ -52,7 +52,7 @@ def _call(method: str, path: str, api_key: str | None, body: dict | None = None,
     token = str(auth_token or "").strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    elif require_api_key or not raw_url:
+    if require_api_key or (not raw_url and not token):
         headers["X-Api-Key"] = _key(api_key)
     if body is not None:
         data = json.dumps(body).encode()
