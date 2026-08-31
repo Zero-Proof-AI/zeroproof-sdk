@@ -13,6 +13,7 @@ SDK_BRIEF.md
 
 # secrets and local junk
 .env
+.env.local
 .venv/
 __pycache__/
 *.pyc
