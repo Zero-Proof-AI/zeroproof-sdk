@@ -115,6 +115,71 @@ def revoke_delegated_credential(clerk_token: str | None, credential: str,
                  timeout=timeout, auth_token=clerk_token)
 
 
+DEFAULT_STUDIO_URL = (
+    "https://zeroproofai--zeroproof-studio-api-serve.modal.run")
+_STUDIO_MODES = ("explore", "sft", "rl", "adaptive")
+_STUDIO_MAX_ROWS = 20_000
+
+
+def _studio_url() -> str:
+    return os.environ.get("ZEROPROOF_STUDIO_URL",
+                          DEFAULT_STUDIO_URL).rstrip("/")
+
+
+def push_to_studio(rows: list[dict], agent: str, mode: str, *,
+                   tags: list[str] | None = None,
+                   filename: str | None = None,
+                   api_key: str | None = None) -> dict:
+    """Import rows into the studio runs store the platform UI reads.
+
+    ``push_rows`` lands in the datasets registry; the platform's
+    datasets page reads the studio's runs store instead, so rows pushed
+    there never appear in the UI. This posts to the studio's import
+    endpoint, which grades rows against the agent's declared tools and
+    writes into the same store the page lists.
+
+    ``agent`` must exist in the STUDIO agent registry (separate from
+    trace agents; an unregistered name is rejected by the studio).
+    ``mode`` labels the batch (one of explore/sft/rl/adaptive) and is
+    required: the store would otherwise silently label everything "rl".
+    """
+    if mode not in _STUDIO_MODES:
+        raise PlatformError(
+            f"mode= must be one of {'/'.join(_STUDIO_MODES)}")
+    if len(rows) > _STUDIO_MAX_ROWS:
+        raise PlatformError(
+            f"studio import caps at {_STUDIO_MAX_ROWS} rows; "
+            f"got {len(rows)} - split the push")
+    body: dict = {"agent": agent, "mode": mode, "rows": list(rows)}
+    if tags:
+        body["tags"] = list(tags)
+    if filename:
+        body["filename"] = filename
+    url = _studio_url() + "/api/import"
+    data = json.dumps(body, default=str).encode()
+    headers = {"X-Api-Key": _key(api_key),
+               "Content-Type": "application/json"}
+    request = urllib.request.Request(url, data=data, method="POST",
+                                     headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode(errors="replace")[:400]
+        try:
+            detail = json.loads(detail).get("error", detail)
+        except (ValueError, AttributeError):
+            pass
+        hint = (" (is the agent registered in the studio? the studio "
+                "registry is separate from trace agents)"
+                if err.code in (400, 404) else "")
+        raise PlatformError(
+            f"POST {url} -> {err.code}: {detail}{hint}") from None
+    except urllib.error.URLError as err:
+        raise PlatformError(f"POST {url} failed: {err.reason}") from None
+    return json.loads(payload) if payload else {}
+
+
 def push_rows(rows: list[dict], name: str, *, api_key: str | None = None,
               parent: str | None = None) -> dict:
     """Upload rows as JSONL to your Zero Proof Labs account.

@@ -107,6 +107,119 @@ def mine_traces(rows: Sequence[dict]) -> dict[str, Any]:
     }
 
 
+# Trace-grounded result exemplars. Agent specs declare tool inputs but
+# almost never result shapes, so invented results drift from the real
+# product. Traces carry the real payloads; a few per tool become shape
+# templates. Three shows the shape family; ~500 serialized chars keeps a
+# template affordable in a prompt.
+_EXEMPLARS_PER_TOOL = 3
+_EXEMPLAR_MAX_CHARS = 500
+
+
+def _exemplar_value(result: Any) -> Any:
+    """Structured view of a step result; JSON-in-a-string is parsed."""
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except ValueError:
+            return result
+    return result
+
+
+def _exemplar_shape_key(value: Any) -> str:
+    """Coarse shape identity: keys for records, item shape for lists,
+    length band for text. Two results with the same key teach nothing new."""
+    if isinstance(value, dict):
+        return "dict:" + ",".join(sorted(str(k) for k in value)[:10])
+    if isinstance(value, list):
+        return "list:" + (_exemplar_shape_key(value[0]) if value else "empty")
+    if isinstance(value, str):
+        return f"str:{min(len(value) // 100, 4)}"
+    return type(value).__name__
+
+
+def _trim_exemplar(value: Any) -> Any:
+    """Shrink a payload toward the serialized cap without breaking JSON."""
+    if isinstance(value, str):
+        return value if len(value) <= 160 else value[:157] + "..."
+    if isinstance(value, list):
+        return [_trim_exemplar(v) for v in value[:2]]
+    if isinstance(value, dict):
+        return {str(k): _trim_exemplar(v)
+                for k, v in list(value.items())[:12]}
+    return value
+
+
+def mine_result_exemplars(rows: Sequence[dict], *,
+                          per_tool: int = _EXEMPLARS_PER_TOOL
+                          ) -> dict[str, list]:
+    """Up to ``per_tool`` real result payloads per tool, shape-diverse.
+
+    Sibling of ``mine_traces``: same rows in, but this collects what the
+    tools RETURNED, for grounding invented results. Faulted and empty
+    results are skipped (they show the fault axis, not the success
+    shape), a result whose shape is already kept is skipped, and each
+    exemplar is trimmed to serialize within ~500 chars.
+    """
+    out: dict[str, list] = {}
+    seen: dict[str, set[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for step in row.get("steps") or []:
+            if not isinstance(step, dict) or not step.get("tool"):
+                continue
+            step = _normalize_step(step)
+            if "result" not in step:
+                continue
+            name = str(step["tool"])
+            value = _exemplar_value(step["result"])
+            if not value:
+                continue
+            if isinstance(value, dict) and not (set(value) - {"status", "ok"}):
+                # A bare status carries no shape worth copying.
+                continue
+            if trace_fault({"steps": [{"tool": name,
+                                       "result": value}]}) != NO_FAULT:
+                continue
+            kept = out.setdefault(name, [])
+            if len(kept) >= per_tool:
+                continue
+            key = _exemplar_shape_key(value)
+            if key in seen.setdefault(name, set()):
+                continue
+            trimmed = _trim_exemplar(value)
+            try:
+                if len(json.dumps(trimmed,
+                                  default=str)) > _EXEMPLAR_MAX_CHARS:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            seen[name].add(key)
+            kept.append(trimmed)
+    return {name: kept for name, kept in out.items() if kept}
+
+
+def exemplar_result_shapes(exemplars: dict[str, list]) -> dict[str, dict]:
+    """Exemplars in ``write_result_shapes`` form: one template per tool.
+
+    The sandbox fills one dict template per call (``MockEnvironment``),
+    so the first record-shaped exemplar becomes that template; a bare
+    list of records is wrapped the way ``_parse_result_shapes`` wraps
+    one. Non-record exemplars stay report-only.
+    """
+    out: dict[str, dict] = {}
+    for name, values in (exemplars or {}).items():
+        for value in values:
+            if isinstance(value, dict) and value:
+                out[name] = dict(value)
+                break
+            if isinstance(value, list) and value and isinstance(value[0], dict):
+                out[name] = {"results": [dict(value[0])]}
+                break
+    return out
+
+
 def dimensions_from_traces(rows: Sequence[dict], tools: list[dict],
                            policy: str = "", *,
                            broaden: bool = True) -> dict[str, list[str]]:
@@ -587,7 +700,8 @@ def format_trace_report(report: dict[str, Any]) -> str:
 
 
 __all__ = [
-    "mine_traces", "dimensions_from_traces", "split_pseudo_production",
+    "mine_traces", "mine_result_exemplars", "exemplar_result_shapes",
+    "dimensions_from_traces", "split_pseudo_production",
     "flaw_rows", "leakage_report", "drop_leaky_rows", "simulate_from_traces",
     "trace_story",
     "load_traces", "trace_report", "format_trace_report",
