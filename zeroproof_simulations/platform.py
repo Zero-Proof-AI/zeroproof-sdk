@@ -81,9 +81,9 @@ def issue_delegated_credential(clerk_token: str | None, *, ttl_seconds: int = 36
                               timeout: int = 120) -> dict:
     """Create a short-lived delegated credential for SDK or backend use.
 
-    Prefer a real Clerk session token or authenticated backend token in the
-    ``clerk_token`` parameter. The SDK keeps the legacy ``X-Api-Key`` path for
-    compatibility, but delegate-based clients should use the bearer token flow.
+    ``clerk_token`` must be a valid Clerk session token or other authenticated
+    backend token. This helper sends that token as a bearer token to the auth
+    endpoint to mint the delegated credential.
     """
     if not clerk_token:
         raise PlatformError("A valid Clerk session token is required to mint a delegated credential.")
