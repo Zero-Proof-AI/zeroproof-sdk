@@ -543,6 +543,7 @@ def start_job(body: dict | None = None) -> dict:
     brain = str(body.get("brain") or "hosted").strip().lower()
     if brain not in {"hosted", "own"}:
         brain = "hosted"
+    request_api_key = str(body.get("_api_key") or "").strip()
     api_key = str(body.get("api_key") or "").strip() if brain == "own" else ""
     base_url = str(body.get("base_url") or "").strip() if brain == "own" else ""
     model = str(body.get("model") or "").strip() if brain == "own" else ""
@@ -633,6 +634,7 @@ def start_job(body: dict | None = None) -> dict:
         "output": str(out_path),
         "grade": grade,
         "source": source,
+        "_api_key": request_api_key,
     }
     _write_meta(out_path, {
         "agent": agent,
