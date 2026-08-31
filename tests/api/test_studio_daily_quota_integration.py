@@ -1,6 +1,7 @@
 """Live studio integration test for daily quota enforcement on /api/simulate."""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -103,13 +104,51 @@ def _usage_for_key(api_key: str) -> tuple[int, int]:
     )
 
 
+@contextlib.contextmanager
+def _seed_over_quota(api_key: str):
+    """Temporarily set the key's account usage to the daily limit, then restore."""
+    try:
+        import boto3
+    except ModuleNotFoundError:
+        pytest.skip("boto3 required to seed over-quota state")
+
+    db = boto3.client("dynamodb", region_name=AWS_REGION)
+    item = db.get_item(TableName=KEYS_TABLE, Key={"apiKey": {"S": api_key}}).get("Item")
+    if not item or not item.get("active", {}).get("BOOL"):
+        pytest.skip(f"api key {api_key[:12]}... is not active")
+    user_id = item["userId"]["S"]
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    pk = {"apiKey": {"S": f"user#{user_id}"}, "date": {"S": today}}
+    original = db.get_item(TableName=USAGE_TABLE, Key=pk).get("Item")
+
+    lim_in = int(os.environ.get("DAILY_INPUT_LIMIT", "500000"))
+    lim_out = int(os.environ.get("DAILY_OUTPUT_LIMIT", "1000000"))
+    db.update_item(
+        TableName=USAGE_TABLE,
+        Key=pk,
+        UpdateExpression="SET inputTokens=:i, outputTokens=:o",
+        ExpressionAttributeValues={
+            ":i": {"N": str(lim_in)},
+            ":o": {"N": str(lim_out)},
+        },
+    )
+    try:
+        yield
+    finally:
+        if original:
+            db.put_item(TableName=USAGE_TABLE, Item=original)
+        else:
+            db.delete_item(TableName=USAGE_TABLE, Key=pk)
+
+
 def test_live_simulate_rejects_over_quota_credential():
     if not OVER_QUOTA_KEY:
         pytest.skip(
             "set TEST_STUDIO_OVER_QUOTA_KEY or "
             "TEST_OVER_QUOTA_DELEGATED_CREDENTIAL to run over-quota check"
         )
-    status, payload = _simulate_request(str(OVER_QUOTA_KEY))
+    with _seed_over_quota(str(OVER_QUOTA_KEY)):
+        status, payload = _simulate_request(str(OVER_QUOTA_KEY))
 
     assert status == 429
     assert "daily account quota exceeded" in str(payload.get("error") or "").lower()
