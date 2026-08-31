@@ -6,6 +6,10 @@ from tests.helpers import TOOLS, POLICY, GITHUB_SPEC, scripted_agent, simulate_o
 import zeroproof_simulations as zps
 
 
+def _lower_headers(headers):
+    return {str(key).lower(): value for key, value in dict(headers).items()}
+
+
 def test_default_budget_is_500():
     sig = inspect.signature(zps.simulate)
     params = sig.parameters
@@ -60,7 +64,7 @@ def test_platform_delegated_credential_helpers(monkeypatch):
         seen.append({
             "url": req.full_url,
             "method": req.get_method(),
-            "headers": dict(req.headers),
+            "headers": _lower_headers(req.headers),
             "body": req.data.decode() if req.data else None,
         })
         return FakeResponse()
@@ -71,13 +75,13 @@ def test_platform_delegated_credential_helpers(monkeypatch):
     out = zps.issue_delegated_credential("clerk.jwt.abc", ttl_seconds=900)
     assert out["credential"] == "zp_dc_123"
     assert seen[0]["url"] == "https://example.test/auth/issue-credential"
-    assert seen[0]["headers"]["Authorization"] == "Bearer clerk.jwt.abc"
-    assert "X-Api-Key" not in seen[0]["headers"]
+    assert seen[0]["headers"]["authorization"] == "Bearer clerk.jwt.abc"
+    assert "x-api-key" not in seen[0]["headers"]
 
     refreshed = zps.refresh_delegated_credential("clerk.jwt.abc", "zp_dc_123", ttl_seconds=1800)
     assert refreshed["credential"] == "zp_dc_123"
     assert seen[1]["url"] == "https://example.test/auth/refresh-credential"
-    assert seen[1]["headers"]["Authorization"] == "Bearer clerk.jwt.abc"
+    assert seen[1]["headers"]["authorization"] == "Bearer clerk.jwt.abc"
 
 
 def test_platform_call_falls_back_to_api_key_for_blank_auth_token(monkeypatch):
@@ -94,7 +98,7 @@ def test_platform_call_falls_back_to_api_key_for_blank_auth_token(monkeypatch):
     def fake_urlopen(req, timeout=120):
         seen.append({
             "url": req.full_url,
-            "headers": dict(req.headers),
+            "headers": _lower_headers(req.headers),
         })
         return FakeResponse()
 
@@ -106,8 +110,38 @@ def test_platform_call_falls_back_to_api_key_for_blank_auth_token(monkeypatch):
     _call("GET", "/datasets", None, auth_token="   ")
 
     assert seen[0]["url"] == "https://example.test/datasets"
-    assert seen[0]["headers"].get("X-api-key") == "zp_test_key"
-    assert "Authorization" not in seen[0]["headers"]
+    assert seen[0]["headers"].get("x-api-key") == "zp_test_key"
+    assert "authorization" not in seen[0]["headers"]
+
+
+def test_platform_call_can_send_bearer_and_api_key_together(monkeypatch):
+    seen = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def read(self):
+            return b'{}'
+
+    def fake_urlopen(req, timeout=120):
+        seen.append({
+            "url": req.full_url,
+            "headers": _lower_headers(req.headers),
+        })
+        return FakeResponse()
+
+    monkeypatch.setenv("ZEROPROOF_API_URL", "https://example.test")
+    monkeypatch.setenv("ZEROPROOF_API_KEY", "zp_test_key")
+    monkeypatch.setattr("zeroproof_simulations.platform.urllib.request.urlopen", fake_urlopen)
+
+    from zeroproof_simulations.platform import _call
+    _call("GET", "/datasets", None, auth_token="clerk.jwt.abc", require_api_key=True)
+
+    assert seen[0]["url"] == "https://example.test/datasets"
+    assert seen[0]["headers"]["authorization"] == "Bearer clerk.jwt.abc"
+    assert seen[0]["headers"].get("x-api-key") == "zp_test_key"
 
 
 def test_system_prompt_alias_policy():
