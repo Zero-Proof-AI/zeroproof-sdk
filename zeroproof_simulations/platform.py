@@ -1,9 +1,12 @@
 """Zero Proof Labs platform client: dataset upload, listing, download.
 
 Datasets generated locally with ``simulate()`` push to your Zero Proof Labs
-account, where the optimization framework iterates on them. Auth is the
-``zp_`` API key from https://www.zeroproofai.com/platform, read from the
-``ZEROPROOF_API_KEY`` env var unless passed explicitly.
+account, where the optimization framework iterates on them. Runtime access
+uses a short-lived delegated credential (``zp_dc_...``), which is issued by a
+valid Clerk session token and then passed as the X-Api-Key on protected routes.
+
+The legacy ``ZEROPROOF_API_KEY`` env var still works for compatibility, but the
+preferred runtime credential is ``ZEROPROOF_DELEGATED_CREDENTIAL``.
 
 Stdlib only, matching the package's no-dependencies rule.
 """
@@ -16,9 +19,9 @@ import urllib.error
 import urllib.request
 
 #: Overridable with ``ZEROPROOF_API_URL``, which is what a self-hosted gate or
-#: a staging one uses. The default is a name we control rather than a generated
-#: one, so the platform can move region, account or gateway without stranding
-#: every copy of this package already installed somewhere.
+#: a staging one uses. The default is the production token gate behind the
+#: ZeroProof AWS account, and the SDK prefers delegated credentials over static
+#: keys at runtime.
 DEFAULT_API_URL = "https://api.zeroproofai.com"
 
 
@@ -31,20 +34,24 @@ def _api_url() -> str:
 
 
 def _key(api_key: str | None) -> str:
-    key = api_key or os.environ.get("ZEROPROOF_API_KEY", "")
+    key = api_key or os.environ.get("ZEROPROOF_DELEGATED_CREDENTIAL") or os.environ.get("ZEROPROOF_API_KEY", "")
     if not key:
         raise PlatformError(
-            "No API key. Pass api_key=... or set ZEROPROOF_API_KEY. "
-            "Get one at https://www.zeroproofai.com/platform")
+            "No delegated credential. Pass api_key=... or set "
+            "ZEROPROOF_DELEGATED_CREDENTIAL (preferred) / ZEROPROOF_API_KEY "
+            "for compatibility.")
     return key
 
 
 def _call(method: str, path: str, api_key: str | None, body: dict | None = None,
           *, raw_url: str | None = None, data: bytes | None = None,
-          content_type: str | None = None, timeout: int = 120) -> dict | bytes:
+          content_type: str | None = None, timeout: int = 120,
+          auth_token: str | None = None, require_api_key: bool = False) -> dict | bytes:
     url = raw_url or (_api_url() + path)
     headers: dict[str, str] = {}
-    if not raw_url:
+    if auth_token is not None:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    elif require_api_key or not raw_url:
         headers["X-Api-Key"] = _key(api_key)
     if body is not None:
         data = json.dumps(body).encode()
@@ -67,6 +74,45 @@ def _call(method: str, path: str, api_key: str | None, body: dict | None = None,
     if raw_url:
         return payload
     return json.loads(payload) if payload else {}
+
+
+def issue_delegated_credential(clerk_token: str | None, *, ttl_seconds: int = 3600,
+                              name: str = "sdk-default", api_key: str | None = None,
+                              timeout: int = 120) -> dict:
+    """Create a short-lived delegated credential for SDK or backend use.
+
+    Prefer a real Clerk session token or authenticated backend token in the
+    ``clerk_token`` parameter. The SDK keeps the legacy ``X-Api-Key`` path for
+    compatibility, but delegate-based clients should use the bearer token flow.
+    """
+    if not clerk_token:
+        raise PlatformError("A valid Clerk session token is required to mint a delegated credential.")
+    body = {"name": name, "ttlSeconds": int(ttl_seconds)}
+    return _call("POST", "/auth/issue-credential", api_key, body, timeout=timeout,
+                 auth_token=clerk_token)
+
+
+def refresh_delegated_credential(clerk_token: str | None, credential: str, *,
+                               ttl_seconds: int = 3600, timeout: int = 120) -> dict:
+    """Refresh a delegated credential before it expires."""
+    if not clerk_token:
+        raise PlatformError("A valid Clerk session token is required to refresh a delegated credential.")
+    if not credential:
+        raise PlatformError("Pass the current delegated credential to refresh it.")
+    body = {"credential": credential, "ttlSeconds": int(ttl_seconds)}
+    return _call("POST", "/auth/refresh-credential", None, body, timeout=timeout,
+                 auth_token=clerk_token)
+
+
+def revoke_delegated_credential(clerk_token: str | None, credential: str,
+                               *, timeout: int = 120) -> dict:
+    """Revoke a delegated credential for the authenticated user."""
+    if not clerk_token:
+        raise PlatformError("A valid Clerk session token is required to revoke a delegated credential.")
+    if not credential:
+        raise PlatformError("Pass the delegated credential to revoke it.")
+    return _call("POST", "/auth/revoke-credential", None, {"credential": credential},
+                 timeout=timeout, auth_token=clerk_token)
 
 
 def push_rows(rows: list[dict], name: str, *, api_key: str | None = None,

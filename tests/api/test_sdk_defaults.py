@@ -1,4 +1,5 @@
 import inspect
+import json
 import threading
 import time
 
@@ -43,6 +44,40 @@ def test_default_budget_is_500():
     assert "length" not in params
     assert "turns" not in params
     assert "seconds" not in params
+
+
+def test_platform_delegated_credential_helpers(monkeypatch):
+    seen = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def read(self):
+            return b'{"credential": "zp_dc_123", "expiresAt": "2026-08-26T13:00:00Z"}'
+
+    def fake_urlopen(req, timeout=120):
+        seen.append({
+            "url": req.full_url,
+            "method": req.get_method(),
+            "headers": dict(req.headers),
+            "body": req.data.decode() if req.data else None,
+        })
+        return FakeResponse()
+
+    monkeypatch.setenv("ZEROPROOF_API_URL", "https://example.test")
+    monkeypatch.setattr("zeroproof_simulations.platform.urllib.request.urlopen", fake_urlopen)
+
+    out = zps.issue_delegated_credential("clerk.jwt.abc", ttl_seconds=900)
+    assert out["credential"] == "zp_dc_123"
+    assert seen[0]["url"] == "https://example.test/auth/issue-credential"
+    assert seen[0]["headers"]["Authorization"] == "Bearer clerk.jwt.abc"
+
+    refreshed = zps.refresh_delegated_credential("clerk.jwt.abc", "zp_dc_123", ttl_seconds=1800)
+    assert refreshed["credential"] == "zp_dc_123"
+    assert seen[1]["url"] == "https://example.test/auth/refresh-credential"
+    assert seen[1]["headers"]["Authorization"] == "Bearer clerk.jwt.abc"
 
 
 def test_system_prompt_alias_policy():

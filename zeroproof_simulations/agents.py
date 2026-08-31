@@ -130,6 +130,31 @@ def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
     ping_hosted(base_url, timeout=timeout)
 
 
+HOSTED_DROPPED = (
+    "Hosted Qwen dropped an in-flight request. "
+    "Lower concurrency or wait for the other simulate to finish.")
+_TRANSIENT_RETRY = "retry_transient"
+_TRANSIENT_TRIES = 3
+_TRANSIENT_STATUSES = {500, 502, 503, 504}
+
+
+def _is_lost_track(text: str) -> bool:
+    low = str(text or "").lower()
+    if "lost track of input" in low or "internalfailure" in low:
+        return True
+    if "modal-http" in low and ("500" in low or "internal error" in low):
+        return True
+    return "returned 500" in low and "modal.run" in low
+
+
+def public_llm_error(exc: BaseException | str | None) -> str:
+    """Studio/JSONL-safe message. Strip Modal internals from dropped requests."""
+    text = str(exc or "").strip()
+    if _is_lost_track(text) or str(exc) == _TRANSIENT_RETRY:
+        return HOSTED_DROPPED
+    return text
+
+
 USER_TURN_MARK = "\n<USER_TURN>\n"
 
 

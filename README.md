@@ -89,10 +89,19 @@ zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", un
 ## Store datasets on Zero Proof Labs
 
 Push a run to your Zero Proof Labs account so the optimization framework
-can iterate on it. Auth is your `zp_` API key from
-https://www.zeroproofai.com/platform (env `ZEROPROOF_API_KEY`).
+can iterate on it. For runtime SDK access, prefer a short-lived delegated
+credential (`zp_dc_...`) issued from a valid Clerk session token. The SDK
+uses `ZEROPROOF_DELEGATED_CREDENTIAL` by default; the legacy
+`ZEROPROOF_API_KEY` still works for compatibility.
 
 ```python
+# Preferred runtime path
+# export ZEROPROOF_DELEGATED_CREDENTIAL="zp_dc_..."
+
+# If you need to mint one from a Clerk session token:
+# credential = zps.issue_delegated_credential(clerk_token, ttl_seconds=3600)
+# export ZEROPROOF_DELEGATED_CREDENTIAL=credential["credential"]
+
 data = zps.simulate(spec="specs/github")
 v1 = data.push("github-explore-v1")            # -> {"datasetId": "ds_...", ...}
 

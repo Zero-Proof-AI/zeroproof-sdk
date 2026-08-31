@@ -47,8 +47,11 @@ from .explore import mutate_pool
 from .generator import (ModelSimulator, assistant_kind, make_default_generator,
                        write_result_shapes, write_scene_brief)
 from .grading import _as_dict, behavior_signature, conduct_grade
-from .platform import (PlatformError, datasets, delete as delete_dataset,
-                       pull, push_file, push_rows)
+from .platform import (PlatformError, datasets,
+                       delete as delete_dataset,
+                       issue_delegated_credential, pull, push_file,
+                       push_rows, refresh_delegated_credential,
+                       revoke_delegated_credential)
 from .llm_judge import (MISSING_JUDGE_KEY, apply_llm_grade,
                        resolve_judge_key)
 from .grade_llm import apply_grade_llm, require_judge_key
@@ -77,7 +80,9 @@ from .judging import (ScoredData, build_preference_pairs, evaluate,
                       normalize_judge_result, run_judge)
 
 __all__ = ["simulate", "SimulationData", "conversation", "local_model",
-           "datasets", "pull", "push_file", "push_rows", "delete_dataset",
+           "datasets", "pull", "push_file", "push_rows",
+           "delete_dataset", "issue_delegated_credential",
+           "refresh_delegated_credential", "revoke_delegated_credential",
            "PlatformError",
            "hosted_model",
            "MockEnvironment", "llm_grade", "grade", "grade_llm",
