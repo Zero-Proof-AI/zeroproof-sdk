@@ -77,7 +77,7 @@ def _call(method: str, path: str, api_key: str | None, body: dict | None = None,
 
 
 def issue_delegated_credential(clerk_token: str | None, *, ttl_seconds: int = 3600,
-                              name: str = "sdk-default", api_key: str | None = None,
+                              name: str = "sdk-default",
                               timeout: int = 120) -> dict:
     """Create a short-lived delegated credential for SDK or backend use.
 
@@ -88,7 +88,7 @@ def issue_delegated_credential(clerk_token: str | None, *, ttl_seconds: int = 36
     if not clerk_token:
         raise PlatformError("A valid Clerk session token is required to mint a delegated credential.")
     body = {"name": name, "ttlSeconds": int(ttl_seconds)}
-    return _call("POST", "/auth/issue-credential", api_key, body, timeout=timeout,
+    return _call("POST", "/auth/issue-credential", None, body, timeout=timeout,
                  auth_token=clerk_token)
 
 

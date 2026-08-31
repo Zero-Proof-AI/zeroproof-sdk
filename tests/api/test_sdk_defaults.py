@@ -72,6 +72,7 @@ def test_platform_delegated_credential_helpers(monkeypatch):
     assert out["credential"] == "zp_dc_123"
     assert seen[0]["url"] == "https://example.test/auth/issue-credential"
     assert seen[0]["headers"]["Authorization"] == "Bearer clerk.jwt.abc"
+    assert "X-Api-Key" not in seen[0]["headers"]
 
     refreshed = zps.refresh_delegated_credential("clerk.jwt.abc", "zp_dc_123", ttl_seconds=1800)
     assert refreshed["credential"] == "zp_dc_123"
