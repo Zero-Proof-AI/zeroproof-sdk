@@ -67,9 +67,11 @@ from .optimize import (filter_rl_rows, group_signal, optimize,
                        optimize_for_rl, recommend, select_for_rl,
                        select_for_sft, trim_unanimous_groups)
 from .otel import rows_from_otel
-from .traces import (dimensions_from_traces, drop_leaky_rows, flaw_rows,
+from .traces import (dimensions_from_traces, drop_leaky_rows,
+                     exemplar_result_shapes, flaw_rows,
                      format_trace_report, leakage_report,
-                     load_traces, mine_traces, simulate_from_traces,
+                     load_traces, mine_result_exemplars, mine_traces,
+                     simulate_from_traces,
                      split_pseudo_production, trace_report)
 from .preflight import (FAILURE_CLASSES, classify_failure, dataset_report,
                         format_dataset_report, preflight)
@@ -1183,6 +1185,13 @@ def simulate(agent: Any = None, *, spec: Any = None,
     _note(data, "agent ingestion")
     scene_box: dict[str, Any] = {"brief": ""}
     shape_box: dict[str, dict] = {}
+    trace_exemplars: dict[str, list] = {}
+    if trace_rows:
+        # Real observed payloads beat invented ones: results mined from
+        # the traces become the shape templates first; the model-written
+        # pass below only fills tools the traces never showed.
+        trace_exemplars = mine_result_exemplars(trace_rows)
+        shape_box.update(exemplar_result_shapes(trace_exemplars))
     scene_thread: threading.Thread | None = None
     use_model_writer = not (
         simulator is False
@@ -1196,7 +1205,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
             # its first waves without the scene brief.
             shapes = write_result_shapes(tools, backend_spec=scene_spec)
             if shapes:
-                shape_box.update(shapes)
+                # setdefault, not update: a template mined from a real
+                # trace outranks a model-written guess for that tool.
+                for shape_name, shape in shapes.items():
+                    shape_box.setdefault(shape_name, shape)
             elif "result_shapes_unavailable" not in data.degraded:
                 data.degraded.append("result_shapes_unavailable")
             brief = write_scene_brief(
@@ -2356,6 +2368,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
             "faults": mined["faults"],
             "tools": {name: dict(slot)
                       for name, slot in mined["tools"].items()},
+            # Observed result payloads reused as shape templates for
+            # invented results; count everything (doctrine).
+            "result_exemplars": {name: len(values) for name, values
+                                 in trace_exemplars.items()},
             "focused_dimensions": {axis: list(values) for axis, values
                                    in (dimensions or {}).items()},
         }
