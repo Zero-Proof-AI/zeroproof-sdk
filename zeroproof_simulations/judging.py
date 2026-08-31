@@ -167,10 +167,12 @@ class ScoredData:
             self.rows, max_pairs_per_prompt=max_pairs_per_prompt)
 
     def select_for_rl(self, *, target: int = 1000, lo: float = 0.3,
-                      hi: float = 0.7) -> tuple[list[dict], dict[str, Any]]:
+                      hi: float = 0.7, has_tools: bool = True
+                      ) -> tuple[list[dict], dict[str, Any]]:
         """Whole mixed-reward groups for RL; groups never split."""
         from .optimize import select_for_rl
-        return select_for_rl(self.rows, target=target, lo=lo, hi=hi)
+        return select_for_rl(self.rows, target=target, lo=lo, hi=hi,
+                             has_tools=has_tools)
 
     def report(self, *, tools: Sequence[dict] | None = None,
                system_prompt: str = "") -> dict[str, Any]:
