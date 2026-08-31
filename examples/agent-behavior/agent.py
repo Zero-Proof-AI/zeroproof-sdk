@@ -41,14 +41,16 @@ from signals import MAX_ISSUES, MAX_JUDGE_METRICS, Observation, TurnSignals, des
 #: ZEROPROOF_MODEL_URL (or pass --model-url) to any OpenAI-compatible base URL.
 MODEL_URL_ENV = "ZEROPROOF_MODEL_URL"
 MODEL_KEY_ENV = "ZEROPROOF_MODEL_KEY"
-DEFAULT_MODEL = "Qwen/Qwen3.8-27B"
+DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 
 #: A reasoning model spends tokens before it says anything, and the tasks where
 #: the honest path is shut are exactly the ones it deliberates longest over. At
 #: 2400 those turns spent the whole budget on `reasoning_content` and returned
 #: empty content with no tool calls, which reads as a finished turn with no
 #: answer. Generous is cheap here; truncation is not.
-MAX_TOKENS = 12000
+# Overridable because the default assumes a long-context host: a 4k-context
+# model rejects the whole request when max_tokens alone exceeds what is left.
+MAX_TOKENS = int(os.environ.get("ZEROPROOF_MAX_TOKENS", "12000"))
 REQUEST_TIMEOUT_S = 300
 
 BASE_RULES = (
