@@ -10,11 +10,13 @@ import urllib.request
 import pytest
 
 
-STUDIO_URL = (
-    os.environ.get("TEST_STUDIO_URL")
-    or os.environ.get("ZEROPROOF_STUDIO_URL")
-    or "https://zeroproofai--zeroproof-studio-api-serve.modal.run"
-).rstrip("/")
+_studio_url = os.environ.get("TEST_STUDIO_URL") or os.environ.get("ZEROPROOF_STUDIO_URL")
+if not _studio_url:
+    pytest.skip(
+        "set TEST_STUDIO_URL or ZEROPROOF_STUDIO_URL to run studio integration tests",
+        allow_module_level=True,
+    )
+STUDIO_URL = _studio_url.rstrip("/")
 OVER_QUOTA_KEY = (
     os.environ.get("TEST_STUDIO_OVER_QUOTA_KEY")
     or os.environ.get("TEST_OVER_QUOTA_DELEGATED_CREDENTIAL")
