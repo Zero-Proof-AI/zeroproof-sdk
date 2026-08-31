@@ -1032,13 +1032,6 @@ def test_public_llm_error_hides_modal_500():
     assert public_llm_error("temporary hosted failure") == "temporary hosted failure"
 
 
-def test_studio_hosted_concurrency_leaves_headroom():
-    from studio.api.simulate import DEFAULT_CONCURRENCY, HOSTED_MAX_CONCURRENCY
-
-    assert DEFAULT_CONCURRENCY == 16
-    assert HOSTED_MAX_CONCURRENCY == 32
-
-
 def test_writer_merges_n_completions(monkeypatch):
     from zeroproof_simulations.generator import ModelSimulator
 

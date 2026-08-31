@@ -30,9 +30,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Zero-Proof-AI/zeroproof-simulations"
-Repository = "https://github.com/Zero-Proof-AI/zeroproof-simulations"
-Issues = "https://github.com/Zero-Proof-AI/zeroproof-simulations/issues"
+Homepage = "https://github.com/Zero-Proof-AI/zeroproof-sdk"
+Repository = "https://github.com/Zero-Proof-AI/zeroproof-sdk"
+Issues = "https://github.com/Zero-Proof-AI/zeroproof-sdk/issues"
 Datasets = "https://huggingface.co/datasets/zero-proof-ai/agent-simulations"
 
 [project.scripts]
