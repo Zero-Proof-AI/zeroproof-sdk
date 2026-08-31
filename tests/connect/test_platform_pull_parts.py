@@ -109,3 +109,24 @@ def test_ingested_traces_export_with_real_tool_arguments():
     assert all(c["function"]["arguments"] not in ("{}", "", None) for c in calls)
     assert json.loads(calls[0]["function"]["arguments"])["path"] == "paging.py"
     assert export.tool_call_roundtrip(rows)["invalid"] == 0
+
+
+def test_infer_harness_drafts_schemas_from_tool_traces():
+    from zeroproof_simulations.traces import infer_harness
+    rows = [
+        {"tool_trace": [
+            {"tool": "read_file", "input": '{"path": "a.py"}', "output": "..."},
+            {"tool": "read_file", "input": '{"path": "b.py"}', "output": "..."},
+        ]},
+        {"steps": [
+            {"tool": "run_command", "arguments": {"command": "pytest", "timeout": 30},
+             "result": {"status": "ok"}},
+        ]},
+    ]
+    h = infer_harness(rows)
+    assert h["observed_calls"] == {"read_file": 2, "run_command": 1}
+    by = {t["function"]["name"]: t["function"]["parameters"] for t in h["tools"]}
+    assert by["read_file"]["properties"]["path"]["type"] == "string"
+    assert by["read_file"]["required"] == ["path"]
+    assert by["run_command"]["properties"]["timeout"]["type"] == "number"
+    assert h["policy"] == ""

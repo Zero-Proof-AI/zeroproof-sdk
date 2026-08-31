@@ -375,7 +375,9 @@ def _leak_flags(generated: Sequence[Any], sources: Sequence[Any], *,
                 best, best_j = sim, j
         if " ".join(gen_texts[i].lower().split()) in src_norm:
             best = 1.0
-        report["max_similarity"] = max(report["max_similarity"], best)
+        # Clamped: float cosine drift printed 1.0000000000000002 in a
+        # report a customer reads.
+        report["max_similarity"] = min(1.0, max(report["max_similarity"], best))
         if best >= min(float(threshold), 1.0):
             flags[i] = True
             report["n_leaky"] += 1
@@ -699,10 +701,80 @@ def format_trace_report(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def infer_harness(rows: Sequence[dict]) -> dict[str, Any]:
+    """Draft a harness from observed trace rows. Mechanical, no model.
+
+    Tool schemas come from what the agent actually sent: every argument key
+    seen for a tool becomes a property, its JSON type read off the observed
+    values, and a key present on every call becomes required. The policy
+    cannot be inferred — exporters do not ship system prompts — so it comes
+    back empty for the caller to fill in. A drafted schema is a starting
+    point to edit, not a spec to trust: it can only describe arguments the
+    traces happened to exercise.
+    """
+    def _json_type(value: Any) -> str:
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, (int, float)):
+            return "number"
+        if isinstance(value, list):
+            return "array"
+        if isinstance(value, dict):
+            return "object"
+        return "string"
+
+    seen: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        steps = row.get("steps")
+        if not steps and isinstance(row.get("tool_trace"), list):
+            steps = [{"tool": t.get("tool"), "arguments": t.get("input")}
+                     for t in row["tool_trace"] if isinstance(t, dict)]
+        for step in steps or []:
+            if not isinstance(step, dict):
+                continue
+            name = str(step.get("tool") or "").strip()
+            if not name:
+                continue
+            args = step.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
+            entry = seen.setdefault(name, {"calls": 0, "keys": {}})
+            entry["calls"] += 1
+            for key, value in args.items():
+                types = entry["keys"].setdefault(str(key), {"n": 0, "types": set()})
+                types["n"] += 1
+                types["types"].add(_json_type(value))
+
+    tools = []
+    for name in sorted(seen):
+        entry = seen[name]
+        properties = {}
+        required = []
+        for key in sorted(entry["keys"]):
+            info = entry["keys"][key]
+            types = sorted(info["types"])
+            properties[key] = {"type": types[0] if len(types) == 1 else "string"}
+            if info["n"] == entry["calls"]:
+                required.append(key)
+        tools.append({"type": "function", "function": {
+            "name": name,
+            "parameters": {"type": "object", "properties": properties,
+                           "required": required}}})
+    return {"tools": tools, "policy": "",
+            "observed_calls": {name: seen[name]["calls"] for name in sorted(seen)}}
+
+
 __all__ = [
     "mine_traces", "mine_result_exemplars", "exemplar_result_shapes",
     "dimensions_from_traces", "split_pseudo_production",
     "flaw_rows", "leakage_report", "drop_leaky_rows", "simulate_from_traces",
-    "trace_story",
     "load_traces", "trace_report", "format_trace_report",
+    "infer_harness",
 ]
