@@ -50,7 +50,10 @@ zeroproof = ["py.typed"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["zeroproof", "zeroproof_simulations"]
-exclude = ["tests*", "examples*", "docs*", "specs*"]
+# behaviors is internal tooling for our own training runs: in the repo,
+# never in the wheel.
+exclude = ["tests*", "examples*", "docs*", "specs*",
+           "zeroproof_simulations.behaviors*"]
 namespaces = false
 
 [tool.pytest.ini_options]

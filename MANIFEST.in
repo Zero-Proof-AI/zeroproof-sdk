@@ -5,6 +5,7 @@ recursive-include zeroproof_simulations *.py
 recursive-include zeroproof *.py
 include zeroproof/py.typed
 prune zeroproof_simulations/_experimental
+prune zeroproof_simulations/behaviors
 prune tests
 prune examples
 prune specs
