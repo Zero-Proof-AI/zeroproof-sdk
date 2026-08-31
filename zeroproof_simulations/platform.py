@@ -49,8 +49,9 @@ def _call(method: str, path: str, api_key: str | None, body: dict | None = None,
           auth_token: str | None = None, require_api_key: bool = False) -> dict | bytes:
     url = raw_url or (_api_url() + path)
     headers: dict[str, str] = {}
-    if auth_token is not None:
-        headers["Authorization"] = f"Bearer {auth_token}"
+    token = str(auth_token or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     elif require_api_key or not raw_url:
         headers["X-Api-Key"] = _key(api_key)
     if body is not None:

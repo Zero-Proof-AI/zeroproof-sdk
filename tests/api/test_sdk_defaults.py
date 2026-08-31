@@ -80,6 +80,36 @@ def test_platform_delegated_credential_helpers(monkeypatch):
     assert seen[1]["headers"]["Authorization"] == "Bearer clerk.jwt.abc"
 
 
+def test_platform_call_falls_back_to_api_key_for_blank_auth_token(monkeypatch):
+    seen = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def read(self):
+            return b'{}'
+
+    def fake_urlopen(req, timeout=120):
+        seen.append({
+            "url": req.full_url,
+            "headers": dict(req.headers),
+        })
+        return FakeResponse()
+
+    monkeypatch.setenv("ZEROPROOF_API_URL", "https://example.test")
+    monkeypatch.setenv("ZEROPROOF_API_KEY", "zp_test_key")
+    monkeypatch.setattr("zeroproof_simulations.platform.urllib.request.urlopen", fake_urlopen)
+
+    from zeroproof_simulations.platform import _call
+    _call("GET", "/datasets", None, auth_token="   ")
+
+    assert seen[0]["url"] == "https://example.test/datasets"
+    assert seen[0]["headers"].get("X-api-key") == "zp_test_key"
+    assert "Authorization" not in seen[0]["headers"]
+
+
 def test_system_prompt_alias_policy():
     data = simulate_offline(budget=4, system_prompt=POLICY, per_round=6)
     assert data.profile.system_prompt == POLICY
