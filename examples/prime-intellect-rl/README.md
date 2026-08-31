@@ -10,7 +10,7 @@ the rest of the pipeline is unchanged.
 ## Run it
 
 ```bash
-pip install zeroproof-simulations
+pip install zeroproof
 export VLLM_API_KEY=...            # ask ZeroProof for a key
 uv run python generate.py --situations 100 --k 8
 uv run python diagnose.py data/rl.jsonl
@@ -166,7 +166,7 @@ One packaging note if you push the environment to the Environments Hub: it is
 installed there with plain pip, so every dependency has to be pip-resolvable. A
 `[tool.uv.sources]` git pin installs locally, passes the hub's CI, and then kills
 every env server at training time with a `ModuleNotFoundError`. Depend on
-`zeroproof-simulations` from PyPI rather than from a git URL.
+`zeroproof` from PyPI rather than from a git URL.
 
 ## Files
 
