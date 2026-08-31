@@ -120,3 +120,57 @@ def test_export_refuses_unparseable_tool_arguments():
     clean = training_rows([ROW], system_prompt=POLICY, tools=TOOLS)
     assert tool_call_roundtrip(clean) == {"checked": 1, "invalid": 0,
                                           "rows": []}
+
+
+def _graded(prompt: str, reward: int, tier: str = "ordinary") -> dict:
+    return {
+        "prompt": prompt, "reward": reward, "tier": tier, "stance": "curt",
+        "messages": [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+
+
+def test_repeated_prompts_get_group_identity():
+    rows = training_rows(
+        [_graded("refund A", 1), _graded("refund A", 0),
+         _graded("refund A", 0), _graded("lookup B", 1),
+         _graded("lookup B", 1)],
+        system_prompt=POLICY, tools=TOOLS)
+    a = [r for r in rows if r["prompt"] == "refund A"]
+    b = [r for r in rows if r["prompt"] == "lookup B"]
+    assert {r["group_id"] for r in a} != {r["group_id"] for r in b}
+    assert all(r["k"] == 3 and r["n0"] == 2 and r["n1"] == 1 for r in a)
+    assert all(r["k"] == 2 and r["n0"] == 0 and r["n1"] == 2 for r in b)
+
+
+def test_unique_prompts_get_no_group_fields():
+    rows = training_rows([_graded("one", 1), _graded("two", 0)],
+                         system_prompt=POLICY, tools=TOOLS)
+    assert all("group_id" not in r and "k" not in r for r in rows)
+
+
+def test_diversity_axes_survive_export():
+    rows = training_rows([_graded("refund A", 1, tier="adversarial")],
+                         system_prompt=POLICY, tools=TOOLS)
+    assert rows[0]["tier"] == "adversarial"
+    assert rows[0]["stance"] == "curt"
+
+
+def test_pulled_tool_trace_rows_export_with_tool_calls():
+    row = {
+        "prompt": "fix the paging bug",
+        "final_text": "Done, tests pass.",
+        "reward": 1,
+        "tool_trace": [
+            {"tool": "read_file", "input": '{"path": "paging.py"}',
+             "output": "def page_count(): ..."},
+        ],
+    }
+    rows = training_rows([row], system_prompt=POLICY, tools=TOOLS)
+    calls = [c for m in rows[0]["messages"] for c in (m.get("tool_calls") or [])]
+    assert len(calls) == 1
+    assert json.loads(calls[0]["function"]["arguments"]) == {"path": "paging.py"}
+    from zeroproof_simulations.export import tool_call_roundtrip as rt
+    assert rt(rows) == {"checked": 1, "invalid": 0, "rows": []}

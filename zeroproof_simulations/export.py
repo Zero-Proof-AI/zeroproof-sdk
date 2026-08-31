@@ -17,6 +17,7 @@ The result trains any chat-template model. No field is model-specific.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -25,9 +26,16 @@ from typing import Any, Sequence
 from .quality import _load_jsonl, _write_jsonl
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
+# The second group are the sampled diversity axes. They cost bytes, but a
+# training file that drops them cannot answer "which slice regressed" after
+# the run: post-training evals stratify by exactly these, and re-deriving
+# them from message text is guesswork.
 _CARRY_KEYS = ("reward", "qwen_reward", "reason", "prompt", "scenario_id",
-               "world_state", "faults", "label_source",
-               "failure_class", "judge_status", "judge_name", "lineage")
+               "world_state", "faults", "fault_detected", "label_source",
+               "failure_class", "judge_status", "judge_name", "lineage",
+               "tier", "ask_family", "ask", "stance", "tone", "texture",
+               "vagueness", "phrasing", "pressure", "user", "history",
+               "length", "intent_known", "tool_known")
 
 
 def _strip_think(text: str) -> str:
@@ -168,6 +176,19 @@ def training_rows(source, *, system_prompt: str | None = None,
     for row in rows:
         if not isinstance(row, dict):
             continue
+        # Rows pulled from the platform store actions as ``tool_trace``
+        # (input/output); the conversation builder reads ``steps``
+        # (arguments/result). Without this bridge a pulled trace exports as
+        # a tool-less chat and the roundtrip gate has nothing to check —
+        # the dataset trains an agent that never calls a tool.
+        if (not row.get("messages") and not row.get("steps")
+                and isinstance(row.get("tool_trace"), list)):
+            row = dict(row)
+            row["steps"] = [
+                {"tool": step.get("tool"),
+                 "arguments": step.get("input"),
+                 "result": step.get("output")}
+                for step in row["tool_trace"] if isinstance(step, dict)]
         messages = row.get("messages") or conversation(row)
         entry: dict[str, Any] = {
             "messages": _convert_messages(messages, system=system,
@@ -179,7 +200,38 @@ def training_rows(source, *, system_prompt: str | None = None,
             if row.get(key) is not None:
                 entry[key] = row[key]
         out.append(entry)
+    _stamp_groups(out)
     return out
+
+
+def _stamp_groups(rows: list[dict]) -> None:
+    """GRPO group identity, stamped whenever any prompt repeats.
+
+    ``select_for_rl`` hands over whole groups, and then the export used to
+    flatten them: a GRPO trainer had to re-group by exact prompt string, an
+    equality that one whitespace edit silently breaks. ``group_id`` is the
+    stable name (sha1 of the prompt, like the studio packs used), ``k`` the
+    group size, ``n0``/``n1`` the 0/1 label counts so a consumer can drop
+    unanimous groups without rescoring. A run with no repeated prompt is an
+    SFT/explore export and gets no group fields at all.
+    """
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        prompt = row.get("prompt")
+        if isinstance(prompt, str) and prompt:
+            groups.setdefault(prompt, []).append(row)
+    if not any(len(members) > 1 for members in groups.values()):
+        return
+    for prompt, members in groups.items():
+        gid = hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
+        rewards = [m.get("reward") for m in members]
+        n0 = sum(1 for v in rewards if v == 0)
+        n1 = sum(1 for v in rewards if v == 1)
+        for m in members:
+            m["group_id"] = gid
+            m["k"] = len(members)
+            m["n0"] = n0
+            m["n1"] = n1
 
 
 def export_training(source, output: str | None = None, *,
@@ -216,6 +268,7 @@ def export_training(source, output: str | None = None, *,
                            if r["messages"] and
                            r["messages"][0]["role"] == "system"),
         "with_tools": sum(1 for r in rows if r.get("tools")),
+        "groups": len({r["group_id"] for r in rows if "group_id" in r}),
         "tool_call_roundtrip": roundtrip,
     }
     if dest:
@@ -271,6 +324,18 @@ def export_preference(pairs: Sequence[dict], output: str | None = None, *,
             "validate=False.")
     report: dict[str, Any] = {"pairs": len(out_rows),
                               "tool_call_roundtrip": roundtrip}
+    # A 0-byte JSONL is not an empty dataset, it is a crash downstream:
+    # datasets raises a bare StopIteration on it and pyarrow refuses the
+    # file. No pairs means no file, loudly.
+    if not out_rows:
+        if validate:
+            raise ValueError(
+                "no_preference_pairs: nothing had a chosen and a rejected "
+                "side. All-pass or all-fail runs produce no contrast; "
+                "regrade or raise difficulty, or pass validate=False to "
+                "get the empty report without a file.")
+        report["path"] = None
+        return report
     if output:
         report["path"] = _write_jsonl(output, out_rows)
     return report
