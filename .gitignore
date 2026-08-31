@@ -29,6 +29,7 @@ examples/*
 # Generated rows there are still covered by the *.jsonl rule above.
 !examples/prime-intellect-rl/
 !examples/agent-behavior/
+!examples/identity/
 
 # helpers, not the product
 /scripts/
