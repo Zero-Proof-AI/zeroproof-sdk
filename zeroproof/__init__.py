@@ -40,7 +40,7 @@ from .models import (
     WorkflowStatus,
 )
 
-__version__ = "0.2.7"
+__version__ = "0.3"
 __all__ = [
     # Main client
     "ZeroProof",
