@@ -251,6 +251,25 @@ def _shrink_last_user(messages: list[dict], *, frac: float = 0.5) -> bool:
     return True
 
 
+def _trim_length_cut(choice: dict) -> None:
+    """Cut a token-capped reply back to its last complete sentence.
+
+    finish_reason "length" means the server stopped mid-thought; the
+    dangling fragment otherwise ships as a truncated final_text (measured
+    20/160 rows in an rl run). Tool-call replies are left alone. If no
+    sentence boundary exists the text stays and the junk gate decides.
+    """
+    if not isinstance(choice, dict) or choice.get("finish_reason") != "length":
+        return
+    message = choice.get("message")
+    if not isinstance(message, dict) or message.get("tool_calls"):
+        return
+    text = str(message.get("content") or "")
+    cut = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
+    if cut > 40:
+        message["content"] = text[:cut + 1]
+
+
 def complete(base_url: str, model: str, messages: list[dict], *,
              tools: list[dict] | None = None, api_key: str | None = None,
              temperature: float = 0.7, max_tokens: int = 1024,
@@ -344,6 +363,8 @@ def complete(base_url: str, model: str, messages: list[dict], *,
             choices = json.loads(raw).get("choices") or []
             if not choices:
                 raise RuntimeError(f"{parsed.hostname} returned no choices")
+            for c in choices:
+                _trim_length_cut(c)
             first = dict(choices[0].get("message") or {})
             extras = [dict(c.get("message") or {}) for c in choices]
             if len(extras) > 1:
