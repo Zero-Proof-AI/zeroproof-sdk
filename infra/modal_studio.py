@@ -40,6 +40,11 @@ if (ROOT / "specs").is_dir():
 
 app = modal.App("zeroproof-studio-api", image=image)
 
+# Runs, agents, and imported datasets all live under ROOT/outputs
+# (studio/api/data.py). Without a volume the store is container-local
+# and every deploy or restart wipes it.
+outputs = modal.Volume.from_name("studio-outputs", create_if_missing=True)
+
 
 @app.function(
     cpu=1,
@@ -48,6 +53,7 @@ app = modal.App("zeroproof-studio-api", image=image)
     max_containers=1,
     scaledown_window=300,
     timeout=900,
+    volumes={"/root/outputs": outputs},
     secrets=[
         modal.Secret.from_name("stressd-vllm-key"),
         modal.Secret.from_name("zeroproof-token-gate"),
