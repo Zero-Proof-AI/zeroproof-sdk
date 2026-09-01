@@ -1157,6 +1157,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
             "simulate needs an agent, tools=, or a system prompt.")
     trace_rows: list[dict] = []
     trace_focused = False
+    optimizer_state = None
+
+    def _apply_allocation(region_list) -> None:
+        return None
     # strategy= names the coverage stance explicitly (doctrine: traces
     # change the coverage DISTRIBUTION, never the space). auto resolves
     # descriptively and records its reason; it never picks "targeted" on
@@ -1195,6 +1199,43 @@ def simulate(agent: Any = None, *, spec: Any = None,
                           if isinstance(r, dict)]
         else:
             trace_rows = [r for r in traces if isinstance(r, dict)]
+        # The optimizer's memory feeds the run it aims: regions from
+        # the whole trace history, budget shares from their lifecycle.
+        # Cells whose coordinates intersect a hot region's expansion
+        # recipe draw extra weight proportional to its share; cells
+        # outside every recipe keep base weight - that is the
+        # exploration reserve in action.
+        optimizer_state = behavior_state(
+            trace_rows,
+            targeted=[str(x) for x in
+                      (advanced.pop("targeted_regions", None) or [])])
+        _ALLOC_GAIN = 4.0
+
+        def _allocation_boost(assignment: dict) -> float:
+            factor = 1.0
+            for region in optimizer_state["regions"]:
+                share = region.get("budget_share") or 0.0
+                if share <= 0:
+                    continue
+                recipe = region.get("recipe") or {}
+                match = 0.0
+                tools_r = recipe.get("tool") or []
+                if tools_r and str(assignment.get("tool")) in tools_r:
+                    match += 0.6
+                conds = recipe.get("tool_condition") or []
+                if conds and str(assignment.get("tool_condition")) in conds:
+                    match += 0.4
+                if match:
+                    factor += _ALLOC_GAIN * share * match
+            return factor
+
+        def _apply_allocation(region_list) -> None:
+            for region in region_list or []:
+                boost = _allocation_boost(region.get("assignment") or {})
+                if boost != 1.0:
+                    region["weight"] = round(
+                        float(region.get("weight") or 0.0) * boost, 6)
+
         if (trace_rows and dimensions is None
                 and resolved_strategy != "broad"):
             # trace: denser near observed behaviors, background kept.
@@ -1293,6 +1334,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         scene_brief=scene_box["brief"], time_budget=time_budget,
         run_started=started, mode=topo["mode"],
         steering_weight=applied_steering, **advanced)
+    _apply_allocation(getattr(generator, "regions", None))
     planned_cell_keys = {
         json.dumps(region["assignment"], sort_keys=True, default=str)
         for region in (getattr(generator, "regions", None) or [])
@@ -2291,14 +2333,16 @@ def simulate(agent: Any = None, *, spec: Any = None,
                         slot = axis_counts.setdefault(axis, {})
                         slot[value] = slot.get(value, 0) + 1
 
-            retarget_regions(generator.regions, tools, counts=region_counts,
-                             novelty=novelty_fn, behavior_value=behavior_fn,
-                             axis_counts=axis_counts, mode=topo["mode"])
+            _apply_allocation(retarget_regions(
+                generator.regions, tools, counts=region_counts,
+                novelty=novelty_fn, behavior_value=behavior_fn,
+                axis_counts=axis_counts, mode=topo["mode"]))
             model_obj = getattr(generator, "model", None)
             if model_obj is not None and getattr(model_obj, "regions", None):
-                retarget_regions(model_obj.regions, tools, counts=region_counts,
-                                 novelty=novelty_fn, behavior_value=behavior_fn,
-                                 axis_counts=axis_counts, mode=topo["mode"])
+                _apply_allocation(retarget_regions(
+                    model_obj.regions, tools, counts=region_counts,
+                    novelty=novelty_fn, behavior_value=behavior_fn,
+                    axis_counts=axis_counts, mode=topo["mode"]))
             templates = getattr(generator, "templates", None)
             if templates is not None:
                 templates.regions = generator.regions
@@ -2438,7 +2482,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
         # improving / uncertain / passing) with budget shares. Recorded
         # for callers and the platform UI; allocation is disclosure
         # until the steering calibration sets how hard to apply it.
-        data.search["behavior_state"] = behavior_state(trace_rows)
+        state_record = dict(optimizer_state or behavior_state(trace_rows))
+        state_record["applied"] = bool(optimizer_state
+                                       and optimizer_state["regions"])
+        state_record["allocation_gain"] = 4.0
+        data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(data.trajectories, trace_rows,
                                           embedder=resolved_embedder)
         data.trajectories[:] = kept_rows
