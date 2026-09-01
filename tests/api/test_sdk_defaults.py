@@ -17,7 +17,7 @@ def test_default_budget_is_500():
         "agent", "spec", "tools", "system_prompt", "budget", "time_budget", "until",
         "mode", "situations", "requests_per_situation", "rollouts_per_request",
         "unique_situations", "grade", "llm_grade", "traces", "grader",
-        "strategy", "scaffold", "output",
+        "strategy", "seeds", "scaffold", "output",
         "advanced",
     ]
     named = [name for name, p in params.items()
