@@ -778,3 +778,101 @@ __all__ = [
     "load_traces", "trace_report", "format_trace_report",
     "infer_harness",
 ]
+
+
+# --- behavioral state over trace history ------------------------------------
+
+_STATE_PRIORITY = {
+    "new": 1.0, "persistent": 0.9, "uncertain": 0.35,
+    "improving": 0.2, "solved": 0.05, "passing": 0.05,
+}
+_EXPLORATION_FLOOR = 0.2
+
+
+def behavior_state(rows: Sequence[dict], *, recent_fraction: float = 0.5,
+                   exploration: float = _EXPLORATION_FLOOR) -> dict:
+    """The optimizer's map: trace history in, budget allocation out.
+
+    Rows are the agent's whole history in time order (oldest first; a
+    ``ts`` field is honored when present). Each row lands in a behavior
+    region (tools touched + fault kind); each region's old-vs-recent
+    outcomes classify it:
+
+      old failure + recent success      -> improving (low priority)
+      old failure + recent failure      -> persistent (high)
+      old failure + nothing recent      -> uncertain (small retest)
+      first seen recently, failing      -> new (highest)
+      recent failures, heavy repetition -> persistent, support capped
+      passing throughout                -> passing (minimal)
+
+    Regions never share a row. The returned ``budget_share`` values sum
+    to ``1 - exploration``; the remainder is broad exploration, always
+    reserved. The caller does not curate traces; the history is the
+    input and the allocation is the output.
+    """
+    items = [r for r in rows if isinstance(r, dict)]
+    if any("ts" in r for r in items):
+        items.sort(key=lambda r: r.get("ts") or 0)
+    n = len(items)
+    if n == 0:
+        return {"regions": [], "exploration_share": 1.0, "traces": 0}
+    cut = max(1, int(n * (1.0 - max(0.1, min(0.9, recent_fraction)))))
+
+    regions: dict[str, dict] = {}
+    for idx, row in enumerate(items):
+        tools = tuple(sorted({str(s.get("tool")) for s in row.get("steps") or []
+                              if isinstance(s, dict) and s.get("tool")}))
+        fault = trace_fault(row)
+        # The region is the behavior surface (tools touched); fault
+        # kinds annotate it. Keying by fault would put a region's
+        # failures and its later successes in different rows, making
+        # "improving" undetectable.
+        key = "+".join(tools) if tools else "no-tool"
+        slot = regions.setdefault(key, {
+            "region": key, "faults": {}, "old_pass": 0, "old_fail": 0,
+            "old_seen": 0, "recent_pass": 0, "recent_fail": 0,
+            "recent_seen": 0, "first_index": idx})
+        if fault and fault != NO_FAULT:
+            slot["faults"][fault] = slot["faults"].get(fault, 0) + 1
+        reward = _binary_reward(row)
+        failed = (reward == 0) or (reward is None and fault
+                                   and fault != NO_FAULT)
+        era = "recent" if idx >= cut else "old"
+        slot[f"{era}_seen"] += 1
+        slot[f"{era}_fail" if failed else f"{era}_pass"] += 1
+
+    out = []
+    for slot in regions.values():
+        old_bad = slot["old_fail"] > 0
+        rec_bad = slot["recent_fail"] > 0
+        rec_seen = slot["recent_seen"] > 0
+        if not old_bad and not rec_bad:
+            status = "passing"
+        elif slot["old_seen"] == 0 and rec_bad:
+            status = "new"
+        elif old_bad and rec_bad:
+            status = "persistent"
+        elif old_bad and rec_seen and not rec_bad:
+            status = "improving"
+        elif old_bad and not rec_seen:
+            status = "uncertain"
+        else:                       # recent-only region, passing recently
+            status = "passing" if not rec_bad else "new"
+        support = slot["old_fail"] + slot["recent_fail"]
+        # High repetition earns confidence, not proportionally more
+        # budget: support saturates so one loud failure mode cannot
+        # monopolize generation with redundant data.
+        support_factor = min(1.0, 0.5 + 0.25 * min(support, 6) / 3)
+        slot["status"] = status
+        slot["priority"] = round(
+            _STATE_PRIORITY[status] * support_factor, 4)
+        out.append(slot)
+
+    total = sum(s["priority"] for s in out) or 1.0
+    budget_pool = 1.0 - max(0.0, min(0.6, exploration))
+    for slot in out:
+        slot["budget_share"] = round(budget_pool * slot["priority"] / total, 4)
+    out.sort(key=lambda s: -s["budget_share"])
+    return {"regions": out, "exploration_share": round(1.0 - budget_pool
+                                                      + 0.0, 4),
+            "traces": n}
