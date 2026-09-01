@@ -44,7 +44,8 @@ from .actionspace import (action_space_targets, induced_keys_from_trajectory,
                           render_target_situation, shape_as_tags,
                           shape_from_trajectory, uncovered_action_shapes)
 from .explore import mutate_pool
-from .generator import (ModelSimulator, assistant_kind, make_default_generator,
+from .generator import (ModelSimulator, amplify_seeds, assistant_kind,
+                       make_default_generator,
                        write_result_shapes, write_scene_brief)
 from .grading import _as_dict, behavior_signature, conduct_grade
 from .platform import (PlatformError, datasets,
@@ -972,6 +973,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
              traces: Any = None,
              grader: Any = None,
              strategy: str = "auto",
+             seeds: list | None = None,
              scaffold: str | None = None,
              output: str | None = None,
              advanced: dict | None = None,
@@ -1032,7 +1034,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         rollouts_per_request=k_arg, repeats=repeats,
         rollouts_per_prompt=rollouts_per_prompt)
     seed_prompts: list[str] = []
-    for item in (cfg.pop("seed_prompts", None) or []):
+    for item in list(seeds or []) + list(cfg.pop("seed_prompts", None) or []):
         text = str(item or "").strip()
         if text:
             seed_prompts.append(text)
@@ -1148,6 +1150,22 @@ def simulate(agent: Any = None, *, spec: Any = None,
 
     tools, policy, spec_sits = _apply_spec(spec, tools, policy, [])
     seed_prompts.extend(str(s).strip() for s in spec_sits if str(s).strip())
+    # simulate-from-seeds: a few example asks are a behavior request,
+    # not the situation list. With an explicit situations=N target the
+    # engine runs the coordinate search itself, amplifying the examples
+    # across phrasing/stance/language axes to N distinct situations
+    # before generation. Disclosed in search["seed_amplification"].
+    seed_amp_report = None
+    if (seed_prompts and n_situations_target
+            and len(seed_prompts) < int(n_situations_target)):
+        given = len(seed_prompts)
+        seed_prompts = amplify_seeds(
+            seed_prompts, int(n_situations_target), policy=policy,
+            backend_spec=None)
+        seed_amp_report = {"given": given,
+                           "target": int(n_situations_target),
+                           "total": len(seed_prompts),
+                           "minted": len(seed_prompts) - given}
     profile = inspect(agent, tools=tools, system_prompt=policy)
     tools = list(profile.tools or [])
     policy = str(profile.policy or "")
@@ -2557,6 +2575,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
     data.coverage["requests_per_situation"] = n_req
     data.coverage["rollouts_per_request"] = repeat_count
     data.allocator = dict(allocator_counts)
+    if seed_amp_report:
+        data.search["seed_amplification"] = seed_amp_report
     data.search["strategy"] = {
         "requested": strategy,
         "resolved": resolved_strategy,

@@ -705,6 +705,80 @@ def _format_scene_brief(text: str, *, policy: str = "") -> str:
     return brief
 
 
+_AMPLIFY_AXES = (
+    "direct ask", "indirect ask", "adversarial or suspicious framing",
+    "casual with typos or lowercase", "formal and polite",
+    "a different language", "playful or joking", "multi-part or contextual",
+)
+_AMPLIFY_BATCH = 25
+_AMPLIFY_MAX_ROUNDS = 40
+
+
+def amplify_seeds(seeds: Sequence[str], target: int, *, policy: str = "",
+                  backend_spec: str | None = None,
+                  timeout: float = 30.0) -> list[str]:
+    """Grow a few example asks into ``target`` distinct situations.
+
+    The examples ARE the behavior request: each mint round shows them to
+    the writer model and asks for same-intent asks in a rotated style
+    axis (direct, indirect, adversarial, multilingual, casual, formal,
+    playful, contextual). Results are deduplicated against the examples
+    and each other. Originals always survive, first. Returns early with
+    what it has if the backend fails or rounds run out; callers should
+    treat the returned length as the real situation count.
+    """
+    kept: list[str] = []
+    seen: set[str] = set()
+
+    def _norm(text: str) -> str:
+        return " ".join(re.findall(r"[a-z0-9]+", str(text).lower()))
+
+    for seed in seeds:
+        text = str(seed).strip()
+        key = _norm(text)
+        if text and key not in seen:
+            seen.add(key)
+            kept.append(text)
+    if target <= len(kept):
+        return kept[:max(target, len(kept))]
+    spec = backend_spec or default_simulator_spec()
+    try:
+        url, model = parse_backend_spec(spec)
+    except ValueError:
+        return kept
+    examples = "\n".join(f"- {s}" for s in kept[:12])
+    hint = writer_policy_digest(policy)[:400]
+    for round_index in range(_AMPLIFY_MAX_ROUNDS):
+        if len(kept) >= target:
+            break
+        axis = _AMPLIFY_AXES[round_index % len(_AMPLIFY_AXES)]
+        prompt = (
+            f"These are example messages users send to an assistant:\n"
+            f"{examples}\n\n"
+            f"Write {_AMPLIFY_BATCH} NEW user messages with the same "
+            f"intent but different wording and situations. Style for "
+            f"this batch: {axis}. One per line, no numbering, no "
+            f"quotes, no answers." + (f"\nAssistant context: {hint}"
+                                      if hint else ""))
+        try:
+            reply = complete(
+                url, model,
+                [{"role": "user", "content": prompt}],
+                temperature=1.0, max_tokens=900, timeout=timeout, n=1)
+            lines = str(reply.get("content") or "").splitlines()
+        except Exception:
+            break
+        for line in lines:
+            text = line.strip().strip("-*\u2022 \t\"'")
+            key = _norm(text)
+            if 8 <= len(text) <= 300 and key and key not in seen:
+                seen.add(key)
+                kept.append(text)
+                if len(kept) >= target:
+                    break
+    return kept
+
+
 def write_scene_brief(tools: Sequence[dict] = (), policy: str = "", *,
                       backend_spec: str | None = None, kind: str = "",
                       timeout: float = _SCENE_TIMEOUT) -> str:
