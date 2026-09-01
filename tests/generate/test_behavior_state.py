@@ -53,3 +53,27 @@ def test_repetition_saturates():
 def test_empty_history():
     state = behavior_state([])
     assert state["regions"] == [] and state["exploration_share"] == 1.0
+
+
+def test_behavior_state_rides_trace_fed_simulate():
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations.traces import simulate_from_traces
+    traces = [
+        {"prompt": "where is order 4412",
+         "steps": [{"tool": "lookup_order", "arguments": {"order_id": "4412"},
+                    "result": {"status": "not_found"}}],
+         "final_text": "I could not find that order.", "reward": 0},
+        {"prompt": "refund order 9911 now",
+         "steps": [{"tool": "create_refund", "arguments": {"order_id": "9911"},
+                    "result": {"status": "timeout"}}],
+         "final_text": "The refund request timed out.", "reward": 0},
+    ]
+    data = simulate_from_traces(
+        traces, scripted_agent, tools=TOOLS, policy=POLICY, mode="explore",
+        budget=4, seed=0, grade=False, concurrency=4, simulator=False,
+        time_budget=20, advanced={"per_round": 4, "mutate_failures": False})
+    state = data.search["behavior_state"]
+    assert state["traces"] == 2
+    regions = {r["region"]: r for r in state["regions"]}
+    assert "lookup_order" in regions and "create_refund" in regions
+    assert state["exploration_share"] >= 0.2

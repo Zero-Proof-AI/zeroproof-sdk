@@ -71,7 +71,7 @@ from .optimize import (filter_rl_rows, group_signal, optimize,
                        optimize_for_rl, recommend, select_for_rl,
                        select_for_sft, trim_unanimous_groups)
 from .otel import rows_from_otel
-from .traces import (dimensions_from_traces, drop_leaky_rows,
+from .traces import (behavior_state, dimensions_from_traces, drop_leaky_rows,
                      exemplar_result_shapes, flaw_rows,
                      format_trace_report, leakage_report,
                      load_traces, mine_result_exemplars, mine_traces,
@@ -2388,6 +2388,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
         # Source traces shaped the grid; they must not shape the rows.
         # A generated near-copy of a held-out trace is training leakage.
         mined = mine_traces(trace_rows)
+        # The optimizer's map rides every trace-fed run: the trace
+        # history classifies into behavior regions (new / persistent /
+        # improving / uncertain / passing) with budget shares. Recorded
+        # for callers and the platform UI; allocation is disclosure
+        # until the steering calibration sets how hard to apply it.
+        data.search["behavior_state"] = behavior_state(trace_rows)
         kept_rows, leak = drop_leaky_rows(data.trajectories, trace_rows,
                                           embedder=resolved_embedder)
         data.trajectories[:] = kept_rows
