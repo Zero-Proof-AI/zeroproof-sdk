@@ -937,3 +937,35 @@ def behavior_state(rows: Sequence[dict], *,
     out.sort(key=lambda s: -s["budget_share"])
     return {"regions": out, "exploration_share": round(1.0 - pool, 4),
             "traces": n, "buckets": buckets}
+
+
+def region_progress(state: dict, generated_rows: Sequence[dict]) -> list[dict]:
+    """Same rules on both sides of the loop: re-measure each trace-derived
+    region on the generated (and graded) rows. The per-region pair -
+    fail rate in the traces vs fail rate in what we generated - is the
+    hill-climb readout: searching and fixing, in the same vocabulary the
+    customer's grader speaks.
+    """
+    counts: dict[str, list[int]] = {}
+    for row in generated_rows or []:
+        if not isinstance(row, dict):
+            continue
+        for region_id, _kind, failed in _row_regions(row):
+            slot = counts.setdefault(region_id, [0, 0])
+            slot[0 if failed else 1] += 1
+    out = []
+    for region in (state or {}).get("regions", []):
+        rid = region.get("region")
+        hist = region.get("history") or []
+        trace_rate = hist[-1]["fail_rate"] if hist else None
+        pair = counts.get(rid)
+        gen_n = (pair[0] + pair[1]) if pair else 0
+        out.append({
+            "region": rid,
+            "status": region.get("status"),
+            "trace_fail_rate": trace_rate,
+            "generated_n": gen_n,
+            "generated_fail_rate": (round(pair[0] / gen_n, 3)
+                                    if pair and gen_n else None),
+        })
+    return out
