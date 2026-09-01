@@ -71,7 +71,8 @@ from .optimize import (filter_rl_rows, group_signal, optimize,
                        optimize_for_rl, recommend, select_for_rl,
                        select_for_sft, trim_unanimous_groups)
 from .otel import rows_from_otel
-from .traces import (behavior_state, dimensions_from_traces, drop_leaky_rows,
+from .traces import (behavior_state, region_progress,
+                     dimensions_from_traces, drop_leaky_rows,
                      exemplar_result_shapes, flaw_rows,
                      format_trace_report, leakage_report,
                      load_traces, mine_result_exemplars, mine_traces,
@@ -2486,6 +2487,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
         state_record["applied"] = bool(optimizer_state
                                        and optimizer_state["regions"])
         state_record["allocation_gain"] = 4.0
+        # Close the loop: the same region predicates that read the
+        # traces re-measure the generated rows, so trace fail rate vs
+        # generated fail rate is one comparable number per region.
+        state_record["region_progress"] = region_progress(
+            state_record, data.trajectories)
         data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(data.trajectories, trace_rows,
                                           embedder=resolved_embedder)

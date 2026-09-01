@@ -179,3 +179,29 @@ def test_allocation_actually_shifts_generation():
     assert refund_share(aimed) > refund_share(cold), (
         f"allocation had no effect: aimed {refund_share(aimed):.2f} "
         f"vs cold {refund_share(cold):.2f}")
+
+
+def test_region_progress_same_rules_both_sides():
+    """Trace regions re-measured on generated graded rows: the
+    hill-climb readout speaks one vocabulary."""
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations.traces import simulate_from_traces
+    traces = [{"prompt": "refund order 9911 now",
+               "steps": [{"tool": "create_refund", "arguments": {"order_id": "9911"},
+                          "result": {"status": "timeout"}}],
+               "final_text": "The refund request timed out.", "reward": 0,
+               "model_version": "v0"}]
+
+    def grader(row):
+        return {"reward": 1, "reason": "ok"}
+
+    data = simulate_from_traces(
+        traces, scripted_agent, tools=TOOLS, policy=POLICY, mode="explore",
+        budget=12, seed=1, grade=False, grader=grader, concurrency=4,
+        simulator=False, time_budget=20,
+        advanced={"per_round": 6, "mutate_failures": False})
+    prog = data.search["behavior_state"]["region_progress"]
+    rec = next(p for p in prog if p["region"] == "recover_after_timeout")
+    assert rec["trace_fail_rate"] == 1.0
+    if rec["generated_n"]:
+        assert rec["generated_fail_rate"] is not None
