@@ -77,3 +77,36 @@ def test_behavior_state_rides_trace_fed_simulate():
     regions = {r["region"]: r for r in state["regions"]}
     assert "lookup_order" in regions and "create_refund" in regions
     assert state["exploration_share"] >= 0.2
+
+
+def test_rows_carry_dims_and_model_version_everywhere():
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations import simulate
+    data = simulate(agent=scripted_agent, tools=TOOLS, system_prompt=POLICY,
+                    mode="explore", budget=16, seed=0, grade=False,
+                    concurrency=4, simulator=False, time_budget=20,
+                    advanced={"per_round": 8, "mutate_failures": False,
+                              "seed_prompts": ["where is order 12"],
+                              "model_version": "v3-adapter"})
+    assert all(t.get("scenario_dimensions") for t in data.trajectories)
+    assert all(t.get("model_version") == "v3-adapter"
+               for t in data.trajectories)
+    realized = [t for t in data.trajectories
+                if t["scenario_dimensions"].get("origin") == "realized"]
+    for t in realized:
+        assert "tool" in t["scenario_dimensions"]
+        assert "tool_condition" in t["scenario_dimensions"]
+
+
+def test_otel_reads_model_version():
+    from zeroproof_simulations import rows_from_otel
+    spans = [{"traceId": "t1", "spanId": "r", "name": "agent x",
+              "startedMs": 1000,
+              "attributes": {
+                  "zeroproof.model_version": "identity-v5-adapter",
+                  "gen_ai.input.messages":
+                      '[{"role": "user", "content": "hi"}]',
+                  "gen_ai.output.messages":
+                      '[{"role": "assistant", "content": "hello"}]'}}]
+    rows = rows_from_otel({"spans": spans})
+    assert rows[0]["model_version"] == "identity-v5-adapter"
