@@ -1128,6 +1128,23 @@ def simulate(agent: Any = None, *, spec: Any = None,
     extra_cards = max(0, int(advanced.pop("extra_cards", 1)))
     hung_slot_s = float(advanced.pop("hung_slot", _HUNG_SLOT_S))
     advanced.pop("scene_brief", None)
+    # Which weights produced each row: rounds of the continual loop are
+    # indistinguishable without it (base and every adapter can share a
+    # model name). advanced["model_version"] overrides; the resolved
+    # backend model is the default; callable agents record their name.
+    model_version_tag = str(advanced.pop("model_version", "") or "").strip()
+    if not model_version_tag:
+        if agent is not None and callable(agent) and not isinstance(agent, str):
+            model_version_tag = getattr(agent, "__name__", "callable-agent")
+        else:
+            try:
+                from .agents import parse_backend_spec as _pbs, \
+                    default_simulator_spec as _dss
+                _spec = agent if isinstance(agent, str) else _dss()
+                model_version_tag = _pbs(_spec)[1]
+            except Exception:
+                model_version_tag = "unknown"
+
     tools, policy, spec_sits = _apply_spec(spec, tools, policy, [])
     seed_prompts.extend(str(s).strip() for s in spec_sits if str(s).strip())
     profile = inspect(agent, tools=tools, system_prompt=policy)
@@ -1342,6 +1359,30 @@ def simulate(agent: Any = None, *, spec: Any = None,
             return None
         return plan
 
+    def _realized_dims(steps: list, faults: list) -> dict:
+        # Rows without a grid cell (seeds, open-ended, behavior cards)
+        # still get auditable coordinates - realized from what actually
+        # happened, marked so audits can tell assigned from observed.
+        tools_called = [str(s.get("tool")) for s in steps or []
+                        if isinstance(s, dict) and s.get("tool")]
+        condition = "success"
+        for s in steps or []:
+            result = s.get("result") if isinstance(s, dict) else None
+            status = (str(result.get("status")) if isinstance(result, dict)
+                      else "")
+            if status and status not in ("ok", "success"):
+                condition = status
+                break
+        else:
+            for plan in faults or []:
+                kind = str((plan or {}).get("fault") or "")
+                if kind:
+                    condition = kind
+                    break
+        return {"tool": tools_called[0] if tools_called else "unrelated",
+                "tool_condition": condition,
+                "origin": "realized"}
+
     def one(job: tuple) -> dict:
         prompt, rollout, meta, selection = job
         meta = dict(meta or {})
@@ -1354,6 +1395,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
         except Exception as exc:
             raw = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>"}
         raw = raw if isinstance(raw, dict) else {"steps": [], "final_text": str(raw)}
+        if not assignment:
+            assignment = _realized_dims(raw.get("steps") or [],
+                                        _clean_faults(faults))
         t = {
             "scenario_id": meta.get("region_id") or f"probe_{hash(prompt) & 0xffffff:x}",
             "scenario_dimensions": assignment,
@@ -1368,6 +1412,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
             "grader_reason": None,
             "reason": None,
             "rollout_index": rollout,
+            "model_version": model_version_tag,
             "seed": meta.get("seed", seed),
             "semantic_cluster": None if not data.semantic else selection.get("cluster"),
             "semantic_novelty": None if not data.semantic else selection.get("novelty"),

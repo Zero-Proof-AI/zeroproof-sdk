@@ -147,8 +147,14 @@ def rows_from_otel(source: Any) -> list[dict]:
         final_text = ""
         steps: list[dict] = []
         reward = None
+        model_version = None
         seen_users: set[str] = set()
         for _, span, attrs in entries:
+            if model_version is None:
+                mv = _first(attrs, ("zeroproof.model_version",
+                                    "gen_ai.request.model"))
+                if mv:
+                    model_version = str(mv)
             raw_reward = _first(attrs, reward_keys)
             if raw_reward is not None and reward is None:
                 try:
@@ -206,6 +212,12 @@ def rows_from_otel(source: Any) -> list[dict]:
             # and in [0, 1]; rows without them stay ungraded, first-class.
             if reward is not None:
                 row["reward"] = reward
+            # Which weights produced this trace: zeroproof.model_version
+            # wins (adapters share the base model name), the request
+            # model is the fallback. Rounds of the continual loop are
+            # indistinguishable without it.
+            if model_version:
+                row["model_version"] = model_version
             rows.append(row)
     return rows
 
