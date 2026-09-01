@@ -50,6 +50,12 @@ _ABSTAIN_PHRASES = (
     "can't find",
     "could not find",
     "couldn't find",
+    "does not mention",
+    "doesn't mention",
+    "not explicitly stated",
+    "not specified",
+    "not provided",
+    "no information",
     "no information",
     "not mentioned",
     "does not mention",
@@ -165,11 +171,17 @@ def _informative(text: str) -> set[str]:
 
 
 def _reply(row: dict) -> str:
-    if isinstance(row.get("answer"), str):
-        return row["answer"]
+    # final_text is the engine's own name for "what the agent said"; the
+    # bare answer field is often the gold label on QA rows, and grading the
+    # answer key instead of the reply zeroed a whole live run.
+    for field in ("final_text", "answer_live"):
+        if isinstance(row.get(field), str) and row[field].strip():
+            return row[field]
     for msg in reversed(row.get("messages") or []):
         if msg.get("role") == "assistant" and isinstance(msg.get("content"), str):
             return msg["content"]
+    if isinstance(row.get("answer"), str):
+        return row["answer"]
     return ""
 
 

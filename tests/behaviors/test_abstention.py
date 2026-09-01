@@ -140,3 +140,25 @@ def test_registry_discovers_the_pack():
     module = packs()["abstention"]
     assert module.SPEC["description"]
     assert module.transform is transform
+
+
+def test_marker_reads_the_reply_not_the_gold_answer():
+    row = {
+        "question": "What year was it launched?",
+        "answer": "It launched in 2023 as a sync tool.",
+        "final_text": "The context does not mention the launch year.",
+        "behavior": {"removed_passage": "launched in 2023", "original_answer": "2023",
+                     "expects": "abstention"},
+    }
+    from zeroproof_simulations.behaviors.abstention import marker
+    m = marker(row)
+    assert m["abstention.abstained"] == 1
+    assert m["abstention.hallucinated"] == 0
+
+
+def test_live_phrasings_count_as_abstention():
+    from zeroproof_simulations.behaviors.abstention import marker
+    for text in ("The primary function is not explicitly stated in the provided context.",
+                 "The context provided does not mention what technology it uses."):
+        m = marker({"final_text": text, "question": "q", "behavior": {"expects": "abstention"}})
+        assert m["abstention.abstained"] == 1
