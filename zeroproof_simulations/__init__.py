@@ -1139,6 +1139,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         raise ValueError(
             "simulate needs an agent, tools=, or a system prompt.")
     trace_rows: list[dict] = []
+    trace_focused = False
     # strategy= names the coverage stance explicitly (doctrine: traces
     # change the coverage DISTRIBUTION, never the space). auto resolves
     # descriptively and records its reason; it never picks "targeted" on
@@ -1154,11 +1155,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
     # steering_weight is the calibration knob for doctrine point 5 (how
     # much the trace-aimed distribution outweighs background coverage).
     # An advanced knob until tranche 1 lands; accepted via
-    # steering_weight= or advanced= and RECORDED here so eval rows can
-    # be joined back to the weight that produced their training set;
-    # density application lands with the steering module. None means
-    # "rule decides" (steering's sparse-capped default), an explicit
-    # number is an override.
+    # steering_weight= or advanced=. Over a trace-focused grid, weight w
+    # sends each structured card draw to the front (trace-mined) half of
+    # the steered axes with probability w; rows drawn that way carry
+    # row["steering"] = {"origin": "targeted"}. None means "rule
+    # decides" (currently: no bias), an explicit number is an override.
     steering_weight = cfg.pop("steering_weight", None)
     if steering_weight is not None:
         try:
@@ -1184,6 +1185,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
             dimensions = dimensions_from_traces(
                 trace_rows, tools, policy,
                 broaden=resolved_strategy != "targeted")
+            trace_focused = True
+    # The weight only applies over a trace-focused grid (its front-half
+    # ordering is what the bias aims at) and only when nonzero; anything
+    # else is exactly the unsteered draw and records no applied weight.
+    applied_steering = (float(steering_weight)
+                        if steering_weight and trace_focused else None)
 
     data = SimulationData(profile=profile, arm_weights=dict(_SEARCH_ARMS))
     data.scaffold_chars = len(scaffold_text)
@@ -1267,7 +1274,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
         completions_per_request=completions_per_request,
         distinct_cards=distinct_cards, extra_cards=extra_cards,
         scene_brief=scene_box["brief"], time_budget=time_budget,
-        run_started=started, mode=topo["mode"], **advanced)
+        run_started=started, mode=topo["mode"],
+        steering_weight=applied_steering, **advanced)
     planned_cell_keys = {
         json.dumps(region["assignment"], sort_keys=True, default=str)
         for region in (getattr(generator, "regions", None) or [])
@@ -1366,6 +1374,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
             "parent_failure_id": meta.get("parent_failure_id") or meta.get("parent"),
             "selection_reason": selection.get("reason"),
         }
+        # Cards drawn the steered way carry the mark onto the row, so
+        # metadata's targeted/background split counts real draws.
+        steering = meta.get("steering")
+        if isinstance(steering, dict) and steering.get("origin"):
+            t["steering"] = dict(steering)
         t.update(_row_conversation(meta, prompt, seed))
         t["behavior_signature"] = behavior_signature(t)
         return t
@@ -1604,7 +1617,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
             completions_per_request=n_comp,
             distinct_cards=distinct_cards, extra_cards=extra_cards,
             scene_brief=scene_box["brief"], out_tokens=token_cap,
-            time_budget=time_budget, run_started=started, **advanced)
+            time_budget=time_budget, run_started=started,
+            steering_weight=applied_steering, **advanced)
         src_model = getattr(generator, "model", None)
         loc_model = getattr(local, "model", None)
         if src_model is not None and loc_model is not None:
@@ -2447,7 +2461,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                    else "no traces -> broad exploration"
                    if strategy == "auto" else "explicit"),
         "steering_weight": {"requested": steering_weight,
-                            "applied": steering_weight,
+                            "applied": applied_steering,
                             "source": ("override" if steering_weight
                                        is not None else "rule")},
     }

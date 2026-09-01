@@ -16,7 +16,8 @@ from .diversity import (DEFAULT_TEXTURE_RATE, behavior_tier,
                      sample_writer_temperature, sample_writer_vars)
 from .scenarios import (SEARCH_ARMS, fault_plan_for_region,
                         make_candidate_generator, reallocate_search_arms,
-                        policy_sections, scenario_regions, _intent_for_tool,
+                        policy_sections, scenario_regions, steer_region_picks,
+                        steering_front_values, _intent_for_tool,
                         _tool_names)
 
 # Ceiling only. The model stops at EOS. Sized to a card batch, not 1024.
@@ -1140,7 +1141,8 @@ class ModelSimulator:
                  time_budget: float | None = None,
                  run_started: float | None = None,
                  mode: str | None = None,
-                 prefer_success: bool | None = None):
+                 prefer_success: bool | None = None,
+                 steering_weight: float | None = None):
         self.texture_rate = (DEFAULT_TEXTURE_RATE if texture_rate is None
                              else max(0.0, float(texture_rate)))
         self.backend_spec = backend_spec or default_simulator_spec()
@@ -1171,6 +1173,12 @@ class ModelSimulator:
         self.regions = scenario_regions(list(tools), self.policy, dimensions=dimensions,
                                         mode=mode, prefer_success=prefer_success)
         self.region_index = {r["id"]: r for r in self.regions}
+        # Trace steering: weight w sends each sampled card to the front
+        # (trace-mined) half of the steered axes with probability w.
+        self.steering_weight = max(0.0, float(steering_weight or 0.0))
+        self.steer_front = (steering_front_values(dimensions)
+                            if self.steering_weight else {})
+        self.last_steered_ids: set[str] = set()
         self.last_errors: dict[str, str] = {}
         self.last_candidate_provenance: dict[str, dict[str, Any]] = {}
         self.last_provenance: dict[str, list[str]] = {}
@@ -1509,6 +1517,13 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
         self.last_candidate_provenance = {}
         self.last_provenance = {}
         sampled = self._sample_regions(round_index)
+        self.last_steered_ids = set()
+        if self.steering_weight and self.steer_front:
+            ranked = sorted(self.regions, key=lambda region: (
+                -float(region.get("weight") or 0.0), region["id"]))
+            sampled, self.last_steered_ids = steer_region_picks(
+                sampled, ranked, seed=self.seed, round_index=round_index,
+                weight=self.steering_weight, front=self.steer_front)
         sampled, prompt = self._fit_prompt(round_index, sampled)
         try:
             url, model = parse_backend_spec(self.backend_spec)
@@ -1598,6 +1613,9 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
                     tool=str((assignment or {}).get("tool") or "")
                     if isinstance(assignment, dict) else ""),
             }
+            if region and region["id"] in self.last_steered_ids:
+                meta["steering"] = {"origin": "targeted",
+                                    "weight": self.steering_weight}
             self.last_candidate_provenance[message] = meta
             self.last_provenance[message] = [f"llm_guided:{meta.get('region_id') or 'probe'}"]
             if region:
@@ -1645,6 +1663,8 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
     kind = template_kwargs.pop("kind", kind)
     mode = template_kwargs.pop("mode", None)
     prefer_success = template_kwargs.pop("prefer_success", None)
+    # Left in template_kwargs on purpose: the template arm steers too.
+    steering_weight = template_kwargs.get("steering_weight")
     writer_policy = writer_policy_digest(policy)
     templates = make_candidate_generator(
         tools, policy=writer_policy, per_round=max(6, min(16, int(per_round) // 8)),
@@ -1667,7 +1687,7 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
             extra_cards=extra_cards, texture_rate=texture_rate, kind=kind,
             scene_brief=scene_brief, out_tokens=out_tokens,
             time_budget=time_budget, run_started=run_started, mode=mode,
-            prefer_success=prefer_success)
+            prefer_success=prefer_success, steering_weight=steering_weight)
 
     def _ingest_templates(round_index: int, dataset: Any, texts: list[str],
                           provenance: dict[str, dict]) -> None:

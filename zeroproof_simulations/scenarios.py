@@ -441,6 +441,72 @@ def scenario_regions(tools: list[dict], policy: str = "", strength: int = 2, *,
     return regions
 
 
+# Steering (doctrine point 5). dimensions_from_traces sorts trace-mined
+# values to the front of these axes, so the front half of each axis IS
+# the aimed pool; the back half is background coverage.
+STEERED_AXES = ("tool", "tool_condition", "world_state")
+
+
+def steering_front_values(dimensions: dict[str, list[str]] | None
+                          ) -> dict[str, set[str]]:
+    """Front half of every steered axis that has room to split."""
+    front: dict[str, set[str]] = {}
+    for axis in STEERED_AXES:
+        values = [str(v) for v in (dimensions or {}).get(axis) or []]
+        if len(values) >= 2:
+            front[axis] = set(values[:max(1, len(values) // 2)])
+    return front
+
+
+def steer_region_picks(picked: list[dict], ranked: list[dict], *,
+                       seed: int, round_index: int, weight: float,
+                       front: dict[str, set[str]]
+                       ) -> tuple[list[dict], set[str]]:
+    """Bias per-slot region draws toward the trace-aimed pool.
+
+    Each slot flips a deterministic coin: with probability ``weight`` it
+    takes the best-ranked unused region whose steered axes all sit in the
+    front (trace-mined) half of their value lists; otherwise it keeps the
+    plain draw. Returns the picks plus the ids drawn the biased way.
+    ``weight<=0``, no split axes, or an empty pool return the picks
+    untouched, identical to the unsteered draw.
+    """
+    if float(weight or 0.0) <= 0.0 or not front or not picked:
+        return list(picked), set()
+
+    def aimed(region: dict) -> bool:
+        assignment = region.get("assignment") or {}
+        return all(str(assignment.get(axis)) in values
+                   for axis, values in front.items())
+
+    pool = [region for region in ranked if aimed(region)]
+    if not pool:
+        return list(picked), set()
+    used = {region["id"] for region in picked}
+    out: list[dict] = []
+    steered: set[str] = set()
+    for slot, region in enumerate(picked):
+        digest = hashlib.sha256(
+            f"{seed}:{round_index}:steer:{slot}".encode()).hexdigest()
+        uniform = (int(digest[:8], 16) + 1) / float(16 ** 8 + 2)
+        if uniform >= float(weight):
+            out.append(region)
+            continue
+        if aimed(region):
+            out.append(region)
+            steered.add(region["id"])
+            continue
+        swap = next((cand for cand in pool if cand["id"] not in used), None)
+        if swap is None:
+            out.append(region)
+            continue
+        used.discard(region["id"])
+        used.add(swap["id"])
+        out.append(swap)
+        steered.add(swap["id"])
+    return out, steered
+
+
 def _domain_noun(tools: list[dict]) -> str:
     names = _tool_names(tools)
     for wanted in ("destructive", "other", "read"):
@@ -792,12 +858,15 @@ def make_candidate_generator(tools: list[dict], policy: str = "",
                              dimensions: dict | None = None,
                              mode: str | None = None,
                              prefer_success: bool | None = None,
+                             steering_weight: float | None = None,
                              ) -> Callable[..., list[str]]:
     """Structured region samples plus open-ended probes. Adaptive arm split."""
     regions = scenario_regions(tools, policy, observed_counts=observed_counts,
                                novelty=novelty, behavior_value=behavior_value,
                                dimensions=dimensions, mode=mode,
                                prefer_success=prefer_success)
+    steer_w = max(0.0, float(steering_weight or 0.0))
+    steer_front = steering_front_values(dimensions) if steer_w else {}
     total = sum(_ARM_START.values())
     arm_weights = {arm: value / total for arm, value in _ARM_START.items()}
     applied_rounds: set[int] = set()
@@ -842,6 +911,9 @@ def make_candidate_generator(tools: list[dict], policy: str = "",
         picked = mix_items_by_tier(
             ranked, structured_budget,
             lambda region: behavior_tier(region.get("assignment") or {}))
+        picked, steered = steer_region_picks(
+            picked, ranked, seed=seed, round_index=round_index,
+            weight=steer_w, front=steer_front)
 
         texts: list[str] = []
         candidate_provenance: dict[str, dict] = {}
@@ -853,6 +925,9 @@ def make_candidate_generator(tools: list[dict], policy: str = "",
                     "arm": "structured", "region_id": region["id"],
                     "assignment": dict(region["assignment"]),
                     "weight": region["weight"], "round": round_index}
+                if region["id"] in steered:
+                    candidate_provenance[text]["steering"] = {
+                        "origin": "targeted", "weight": steer_w}
                 plan = fault_plan_for_region(region)
                 if plan:
                     generate.fault_plans[text] = plan
