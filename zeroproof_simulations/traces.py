@@ -787,92 +787,153 @@ _STATE_PRIORITY = {
     "improving": 0.2, "solved": 0.05, "passing": 0.05,
 }
 _EXPLORATION_FLOOR = 0.2
+_RECIPE_AXES = ("tool", "tool_condition", "world_state", "stance", "history")
 
 
-def behavior_state(rows: Sequence[dict], *, recent_fraction: float = 0.5,
+def _row_regions(row: dict) -> list[tuple[str, str, bool]]:
+    """(region_id, kind, failed) memberships for one trajectory.
+
+    A region is a named behavioral predicate, never a coordinate tuple:
+    markers first (the customer's grader vocabulary, score 0 = fail,
+    1 = pass), then fault-response pairs (fault kind x whether the run
+    still succeeded), then a capability fallback for plain reward
+    failures. Coordinates are recorded separately as the region's
+    expansion recipe.
+    """
+    out: list[tuple[str, str, bool]] = []
+    scores = row.get("scores")
+    if isinstance(scores, dict):
+        for name, value in scores.items():
+            try:
+                v = float(value if not isinstance(value, dict)
+                          else value.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if v in (0.0, 1.0):
+                out.append((str(name), "marker", v == 0.0))
+    fault = trace_fault(row)
+    reward = _binary_reward(row)
+    if fault and fault != NO_FAULT:
+        recovered = reward == 1
+        out.append((f"recover_after_{fault}", "fault_response",
+                    not recovered))
+    if not out:
+        tools = [str(s.get("tool")) for s in row.get("steps") or []
+                 if isinstance(s, dict) and s.get("tool")]
+        surface = tools[0] if tools else "no-tool"
+        if reward is not None:
+            out.append((f"task:{surface}", "capability", reward == 0))
+    return out
+
+
+def behavior_state(rows: Sequence[dict], *,
+                   targeted: Sequence[str] = (),
                    exploration: float = _EXPLORATION_FLOOR) -> dict:
-    """The optimizer's map: trace history in, budget allocation out.
+    """The optimizer's memory: evidence in, allocation out.
 
-    Rows are the agent's whole history in time order (oldest first; a
-    ``ts`` field is honored when present). Each row lands in a behavior
-    region (tools touched + fault kind); each region's old-vs-recent
-    outcomes classify it:
-
-      old failure + recent success      -> improving (low priority)
-      old failure + recent failure      -> persistent (high)
-      old failure + nothing recent      -> uncertain (small retest)
-      first seen recently, failing      -> new (highest)
-      recent failures, heavy repetition -> persistent, support capped
-      passing throughout                -> passing (minimal)
-
-    Regions never share a row. The returned ``budget_share`` values sum
-    to ``1 - exploration``; the remainder is broad exploration, always
-    reserved. The caller does not curate traces; the history is the
-    input and the allocation is the output.
+    Rows are the agent's whole history. History buckets by
+    ``model_version`` when rows carry it (rounds of the continual
+    loop); otherwise by time-order halves. Each region tracks support,
+    per-bucket fail rates, first/last bucket, whether it was previously
+    ``targeted``, and the coordinate values it was observed under (its
+    expansion recipe - how the simulator generates variants around it,
+    never its identity). Classification: new, persistent, improving,
+    uncertain, solved, passing; persistent-despite-targeting keeps top
+    priority and flags ``rotate_coordinates``. budget_share sums to
+    1 - exploration; broad exploration is always reserved.
     """
     items = [r for r in rows if isinstance(r, dict)]
     if any("ts" in r for r in items):
         items.sort(key=lambda r: r.get("ts") or 0)
     n = len(items)
     if n == 0:
-        return {"regions": [], "exploration_share": 1.0, "traces": 0}
-    cut = max(1, int(n * (1.0 - max(0.1, min(0.9, recent_fraction)))))
+        return {"regions": [], "exploration_share": 1.0, "traces": 0,
+                "buckets": []}
+
+    versions: list[str] = []
+    for r in items:
+        v = str(r.get("model_version") or "")
+        if v and v not in versions:
+            versions.append(v)
+    if len(versions) >= 2:
+        bucket_of = lambda idx, r: str(r.get("model_version") or versions[0])
+        buckets = versions
+    else:
+        cut = max(1, n // 2)
+        bucket_of = lambda idx, r: "recent" if idx >= cut else "old"
+        buckets = ["old", "recent"]
+    latest = buckets[-1]
 
     regions: dict[str, dict] = {}
     for idx, row in enumerate(items):
-        tools = tuple(sorted({str(s.get("tool")) for s in row.get("steps") or []
-                              if isinstance(s, dict) and s.get("tool")}))
-        fault = trace_fault(row)
-        # The region is the behavior surface (tools touched); fault
-        # kinds annotate it. Keying by fault would put a region's
-        # failures and its later successes in different rows, making
-        # "improving" undetectable.
-        key = "+".join(tools) if tools else "no-tool"
-        slot = regions.setdefault(key, {
-            "region": key, "faults": {}, "old_pass": 0, "old_fail": 0,
-            "old_seen": 0, "recent_pass": 0, "recent_fail": 0,
-            "recent_seen": 0, "first_index": idx})
-        if fault and fault != NO_FAULT:
-            slot["faults"][fault] = slot["faults"].get(fault, 0) + 1
-        reward = _binary_reward(row)
-        failed = (reward == 0) or (reward is None and fault
-                                   and fault != NO_FAULT)
-        era = "recent" if idx >= cut else "old"
-        slot[f"{era}_seen"] += 1
-        slot[f"{era}_fail" if failed else f"{era}_pass"] += 1
+        bucket = bucket_of(idx, row)
+        dims = row.get("scenario_dimensions") or {}
+        for region_id, kind, failed in _row_regions(row):
+            slot = regions.setdefault(region_id, {
+                "region": region_id, "kind": kind,
+                "by_bucket": {}, "recipe": {}, "support": 0,
+                "first_bucket": bucket})
+            b = slot["by_bucket"].setdefault(bucket, [0, 0])  # [fail, pass]
+            b[0 if failed else 1] += 1
+            slot["support"] += 1
+            slot["last_bucket"] = bucket
+            if failed:
+                recipe = slot["recipe"]
+                for axis in _RECIPE_AXES:
+                    value = str(dims.get(axis) or "")
+                    if value and value != "unspecified":
+                        recipe.setdefault(axis, [])
+                        if value not in recipe[axis]:
+                            recipe[axis].append(value)
+                for step in row.get("steps") or []:
+                    tool = str(step.get("tool") or "") \
+                        if isinstance(step, dict) else ""
+                    if tool:
+                        recipe.setdefault("tool", [])
+                        if tool not in recipe["tool"]:
+                            recipe["tool"].append(tool)
 
     out = []
     for slot in regions.values():
-        old_bad = slot["old_fail"] > 0
-        rec_bad = slot["recent_fail"] > 0
-        rec_seen = slot["recent_seen"] > 0
-        if not old_bad and not rec_bad:
+        per = slot["by_bucket"]
+        latest_stats = per.get(latest)
+        earlier = [per[b] for b in buckets[:-1] if b in per]
+        old_fail = sum(b[0] for b in earlier)
+        old_seen = sum(b[0] + b[1] for b in earlier)
+        rec_fail = latest_stats[0] if latest_stats else 0
+        rec_seen = (latest_stats[0] + latest_stats[1]) if latest_stats else 0
+        was_targeted = slot["region"] in set(targeted)
+        if old_fail == 0 and rec_fail == 0:
             status = "passing"
-        elif slot["old_seen"] == 0 and rec_bad:
+        elif old_seen == 0 and rec_fail > 0:
             status = "new"
-        elif old_bad and rec_bad:
+        elif old_fail > 0 and rec_fail > 0:
             status = "persistent"
-        elif old_bad and rec_seen and not rec_bad:
-            status = "improving"
-        elif old_bad and not rec_seen:
+        elif old_fail > 0 and rec_seen > 0 and rec_fail == 0:
+            status = "solved" if was_targeted else "improving"
+        elif old_fail > 0 and rec_seen == 0:
             status = "uncertain"
-        else:                       # recent-only region, passing recently
-            status = "passing" if not rec_bad else "new"
-        support = slot["old_fail"] + slot["recent_fail"]
-        # High repetition earns confidence, not proportionally more
-        # budget: support saturates so one loud failure mode cannot
-        # monopolize generation with redundant data.
-        support_factor = min(1.0, 0.5 + 0.25 * min(support, 6) / 3)
+        else:
+            status = "new" if rec_fail else "passing"
+        fails_total = sum(b[0] for b in per.values())
+        support_factor = min(1.0, 0.5 + 0.25 * min(fails_total, 6) / 3)
         slot["status"] = status
+        slot["previously_targeted"] = was_targeted
+        slot["rotate_coordinates"] = bool(was_targeted
+                                          and status == "persistent")
+        slot["history"] = [
+            {"bucket": b, "n": per[b][0] + per[b][1],
+             "fail_rate": round(per[b][0] / (per[b][0] + per[b][1]), 3)}
+            for b in buckets if b in per]
         slot["priority"] = round(
             _STATE_PRIORITY[status] * support_factor, 4)
         out.append(slot)
 
     total = sum(s["priority"] for s in out) or 1.0
-    budget_pool = 1.0 - max(0.0, min(0.6, exploration))
+    pool = 1.0 - max(0.0, min(0.6, exploration))
     for slot in out:
-        slot["budget_share"] = round(budget_pool * slot["priority"] / total, 4)
+        slot["budget_share"] = round(pool * slot["priority"] / total, 4)
+        del slot["by_bucket"]
     out.sort(key=lambda s: -s["budget_share"])
-    return {"regions": out, "exploration_share": round(1.0 - budget_pool
-                                                      + 0.0, 4),
-            "traces": n}
+    return {"regions": out, "exploration_share": round(1.0 - pool, 4),
+            "traces": n, "buckets": buckets}
