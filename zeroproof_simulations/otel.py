@@ -149,12 +149,17 @@ def rows_from_otel(source: Any) -> list[dict]:
         reward = None
         model_version = None
         seen_users: set[str] = set()
+        model_generic = None
         for _, span, attrs in entries:
-            if model_version is None:
-                mv = _first(attrs, ("zeroproof.model_version",
-                                    "gen_ai.request.model"))
-                if mv:
-                    model_version = str(mv)
+            # The explicit zeroproof key wins across ALL spans; a generic
+            # model name on an earlier span must not freeze the choice.
+            mv = _first(attrs, ("zeroproof.model_version",))
+            if mv and model_version is None:
+                model_version = str(mv)
+            if model_generic is None:
+                generic = _first(attrs, ("gen_ai.request.model",))
+                if generic:
+                    model_generic = str(generic)
             raw_reward = _first(attrs, reward_keys)
             if raw_reward is not None and reward is None:
                 try:
@@ -216,8 +221,8 @@ def rows_from_otel(source: Any) -> list[dict]:
             # wins (adapters share the base model name), the request
             # model is the fallback. Rounds of the continual loop are
             # indistinguishable without it.
-            if model_version:
-                row["model_version"] = model_version
+            if model_version or model_generic:
+                row["model_version"] = model_version or model_generic
             rows.append(row)
     return rows
 
