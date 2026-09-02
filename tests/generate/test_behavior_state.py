@@ -205,3 +205,22 @@ def test_region_progress_same_rules_both_sides():
     assert rec["trace_fail_rate"] == 1.0
     if rec["generated_n"]:
         assert rec["generated_fail_rate"] is not None
+
+
+def test_applied_is_false_when_no_cell_ever_boosted():
+    """applied discloses that a weight changed, not that regions exist."""
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations.traces import simulate_from_traces
+    hot = [{"prompt": f"legacy lookup {i} failed",
+            "steps": [{"tool": "legacy_lookup", "arguments": {},
+                       "result": {"status": "timeout"}}],
+            "final_text": "It failed.", "reward": 0,
+            "model_version": "v0"} for i in range(4)]
+    aimed = simulate_from_traces(
+        hot, scripted_agent, policy=POLICY, tools=TOOLS, mode="explore",
+        budget=8, seed=3, grade=False, concurrency=4, simulator=False,
+        time_budget=30, advanced={"per_round": 8, "mutate_failures": False})
+    state = aimed.search["behavior_state"]
+    assert any(r["region"] == "recover_after_timeout"
+               for r in state["regions"])
+    assert state["applied"] is False
