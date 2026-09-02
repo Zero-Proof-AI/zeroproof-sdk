@@ -289,3 +289,27 @@ def test_otel_zeroproof_model_version_beats_earlier_generic_span():
                       '[{"role": "assistant", "content": "hello"}]'}}]
     rows = rows_from_otel({"spans": spans})
     assert rows[0]["model_version"] == "identity-v5-adapter"
+
+
+def test_newest_first_history_with_ts_still_orders_by_time():
+    """Chronology comes from ts, never from row order: a newest-first
+    export must not read the oldest round as latest."""
+    from zeroproof_simulations.traces import behavior_state
+    newest_first = (
+        [dict(_mrow("edits_before_reading", True, "v1"), ts=2000)] * 4
+        + [dict(_mrow("edits_before_reading", False, "v0"), ts=1000)] * 4)
+    state = behavior_state(newest_first)
+    assert state["buckets"] == ["v0", "v1"]
+    region = state["regions"][0]
+    assert region["status"] == "improving"
+    assert [h["fail_rate"] for h in region["history"]] == [1.0, 0.0]
+
+
+def test_otel_rows_carry_ts_from_earliest_span():
+    from zeroproof_simulations.otel import rows_from_otel
+    spans = [{"spanId": "a", "traceId": "t", "name": "chat",
+              "startedMs": 5000,
+              "attributes": {"gen_ai.input.messages":
+                             '[{"role": "user", "content": "hi"}]'}}]
+    rows = rows_from_otel({"spans": spans})
+    assert rows[0]["ts"] == 5000 * 1_000_000
