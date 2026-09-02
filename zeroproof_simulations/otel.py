@@ -213,6 +213,10 @@ def rows_from_otel(source: Any) -> list[dict]:
             row = {"prompt": prompt, "steps": steps,
                    "final_text": final_text,
                    "conversation_id": conv}
+            # Earliest span start, so behavior_state can order history by
+            # time instead of trusting the export's row order.
+            if entries and entries[0][0]:
+                row["ts"] = entries[0][0]
             # zeroproof.reward span attributes are preserved when present
             # and in [0, 1]; rows without them stay ungraded, first-class.
             if reward is not None:
