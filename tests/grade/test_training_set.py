@@ -68,8 +68,11 @@ def test_training_set_writes_chat_jsonl_with_policy_and_tools(tmp_path):
     assert report["tool_call_roundtrip"]["invalid"] == 0
 
 
-def test_select_refuses_ungraded_rows():
+def test_select_refuses_ungraded_and_nonbinary_rows():
     data = SimulationData(trajectories=[
         {"prompt": "coffee", "steps": [], "final_text": "ok", "arm": "grid"}])
     with pytest.raises(RuntimeError, match="graded"):
         data.select()
+    fractional = SimulationData(trajectories=[_row("coffee", 0.5)])
+    with pytest.raises(RuntimeError, match="binary"):
+        fractional.select()

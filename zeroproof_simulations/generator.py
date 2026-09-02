@@ -731,7 +731,10 @@ def amplify_seeds(seeds: Sequence[str], target: int, *, policy: str = "",
     seen: set[str] = set()
 
     def _norm(text: str) -> str:
-        return " ".join(re.findall(r"[a-z0-9]+", str(text).lower()))
+        # Non-Latin text has no [a-z0-9] tokens; fall back to the
+        # casefolded text so distinct seeds and minted lines survive.
+        tokens = " ".join(re.findall(r"[a-z0-9]+", str(text).lower()))
+        return tokens or " ".join(str(text).casefold().split())
 
     for seed in seeds:
         text = str(seed).strip()

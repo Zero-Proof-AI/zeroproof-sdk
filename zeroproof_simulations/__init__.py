@@ -435,12 +435,13 @@ class SimulationData:
         (``grade=True``, ``grader=``) or afterwards with ``grade()``.
         The selection report lands in ``search["selection"]``.
         """
-        if not any(t.get("reward") is not None or t.get("qwen_reward")
-                   is not None for t in self.trajectories):
+        from .optimize import _binary_label
+        if not any(_binary_label(t) is not None
+                   for t in self.trajectories if isinstance(t, dict)):
             raise RuntimeError(
-                "select() needs graded rows and none carry a reward. "
-                "Pass grade=True or grader= to simulate(), or call "
-                "grade() first.")
+                "select() needs binary-graded rows (reward 0 or 1) and "
+                "none carry one. Pass grade=True or grader= to "
+                "simulate(), or call grade() first.")
         selected, report = select_for_sft(self.trajectories, target=target)
         self.search["selection"] = report
         return selected
@@ -1193,16 +1194,6 @@ def simulate(agent: Any = None, *, spec: Any = None,
     # across phrasing/stance/language axes to N distinct situations
     # before generation. Disclosed in search["seed_amplification"].
     seed_amp_report = None
-    if (seed_prompts and n_situations_target
-            and len(seed_prompts) < int(n_situations_target)):
-        given = len(seed_prompts)
-        seed_prompts = amplify_seeds(
-            seed_prompts, int(n_situations_target), policy=policy,
-            backend_spec=None)
-        seed_amp_report = {"given": given,
-                           "target": int(n_situations_target),
-                           "total": len(seed_prompts),
-                           "minted": len(seed_prompts) - given}
     profile = inspect(agent, tools=tools, system_prompt=policy)
     tools = list(profile.tools or [])
     policy = str(profile.policy or "")
@@ -1211,10 +1202,30 @@ def simulate(agent: Any = None, *, spec: Any = None,
     if agent is None and not tools and not policy:
         raise ValueError(
             "simulate needs an agent, tools=, or a system prompt.")
+    # Amplification is opted into by the named seeds= parameter only;
+    # the legacy advanced["seed_prompts"] contract stays literal, and an
+    # offline run (simulator=False) never makes network calls. Runs
+    # after inspect() so the writer hint carries the resolved policy.
+    if (seeds and seed_prompts and n_situations_target
+            and len(seed_prompts) < int(n_situations_target)
+            and simulator is not False):
+        given = len(seed_prompts)
+        seed_prompts = amplify_seeds(
+            seed_prompts, int(n_situations_target), policy=policy,
+            backend_spec=None)
+        seed_amp_report = {"given": given,
+                           "target": int(n_situations_target),
+                           "total": len(seed_prompts),
+                           "minted": len(seed_prompts) - given}
     trace_rows: list[dict] = []
     trace_focused = False
     optimizer_state = None
     allocation_hits = {"n": 0}
+    # Popped unconditionally: on a non-trace run the key must not ride
+    # **advanced into the generator, where it is an unknown kwarg.
+    targeted_regions = [str(x) for x in
+                        ((advanced or {}).pop("targeted_regions", None)
+                         or [])]
 
     def _apply_allocation(region_list) -> None:
         return None
@@ -1262,10 +1273,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
         # recipe draw extra weight proportional to its share; cells
         # outside every recipe keep base weight - that is the
         # exploration reserve in action.
-        optimizer_state = behavior_state(
-            trace_rows,
-            targeted=[str(x) for x in
-                      (advanced.pop("targeted_regions", None) or [])])
+        optimizer_state = behavior_state(trace_rows,
+                                         targeted=targeted_regions)
         _ALLOC_GAIN = 4.0
 
         def _allocation_boost(assignment: dict) -> float:

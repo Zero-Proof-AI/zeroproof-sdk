@@ -260,3 +260,14 @@ def test_region_progress_measured_after_grading():
     rec = next(p for p in prog if p["region"] == "recover_after_timeout")
     if rec["generated_n"]:
         assert rec["generated_fail_rate"] == 0.0
+
+
+def test_targeted_regions_without_traces_is_harmless():
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations import simulate
+    data = simulate(agent=scripted_agent, tools=TOOLS, system_prompt=POLICY,
+                    budget=4, seed=1, grade=False, simulator=False,
+                    concurrency=2, time_budget=20,
+                    advanced={"per_round": 4, "mutate_failures": False,
+                              "targeted_regions": ["recover_after_timeout"]})
+    assert data.trajectories
