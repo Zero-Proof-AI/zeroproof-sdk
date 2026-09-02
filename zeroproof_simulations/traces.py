@@ -814,9 +814,10 @@ def _row_regions(row: dict) -> list[tuple[str, str, bool]]:
     fault = trace_fault(row)
     reward = _binary_reward(row)
     if fault and fault != NO_FAULT:
-        recovered = reward == 1
-        out.append((f"recover_after_{fault}", "fault_response",
-                    not recovered))
+        # Ungraded is unknown, never failed: reward=None rows count as
+        # region support but not toward the fail/pass rates.
+        failed = (reward == 0) if reward is not None else None
+        out.append((f"recover_after_{fault}", "fault_response", failed))
     if not out:
         tools = [str(s.get("tool")) for s in row.get("steps") or []
                  if isinstance(s, dict) and s.get("tool")]
@@ -873,8 +874,9 @@ def behavior_state(rows: Sequence[dict], *,
                 "region": region_id, "kind": kind,
                 "by_bucket": {}, "recipe": {}, "support": 0,
                 "first_bucket": bucket})
-            b = slot["by_bucket"].setdefault(bucket, [0, 0])  # [fail, pass]
-            b[0 if failed else 1] += 1
+            if failed is not None:
+                b = slot["by_bucket"].setdefault(bucket, [0, 0])  # [fail, pass]
+                b[0 if failed else 1] += 1
             slot["support"] += 1
             slot["last_bucket"] = bucket
             if failed:
@@ -951,6 +953,8 @@ def region_progress(state: dict, generated_rows: Sequence[dict]) -> list[dict]:
         if not isinstance(row, dict):
             continue
         for region_id, _kind, failed in _row_regions(row):
+            if failed is None:
+                continue
             slot = counts.setdefault(region_id, [0, 0])
             slot[0 if failed else 1] += 1
     out = []

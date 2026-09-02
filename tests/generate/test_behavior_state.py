@@ -224,3 +224,39 @@ def test_applied_is_false_when_no_cell_ever_boosted():
     assert any(r["region"] == "recover_after_timeout"
                for r in state["regions"])
     assert state["applied"] is False
+
+
+def test_ungraded_fault_rows_are_unknown_not_failed():
+    """reward=None with a fault is support, never a failure count."""
+    from zeroproof_simulations.traces import behavior_state
+    rows = [{"prompt": f"lookup {i} timed out",
+             "steps": [{"tool": "get_order", "arguments": {},
+                        "result": {"status": "timeout"}}],
+             "final_text": "Retried and it worked.",
+             "model_version": "v0"} for i in range(4)]
+    state = behavior_state(rows)
+    region = next(r for r in state["regions"]
+                  if r["region"] == "recover_after_timeout")
+    assert region["support"] == 4
+    assert region["history"] == []
+    assert region["status"] == "passing"
+
+
+def test_region_progress_measured_after_grading():
+    """The readout describes graded, shipping rows, not raw rollouts."""
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations.traces import simulate_from_traces
+    hot = [{"prompt": f"refund order {i} failed again",
+            "steps": [{"tool": "create_refund", "arguments": {"order_id": str(i)},
+                       "result": {"status": "timeout"}}],
+            "final_text": "The refund timed out.", "reward": 0,
+            "model_version": "v0"} for i in range(4)]
+    aimed = simulate_from_traces(
+        hot, scripted_agent, policy=POLICY, tools=TOOLS, mode="explore",
+        budget=16, seed=3, concurrency=4, simulator=False, time_budget=30,
+        grader=lambda row: {"reward": 1, "reason": "recovered"},
+        advanced={"per_round": 8, "mutate_failures": False})
+    prog = aimed.search["behavior_state"]["region_progress"]
+    rec = next(p for p in prog if p["region"] == "recover_after_timeout")
+    if rec["generated_n"]:
+        assert rec["generated_fail_rate"] == 0.0

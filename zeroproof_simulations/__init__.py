@@ -2548,11 +2548,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
         # regions existed; the gain reads the one constant that steers.
         state_record["applied"] = allocation_hits["n"] > 0
         state_record["allocation_gain"] = _ALLOC_GAIN
-        # Close the loop: the same region predicates that read the
-        # traces re-measure the generated rows, so trace fail rate vs
-        # generated fail rate is one comparable number per region.
-        state_record["region_progress"] = region_progress(
-            state_record, data.trajectories)
+        # region_progress is attached at the very end of simulate(), so
+        # it measures the rows that ship: graded, leak-pruned.
         data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(data.trajectories, trace_rows,
                                           embedder=resolved_embedder)
@@ -2670,6 +2667,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
             if verdict.get("reason") is not None:
                 row.setdefault("reason", verdict["reason"])
             row["label_source"] = "conduct"
+    if trace_rows and "behavior_state" in data.search:
+        # Close the loop on the rows that ship: same region predicates
+        # as the traces, measured after grading and leak-pruning.
+        data.search["behavior_state"]["region_progress"] = region_progress(
+            data.search["behavior_state"], data.trajectories)
     if out_path is not None and data.trajectories:
         data.save(str(out_path), meta=True)
     return data
