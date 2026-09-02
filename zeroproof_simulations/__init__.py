@@ -445,6 +445,24 @@ class SimulationData:
         self.search["selection"] = report
         return selected
 
+    def training_set(self, output: str | None = None, *,
+                     target: int = 1000, validate: bool = True) -> dict:
+        """Select the recommended rows and export them trainer-ready.
+
+        ``select()`` picks diverse pass-labeled rows, ``export_training``
+        writes them as chat JSONL with this run's system prompt and tools
+        and the tool-call round-trip gate. Returns the export report with
+        the selection report attached; pass ``output`` to write the file.
+        Raw simulation rows are not the training artifact — this is.
+        """
+        selected = self.select(target=target)
+        policy = str(self.profile.policy or "") if self.profile else ""
+        tools = list(self.profile.tools) if self.profile else []
+        report = export_training(selected, output, system_prompt=policy,
+                                 tools=tools or None, validate=validate)
+        report["selection"] = self.search.get("selection")
+        return report
+
     def rows(self) -> list[dict]:
         return [_export_row(t) for t in self.trajectories]
 
