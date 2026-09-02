@@ -41,3 +41,24 @@ def test_backend_failure_returns_originals(monkeypatch):
         raise RuntimeError("endpoint down")
     monkeypatch.setattr(gen, "complete", dead)
     assert amplify_seeds(SEEDS, 50) == SEEDS
+
+
+def test_amplify_is_opt_in_and_respects_offline(monkeypatch):
+    """Legacy advanced seed openers stay literal; simulator=False never
+    reaches the network; non-Latin seeds are distinct, not dropped."""
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations import generator, simulate
+
+    def _explode(*a, **k):
+        raise AssertionError("amplify called the backend")
+    monkeypatch.setattr(generator, "complete", _explode)
+    common = dict(tools=TOOLS, system_prompt=POLICY, agent=scripted_agent,
+                  budget=4, seed=1, grade=False, simulator=False,
+                  concurrency=2, time_budget=20,
+                  advanced={"per_round": 4, "mutate_failures": False})
+    simulate(situations=6, **dict(common,
+             advanced=dict(common["advanced"],
+                           seed_prompts=["list my recent expenses"])))
+    simulate(seeds=["list my recent expenses"], situations=6, **common)
+    assert generator.amplify_seeds(["你是谁？", "谁造的你？"], 2) == [
+        "你是谁？", "谁造的你？"]
