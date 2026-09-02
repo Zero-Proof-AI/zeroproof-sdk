@@ -271,3 +271,21 @@ def test_targeted_regions_without_traces_is_harmless():
                     advanced={"per_round": 4, "mutate_failures": False,
                               "targeted_regions": ["recover_after_timeout"]})
     assert data.trajectories
+
+
+def test_otel_zeroproof_model_version_beats_earlier_generic_span():
+    from zeroproof_simulations.otel import rows_from_otel
+    spans = [{"spanId": "a", "traceId": "t", "name": "chat",
+              "startedMs": 1000,
+              "attributes": {
+                  "gen_ai.request.model": "qwen2.5-7b",
+                  "gen_ai.input.messages":
+                      '[{"role": "user", "content": "hi"}]'}},
+             {"spanId": "b", "traceId": "t", "name": "chat",
+              "startedMs": 2000,
+              "attributes": {
+                  "zeroproof.model_version": "identity-v5-adapter",
+                  "gen_ai.output.messages":
+                      '[{"role": "assistant", "content": "hello"}]'}}]
+    rows = rows_from_otel({"spans": spans})
+    assert rows[0]["model_version"] == "identity-v5-adapter"
