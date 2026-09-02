@@ -1214,6 +1214,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     trace_rows: list[dict] = []
     trace_focused = False
     optimizer_state = None
+    allocation_hits = {"n": 0}
 
     def _apply_allocation(region_list) -> None:
         return None
@@ -1289,6 +1290,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
             for region in region_list or []:
                 boost = _allocation_boost(region.get("assignment") or {})
                 if boost != 1.0:
+                    allocation_hits["n"] += 1
                     region["weight"] = round(
                         float(region.get("weight") or 0.0) * boost, 6)
 
@@ -1403,6 +1405,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
     model_obj = getattr(generator, "model", None)
     if model_obj is not None and hasattr(model_obj, "arm_weights"):
         model_obj.arm_weights = dict(_SEARCH_ARMS)
+    # The model arm keeps its own region list; without this it draws
+    # round-1 cards unboosted and short runs never see the allocation.
+    _apply_allocation(getattr(model_obj, "regions", None))
     model_backend = getattr(getattr(generator, "model", None), "backend_spec", None)
     if isinstance(model_backend, str):
         try:
@@ -2539,9 +2544,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
         # for callers and the platform UI; allocation is disclosure
         # until the steering calibration sets how hard to apply it.
         state_record = dict(optimizer_state or behavior_state(trace_rows))
-        state_record["applied"] = bool(optimizer_state
-                                       and optimizer_state["regions"])
-        state_record["allocation_gain"] = 4.0
+        # applied means a cell weight actually changed, not merely that
+        # regions existed; the gain reads the one constant that steers.
+        state_record["applied"] = allocation_hits["n"] > 0
+        state_record["allocation_gain"] = _ALLOC_GAIN
         # Close the loop: the same region predicates that read the
         # traces re-measure the generated rows, so trace fail rate vs
         # generated fail rate is one comparable number per region.
