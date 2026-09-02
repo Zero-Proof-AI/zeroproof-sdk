@@ -426,6 +426,25 @@ class SimulationData:
         self._rewrite(path)
         return summarize_quality(self.trajectories)
 
+    def select(self, *, target: int = 1000) -> list[dict]:
+        """The rows recommended for training, not everything generated.
+
+        Diverse pass-labeled demonstrations via ``select_for_sft``: one of
+        each distinct way of being right before any repeats, junk and
+        duplicate prompts dropped. Requires graded rows — grade in-loop
+        (``grade=True``, ``grader=``) or afterwards with ``grade()``.
+        The selection report lands in ``search["selection"]``.
+        """
+        if not any(t.get("reward") is not None or t.get("qwen_reward")
+                   is not None for t in self.trajectories):
+            raise RuntimeError(
+                "select() needs graded rows and none carry a reward. "
+                "Pass grade=True or grader= to simulate(), or call "
+                "grade() first.")
+        selected, report = select_for_sft(self.trajectories, target=target)
+        self.search["selection"] = report
+        return selected
+
     def rows(self) -> list[dict]:
         return [_export_row(t) for t in self.trajectories]
 
