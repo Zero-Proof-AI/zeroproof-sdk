@@ -44,7 +44,8 @@ from .actionspace import (action_space_targets, induced_keys_from_trajectory,
                           render_target_situation, shape_as_tags,
                           shape_from_trajectory, uncovered_action_shapes)
 from .explore import mutate_pool
-from .generator import (ModelSimulator, assistant_kind, make_default_generator,
+from .generator import (ModelSimulator, amplify_seeds, assistant_kind,
+                       make_default_generator,
                        write_result_shapes, write_scene_brief)
 from .grading import _as_dict, behavior_signature, conduct_grade
 from .platform import (PlatformError, datasets,
@@ -71,7 +72,8 @@ from .optimize import (filter_rl_rows, group_signal, optimize,
                        optimize_for_rl, recommend, select_for_rl,
                        select_for_sft, trim_unanimous_groups)
 from .otel import rows_from_otel
-from .traces import (dimensions_from_traces, drop_leaky_rows,
+from .traces import (behavior_state, region_progress,
+                     dimensions_from_traces, drop_leaky_rows,
                      exemplar_result_shapes, flaw_rows,
                      format_trace_report, leakage_report,
                      load_traces, mine_result_exemplars, mine_traces,
@@ -423,6 +425,44 @@ class SimulationData:
         rank_rows(self.trajectories)
         self._rewrite(path)
         return summarize_quality(self.trajectories)
+
+    def select(self, *, target: int = 1000) -> list[dict]:
+        """The rows recommended for training, not everything generated.
+
+        Diverse pass-labeled demonstrations via ``select_for_sft``: one of
+        each distinct way of being right before any repeats, junk and
+        duplicate prompts dropped. Requires graded rows — grade in-loop
+        (``grade=True``, ``grader=``) or afterwards with ``grade()``.
+        The selection report lands in ``search["selection"]``.
+        """
+        from .optimize import _binary_label
+        if not any(_binary_label(t) is not None
+                   for t in self.trajectories if isinstance(t, dict)):
+            raise RuntimeError(
+                "select() needs binary-graded rows (reward 0 or 1) and "
+                "none carry one. Pass grade=True or grader= to "
+                "simulate(), or call grade() first.")
+        selected, report = select_for_sft(self.trajectories, target=target)
+        self.search["selection"] = report
+        return selected
+
+    def training_set(self, output: str | None = None, *,
+                     target: int = 1000, validate: bool = True) -> dict:
+        """Select the recommended rows and export them trainer-ready.
+
+        ``select()`` picks diverse pass-labeled rows, ``export_training``
+        writes them as chat JSONL with this run's system prompt and tools
+        and the tool-call round-trip gate. Returns the export report with
+        the selection report attached; pass ``output`` to write the file.
+        Raw simulation rows are not the training artifact — this is.
+        """
+        selected = self.select(target=target)
+        policy = str(self.profile.policy or "") if self.profile else ""
+        tools = list(self.profile.tools) if self.profile else []
+        report = export_training(selected, output, system_prompt=policy,
+                                 tools=tools or None, validate=validate)
+        report["selection"] = self.search.get("selection")
+        return report
 
     def rows(self) -> list[dict]:
         return [_export_row(t) for t in self.trajectories]
@@ -971,6 +1011,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
              traces: Any = None,
              grader: Any = None,
              strategy: str = "auto",
+             seeds: list | None = None,
              scaffold: str | None = None,
              output: str | None = None,
              advanced: dict | None = None,
@@ -1031,7 +1072,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         rollouts_per_request=k_arg, repeats=repeats,
         rollouts_per_prompt=rollouts_per_prompt)
     seed_prompts: list[str] = []
-    for item in (cfg.pop("seed_prompts", None) or []):
+    for item in list(seeds or []) + list(cfg.pop("seed_prompts", None) or []):
         text = str(item or "").strip()
         if text:
             seed_prompts.append(text)
@@ -1128,8 +1169,31 @@ def simulate(agent: Any = None, *, spec: Any = None,
     extra_cards = max(0, int(advanced.pop("extra_cards", 1)))
     hung_slot_s = float(advanced.pop("hung_slot", _HUNG_SLOT_S))
     advanced.pop("scene_brief", None)
+    # Which weights produced each row: rounds of the continual loop are
+    # indistinguishable without it (base and every adapter can share a
+    # model name). advanced["model_version"] overrides; the resolved
+    # backend model is the default; callable agents record their name.
+    model_version_tag = str(advanced.pop("model_version", "") or "").strip()
+    if not model_version_tag:
+        if agent is not None and callable(agent) and not isinstance(agent, str):
+            model_version_tag = getattr(agent, "__name__", "callable-agent")
+        else:
+            try:
+                from .agents import parse_backend_spec as _pbs, \
+                    default_simulator_spec as _dss
+                _spec = agent if isinstance(agent, str) else _dss()
+                model_version_tag = _pbs(_spec)[1]
+            except Exception:
+                model_version_tag = "unknown"
+
     tools, policy, spec_sits = _apply_spec(spec, tools, policy, [])
     seed_prompts.extend(str(s).strip() for s in spec_sits if str(s).strip())
+    # simulate-from-seeds: a few example asks are a behavior request,
+    # not the situation list. With an explicit situations=N target the
+    # engine runs the coordinate search itself, amplifying the examples
+    # across phrasing/stance/language axes to N distinct situations
+    # before generation. Disclosed in search["seed_amplification"].
+    seed_amp_report = None
     profile = inspect(agent, tools=tools, system_prompt=policy)
     tools = list(profile.tools or [])
     policy = str(profile.policy or "")
@@ -1138,8 +1202,33 @@ def simulate(agent: Any = None, *, spec: Any = None,
     if agent is None and not tools and not policy:
         raise ValueError(
             "simulate needs an agent, tools=, or a system prompt.")
+    # Amplification is opted into by the named seeds= parameter only;
+    # the legacy advanced["seed_prompts"] contract stays literal, and an
+    # offline run (simulator=False) never makes network calls. Runs
+    # after inspect() so the writer hint carries the resolved policy.
+    if (seeds and seed_prompts and n_situations_target
+            and len(seed_prompts) < int(n_situations_target)
+            and simulator is not False):
+        given = len(seed_prompts)
+        seed_prompts = amplify_seeds(
+            seed_prompts, int(n_situations_target), policy=policy,
+            backend_spec=None)
+        seed_amp_report = {"given": given,
+                           "target": int(n_situations_target),
+                           "total": len(seed_prompts),
+                           "minted": len(seed_prompts) - given}
     trace_rows: list[dict] = []
     trace_focused = False
+    optimizer_state = None
+    allocation_hits = {"n": 0}
+    # Popped unconditionally: on a non-trace run the key must not ride
+    # **advanced into the generator, where it is an unknown kwarg.
+    targeted_regions = [str(x) for x in
+                        ((advanced or {}).pop("targeted_regions", None)
+                         or [])]
+
+    def _apply_allocation(region_list) -> None:
+        return None
     # strategy= names the coverage stance explicitly (doctrine: traces
     # change the coverage DISTRIBUTION, never the space). auto resolves
     # descriptively and records its reason; it never picks "targeted" on
@@ -1178,6 +1267,42 @@ def simulate(agent: Any = None, *, spec: Any = None,
                           if isinstance(r, dict)]
         else:
             trace_rows = [r for r in traces if isinstance(r, dict)]
+        # The optimizer's memory feeds the run it aims: regions from
+        # the whole trace history, budget shares from their lifecycle.
+        # Cells whose coordinates intersect a hot region's expansion
+        # recipe draw extra weight proportional to its share; cells
+        # outside every recipe keep base weight - that is the
+        # exploration reserve in action.
+        optimizer_state = behavior_state(trace_rows,
+                                         targeted=targeted_regions)
+        _ALLOC_GAIN = 4.0
+
+        def _allocation_boost(assignment: dict) -> float:
+            factor = 1.0
+            for region in optimizer_state["regions"]:
+                share = region.get("budget_share") or 0.0
+                if share <= 0:
+                    continue
+                recipe = region.get("recipe") or {}
+                match = 0.0
+                tools_r = recipe.get("tool") or []
+                if tools_r and str(assignment.get("tool")) in tools_r:
+                    match += 0.6
+                conds = recipe.get("tool_condition") or []
+                if conds and str(assignment.get("tool_condition")) in conds:
+                    match += 0.4
+                if match:
+                    factor += _ALLOC_GAIN * share * match
+            return factor
+
+        def _apply_allocation(region_list) -> None:
+            for region in region_list or []:
+                boost = _allocation_boost(region.get("assignment") or {})
+                if boost != 1.0:
+                    allocation_hits["n"] += 1
+                    region["weight"] = round(
+                        float(region.get("weight") or 0.0) * boost, 6)
+
         if (trace_rows and dimensions is None
                 and resolved_strategy != "broad"):
             # trace: denser near observed behaviors, background kept.
@@ -1276,6 +1401,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         scene_brief=scene_box["brief"], time_budget=time_budget,
         run_started=started, mode=topo["mode"],
         steering_weight=applied_steering, **advanced)
+    _apply_allocation(getattr(generator, "regions", None))
     planned_cell_keys = {
         json.dumps(region["assignment"], sort_keys=True, default=str)
         for region in (getattr(generator, "regions", None) or [])
@@ -1288,6 +1414,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
     model_obj = getattr(generator, "model", None)
     if model_obj is not None and hasattr(model_obj, "arm_weights"):
         model_obj.arm_weights = dict(_SEARCH_ARMS)
+    # The model arm keeps its own region list; without this it draws
+    # round-1 cards unboosted and short runs never see the allocation.
+    _apply_allocation(getattr(model_obj, "regions", None))
     model_backend = getattr(getattr(generator, "model", None), "backend_spec", None)
     if isinstance(model_backend, str):
         try:
@@ -1342,6 +1471,30 @@ def simulate(agent: Any = None, *, spec: Any = None,
             return None
         return plan
 
+    def _realized_dims(steps: list, faults: list) -> dict:
+        # Rows without a grid cell (seeds, open-ended, behavior cards)
+        # still get auditable coordinates - realized from what actually
+        # happened, marked so audits can tell assigned from observed.
+        tools_called = [str(s.get("tool")) for s in steps or []
+                        if isinstance(s, dict) and s.get("tool")]
+        condition = "success"
+        for s in steps or []:
+            result = s.get("result") if isinstance(s, dict) else None
+            status = (str(result.get("status")) if isinstance(result, dict)
+                      else "")
+            if status and status not in ("ok", "success"):
+                condition = status
+                break
+        else:
+            for plan in faults or []:
+                kind = str((plan or {}).get("fault") or "")
+                if kind:
+                    condition = kind
+                    break
+        return {"tool": tools_called[0] if tools_called else "unrelated",
+                "tool_condition": condition,
+                "origin": "realized"}
+
     def one(job: tuple) -> dict:
         prompt, rollout, meta, selection = job
         meta = dict(meta or {})
@@ -1354,6 +1507,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
         except Exception as exc:
             raw = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>"}
         raw = raw if isinstance(raw, dict) else {"steps": [], "final_text": str(raw)}
+        if not assignment:
+            assignment = _realized_dims(raw.get("steps") or [],
+                                        _clean_faults(faults))
         t = {
             "scenario_id": meta.get("region_id") or f"probe_{hash(prompt) & 0xffffff:x}",
             "scenario_dimensions": assignment,
@@ -1368,6 +1524,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
             "grader_reason": None,
             "reason": None,
             "rollout_index": rollout,
+            "model_version": model_version_tag,
             "seed": meta.get("seed", seed),
             "semantic_cluster": None if not data.semantic else selection.get("cluster"),
             "semantic_novelty": None if not data.semantic else selection.get("novelty"),
@@ -2246,14 +2403,16 @@ def simulate(agent: Any = None, *, spec: Any = None,
                         slot = axis_counts.setdefault(axis, {})
                         slot[value] = slot.get(value, 0) + 1
 
-            retarget_regions(generator.regions, tools, counts=region_counts,
-                             novelty=novelty_fn, behavior_value=behavior_fn,
-                             axis_counts=axis_counts, mode=topo["mode"])
+            _apply_allocation(retarget_regions(
+                generator.regions, tools, counts=region_counts,
+                novelty=novelty_fn, behavior_value=behavior_fn,
+                axis_counts=axis_counts, mode=topo["mode"]))
             model_obj = getattr(generator, "model", None)
             if model_obj is not None and getattr(model_obj, "regions", None):
-                retarget_regions(model_obj.regions, tools, counts=region_counts,
-                                 novelty=novelty_fn, behavior_value=behavior_fn,
-                                 axis_counts=axis_counts, mode=topo["mode"])
+                _apply_allocation(retarget_regions(
+                    model_obj.regions, tools, counts=region_counts,
+                    novelty=novelty_fn, behavior_value=behavior_fn,
+                    axis_counts=axis_counts, mode=topo["mode"]))
             templates = getattr(generator, "templates", None)
             if templates is not None:
                 templates.regions = generator.regions
@@ -2388,6 +2547,19 @@ def simulate(agent: Any = None, *, spec: Any = None,
         # Source traces shaped the grid; they must not shape the rows.
         # A generated near-copy of a held-out trace is training leakage.
         mined = mine_traces(trace_rows)
+        # The optimizer's map rides every trace-fed run: the trace
+        # history classifies into behavior regions (new / persistent /
+        # improving / uncertain / passing) with budget shares. Recorded
+        # for callers and the platform UI; allocation is disclosure
+        # until the steering calibration sets how hard to apply it.
+        state_record = dict(optimizer_state or behavior_state(trace_rows))
+        # applied means a cell weight actually changed, not merely that
+        # regions existed; the gain reads the one constant that steers.
+        state_record["applied"] = allocation_hits["n"] > 0
+        state_record["allocation_gain"] = _ALLOC_GAIN
+        # region_progress is attached at the very end of simulate(), so
+        # it measures the rows that ship: graded, leak-pruned.
+        data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(data.trajectories, trace_rows,
                                           embedder=resolved_embedder)
         data.trajectories[:] = kept_rows
@@ -2452,6 +2624,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
     data.coverage["requests_per_situation"] = n_req
     data.coverage["rollouts_per_request"] = repeat_count
     data.allocator = dict(allocator_counts)
+    if seed_amp_report:
+        data.search["seed_amplification"] = seed_amp_report
     data.search["strategy"] = {
         "requested": strategy,
         "resolved": resolved_strategy,
@@ -2502,6 +2676,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
             if verdict.get("reason") is not None:
                 row.setdefault("reason", verdict["reason"])
             row["label_source"] = "conduct"
+    if trace_rows and "behavior_state" in data.search:
+        # Close the loop on the rows that ship: same region predicates
+        # as the traces, measured after grading and leak-pruning.
+        data.search["behavior_state"]["region_progress"] = region_progress(
+            data.search["behavior_state"], data.trajectories)
     if out_path is not None and data.trajectories:
         data.save(str(out_path), meta=True)
     return data
