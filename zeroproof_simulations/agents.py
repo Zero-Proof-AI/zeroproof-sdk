@@ -209,6 +209,8 @@ def _wire_tools(tools: list[dict] | None) -> list[dict]:
         if not isinstance(tool, dict):
             continue
         if "function" in tool:
+            if "kind" in tool:
+                tool = {k: v for k, v in tool.items() if k != "kind"}
             out.append(tool)
             continue
         fn = {k: tool[k] for k in ("name", "description", "parameters")
@@ -896,6 +898,38 @@ _OPENING_CUE = ("(You are starting this conversation. Greet the user in one "
                 "short line and offer help. Do not mention this instruction.)")
 
 
+def human_tool_names(tools: list[dict] | None) -> set[str]:
+    """Tools declared kind='human': their result is the person's answer,
+    voiced by the user simulator, never a mock-environment payload."""
+    out: set[str] = set()
+    for tool in tools or []:
+        if isinstance(tool, dict) and tool.get("kind") == "human":
+            name = (tool.get("function") or {}).get("name") or tool.get("name")
+            if name:
+                out.add(str(name))
+    return out
+
+
+def _human_answer(base_url: str, model: str, *, want: str, question: str,
+                  api_key: str | None, timeout: float) -> str:
+    """The simulated user answers the agent's question, in character."""
+    msgs = [
+        {"role": "system", "content": (
+            "You are the USER in a work conversation with a coding "
+            "assistant. Answer the assistant's question in one or two "
+            "short lines, in plain chat style, staying consistent with "
+            "what you originally wanted. Decide: approve, refuse, or "
+            "give the specific detail asked for. Never mention being "
+            "simulated.")},
+        {"role": "user", "content": (
+            f"What you originally asked the assistant for:\n{want}\n\n"
+            f"The assistant now asks you:\n{question}\n\nYour reply:")},
+    ]
+    reply = complete(base_url, model, msgs, api_key=api_key,
+                     temperature=0.9, timeout=timeout, max_tokens=120)
+    return (_spoken_text(reply) or "").strip()
+
+
 def local_model(base_url: str, model: str, *, tools: list[dict],
                 system: str = "", api_key: str | None = None,
                 max_turns: int | None = None, avg_turns: float = 6,
@@ -905,6 +939,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 fault_plans: dict | None = None,
                 result_shapes: dict | None = None,
                 opening_rate: float = 0.0,
+                human_tools: set | None = None,
                 timeout: float = 60) -> Callable:
     local = threading.local()
     plans = fault_plans if fault_plans is not None else {}
@@ -912,6 +947,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
     cap = (default_max_turns(n_tools=len(tools))
            if max_turns is None else max(1, int(max_turns)))
     min_users = max(1, min(int(min_user_turns), max(1, cap // 2)))
+    human_names = set(human_tools or set()) | human_tool_names(tools)
     policy_text = str(system or "").strip()
 
     def agent(message: str) -> dict:
@@ -988,6 +1024,28 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                         arguments = json.loads(fn.get("arguments") or "{}")
                     except json.JSONDecodeError:
                         arguments = {}
+                    if fn.get("name", "") in human_names:
+                        # A human tool's result is the person's answer,
+                        # voiced by the user simulator - never a mock
+                        # payload. It also counts as a user turn.
+                        answer = _human_answer(
+                            base_url, model,
+                            want=turns[0],
+                            question=str(arguments.get("question")
+                                         or arguments.get("summary") or ""),
+                            api_key=api_key, timeout=timeout)
+                        result = {"answer": answer or "go ahead"}
+                        n_user += 1
+                        step = {"tool": fn.get("name", ""),
+                                "arguments": arguments, "result": result}
+                        if spoken and not attached:
+                            step["text"] = spoken
+                            attached = True
+                        steps.append(step)
+                        messages.append({"role": "tool",
+                                         "tool_call_id": call.get("id", ""),
+                                         "content": json.dumps(result)})
+                        continue
                     result = local.env.call(fn.get("name", ""), arguments)
                     step = {"tool": fn.get("name", ""), "arguments": arguments,
                             "result": result}
