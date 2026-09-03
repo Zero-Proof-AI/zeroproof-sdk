@@ -107,7 +107,7 @@ __all__ = ["simulate", "SimulationData", "conversation", "local_model",
            "simulate_from_traces", "rows_from_otel",
            # format_* helpers are presentation, not mechanics; still
            # importable for the CLI but out of the public contract
-           # (SDK-is-the-engine split, Sahana 2026-08-27).
+           # (SDK-is-the-engine split, 2026-08-27).
            "load_traces", "trace_report",
            "preflight", "dataset_report",
            "classify_failure", "FAILURE_CLASSES",
@@ -895,7 +895,7 @@ _MOVED_NAMES = {
     "llm_spec", "embedder", "seed_prompts", "extra_situations",
     "prefer_success",
     # steering_weight stays an advanced knob until the tranche-1
-    # calibration lands (Sahana, 2026-08-27): strategy default is auto,
+    # calibration lands (2026-08-27): strategy default is auto,
     # raw weight hidden from the named surface.
     "steering_weight",
 }
@@ -1549,6 +1549,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
     empty_streak = 0
     writer_idle = 0
     restart_count = 0
+    # Starvation relief: when every situation slot is used but rows are
+    # still owed BECAUSE rollouts were discarded, the run used to wait
+    # out the whole clock scheduling nothing. Lifting the cap once lets
+    # fresh situations fill the lost slots. Never lifts for an
+    # intentionally small situations= cap (lost == 0).
+    cap_lifted = {"lifted": False, "lost": 0}
     # Restarts scale with the job: a 10k-row budget cannot live on the
     # same retry allowance as a smoke run.
     max_restarts = max(MAX_NOVELTY_RESTARTS, int(cap or 0) // 100)
@@ -1606,6 +1612,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                 return False
         elif sk:
             if (n_situations_target
+                    and not cap_lifted["lifted"]
                     and sk not in used_situations
                     and len(used_situations) >= n_situations_target):
                 return False
@@ -1908,6 +1915,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                              "prompt": job[0], "reward": None}
                         t["behavior_signature"] = behavior_signature(t)
                     if not _usable_rollout(t):
+                        cap_lifted["lost"] += 1
                         _note(data, "rollout failure discarded")
                         continue
                     if not data.first_row_seconds:
@@ -2067,9 +2075,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
 
             def _add_job(prompt: str, meta: dict, row: dict, action: str) -> int:
                 sk = _situation_key_from_meta(meta, prompt)
-                if action == "explore" and n_situations_target and (
+                if (action == "explore" and n_situations_target
+                        and not cap_lifted["lifted"] and (
                         sk not in used_situations
-                        and len(used_situations) >= n_situations_target):
+                        and len(used_situations) >= n_situations_target)):
                     return 0
                 before = len(batch)
                 _schedule_prompt(batch, prompt, meta, row, action)
@@ -2199,6 +2208,15 @@ def simulate(agent: Any = None, *, spec: Any = None,
                     empty_streak = 0
                 else:
                     empty_streak += 1
+                    if (not cap_lifted["lifted"] and n_situations_target
+                            and remaining > 0 and cap_lifted["lost"] > 0
+                            and len(used_situations)
+                            >= n_situations_target):
+                        cap_lifted["lifted"] = True
+                        empty_streak = 0
+                        _note(data,
+                              "situation cap lifted to fill lost rollouts")
+                        continue
                     # Unique ingest may drop exact/near-dupe cards. That is
                     # not a run stop: the writer can invent another situation.
                     if (generator.model is not None and not generated_pool
@@ -2290,6 +2308,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
             paired = [(t, job) for t, job in zip(results, jobs_for)
                       if _usable_rollout(t)]
             if len(paired) != len(results):
+                cap_lifted["lost"] += len(results) - len(paired)
                 _note(data, "rollout failure discarded")
             results = [t for t, _ in paired]
             jobs_for = [job for _, job in paired]
