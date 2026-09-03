@@ -72,7 +72,7 @@ from .optimize import (filter_rl_rows, group_signal, optimize,
                        optimize_for_rl, recommend, select_for_rl,
                        select_for_sft, trim_unanimous_groups)
 from .otel import rows_from_otel
-from .traces import (behavior_state, region_progress,
+from .traces import (behavior_state, region_progress, opening_share,
                      dimensions_from_traces, drop_leaky_rows,
                      exemplar_result_shapes, flaw_rows,
                      format_trace_report, leakage_report,
@@ -168,6 +168,9 @@ def _note(data: "SimulationData", stage: str) -> None:
 def conversation(row: dict) -> list[dict]:
     """User/agent turns from prompt + steps. Tool calls stay on the assistant turn."""
     messages: list[dict] = []
+    opener = str(row.get("opener") or "")
+    if opener:
+        messages.append({"role": "assistant", "content": opener})
     first = str(row.get("prompt") or "")
     if first:
         messages.append({"role": "user", "content": first})
@@ -242,6 +245,10 @@ def _export_row(row: dict) -> dict:
         "final_text": str(row.get("final_text", "")),
         "scenario_id": row.get("scenario_id") or "",
     }
+    # Topology axis: which side opened. Absent means user-opened.
+    if row.get("opener"):
+        out["opener"] = str(row["opener"])
+        out["opening"] = str(row.get("opening") or "agent")
     for key in _CONVERSATION_FIELDS:
         if key in row and row[key] is not None:
             out[key] = row[key]
@@ -898,6 +905,9 @@ _MOVED_NAMES = {
     # calibration lands (2026-08-27): strategy default is auto,
     # raw weight hidden from the named surface.
     "steering_weight",
+    # conversation topology: who opens. "user" (default), "agent",
+    # "auto" (share observed in traces), or a 0..1 rate.
+    "opening",
 }
 
 
@@ -1250,6 +1260,15 @@ def simulate(agent: Any = None, *, spec: Any = None,
     # row["steering"] = {"origin": "targeted"}. None means "rule
     # decides" (currently: no bias), an explicit number is an override.
     steering_weight = cfg.pop("steering_weight", None)
+    opening_req = cfg.pop("opening", None)
+    if opening_req is not None and opening_req not in ("user", "agent", "auto"):
+        try:
+            opening_req = float(opening_req)
+        except (TypeError, ValueError):
+            raise ValueError(
+                'opening= must be "user", "agent", "auto", or a rate in [0, 1]')
+        if not 0.0 <= opening_req <= 1.0:
+            raise ValueError("opening= rate must be in [0, 1]")
     if steering_weight is not None:
         try:
             steering_weight = float(steering_weight)
@@ -1370,6 +1389,19 @@ def simulate(agent: Any = None, *, spec: Any = None,
     turns = (default_max_turns(n_tools=len(tools))
              if max_turns is None else max(1, int(max_turns)))
     turn_stats = new_turn_stats()
+    # Resolve the opening-side topology axis: explicit value, or the
+    # share observed in this run's traces ("auto"). Model-backed
+    # runners only; callable agents cannot be asked for an opener.
+    if opening_req == "auto":
+        opening_rate = opening_share(trace_rows) if trace_rows else 0.0
+        opening_source = "traces"
+    elif opening_req == "agent":
+        opening_rate, opening_source = 1.0, "explicit"
+    elif isinstance(opening_req, float):
+        opening_rate, opening_source = opening_req, "explicit"
+    else:
+        opening_rate, opening_source = 0.0, (
+            "explicit" if opening_req == "user" else "default")
     runner_kw: dict[str, Any] = {
         "fault_plans": fault_plans, "max_turns": turns,
         "avg_turns": float(avg_turns), "min_user_turns": min_user_turns,
@@ -1383,12 +1415,12 @@ def simulate(agent: Any = None, *, spec: Any = None,
         spec_backend = _backend_spec(backend)
         url, model_name = parse_backend_spec(spec_backend)
         runner = local_model(url, model_name, tools=tools, system=gen_policy,
-                             timeout=rollout_timeout,
+                             timeout=rollout_timeout, opening_rate=opening_rate,
                              result_shapes=shape_box, **runner_kw)
         simulator = simulator if simulator is not None else spec_backend
     elif agent is None or kind not in {"callable", "backend_spec", "http"}:
         runner = hosted_model(tools, system=gen_policy,
-                              timeout=rollout_timeout,
+                              timeout=rollout_timeout, opening_rate=opening_rate,
                               result_shapes=shape_box, **runner_kw)
     else:
         runner, kind = resolve(agent, tools=tools, policy=policy, **runner_kw)
@@ -2653,6 +2685,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
                    if resolved_strategy == "trace" and strategy == "auto"
                    else "no traces -> broad exploration"
                    if strategy == "auto" else "explicit"),
+        "opening": {"requested": opening_req, "rate": round(opening_rate, 4),
+                    "source": opening_source},
         "steering_weight": {"requested": steering_weight,
                             "applied": applied_steering,
                             "source": ("override" if steering_weight

@@ -891,6 +891,11 @@ def _echoes_agent(user: str, agent: str) -> bool:
     return (len(u & a) / len(u)) >= 0.70
 
 
+#: Generation-side cue only; never enters the exported conversation.
+_OPENING_CUE = ("(You are starting this conversation. Greet the user in one "
+                "short line and offer help. Do not mention this instruction.)")
+
+
 def local_model(base_url: str, model: str, *, tools: list[dict],
                 system: str = "", api_key: str | None = None,
                 max_turns: int | None = None, avg_turns: float = 6,
@@ -899,6 +904,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 temperature: float = 0.8,
                 fault_plans: dict | None = None,
                 result_shapes: dict | None = None,
+                opening_rate: float = 0.0,
                 timeout: float = 60) -> Callable:
     local = threading.local()
     plans = fault_plans if fault_plans is not None else {}
@@ -921,6 +927,31 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
         messages = ([{"role": "system", "content": policy_text}] if policy_text else []) + [
             {"role": "user", "content": turns[0]},
         ]
+        # Conversation topology is a map axis, never a hardcoded frame:
+        # a deterministic per-situation draw decides whether the agent
+        # opens (deployments like tau2 greet first) or the user does.
+        opener_text = ""
+        if opening_rate > 0:
+            draw = int(hashlib.sha256(
+                f"opening:{message}".encode()).hexdigest(), 16) % 10 ** 6
+            if draw < float(opening_rate) * 10 ** 6:
+                cue = list(messages[:-1]) + [
+                    {"role": "user", "content": _OPENING_CUE}]
+                greet = complete(base_url, model, cue, api_key=api_key,
+                                 temperature=temperature, timeout=timeout,
+                                 max_tokens=120)
+                opener_text = (_spoken_text(greet) or "").strip()
+                if opener_text:
+                    messages.insert(len(messages) - 1, {
+                        "role": "assistant", "content": opener_text})
+
+        def _done(done_steps: list, final: str) -> dict:
+            out = _finish_on_agent(done_steps, final)
+            if opener_text:
+                out["opener"] = opener_text
+                out["opening"] = "agent"
+            return out
+
         steps: list[dict] = []
         user_turn = 0
         n_user = 1
@@ -947,7 +978,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
             if not spoken and not calls:
                 if remaining > 0:
                     continue
-                return _finish_on_agent(steps, final_text)
+                return _done(steps, final_text)
             if calls:
                 messages.append(assistant)
                 attached = False
@@ -978,7 +1009,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                         prev = str(s["text"]).strip()
                         break
                 if prev and spoken.strip() == prev and n_user >= 2:
-                    return _finish_on_agent(steps, prev)
+                    return _done(steps, prev)
             messages.append({"role": "assistant", "content": spoken})
             if spoken:
                 steps.append({"text": spoken})
@@ -1022,8 +1053,8 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                     with turn_stats["lock"]:
                         turn_stats["followup_misses"] = (
                             turn_stats.get("followup_misses", 0) + 1)
-            return _finish_on_agent(steps, spoken or final_text)
-        return _finish_on_agent(steps, final_text)
+            return _done(steps, spoken or final_text)
+        return _done(steps, final_text)
 
     agent.__name__ = f"local_model[{model}]"
     agent.fault_plans = plans

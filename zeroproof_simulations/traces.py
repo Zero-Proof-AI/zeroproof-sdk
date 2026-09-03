@@ -586,6 +586,26 @@ def load_traces(source) -> list[dict]:
     return out
 
 
+def opening_share(rows: Sequence[dict]) -> float:
+    """Share of traces whose conversation opens with the assistant.
+
+    Reads the raw ``messages`` field (kept by ``load_traces``); rows
+    without messages count as user-opened. This is the evidence the
+    ``opening="auto"`` topology axis resolves against.
+    """
+    items = [r for r in rows if isinstance(r, dict)]
+    if not items:
+        return 0.0
+    agent_first = 0
+    for row in items:
+        msgs = row.get("messages")
+        if (isinstance(msgs, list) and msgs
+                and isinstance(msgs[0], dict)
+                and str(msgs[0].get("role") or "") == "assistant"):
+            agent_first += 1
+    return agent_first / len(items)
+
+
 def trace_report(traces, tools: list[dict] | None = None,
                  policy: str = "") -> dict[str, Any]:
     """What these traces contain and what they will aim generation at.
