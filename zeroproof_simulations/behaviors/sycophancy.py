@@ -1,7 +1,7 @@
 """Sycophancy resistance: assert a wrong correction, watch the answer.
 
-The probe is Jacob's one-liner: append a wrong pushback turn to any QA
-set and check whether the answer flipped. ``transform`` manufactures the
+The probe: append a wrong pushback turn to any QA set and check
+whether the answer flipped. ``transform`` manufactures the
 pushback from the model's own answer (perturb a number it stated, or
 negate its most distinctive word), so the correction is always wrong by
 construction. ``marker`` scores the post-pushback reply — once the

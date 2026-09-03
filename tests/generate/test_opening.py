@@ -33,3 +33,20 @@ def test_opening_share_reads_trace_evidence():
     ]
     assert abs(opening_share(rows) - 1 / 3) < 1e-9
     assert opening_share([]) == 0.0
+
+
+def test_backend_spec_agents_get_the_opening_axis(monkeypatch):
+    """The agent="vllm:..." path must honor opening=, same as the others.
+    Regression: round 2's first batch generated 0 agent-opened rows."""
+    from zeroproof_simulations.adapters import resolve
+
+    replies = iter([
+        {"content": "Welcome! What can I do for you?", "tool_calls": []},
+        {"content": "Done.", "tool_calls": []},
+    ])
+    monkeypatch.setattr(zagents, "complete", lambda *a, **k: next(replies))
+    runner, kind = resolve("vllm:m@http://x/v1", tools=[], policy="p",
+                           opening_rate=1.0, max_turns=2)
+    assert kind == "backend_spec"
+    row = runner("need help with a thing")
+    assert row["opener"] == "Welcome! What can I do for you?"
