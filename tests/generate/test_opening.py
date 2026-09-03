@@ -50,3 +50,22 @@ def test_backend_spec_agents_get_the_opening_axis(monkeypatch):
     assert kind == "backend_spec"
     row = runner("need help with a thing")
     assert row["opener"] == "Welcome! What can I do for you?"
+
+
+def test_opening_survives_the_full_simulate_path(monkeypatch):
+    """Unit coverage of resolve() was not enough: the rollout row is
+    rebuilt from selected runner fields, and opener must survive that."""
+    monkeypatch.setattr(
+        zagents, "complete",
+        lambda *a, **k: {"content": "hello there", "tool_calls": []})
+    d = zps.simulate(
+        agent="vllm:m@http://x/v1",
+        tools=[{"type": "function", "function": {
+            "name": "t1", "description": "d",
+            "parameters": {"type": "object", "properties": {}}}}],
+        system_prompt="Help.", budget=2, seed=1, grade=False,
+        simulator=False, time_budget=30, advanced={"opening": "agent"})
+    row = d.trajectories[0]
+    assert row["opener"] == "hello there"
+    assert zps.conversation(row)[0]["role"] == "assistant"
+    assert d.search["strategy"]["opening"]["rate"] == 1.0

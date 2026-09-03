@@ -1552,6 +1552,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
             "faults": _clean_faults(faults),
             "steps": raw.get("steps") or [],
             "final_text": str(raw.get("final_text", "")),
+            # topology axis: which side opened this conversation
+            **({"opener": str(raw["opener"]), "opening": "agent"}
+               if raw.get("opener") else {}),
             "behavior_signature": None,
             "reward": None,
             "grader_reason": None,
