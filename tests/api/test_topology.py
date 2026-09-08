@@ -9,7 +9,7 @@ import pytest
 
 from tests.helpers import TOOLS, POLICY, GITHUB_SPEC, scripted_agent, offline
 import zeroproof_simulations as zps
-from zeroproof_simulations.scenarios import SEARCH_ARMS, build_dimensions, reallocate_search_arms
+from zeroproof_simulations.generate.scenarios import SEARCH_ARMS, build_dimensions, reallocate_search_arms
 
 
 def test_resolve_topology_defaults_and_aliases():
@@ -73,13 +73,13 @@ def test_unique_situations_defaults_n_k_unless_set():
 
 
 def test_situations_int_is_n_list_is_seed():
-    n_cards, seeds = zps._parse_situations_arg(3, ["extra opener"])
+    n_cards, seeds = zps.simulation._parse_situations_arg(3, ["extra opener"])
     assert n_cards == 3
     assert seeds == ["extra opener"]
     with pytest.raises(ValueError, match="seed_prompts"):
         zps.simulate(
             scripted_agent, situations=["not an N"], budget=2, **offline())
-    none, listed = zps._parse_situations_arg(None, ["where is order ORD-1"])
+    none, listed = zps.simulation._parse_situations_arg(None, ["where is order ORD-1"])
     assert none is None
     assert listed == ["where is order ORD-1"]
 
@@ -113,7 +113,7 @@ def test_public_n_is_requests_per_situation_not_completions(monkeypatch):
         return {"content": json.dumps([
             {"region_id": None, "message": f"check {topic}"}])}
 
-    monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
+    monkeypatch.setattr("zeroproof_simulations.generate.generator.complete", fake_complete)
     data = zps.simulate(
         scripted_agent, mode="adaptive", n=5, repeats=1, budget=6, seed=0,
         grade=False, concurrency=4, simulator="vllm:fake@http://127.0.0.1:9",
@@ -161,7 +161,7 @@ def test_mode_sft_rl_explore_change_n_and_k():
 
 
 def test_rl_covering_grid_and_fault_rate_are_overridable():
-    from zeroproof_simulations.scenarios import scenario_regions
+    from zeroproof_simulations.generate.scenarios import scenario_regions
 
     def n_faults(regions):
         return sum(1 for row in regions
@@ -395,7 +395,7 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
 
 
 def test_texture_reaches_writer_tag_draw(monkeypatch):
-    from zeroproof_simulations.diversity import sample_cell_tags as orig
+    from zeroproof_simulations.generate.diversity import sample_cell_tags as orig
 
     seen: list[float] = []
 
@@ -404,13 +404,13 @@ def test_texture_reaches_writer_tag_draw(monkeypatch):
         return orig(seed, round_index, key, assignment,
                     texture_rate=texture_rate, **kw)
 
-    monkeypatch.setattr("zeroproof_simulations.generator.sample_cell_tags", tracked)
+    monkeypatch.setattr("zeroproof_simulations.generate.generator.sample_cell_tags", tracked)
 
     def fake_complete(_url, _model, _messages, **_kwargs):
         return {"content": json.dumps([
             {"region_id": None, "message": "where's my order ORD-1"}])}
 
-    monkeypatch.setattr("zeroproof_simulations.generator.complete", fake_complete)
+    monkeypatch.setattr("zeroproof_simulations.generate.generator.complete", fake_complete)
     zps.simulate(
         scripted_agent, mode="adaptive", texture=0.0, repeats=1, budget=3,
         seed=0, grade=False, concurrency=2,
@@ -448,7 +448,7 @@ def test_avg_turns_max_turns_concurrency_temperature_backend(monkeypatch):
 
         return agent
 
-    monkeypatch.setattr("zeroproof_simulations.local_model", fake_local)
+    monkeypatch.setattr("zeroproof_simulations.simulation.local_model", fake_local)
     zps.simulate(
         tools=TOOLS, policy=POLICY, backend="vllm:fake@http://127.0.0.1:9",
         max_turns=6, avg_turns=2, temperature=0.2, budget=3, repeats=1,
@@ -532,8 +532,8 @@ def test_k_does_not_clone_followups(monkeypatch):
             return {"content": f"Refund note {last.get('content')}"}
         return {"content": "Order ORD-1 is packed. Want me to check the refund too?"}
 
-    monkeypatch.setattr("zeroproof_simulations.agents.complete", fake_complete)
-    monkeypatch.setattr("zeroproof_simulations.agents.sample_turn_budget",
+    monkeypatch.setattr("zeroproof_simulations.generate.agents.complete", fake_complete)
+    monkeypatch.setattr("zeroproof_simulations.generate.agents.sample_turn_budget",
                         lambda *_a, **_k: 8)
     data = zps.simulate(
         tools=TOOLS, policy=POLICY,

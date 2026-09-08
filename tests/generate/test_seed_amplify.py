@@ -1,8 +1,8 @@
 """simulate-from-seeds: a few example asks + situations=N make the
 engine mint the rest of the situation space itself. Five seeds must be
 enough; originals always survive; disclosure is recorded."""
-import zeroproof_simulations.generator as gen
-from zeroproof_simulations.generator import amplify_seeds
+import zeroproof_simulations.generate.generator as gen
+from zeroproof_simulations.generate.generator import amplify_seeds
 
 SEEDS = ["who are you?", "what's your name?", "who made you?",
          "introduce yourself", "which company built you?"]
@@ -47,7 +47,8 @@ def test_amplify_is_opt_in_and_respects_offline(monkeypatch):
     """Legacy advanced seed openers stay literal; simulator=False never
     reaches the network; non-Latin seeds are distinct, not dropped."""
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations import generator, simulate
+    from zeroproof_simulations import simulate
+    from zeroproof_simulations.generate import generator
 
     def _explode(*a, **k):
         raise AssertionError("amplify called the backend")

@@ -9,8 +9,8 @@ import json
 
 import zeroproof_simulations as zps
 from tests.helpers import POLICY, TOOLS
-from zeroproof_simulations.sandbox import MockEnvironment
-from zeroproof_simulations.traces import (exemplar_result_shapes,
+from zeroproof_simulations.world.sandbox import MockEnvironment
+from zeroproof_simulations.ingest.traces import (exemplar_result_shapes,
                                           mine_result_exemplars)
 
 TRACES = [
@@ -80,7 +80,7 @@ def _capture_hosted(seen):
 
 def test_simulate_seeds_runner_shapes_from_traces(monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr("zeroproof_simulations.hosted_model",
+    monkeypatch.setattr("zeroproof_simulations.simulation.hosted_model",
                         _capture_hosted(seen))
     data = zps.simulate(
         None, tools=TOOLS, policy=POLICY, traces=TRACES, budget=4, seed=0,
@@ -95,7 +95,7 @@ def test_simulate_seeds_runner_shapes_from_traces(monkeypatch):
 
 def test_no_trace_run_gets_no_shapes_and_no_report(monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr("zeroproof_simulations.hosted_model",
+    monkeypatch.setattr("zeroproof_simulations.simulation.hosted_model",
                         _capture_hosted(seen))
     data = zps.simulate(
         None, tools=TOOLS, policy=POLICY, budget=4, seed=0,

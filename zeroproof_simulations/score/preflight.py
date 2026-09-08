@@ -69,7 +69,7 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
     thousands of rows; ``cells`` is the covering-grid size the same way
     ``recommend`` counts it.
     """
-    from .scenarios import scenario_regions
+    from ..generate.scenarios import scenario_regions
     tools = list(tools or [])
     policy = str(system_prompt or "")
     per_tool: list[dict[str, Any]] = []
@@ -162,7 +162,7 @@ def classify_failure(row: dict) -> str | None:
 def dataset_report(rows: Sequence[dict], *, tools: Sequence[dict] | None = None,
                    system_prompt: str = "") -> dict[str, Any]:
     """One report a developer reads after simulate/grade: size, signal, mix."""
-    from .coverage import cell_key
+    from ..generate.coverage import cell_key
     from .grading import behavior_signature
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if r.get("reward") in (0, 1)]

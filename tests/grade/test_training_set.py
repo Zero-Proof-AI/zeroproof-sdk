@@ -40,7 +40,7 @@ def test_select_keeps_only_diverse_passes():
 
 
 def test_training_set_writes_chat_jsonl_with_policy_and_tools(tmp_path):
-    from zeroproof_simulations.adapters import AgentProfile
+    from zeroproof_simulations.generate.adapters import AgentProfile
 
     data = _graded_data()
     data.profile = AgentProfile(

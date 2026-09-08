@@ -1,7 +1,7 @@
 """Human-kind tools: their result is the person's answer, never a mock."""
 import json
 
-from zeroproof_simulations import agents as zagents
+from zeroproof_simulations.generate import agents as zagents
 
 
 def test_human_tool_answer_comes_from_the_user_voice(monkeypatch):

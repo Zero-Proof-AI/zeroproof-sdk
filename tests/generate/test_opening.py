@@ -1,7 +1,7 @@
 """Conversation topology: who opens is an axis, never a hardcoded frame."""
 import zeroproof_simulations as zps
-from zeroproof_simulations import agents as zagents
-from zeroproof_simulations.traces import opening_share
+from zeroproof_simulations.generate import agents as zagents
+from zeroproof_simulations.ingest.traces import opening_share
 
 
 def test_agent_opener_rolls_and_exports(monkeypatch):
@@ -38,7 +38,7 @@ def test_opening_share_reads_trace_evidence():
 def test_backend_spec_agents_get_the_opening_axis(monkeypatch):
     """The agent="vllm:..." path must honor opening=, same as the others.
     Regression: round 2's first batch generated 0 agent-opened rows."""
-    from zeroproof_simulations.adapters import resolve
+    from zeroproof_simulations.generate.adapters import resolve
 
     replies = iter([
         {"content": "Welcome! What can I do for you?", "tool_calls": []},

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect as _inspect
 import json
 from dataclasses import dataclass, field
@@ -98,7 +99,7 @@ def openai_http(url: str, *, model: str, tools: list[dict],
 def from_langchain(executor: Any) -> Callable:
     """Classic AgentExecutor: steps come from intermediate_steps."""
     try:
-        from langchain_core.agents import AgentAction  # noqa: F401
+        importlib.import_module("langchain_core.agents")
     except Exception as exc:  # pragma: no cover
         raise _missing("langchain", exc)
 

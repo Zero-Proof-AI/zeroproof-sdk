@@ -43,3 +43,6 @@ zeroproof_simulations/_experimental/
 AUDIT_*.md
 dist/
 build/
+
+# downloaded wheels, not the product
+wheels/

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from zeroproof_simulations.export import export_training, training_rows
-from zeroproof_simulations.optimize import recommend
+from zeroproof_simulations.score.optimize import recommend
 
 TOOLS = [{"type": "function", "function": {
     "name": "get_issue",

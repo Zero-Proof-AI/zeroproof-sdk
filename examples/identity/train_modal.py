@@ -1,7 +1,7 @@
 """LoRA fine-tune of Qwen3-4B-Instruct for the identity demo, on Modal.
 
 Trains a rank-16 LoRA adapter (alpha 32, 2 epochs, lr 1e-4, bf16, packing
-off) on a jsonl of ``{"messages": [...]}`` rows, exactly Jacob's spec. The
+off) on a jsonl of ``{"messages": [...]}`` rows. The
 train file lives on your laptop; ``modal run`` reads it locally and ships
 the rows to the container, so nothing is baked into the image.
 

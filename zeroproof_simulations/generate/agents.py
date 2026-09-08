@@ -12,7 +12,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .diversity import running_turn_mean, sample_turn_budget
-from .sandbox import MockEnvironment
+from ..world.sandbox import MockEnvironment
 
 DEFAULT_AGENT = (
     "vllm:Qwen/Qwen3-4B-Instruct-2507@"

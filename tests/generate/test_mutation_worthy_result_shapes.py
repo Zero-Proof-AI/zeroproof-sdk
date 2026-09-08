@@ -11,8 +11,8 @@ so every one of those adapters was unusable with a callable agent.
 """
 import pytest
 
-from zeroproof_simulations import _mutation_worthy
-from zeroproof_simulations.adapters import parse_claude_stream
+from zeroproof_simulations.simulation import _mutation_worthy
+from zeroproof_simulations.generate.adapters import parse_claude_stream
 
 
 def step(result):

@@ -6,7 +6,7 @@ import os
 import re
 from typing import Any, Sequence
 
-from .agents import complete, parse_backend_spec
+from ..generate.agents import complete, parse_backend_spec
 
 DEFAULT_JUDGE_SPEC = "openai:gpt-4o-mini"
 MISSING_JUDGE_KEY = (

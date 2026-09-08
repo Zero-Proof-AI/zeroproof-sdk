@@ -7,8 +7,8 @@ import statistics
 from pathlib import Path
 from typing import Any, Sequence
 
-from .agents import _ID_FOLLOW, _echoes_agent
-from .generator import (
+from ..generate.agents import _ID_FOLLOW, _echoes_agent
+from ..generate.generator import (
     _ACK_ONLY,
     _DIRECTIVE_ANY,
     _META_LINE,

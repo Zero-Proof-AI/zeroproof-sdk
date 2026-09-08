@@ -36,7 +36,7 @@ def test_conversation_drops_stale_final_text():
 
 
 def test_finish_on_agent_drops_pre_tool_clarify():
-    from zeroproof_simulations.agents import _finish_on_agent
+    from zeroproof_simulations.generate.agents import _finish_on_agent
     clarify = "Which repo and PR number?"
     steps = [
         {"text": clarify},
@@ -49,7 +49,7 @@ def test_finish_on_agent_drops_pre_tool_clarify():
 
 
 def test_finish_on_agent_keeps_post_tool_speech():
-    from zeroproof_simulations.agents import _finish_on_agent
+    from zeroproof_simulations.generate.agents import _finish_on_agent
     steps = [
         {"text": "Which repo?"},
         {"user": "acme/app 42"},
@@ -77,7 +77,7 @@ def test_conversation_is_user_agent_turns():
     assert msgs[0]["content"] == "where's order ORD-1"
     assert msgs[1]["tool_calls"][0]["name"] == "lookup_order"
     assert msgs[3]["content"] == "and the refund?"
-    exported = zps._export_row(row)
+    exported = zps.data._export_row(row)
     assert exported["messages"] == msgs
 
 

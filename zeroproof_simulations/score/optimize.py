@@ -17,7 +17,6 @@ trimming, rerun the simulator rather than squeezing this batch harder.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 from typing import Any, Sequence
@@ -528,8 +527,8 @@ def recommend(tools: Sequence[dict] | None = None, policy: str = "", *,
     Returns the numbers plus ``simulate_kwargs`` ready to splat, and
     ``reasoning`` lines that show the arithmetic.
     """
-    from .coverage import SATURATION_COPIES
-    from .scenarios import scenario_regions
+    from ..generate.coverage import SATURATION_COPIES
+    from ..generate.scenarios import scenario_regions
     kind = "sft" if str(mode).lower() == "sft" else "rl"
     cells = len(scenario_regions(list(tools or []), policy,
                                  mode=str(mode).lower()))

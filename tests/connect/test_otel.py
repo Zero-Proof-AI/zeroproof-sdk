@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import zeroproof_simulations as zps
-from zeroproof_simulations.otel import rows_from_otel
+from zeroproof_simulations.ingest.otel import rows_from_otel
 
 
 def _attr(key, value):

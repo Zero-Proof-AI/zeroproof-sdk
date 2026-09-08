@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import zeroproof_simulations as zps
 from tests.helpers import POLICY, TOOLS, scripted_agent
-from zeroproof_simulations.traces import (dimensions_from_traces,
+from zeroproof_simulations.ingest.traces import (dimensions_from_traces,
                                           drop_leaky_rows, leakage_report,
                                           mine_traces, simulate_from_traces,
                                           split_pseudo_production)
@@ -73,7 +73,7 @@ def test_split_pseudo_production_holds_out_each_unique_flaw():
     rem_prompts = {row["prompt"] for row in remainder}
     assert not (prod_prompts & rem_prompts)
     # Both distinct flaw kinds are represented on the production side.
-    from zeroproof_simulations.grading import trace_fault
+    from zeroproof_simulations.score.grading import trace_fault
     faults = {trace_fault(row) for row in production}
     assert "not_found" in faults
     assert "timeout" in faults
@@ -115,7 +115,7 @@ def test_simulate_from_traces_offline_end_to_end():
 
 
 def test_flaw_rows_returns_next_round_seeds():
-    from zeroproof_simulations.traces import flaw_rows
+    from zeroproof_simulations.ingest.traces import flaw_rows
     flawed = flaw_rows(TRACES)
     prompts = {row["prompt"] for row in flawed}
     assert len(flawed) == 3
@@ -124,7 +124,7 @@ def test_flaw_rows_returns_next_round_seeds():
 
 
 def test_rl_retarget_lets_behavior_gap_lead():
-    from zeroproof_simulations.scenarios import retarget_regions, scenario_regions
+    from zeroproof_simulations.generate.scenarios import retarget_regions, scenario_regions
     regions = scenario_regions(TOOLS, POLICY, mode="rl")[:6]
     gappy = {regions[0]["id"]}
 

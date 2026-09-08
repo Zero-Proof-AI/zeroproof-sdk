@@ -10,7 +10,8 @@ import json
 import pytest
 
 import zeroproof_simulations as zps
-from zeroproof_simulations import export, platform
+from zeroproof_simulations import export
+from zeroproof_simulations.ingest import platform
 
 
 def test_pull_reads_every_part(monkeypatch):
@@ -112,7 +113,7 @@ def test_ingested_traces_export_with_real_tool_arguments():
 
 
 def test_infer_harness_drafts_schemas_from_tool_traces():
-    from zeroproof_simulations.traces import infer_harness
+    from zeroproof_simulations.ingest.traces import infer_harness
     rows = [
         {"tool_trace": [
             {"tool": "read_file", "input": '{"path": "a.py"}', "output": "..."},

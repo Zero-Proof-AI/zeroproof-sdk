@@ -17,9 +17,9 @@ import hashlib
 import json
 from typing import Any, Sequence
 
-from .embeddings import resolve_embedder
-from .grading import NO_FAULT, behavior_signature, trace_fault
-from .scenarios import build_dimensions
+from ..generate.embeddings import resolve_embedder
+from ..score.grading import NO_FAULT, behavior_signature, trace_fault
+from ..generate.scenarios import build_dimensions
 
 # Observed fault chip -> the grid axis and value that reproduces it.
 _FAULT_TO_AXIS = {
@@ -547,7 +547,7 @@ def load_traces(source) -> list[dict]:
     """
     from pathlib import Path as _Path
     if isinstance(source, (str, _Path)):
-        from .quality import _load_jsonl
+        from ..score.quality import _load_jsonl
         rows = _load_jsonl(source)
     else:
         rows = list(source)
@@ -621,7 +621,7 @@ def trace_report(traces, tools: list[dict] | None = None,
     """
     from pathlib import Path as _Path
     if isinstance(traces, (str, _Path)):
-        from .quality import _load_jsonl
+        from ..score.quality import _load_jsonl
         raw = _load_jsonl(traces)
     else:
         raw = list(traces)
