@@ -188,6 +188,19 @@ Each scenario is a draw across the world and the human.
 
 Ordinary asks first, then the edges. On top of that, we embed the openers and add a bit of random noise so the batch stays spread out, not a cluster of near-copies. Spend the row cap and the clock on diversity, not copies.
 
+## Package layout
+
+The public surface is the package itself: `import zeroproof_simulations as zps`.
+Internals are grouped by stage and may move between releases.
+
+| folder | what lives there |
+|---|---|
+| `generate/` | situation grid, writer, diversity selection, agent runners and adapters |
+| `score/` | conduct checks, judges, quality ranking, selection for SFT and RL |
+| `ingest/` | trace loading, OpenTelemetry rows, platform push and pull |
+| `world/` | the mock tool environment |
+| `simulation.py`, `data.py`, `export.py` | the run loop, its result object, and training export |
+
 ## License
 
 Apache-2.0
