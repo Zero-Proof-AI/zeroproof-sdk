@@ -1074,6 +1074,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     failing_regions: list[dict] = []
     failing_rows: list[dict] = []
     used: set[str] = set()
+    rerolls: dict[str, int] = {}
     discarded: set[str] = set()
     used_situations: set[str] = set()
     region_counts: dict[str, int] = {}
@@ -1833,8 +1834,23 @@ def simulate(agent: Any = None, *, spec: Any = None,
             paired = [(t, job) for t, job in zip(results, jobs_for)
                       if _usable_rollout(t)]
             if len(paired) != len(results):
-                cap_lifted["lost"] += len(results) - len(paired)
-                _note(data, "rollout failure discarded")
+                # a lost rollout is re-rolled for the same prompt so a
+                # repeat group keeps all k members; after the retry cap
+                # it counts as lost and a fresh situation fills the slot
+                now = time.monotonic()
+                for t, job in zip(results, jobs_for):
+                    if _usable_rollout(t):
+                        continue
+                    key = str(job[0])
+                    if rerolls.get(key, 0) < repeat_count:
+                        rerolls[key] = rerolls.get(key, 0) + 1
+                        fut = pool.submit(one, job)
+                        inflight[fut] = job
+                        inflight_started[fut] = now
+                        _note(data, "rollout re-rolled")
+                    else:
+                        cap_lifted["lost"] += 1
+                        _note(data, "rollout failure discarded")
             results = [t for t, _ in paired]
             jobs_for = [job for _, job in paired]
             room = cap - len(data.trajectories)
