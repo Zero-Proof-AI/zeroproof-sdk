@@ -89,8 +89,11 @@ data = zps.simulate(
     advanced={"seed": 0},
     output="new_evals/trace_guided.jsonl",
 )
+blocking = [d for d in data.degraded if d in ("generator_fallback", "writer_exhausted")]
+if blocking:
+    raise RuntimeError(f"situations were not model-written, do not use: {blocking}")
 if data.degraded:
-    raise RuntimeError(f"degraded run, stop and report: {data.degraded}")
+    print("advisory notes, rows are still usable:", data.degraded)
 ```
 
 `traces=` reshapes the covering grid (`dimensions_from_traces` under the
@@ -121,8 +124,11 @@ data = zps.simulate(
     advanced={"seed": 0},
     output="new_evals/policy_guided.jsonl",
 )
+blocking = [d for d in data.degraded if d in ("generator_fallback", "writer_exhausted")]
+if blocking:
+    raise RuntimeError(f"situations were not model-written, do not use: {blocking}")
 if data.degraded:
-    raise RuntimeError(f"degraded run, stop and report: {data.degraded}")
+    print("advisory notes, rows are still usable:", data.degraded)
 ```
 
 `mode="explore"` (the default) is fine for a smaller first pass: one

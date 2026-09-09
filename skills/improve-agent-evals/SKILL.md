@@ -119,10 +119,15 @@ axis) and review instructions. Full templates: `references/workflow.md`.
 - **Label every generated case with its provenance**: which lane produced
   it, the generator model, the seed, and the scenario fields the SDK
   already carries (`scenario_id`, `world_state`, `faults`, `stance`).
-- **Templates or fallbacks are not evidence.** If `data.degraded` is
-  non-empty after a run, stop and report it (name the note, e.g.
-  `result_shapes_unavailable`, `generator_fallback`, `trace_leakage_dropped`)
-  instead of shipping those rows as coverage.
+- **Templates or fallbacks are not evidence.** Two notes in `data.degraded`
+  block a run: `generator_fallback` and `writer_exhausted` mean situations
+  were not model-written. Stop and report those; never ship the rows. Every
+  other note is advisory and the rows are still real: `semantic_embedding_unavailable`
+  (novelty scored by hash; pass `embedder="openai:text-embedding-3-small"`
+  with the same OpenAI key to make it semantic), `scene_brief_unavailable`
+  (the brief writer ran past `time_budget`; raise it or ignore),
+  `result_shapes_unavailable`, `trace_leakage_dropped`. Name advisory notes
+  in the report, then continue.
 - **No secrets in outputs.** Never write `OPENAI_API_KEY`, `VLLM_API_KEY`,
   `ZEROPROOF_API_KEY`/`ZEROPROOF_DELEGATED_CREDENTIAL`, or any `zp_*` key
   into the generated JSONL, the reports, or logs.
