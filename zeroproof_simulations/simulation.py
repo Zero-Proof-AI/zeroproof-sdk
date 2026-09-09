@@ -4,6 +4,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import os
 import re
 import threading
 import time
@@ -413,6 +414,22 @@ def _merge_advanced(advanced: dict | None, passed: dict) -> tuple[dict, dict]:
     return cfg, aliases
 
 
+def writer_spec_for(agent: Any, simulator: Any) -> Any:
+    """The situation writer's backend when none was named.
+
+    A string agent spec (``openai:<model>``, ``vllm:<model>@<url>``) is a
+    bring-your-own model; the writer runs on it too, so no ZeroProof key
+    is involved. ``ZEROPROOF_SURROGATE`` and an explicit ``simulator``
+    still win.
+    """
+    if simulator is not None or os.environ.get("ZEROPROOF_SURROGATE"):
+        return simulator
+    if (isinstance(agent, str) and ":" in agent
+            and not agent.startswith(("http://", "https://"))):
+        return agent
+    return simulator
+
+
 def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = None,
                      unique: bool = False, unique_situations: bool = False,
                      requests_per_situation: int | None = None,
@@ -571,7 +588,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         situations, seed_prompts)
     concurrency = int(cfg.pop("concurrency", 32))
     dimensions = cfg.pop("dimensions", None)
-    simulator = cfg.pop("simulator", None)
+    simulator = writer_spec_for(agent, cfg.pop("simulator", None))
     backend = cfg.pop("backend", None)
     explicit_fault = "fault_rate" in cfg or "risk" in cfg
     fault_rate = float(cfg.pop("fault_rate", DEFAULT_FAULT_RATE))
@@ -710,7 +727,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
         given = len(seed_prompts)
         seed_prompts = amplify_seeds(
             seed_prompts, int(n_situations_target), policy=policy,
-            backend_spec=None)
+            backend_spec=simulator if isinstance(simulator, str) else None)
         seed_amp_report = {"given": given,
                            "target": int(n_situations_target),
                            "total": len(seed_prompts),

@@ -510,3 +510,18 @@ def test_writer_and_agent_default_to_hosted_qwen(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     assert default_simulator_spec() == DEFAULT_AGENT
     assert default_agent_spec() == DEFAULT_AGENT
+
+
+
+def test_writer_follows_bring_your_own_model(monkeypatch):
+    from zeroproof_simulations.simulation import writer_spec_for
+    monkeypatch.delenv("ZEROPROOF_SURROGATE", raising=False)
+    assert writer_spec_for("openai:gpt-4.1-mini", None) == "openai:gpt-4.1-mini"
+    assert writer_spec_for("vllm:m@http://h/v1", None) == "vllm:m@http://h/v1"
+    # hosted default, callables, urls, and named writers keep their writer
+    assert writer_spec_for(None, None) is None
+    assert writer_spec_for(lambda m: {}, None) is None
+    assert writer_spec_for("https://agent.example/chat", None) is None
+    assert writer_spec_for("openai:x", "openai:y") == "openai:y"
+    monkeypatch.setenv("ZEROPROOF_SURROGATE", "openai:z")
+    assert writer_spec_for("openai:x", None) is None
