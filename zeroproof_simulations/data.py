@@ -72,10 +72,11 @@ def conversation(row: dict) -> list[dict]:
 
 
 def _clean_faults(plan: Any) -> dict | None:
-    """Fault modes only. world_state is a row field, never a faults key."""
+    """Fault modes only. world_state, stance, and texture ride the plan
+    into the runner but are row fields, never faults keys."""
     if not isinstance(plan, dict) or not plan:
         return None
-    out = {k: v for k, v in plan.items() if k != "world_state"}
+    out = {k: v for k, v in plan.items() if isinstance(v, dict)}
     return out or None
 
 

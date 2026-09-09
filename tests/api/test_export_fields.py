@@ -22,3 +22,16 @@ def test_export_row_omits_missing_group_fields():
     out = _export_row({"prompt": "p", "steps": [], "final_text": "t"})
     for key in ("rollout_index", "model_version"):
         assert key not in out
+
+
+
+def test_faults_export_carries_fault_modes_only():
+    from zeroproof_simulations.data import _export_row
+    row = {"prompt": "p", "steps": [], "final_text": "f", "scenario_id": "s",
+           "stance": "hurried",
+           "faults": {"*": {"mode": "timeout", "rate": 1.0}, "stance": "hurried",
+                      "texture": "lowercase", "world_state": "entity missing"}}
+    out = _export_row(row)
+    assert out["faults"] == {"*": {"mode": "timeout", "rate": 1.0}}
+    assert out["stance"] == "hurried"
+    assert "faults" not in _export_row({**row, "faults": {"stance": "hurried"}})
