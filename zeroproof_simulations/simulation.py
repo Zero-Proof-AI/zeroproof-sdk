@@ -2271,8 +2271,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
                 continue
             verdict = conduct_grade(row, declared or None)
             row["reward"] = verdict.get("reward")
-            if verdict.get("reason") is not None:
-                row.setdefault("reason", verdict["reason"])
+            # the row template pre-seeds reason=None, so setdefault kept
+            # every conduct reason off the export
+            if verdict.get("reason") is not None and not row.get("reason"):
+                row["reason"] = verdict["reason"]
             row["label_source"] = "conduct"
     if trace_rows and "behavior_state" in data.search:
         # Close the loop on the rows that ship: same region predicates

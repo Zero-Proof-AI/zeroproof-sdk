@@ -525,3 +525,16 @@ def test_writer_follows_bring_your_own_model(monkeypatch):
     assert writer_spec_for("openai:x", "openai:y") == "openai:y"
     monkeypatch.setenv("ZEROPROOF_SURROGATE", "openai:z")
     assert writer_spec_for("openai:x", None) is None
+
+
+
+def test_conduct_grade_reason_reaches_the_row(tmp_path):
+    import json
+    data = simulate_offline(grade=True, budget=16)
+    fails = [r for r in data.trajectories if r.get("reward") == 0]
+    assert fails, "the scripted agent invents ids and claims success; some rows must fail"
+    assert all(r.get("reason") for r in fails)
+    out = tmp_path / "rows.jsonl"
+    data.save(str(out))
+    saved = [json.loads(line) for line in out.read_text().splitlines()]
+    assert all(r.get("reason") for r in saved if r.get("reward") == 0)
