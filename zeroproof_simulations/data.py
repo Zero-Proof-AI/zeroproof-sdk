@@ -119,6 +119,11 @@ def _export_row(row: dict) -> dict:
         out["faults"] = faults
     if row.get("fault_detected"):
         out["fault_detected"] = True
+    # group identity: which rollout of the situation, under which weights.
+    # an rl grader groups on disk, so these travel with the row.
+    for key in ("rollout_index", "model_version"):
+        if row.get(key) is not None:
+            out[key] = row[key]
     if row.get("reward") is not None:
         out["reward"] = row["reward"]
         reason = row.get("grader_reason") or row.get("reason")

@@ -5,7 +5,7 @@ import zeroproof_simulations as zps
 
 _DROPPED = {
     "selection_reason", "parent_failure_id", "arm", "scenario_dimensions",
-    "behavior_signature", "grader_reason", "rollout_index", "seed",
+    "behavior_signature", "grader_reason", "seed",
     "semantic_cluster", "semantic_novelty", "llm_reward", "llm_reason",
 }
 _PUBLIC = {"prompt", "messages", "scenario_id", "steps", "final_text",
@@ -13,7 +13,8 @@ _PUBLIC = {"prompt", "messages", "scenario_id", "steps", "final_text",
            "tier", "ask_family", "intent_known", "tool_known",
            "stance", "tone", "length", "ask", "vagueness", "phrasing",
            "pressure", "user", "texture", "history",
-           "quality", "quality_reason", "quality_scores"}
+           "quality", "quality_reason", "quality_scores",
+           "rollout_index", "model_version"}
 
 
 def test_conversation_drops_stale_final_text():
@@ -205,3 +206,31 @@ def test_lost_repeat_rollouts_do_not_starve_the_run():
     assert len(data.trajectories) == 6, (
         f"starved at {len(data.trajectories)} rows: {data.stopped_because}")
     assert data.stopped_because == "budget"
+
+
+def test_lost_repeat_rollouts_are_rerolled_so_groups_stay_complete():
+    """A discarded rollout is re-rolled for the same prompt, so every
+    repeat group keeps all k members instead of a fresh situation
+    filling the slot."""
+    import collections
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations import simulate
+
+    calls = {"n": 0}
+
+    def flaky_agent(message: str) -> dict:
+        calls["n"] += 1
+        if calls["n"] in (2, 4):
+            return {"steps": [], "final_text": ""}
+        return scripted_agent(message)
+
+    data = simulate(agent=flaky_agent, tools=TOOLS, system_prompt=POLICY,
+                    situations=3, rollouts_per_request=2, budget=6,
+                    seed=5, grade=False, simulator=False, concurrency=2,
+                    time_budget=40,
+                    advanced={"per_round": 6, "mutate_failures": False})
+    assert len(data.trajectories) == 6
+    groups = collections.Counter(r["prompt"] for r in data.trajectories)
+    assert len(groups) == 3, groups
+    assert set(groups.values()) == {2}, groups
+    assert "rollout re-rolled" in data.stages
