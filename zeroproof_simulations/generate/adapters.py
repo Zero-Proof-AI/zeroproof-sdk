@@ -287,7 +287,9 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
             min_user_turns: int = 1,
             turn_stats: dict | None = None,
             opening_rate: float = 0.0,
-            temperature: float | None = None) -> tuple[Any, str]:
+            temperature: float | None = None,
+            result_shapes: dict | None = None,
+            timeout: float | None = None) -> tuple[Any, str]:
     if isinstance(target, ConnectedAgent):
         return target.run, target.transport
     kind = transport or detect(target)
@@ -298,10 +300,15 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
         return _sync(target), kind
     if kind == "backend_spec":
         url, spec_model = parse_backend_spec(target)
+        # a bring-your-own model gets the same world as hosted qwen:
+        # mined result shapes and the caller's rollout timeout
+        if timeout is not None:
+            loop_kw["timeout"] = timeout
         return local_model(url, spec_model, tools=tools or [], system=policy,
                            fault_plans=fault_plans, avg_turns=avg_turns,
                            min_user_turns=min_user_turns,
                            opening_rate=opening_rate, execute=execute,
+                           result_shapes=result_shapes,
                            turn_stats=turn_stats, **loop_kw), kind
     if kind == "http":
         if not tools:

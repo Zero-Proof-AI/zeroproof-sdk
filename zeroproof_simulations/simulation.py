@@ -907,7 +907,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
                               result_shapes=shape_box, **runner_kw)
     else:
         runner, kind = resolve(agent, tools=tools, policy=policy,
-                               opening_rate=opening_rate, **runner_kw)
+                               opening_rate=opening_rate,
+                               result_shapes=shape_box,
+                               timeout=rollout_timeout, **runner_kw)
     generator = make_default_generator(
         tools, policy=policy, per_round=pool_size, seed=seed,
         dimensions=dimensions, simulator=simulator, kind=writer_kind,

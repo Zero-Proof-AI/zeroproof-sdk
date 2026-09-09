@@ -94,3 +94,24 @@ def test_from_langchain_invokes_each_turn():
     assert seen == ["first", "second"]
     assert len(out["steps"]) == 2
     assert "second" in out["final_text"]
+
+
+
+def test_backend_spec_runner_gets_result_shapes_and_timeout(monkeypatch):
+    from zeroproof_simulations.generate import adapters
+    seen = {}
+
+    def fake_local_model(url, model, **kwargs):
+        seen.update(kwargs, url=url, model=model)
+        return lambda message: {"steps": [], "final_text": ""}
+
+    monkeypatch.setattr(adapters, "local_model", fake_local_model)
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://byok.example/v1")
+    shapes = {"lookup_order": {"status": "ok", "total": 1}}
+    _, kind = adapters.resolve("openai:my-model", tools=TOOLS, policy="p",
+                               result_shapes=shapes, timeout=12.5)
+    assert kind == "backend_spec"
+    assert seen["url"] == "http://byok.example/v1"
+    assert seen["model"] == "my-model"
+    assert seen["result_shapes"] is shapes
+    assert seen["timeout"] == 12.5
