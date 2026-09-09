@@ -69,7 +69,13 @@ with no observed fault, run lane 2 only. If both hold, run combined.
 Every `simulate(...)` call below needs a model endpoint: set
 `OPENAI_API_KEY` (plus `OPENAI_BASE_URL` for any OpenAI-compatible host)
 and pass `agent="openai:<model>"`, or set `VLLM_API_KEY` for hosted Qwen.
-Preflight and trace reports need no key.
+The same key and base URL serve the optional LLM grader
+(`llm_grade=True` or `zps.grade_llm(..., spec="openai:<model>")`).
+Bring-your-own-model is OpenAI-compatible only: any endpoint that speaks
+`/v1/chat/completions` with tool calls. Anthropic's native API is not
+OpenAI-compatible and is not supported yet; put an OpenAI-compatible
+gateway in front of it or use another provider. Preflight and trace
+reports need no key.
 
 ```python
 import zeroproof_simulations as zps
