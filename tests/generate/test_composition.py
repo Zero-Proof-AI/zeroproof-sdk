@@ -110,3 +110,25 @@ def test_default_path_executes_every_stage(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "agent ingestion" in captured.out
     assert "grade() works afterward on frozen rows" in captured.out
+
+
+
+def test_one_failed_writer_wave_is_not_a_fallback(monkeypatch):
+    import threading
+    state = {"writer_calls": 0, "lock": threading.Lock()}
+
+    def flaky_complete(base_url, model, messages, **kwargs):
+        if '"region_id"' in messages[-1]["content"]:
+            with state["lock"]:
+                state["writer_calls"] += 1
+                first = state["writer_calls"] == 1
+            if first:
+                raise RuntimeError("HTTP 502 from the writer")
+        return _fake_complete(base_url, model, messages, **kwargs)
+
+    monkeypatch.setattr("zeroproof_simulations.generate.generator.complete", flaky_complete)
+    data = simulate_offline(budget=8, simulator="vllm:fake@http://example",
+                            concurrency=4, per_round=6)
+    assert len(data.trajectories) == 8
+    assert "generator_fallback" not in data.degraded
+    assert "502" in data.search["writer_errors"]["llm_guided"]

@@ -1366,6 +1366,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
         generator.meta.update(metas)
         generator.fault_plans.update(plans)
         generator.last_errors.update(errors)
+        # sticky: the writer wrote at least once, so a later wave that
+        # errors is a writer error, not a template fallback
+        if any((m or {}).get("generator") == "model" for m in metas.values()):
+            generator.model_produced = True
         added = 0
         for prompt in more:
             if not prompt or prompt in generated_pool:
@@ -2170,6 +2174,13 @@ def simulate(agent: Any = None, *, spec: Any = None,
         if leak.get("n_dropped"):
             if "trace_leakage_dropped" not in data.degraded:
                 data.degraded.append("trace_leakage_dropped")
+    if generator.model is not None and generator.last_errors:
+        data.search["writer_errors"] = dict(generator.last_errors)
+    if ("generator_fallback" in data.degraded
+            and getattr(generator, "model_produced", False)):
+        # the note was set while the first waves were still in flight;
+        # every prompt in the model path is model-written or nothing
+        data.degraded.remove("generator_fallback")
     misses = int(turn_stats.get("followup_misses", 0) or 0)
     if misses:
         data.search["followup_misses"] = misses
