@@ -828,6 +828,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
                 trace_rows, tools, policy,
                 broaden=resolved_strategy != "targeted")
             trace_focused = True
+            # the grid flips 90% of cells to success for cold starts;
+            # traces that show faults are asking for the fault cells
+            if mine_traces(trace_rows)["faults"]:
+                advanced.setdefault("prefer_success", False)
     # The weight only applies over a trace-focused grid (its front-half
     # ordering is what the bias aims at) and only when nonzero; anything
     # else is exactly the unsteered draw and records no applied weight.

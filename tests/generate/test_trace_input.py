@@ -185,3 +185,18 @@ def test_simulate_aims_at_messages_shaped_traces():
     assert mined["focused_dimensions"]["tool"][0] == "create_refund"
     regions = data.search["behavior_state"]["regions"]
     assert any(r["region"] == "recover_after_timeout" for r in regions)
+
+
+
+def test_traces_with_faults_keep_the_fault_cells():
+    # cold start flips 90% of cells to success; traces showing faults
+    # must aim the run at the fault cells, not the same success grid
+    from tests.helpers import simulate_offline
+    rows = [{"prompt": f"refund order 8{i}", "reward": 0, "final_text": "Refunded.",
+             "steps": [{"tool": "create_refund", "arguments": {"order_id": f"8{i}"},
+                        "result": {"status": "timeout"}}]} for i in range(5)]
+    aimed = simulate_offline(traces=rows, budget=24, per_round=40)
+    cold = simulate_offline(budget=24, per_round=40)
+    share = lambda d: sum(1 for r in d.trajectories if r.get("faults")) / max(1, len(d.trajectories))
+    assert share(aimed) >= 0.15, share(aimed)
+    assert share(aimed) > share(cold), (share(aimed), share(cold))
