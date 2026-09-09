@@ -983,6 +983,29 @@ def _human_answer(base_url: str, model: str, *, want: str, question: str,
     return (_spoken_text(reply) or "").strip()
 
 
+def _answer_tool_call(env: Any, execute: Callable | None, tool: str,
+                      arguments: dict) -> dict:
+    """The world's answer to one tool call.
+
+    With ``execute`` the caller's own world answers: their repo, their
+    database, their tools, whatever they are. Scheduled faults still
+    apply first, so the row's ``faults`` stay truthful. Without it the
+    mock world answers, which fits record-shaped tools and not code.
+    """
+    if execute is None:
+        return env.call(tool, arguments)
+    fault = env._fault_for(tool, arguments)
+    if fault is not None:
+        return fault
+    try:
+        result = execute(tool, arguments)
+    except Exception as exc:
+        return {"status": "error", "reason": public_llm_error(exc)}
+    if isinstance(result, dict):
+        return result
+    return {"status": "ok", "result": result}
+
+
 def local_model(base_url: str, model: str, *, tools: list[dict],
                 system: str = "", api_key: str | None = None,
                 max_turns: int | None = None, avg_turns: float = 6,
@@ -993,6 +1016,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 result_shapes: dict | None = None,
                 opening_rate: float = 0.0,
                 human_tools: set | None = None,
+                execute: Callable | None = None,
                 timeout: float = 60) -> Callable:
     local = threading.local()
     plans = fault_plans if fault_plans is not None else {}
@@ -1103,7 +1127,8 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                                          "tool_call_id": call.get("id", ""),
                                          "content": json.dumps(result)})
                         continue
-                    result = local.env.call(fn.get("name", ""), arguments)
+                    result = _answer_tool_call(
+                        local.env, execute, fn.get("name", ""), arguments)
                     step = {"tool": fn.get("name", ""), "arguments": arguments,
                             "result": result}
                     if spoken and not attached:

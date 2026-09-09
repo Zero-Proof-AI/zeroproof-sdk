@@ -301,7 +301,7 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
         return local_model(url, spec_model, tools=tools or [], system=policy,
                            fault_plans=fault_plans, avg_turns=avg_turns,
                            min_user_turns=min_user_turns,
-                           opening_rate=opening_rate,
+                           opening_rate=opening_rate, execute=execute,
                            turn_stats=turn_stats, **loop_kw), kind
     if kind == "http":
         if not tools:

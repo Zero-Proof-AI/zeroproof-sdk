@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .generate.adapters import inspect, resolve, resolve_system_prompt
 from .generate.agents import (hosted_model, local_model, missing_hosted_key,
@@ -494,6 +494,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
              strategy: str = "auto",
              seeds: list | None = None,
              scaffold: str | None = None,
+             execute: Callable | None = None,
              output: str | None = None,
              advanced: dict | None = None,
              **passed: Any) -> SimulationData:
@@ -512,6 +513,11 @@ def simulate(agent: Any = None, *, spec: Any = None,
     space, and drops any generated row that near-copies a source trace,
     so held-out traces stay out of training. Without it the grid comes
     from the agent's tools and policy alone (cold start).
+
+    ``execute=`` is the caller's world: a function ``(tool, arguments) ->
+    result`` that answers every tool call for real, against their repo,
+    database, or service. Without it the mock world answers, which fits
+    record-shaped tools and not code. Scheduled faults still apply first.
 
     ``scaffold=`` is generation-only guidance appended to the system prompt
     of the MODEL-BACKED teacher during rollout (and to the scene writer).
@@ -887,6 +893,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
     }
     if temperature is not None:
         runner_kw["temperature"] = float(temperature)
+    if execute is not None:
+        runner_kw["execute"] = execute
     # Slow customer backends need more than the tuned 60s per completion.
     rollout_timeout = float(cfg.pop("timeout", 60) or 60)
     if backend:
