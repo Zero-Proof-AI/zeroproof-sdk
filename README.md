@@ -3,11 +3,11 @@
 The ZeroProof Python SDK. One package, two importable modules:
 
 - `zeroproof`: the platform client — trace ingestion, verification API.
-- `zeroproof_simulations`: generate diverse training conversations for any agent, grounded in its tools and system prompt.
+- `zeroproof_simulations`: post-training data for an agent. Give it the agent's traces, or its tools and system prompt; it simulates the situations, the people, and the world, plays the agent through multi-turn tool-calling conversations, and returns rows for your grader.
 
 This repo absorbed the `zeroproof-simulations` package; `zeroproof-simulations` on PyPI is deprecated in favor of `zeroproof`.
 
-The SDK inspects the agent, simulates a world consistent with those tools (objects, results, failures), and samples scenarios across that space. The same model writes the user and plays the agent. Default `explore`: one unique situation per row.
+Two ways in, one engine. Give it the agent's tools and system prompt and it samples situations across everything that agent can be asked. Give it graded traces as well and it aims the budget at the situations that fail in production, so new rows land where the agent is weak and carry both the failure and the fixed version. Every row is a full conversation: user turns, agent turns, tool calls, tool results, scheduled faults. Rows come back ungraded; your grader decides what good means. Default `explore`: one unique situation per row. How it thinks: [docs/simulations.md](docs/simulations.md).
 
 ## Overview
 
@@ -16,7 +16,7 @@ The SDK inspects the agent, simulates a world consistent with those tools (objec
 1. **Read the agent.** Tools and system prompt. That is the spec of the world.
 2. **Build a fake world from those tools.** Objects, plausible results, and faults (timeout, deny, junk).
 3. **Write users.** A separate writer (same hosted model, different prompt, no agent policy) samples situations across tools, stance, history, and so on.
-4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of same prompy.
+4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of the same prompt.
 5. **Play the agent.** It talks, calls tools, gets results, talks again. All of that is stored: user text, agent text, tool calls, tool results, `final_text`.
 6. **Grade.** Rows come back ungraded. Grade after with `zps.grade(...)`, pass your own `grader=`, or `grade=True` for the deterministic conduct score.
 
