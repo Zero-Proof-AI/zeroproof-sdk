@@ -412,14 +412,46 @@ def drop_leaky_rows(rows: Sequence[dict], sources: Sequence[Any], *,
     return kept, report
 
 
+def tools_from_traces(traces: Sequence[dict]) -> list[dict]:
+    """The agent's tool surface, read off the calls the traces contain.
+
+    Argument names are unioned across every observed call, so a tool called
+    with different arguments in different traces ends up with all of them.
+    """
+    seen: dict[str, set[str]] = {}
+    for row in traces or ():
+        if not isinstance(row, dict):
+            continue
+        for step in (row.get("steps") or ()):
+            name = isinstance(step, dict) and step.get("tool")
+            if not name:
+                continue
+            args = step.get("arguments")
+            seen.setdefault(str(name), set()).update(
+                str(k) for k in (args or {}) if isinstance(args, dict))
+    return [{"type": "function", "function": {
+        "name": name,
+        "description": f"{name}, observed in this agent's traces",
+        "parameters": {"type": "object", "properties": {
+            arg: {"type": "string"} for arg in sorted(args)}}}}
+        for name, args in sorted(seen.items())]
+
+
 def simulate_from_traces(traces: Sequence[dict], agent: Any = None, *,
                          tools: list[dict] | None = None,
                          policy: str = "",
                          mode: str = "rl",
                          **kwargs: Any):
     """Alias for ``simulate(agent, traces=...)``: same grid focus and
-    leakage gate, for callers who start from the traces."""
+    leakage gate, for callers who start from the traces.
+
+    With no agent, tools or policy, the tool surface is read from the traces
+    themselves, so handing over graded telemetry is enough to start.
+    """
     from zeroproof_simulations import simulate as _simulate
+    if agent is None and not tools and not policy:
+        # a path is as valid a source here as rows, and the tools live inside
+        tools = tools_from_traces(load_traces(traces)) or None
     return _simulate(agent, tools=tools, system_prompt=policy or None,
                      mode=mode, traces=traces, **kwargs)
 

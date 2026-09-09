@@ -36,6 +36,41 @@ def _missing_required(parameters: dict, arguments: dict) -> list[str]:
     return missing
 
 
+
+_PLACEHOLDER_VALUE = re.compile(
+    r"^(?:<[^>]*>|\[[^\]]*\]|\{[^}]*\}|"
+    r"(?:(?:your |the |a |an |user |customer |my )(?:email|phone|name|zip|address|id)|"
+    r"email address|first name|last name|full name|zip code|phone number|"
+    r"order (?:id|number)|user id|customer id|account (?:id|number)|item id|product id|"
+    r"string|placeholder|xxx+)"
+    r"|[\w.+-]+@(?:example|test|email|domain)\.(?:com|org|net))$", re.I)
+
+
+def placeholder_arguments(arguments: Any) -> list[str]:
+    """Argument leaves that echo the schema instead of the person's details.
+
+    A model trained on rows where the world accepted "first name" or
+    user@example.com learns to call tools with the schema itself. The world
+    refuses them so the row shows the correction, not the habit. A bare
+    word that could be an enum value ("email" as a contact channel) is not
+    a placeholder; only the schema-echo phrasings are.
+    """
+    out: list[str] = []
+    def walk(node: Any, path: str) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, f"{path}.{k}" if path else str(k))
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{path}[{i}]")
+        elif isinstance(node, str):
+            s = node.strip()
+            if s and _PLACEHOLDER_VALUE.match(s):
+                out.append(path)
+    walk(arguments, "")
+    return out
+
+
 def _reference_values(arguments: Any, *, prefix: str = "") -> list[tuple[str, str]]:
     references = []
     if isinstance(arguments, dict):
@@ -417,20 +452,43 @@ _FILE_MUTATE = re.compile(
     r"(write|edit|apply|patch|create_file|update_file|replace)", re.I)
 
 
-def _record_fields(k: int, i: int, noun: str = "") -> dict[str, Any]:
+_QUANTITY_CUE = re.compile(r"(inventory|stock|quantity|qty|count|available|units?|seats?|rooms?)", re.I)
+_MONEY_CUE = re.compile(r"(price|cost|fee|amount|balance|total|charge|refund|pay|invoice|bill)", re.I)
+_DATE_CUE = re.compile(r"(date|schedule|appointment|booking|deliver|ship|due|calendar|slot)", re.I)
+_PEOPLE_CUE = re.compile(r"(owner|assignee|author|agent|member|team|user|customer|contact|staff)", re.I)
+
+
+def _record_fields(k: int, i: int, noun: str = "", cue: str = "") -> dict[str, Any]:
     """One plausible record body. Deterministic in (k, i).
 
     Items are named after the tool's own noun so a product search returns
-    product-shaped names, not workflow vocabulary.
+    product-shaped names, not workflow vocabulary. The tool's name and
+    parameters decide which measurable fields exist: an inventory check
+    carries a quantity, a price lookup an amount, a booking a date. An owner
+    appears only when the tool is about people; a flower inventory does not
+    have one.
     """
     label = noun or _pick(_TOPICS, k + i * 104729, 97)
-    return {
+    out: dict[str, Any] = {
         "id": 1000 + ((k + i * 137) % 89000),
         "name": f"{_pick(_ADJECTIVES, k + i * 7919, 7)} {label}",
         "status": _pick(_ITEM_STATUSES, k + i * 15485863, 13),
-        "owner": _pick(_PEOPLE, k + i * 32452843, 29),
-        "updated_at": _iso_date(k, i),
     }
+    blob = f"{cue} {noun}"
+    if _QUANTITY_CUE.search(blob):
+        out["quantity"] = (k + i * 31) % 240
+    if _MONEY_CUE.search(blob):
+        scale = (1, 10, 100)[(k + i) % 3]
+        out["amount"] = round(((k + i * 53) % 900 + 12) * scale / 10, 2)
+        out["currency"] = "USD"
+    if _DATE_CUE.search(blob):
+        out["date"] = _iso_date(k + 3, i)
+    # workflow records keep an owner; physical or priced items do not,
+    # unless the tool itself is about people
+    if _PEOPLE_CUE.search(blob) or not (_QUANTITY_CUE.search(blob) or _MONEY_CUE.search(blob)):
+        out["owner"] = _pick(_PEOPLE, k + i * 32452843, 29)
+    out["updated_at"] = _iso_date(k, i)
+    return out
 
 
 def _evaluate_expression(tool: str, arguments: dict) -> dict[str, Any] | None:
@@ -544,6 +602,7 @@ def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[st
     known = {k: v for k, v in arguments.items() if v not in (None, "")}
     name = str(tool or "").lower()
     noun = _item_noun(name)
+    cue = name + " " + " ".join(str(k) for k in arguments)
     if "search" in name or name.startswith("list"):
         # 1 to 6 hits: fixed 2-3 taught models that searches always
         # return two or three results.
@@ -552,7 +611,7 @@ def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[st
         for i in range(count):
             # The record's own id comes first so entity identity is the
             # item's id, never an inherited parent reference (matter_id).
-            fields = _record_fields(n, i, noun)
+            fields = _record_fields(n, i, noun, cue)
             item = {**fields,
                     **{k: v for k, v in known.items() if k not in fields}}
             items.append(_entity_consistent(item, None, noun))
@@ -561,7 +620,7 @@ def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[st
             "count": count,
             "items": items,
         }
-    record = dict(_record_fields(n, 0, noun))
+    record = dict(_record_fields(n, 0, noun, cue))
     record.update(known)
     if digest:
         record.setdefault("ref", digest[:8])
@@ -809,6 +868,11 @@ class MockEnvironment:
         if missing:
             return {"status": "rejected", "reason": "missing_required",
                     "fields": missing}
+        placeholders = placeholder_arguments(arguments)
+        if placeholders:
+            return {"status": "rejected", "reason": "placeholder_argument",
+                    "fields": placeholders,
+                    "hint": "ask the person for the actual value"}
 
         references = _reference_values(arguments)
         digest = self._digest(tool, arguments)

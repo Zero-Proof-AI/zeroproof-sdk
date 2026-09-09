@@ -209,8 +209,9 @@ def _wire_tools(tools: list[dict] | None) -> list[dict]:
         if not isinstance(tool, dict):
             continue
         if "function" in tool:
-            if "kind" in tool:
-                tool = {k: v for k, v in tool.items() if k != "kind"}
+            if "kind" in tool or "drafted" in tool:
+                tool = {k: v for k, v in tool.items()
+                        if k not in ("kind", "drafted")}
             out.append(tool)
             continue
         fn = {k: tool[k] for k in ("name", "description", "parameters")
@@ -677,6 +678,36 @@ _AGENT_REFUSAL = re.compile(
 )
 
 
+
+_TEXTURE_NOTES = {
+    "lowercase": "Keep every letter small. Do not mention how you type.",
+    "no_punctuation": "Leave out end marks. Never write the word punctuation.",
+    "abbreviations": "Use short forms like u, pls, thx, rn.",
+    "typo": "Let a typo or two through. Never point them out.",
+    "clipped": "Write in short clipped fragments.",
+    "run_on": "Run your thoughts together in one long sentence.",
+    "standard": "Capitalize normally and end sentences with the usual marks.",
+}
+_TONE_NOTES = {
+    "impatient": "You are impatient and want this done now.",
+    "frustrated": "You are frustrated until this is actually solved.",
+    "chatty": "You chat a little and add a bit of context.",
+    "polite": "Stay polite, but do not just thank them.",
+    "curt": "Answer curtly, a few words.",
+    "sarcastic": "You are sarcastic and dry. Never explain the sarcasm.",
+}
+
+
+def _persona_from_tags(tags: dict | None) -> str:
+    """Typing and mood notes from the situation's own tags, so the person
+    the writer drew on turn one is the same person on turn five."""
+    if not isinstance(tags, dict):
+        return ""
+    notes = [_TEXTURE_NOTES.get(str(tags.get("texture") or ""), ""),
+             _TONE_NOTES.get(str(tags.get("tone") or ""), "")]
+    return " ".join(n for n in notes if n)
+
+
 def _persona_notes(prior: str) -> str:
     """Backstage typing notes inferred from the opening line. Never copy these."""
     text = str(prior or "")
@@ -798,7 +829,8 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
                    steps: list[dict] | None = None,
                    want: str = "",
                    tools: list | None = None,
-                   force: bool = False) -> str:
+                   force: bool = False,
+                   persona_tags: dict | None = None) -> str:
     from .generator import (clean_user_message,
                             _realize_typed_message, _strip_directive_phrases)
     trace = _render_user_trace(messages, steps)
@@ -806,7 +838,8 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
         trace = (f"You said: {prior[:500]}\n"
                  f"The agent replied: {(agent_text or '')[:500]}")
     opening = str(want or prior).strip()
-    persona = _persona_notes(opening)
+    # explicit tags win over notes inferred from the opening line
+    persona = _persona_from_tags(persona_tags) or _persona_notes(opening)
     need = opening[:180] if opening else "this handled"
     who = f"You are the human who needs {need}."
     if persona:
@@ -911,16 +944,36 @@ def human_tool_names(tools: list[dict] | None) -> set[str]:
 
 
 def _human_answer(base_url: str, model: str, *, want: str, question: str,
-                  api_key: str | None, timeout: float) -> str:
-    """The simulated user answers the agent's question, in character."""
+                  api_key: str | None, timeout: float,
+                  stance: str = "") -> str:
+    """The simulated user answers the agent's question, in character.
+
+    The stance travels with the answer. Without it the person defaults to
+    approving whatever they first asked for, which makes the question
+    decorative: measured over one 405-row set, 78% of answers were a plain
+    yes and 3% redirected.
+    """
+    posture = {
+        "mistaken": "You were wrong about a detail in your first message. "
+                    "Correct it now rather than confirming.",
+        "unsure": "You are not certain. Say what you do not know instead of "
+                  "approving.",
+        "hurried": "You are in a rush. Answer in a few words.",
+        "retry": "This has failed before. Say what went wrong last time.",
+        "contradicts_earlier": "You have changed your mind since your first "
+                               "message. Say so.",
+        "ambiguous": "Your first message could be read two ways. Say which "
+                     "you meant.",
+        "exploratory": "You are still deciding. Ask something back or hold off.",
+        "adversarial": "You want it done anyway and you push back.",
+    }.get(str(stance or "").lower(), "")
     msgs = [
         {"role": "system", "content": (
-            "You are the USER in a work conversation with a coding "
-            "assistant. Answer the assistant's question in one or two "
-            "short lines, in plain chat style, staying consistent with "
-            "what you originally wanted. Decide: approve, refuse, or "
-            "give the specific detail asked for. Never mention being "
-            "simulated.")},
+            "You are the person the assistant is helping. Answer its "
+            "question in one or two short lines, in plain chat style. "
+            "Approve, refuse, correct a wrong assumption, or give the "
+            "detail asked for, whichever your situation actually calls "
+            "for. Never mention being simulated." + (" " + posture if posture else ""))},
         {"role": "user", "content": (
             f"What you originally asked the assistant for:\n{want}\n\n"
             f"The assistant now asks you:\n{question}\n\nYour reply:")},
@@ -957,6 +1010,8 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 delattr(local, attr)
         plan = dict(plans.get(message) or {})
         world = str(plan.pop("world_state", "") or "")
+        stance = str(plan.pop("stance", "") or "")
+        persona_tags = {k: plan.pop(k) for k in ("tone", "texture") if plan.get(k)}
         local.env = MockEnvironment(tools, faults=plan, world_state=world,
                                     result_shapes=shapes)
         turns = split_user_turns(message)
@@ -1033,8 +1088,10 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                             want=turns[0],
                             question=str(arguments.get("question")
                                          or arguments.get("summary") or ""),
-                            api_key=api_key, timeout=timeout)
-                        result = {"answer": answer or "go ahead"}
+                            api_key=api_key, timeout=timeout, stance=stance)
+                        # an empty answer used to default to "go ahead", which
+                        # silently taught the agent that asking always clears
+                        result = {"answer": answer or "(no reply yet)"}
                         n_user += 1
                         step = {"tool": fn.get("name", ""),
                                 "arguments": arguments, "result": result}
@@ -1096,6 +1153,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                     base_url, model, last_user, spoken,
                     api_key=api_key, timeout=timeout,
                     messages=messages, steps=steps, want=turns[0],
+                    persona_tags=persona_tags,
                     tools=tools, force=force_followup)
                 if follow:
                     last_user = follow

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from ..world.sandbox import placeholder_arguments
 
 _REFERENCE_KEY = re.compile(r"(^id$|_id$|^ref$|^key$)", re.I)
 _STATE_VERB = re.compile(
@@ -451,6 +452,19 @@ def verdict_label(reward) -> str:
     return "Partial"
 
 
+def _value_at(node, path: str):
+    """The leaf at a dotted / indexed path such as ``a.b[0].c``."""
+    for part in re.findall(r"[^.\[\]]+|\[\d+\]", str(path or "")):
+        if part.startswith("["):
+            idx = int(part[1:-1])
+            node = node[idx] if isinstance(node, list) and idx < len(node) else None
+        else:
+            node = node.get(part) if isinstance(node, dict) else None
+        if node is None:
+            return None
+    return node
+
+
 def _reference_leaves(arguments, prefix=""):
     out = []
     if isinstance(arguments, dict):
@@ -511,6 +525,12 @@ def conduct_grade(trajectory: dict, declared_tools: set[str] | None = None) -> d
                 continue
             if _STATE_VERB.match(tool) or _id_like(value):
                 invented.append(f"{tool}({label}={value})")
+        for path in placeholder_arguments(step.get("arguments")):
+            # a value the person actually typed is theirs, however it looks
+            val = _value_at(step.get("arguments"), path)
+            if isinstance(val, str) and val.strip().lower() in grounded_user:
+                continue
+            invented.append(f"{tool}({path}=placeholder)")
         if _step_faulted(step.get("result")):
             faulted.append(tool)
         prior += json.dumps(step.get("result"), default=str).lower()

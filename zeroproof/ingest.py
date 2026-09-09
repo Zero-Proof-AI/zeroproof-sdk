@@ -71,6 +71,40 @@ def otel_env(api_key: str, dataset: str = "traces", base_url: Optional[str] = No
     }
 
 
+def _check_nanos(body: bytes) -> None:
+    """Reject span times that are not nanoseconds.
+
+    The store divides by 1e6 without a unit guard, so a batch sent in
+    milliseconds or seconds lands near 1970 and disappears from every bounded
+    time window: the upload succeeds and the traces are simply never seen.
+    Better to fail here, where the sender can still fix it.
+    """
+    if body[:2] == _GZIP_MAGIC:
+        return
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return
+    for resource in (payload.get("resourceSpans") or []):
+        for scope in (resource.get("scopeSpans") or []):
+            for span in (scope.get("spans") or []):
+                raw = span.get("startTimeUnixNano")
+                if raw in (None, "", 0, "0"):
+                    continue
+                try:
+                    value = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                # 1e15 ns is 1970-01-12; any real timestamp is far above it
+                if 0 < value < 10 ** 15:
+                    raise ZeroProofIngestError(
+                        "span %r has startTimeUnixNano=%d, which is not "
+                        "nanoseconds. Multiply by 1e6 for milliseconds or 1e9 "
+                        "for seconds; as sent, these traces would be stored "
+                        "near 1970 and hidden from every time window."
+                        % (span.get("name") or "unnamed", value))
+
+
 def send_traces(
     api_key: str,
     body: bytes,
@@ -78,6 +112,7 @@ def send_traces(
     timeout: int = 60,
 ) -> Dict:
     """POST one OTLP/HTTP JSON batch (raw or gzipped) and return the 202 body."""
+    _check_nanos(body)
     headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
     if body[:2] == _GZIP_MAGIC:
         headers["Content-Encoding"] = "gzip"

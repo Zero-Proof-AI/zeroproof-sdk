@@ -29,7 +29,8 @@ from .generate.actionspace import (action_space_targets, induced_keys_from_traje
                           render_target_situation, shape_as_tags,
                           shape_from_trajectory, uncovered_action_shapes)
 from .generate.explore import mutate_pool
-from .generate.generator import (amplify_seeds, assistant_kind,
+from .generate.generator import (draft_tools,
+                                 amplify_seeds, assistant_kind,
                        make_default_generator,
                        write_result_shapes, write_scene_brief)
 from .score.grading import _as_dict, behavior_signature, conduct_grade
@@ -679,6 +680,18 @@ def simulate(agent: Any = None, *, spec: Any = None,
     policy = str(profile.policy or "")
     gen_policy = f"{policy}\n\n{scaffold_text}" if scaffold_text else policy
     writer_kind = _kind_from_spec(spec, policy)
+    drafted_tools: list[str] = []
+    if (not tools and policy and simulator is not False
+            and (agent is None or isinstance(agent, str))):
+        # A description with no tools gives the writer and the world no
+        # domain; draft the tool surface the described agent would have.
+        drafted = draft_tools(
+            policy, backend_spec=simulator if isinstance(simulator, str) else None,
+            kind=writer_kind)
+        if drafted:
+            tools = drafted
+            profile.tools = drafted
+            drafted_tools = [d["function"]["name"] for d in drafted]
     if agent is None and not tools and not policy:
         raise ValueError(
             "simulate needs an agent, tools=, or a system prompt.")
@@ -1718,6 +1731,18 @@ def simulate(agent: Any = None, *, spec: Any = None,
                         _note(data,
                               "situation cap lifted to fill lost rollouts")
                         continue
+                    if (n_situations_target
+                            and len(used_situations) >= n_situations_target
+                            and not inflight and not scenario_futs
+                            and cap_lifted["lost"] == 0
+                            and all(prompt_rollouts.get(p, 0) >= repeat_count
+                                    for p in used)):
+                        # every situation the run was asked for exists and
+                        # has all its rollouts; a bigger budget cannot be
+                        # met, so stop and say so instead of spinning the
+                        # writer until the clock
+                        data.stopped_because = "situations_exhausted"
+                        break
                     # Unique ingest may drop exact/near-dupe cards. That is
                     # not a run stop: the writer can invent another situation.
                     if (generator.model is not None and not generated_pool
@@ -1730,8 +1755,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                         raise RuntimeError(
                             f"hosted Qwen produced no situations: {err}")
                     if generator.model is not None and remaining > 0:
-                        if (writer_idle >= 4 and not unique_cards
-                                and time_budget is None):
+                        if writer_idle >= 4 and not unique_cards:
                             # Writer stalled on duplicates. Restart it
                             # with a rotated seed AND a rotating window
                             # of already-used asks as avoid pressure:
@@ -2146,6 +2170,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
     data.allocator = dict(allocator_counts)
     if seed_amp_report:
         data.search["seed_amplification"] = seed_amp_report
+    if drafted_tools:
+        data.search["drafted_tools"] = drafted_tools
     data.search["strategy"] = {
         "requested": strategy,
         "resolved": resolved_strategy,

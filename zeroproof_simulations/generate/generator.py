@@ -821,6 +821,89 @@ def write_scene_brief(tools: Sequence[dict] = (), policy: str = "", *,
     return _format_scene_brief(text, policy=writer_policy)
 
 
+_DRAFT_TIMEOUT = 40.0
+_DRAFT_OUT_TOKENS = 1200
+_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{2,40}$")
+
+
+def draft_tools(policy: str, *, backend_spec: str | None = None,
+                kind: str = "", timeout: float = _DRAFT_TIMEOUT) -> list[dict]:
+    """Tool surface an agent described only in prose would plausibly have.
+
+    A description with no tools gives the writer no world: measured on a
+    "personal finance assistant" prompt, every situation came back as
+    project-management office work. The drafted tools anchor the situation
+    grid and the mock world in the described domain. Each schema is marked
+    ``drafted`` so callers can tell it from a declared tool. Empty on failure.
+    """
+    text = str(policy or "").strip()
+    if not text:
+        return []
+    spec = backend_spec or default_simulator_spec()
+    try:
+        url, model = parse_backend_spec(spec)
+    except ValueError:
+        return []
+    system = (
+        "You design the tool API for the agent described. Return only a JSON "
+        "array of 4 to 8 tools. Each tool: {\"name\": snake_case verb_noun, "
+        "\"description\": one sentence, \"parameters\": {\"type\": \"object\", "
+        "\"properties\": {param: {\"type\": \"string\"|\"number\"|\"boolean\", "
+        "\"description\": short}}, \"required\": [names]}}. Tools must be the "
+        "concrete actions and lookups this agent needs in its own domain, with "
+        "domain-specific parameters (account ids, amounts, dates, item names), "
+        "not generic office tools. Include at least one read and one action. "
+        "No prose."
+    )
+    try:
+        reply = complete(
+            url, model,
+            [{"role": "system", "content": system},
+             {"role": "user", "content": f"Agent description:\n{text[:4000]}\n"
+              f"{'Domain hint: ' + kind if kind else ''}"}],
+            temperature=0.2, max_tokens=_DRAFT_OUT_TOKENS, timeout=timeout, n=1)
+        raw = str(reply.get("content") or "")
+    except Exception:
+        return []
+    cleaned = (raw.strip().removeprefix("```json").removeprefix("```")
+               .removesuffix("```").strip())
+    obj: Any = None
+    try:
+        obj = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\[[\s\S]*\]", cleaned)
+        if match:
+            try:
+                obj = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                obj = None
+    if not isinstance(obj, list):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in obj:
+        fn = item.get("function") if isinstance(item, dict) and isinstance(item.get("function"), dict) else item
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name") or "").strip()
+        if not _TOOL_NAME.match(name) or name in seen:
+            continue
+        params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
+        props = params.get("properties") if isinstance(params.get("properties"), dict) else {}
+        props = {str(k): (v if isinstance(v, dict) else {"type": "string"})
+                 for k, v in props.items() if str(k).strip()}
+        required = [str(r) for r in (params.get("required") or []) if str(r) in props]
+        seen.add(name)
+        out.append({"type": "function", "drafted": True, "function": {
+            "name": name,
+            "description": str(fn.get("description") or name.replace("_", " ")),
+            "parameters": {"type": "object", "properties": props,
+                           "required": required}}})
+        if len(out) >= 8:
+            break
+    return out if len(out) >= 2 else []
+
+
 # Generous: the pass runs in a background thread while writers flood the
 # same GPU, and a late fill is still useful for every later rollout.
 _SHAPES_TIMEOUT = 45.0
@@ -1701,6 +1784,15 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
                 if world and world not in {"unspecified", "unknown"}:
                     plan = dict(plan)
                     plan["world_state"] = world
+                stance = str(tags.get("stance") or (assignment or {}).get("stance") or "")
+                if stance and stance != "ordinary":
+                    plan = dict(plan)
+                    plan["stance"] = stance
+                for key in ("tone", "texture"):
+                    val = str(tags.get(key) or "")
+                    if val:
+                        plan = dict(plan)
+                        plan[key] = val
                 if plan:
                     self.fault_plans[message] = plan
             texts.append(message)

@@ -18,7 +18,7 @@ The SDK inspects the agent, simulates a world consistent with those tools (objec
 3. **Write users.** A separate writer (same hosted model, different prompt, no agent policy) samples situations across tools, stance, history, and so on.
 4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of same prompy.
 5. **Play the agent.** It talks, calls tools, gets results, talks again. All of that is stored: user text, agent text, tool calls, tool results, `final_text`.
-6. **Grade.** Deterministic conduct score by default. Attach an LLM if you want. Or pass your own `grade=`.
+6. **Grade.** Rows come back ungraded. Grade after with `zps.grade(...)`, pass your own `grader=`, or `grade=True` for the deterministic conduct score.
 
 Stop when the row cap or the clock hits.
 
@@ -62,7 +62,7 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `requests_per_situation` | from mode | Phrasings: ways to ask one situation. Alias `phrasings=` |
 | `rollouts_per_request` | from mode | Repeats: reruns of one phrasing. Alias `repeats=` |
 | `fault_rate` | `0.5` | Broken tools. `0` off |
-| `grade` | `True` | Conduct score, or pass your own callable |
+| `grade` | `False` | Rows come back ungraded; grade after with `zps.grade(...)`, or pass `grader=` (your callable) or `grade=True` (conduct score) |
 | `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |
 | `output` | | JSONL path |
 
@@ -148,7 +148,7 @@ hosted GPU with warm replicas and burst under load.
 | `budget` | `1000` | Row cap |
 | `time_budget` | `60` | Seconds. `None` or `0` disables |
 | `until` | `"compute"` | `"saturation"` also stops when coverage plateaus |
-| `grade` | `True` | Conduct score |
+| `grade` | `False` | Grade after, or pass `grader=` / `grade=True` |
 | `llm_grade` | `False` | Extra LLM judge |
 | `output` | | JSONL path |
 | `advanced` | | Keys below |
