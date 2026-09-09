@@ -41,8 +41,8 @@ jobs:
           /tmp/fresh/bin/pip install --quiet dist/*.whl
           cd /tmp && /tmp/fresh/bin/python -c "
           import zeroproof_simulations as zps
-          from zeroproof_simulations.grading import conduct_grade
-          from zeroproof_simulations.sandbox import MockEnvironment
+          from zeroproof_simulations.score.grading import conduct_grade
+          from zeroproof_simulations.world.sandbox import MockEnvironment
           assert callable(zps.simulate)
           t = {'prompt': 'x', 'final_text': 'Fixed it, all tests pass.',
                'steps': [{'tool': 'run_tests', 'arguments': {},
