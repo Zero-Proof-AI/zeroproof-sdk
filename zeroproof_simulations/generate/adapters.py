@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect as _inspect
 import json
 from dataclasses import dataclass, field
@@ -98,7 +99,7 @@ def openai_http(url: str, *, model: str, tools: list[dict],
 def from_langchain(executor: Any) -> Callable:
     """Classic AgentExecutor: steps come from intermediate_steps."""
     try:
-        from langchain_core.agents import AgentAction  # noqa: F401
+        importlib.import_module("langchain_core.agents")
     except Exception as exc:  # pragma: no cover
         raise _missing("langchain", exc)
 
@@ -285,6 +286,7 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
             max_turns: int = 5, avg_turns: float = 6,
             min_user_turns: int = 1,
             turn_stats: dict | None = None,
+            opening_rate: float = 0.0,
             temperature: float | None = None) -> tuple[Any, str]:
     if isinstance(target, ConnectedAgent):
         return target.run, target.transport
@@ -299,6 +301,7 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
         return local_model(url, spec_model, tools=tools or [], system=policy,
                            fault_plans=fault_plans, avg_turns=avg_turns,
                            min_user_turns=min_user_turns,
+                           opening_rate=opening_rate,
                            turn_stats=turn_stats, **loop_kw), kind
     if kind == "http":
         if not tools:

@@ -3,11 +3,11 @@
 The ZeroProof Python SDK. One package, two importable modules:
 
 - `zeroproof`: the platform client — trace ingestion, verification API.
-- `zeroproof_simulations`: generate diverse training conversations for any agent, grounded in its tools and system prompt.
+- `zeroproof_simulations`: post-training data for an agent. Give it the agent's traces, or its tools and system prompt; it simulates the situations, the people, and the world, plays the agent through multi-turn tool-calling conversations, and returns rows for your grader.
 
 This repo absorbed the `zeroproof-simulations` package; `zeroproof-simulations` on PyPI is deprecated in favor of `zeroproof`.
 
-The SDK inspects the agent, simulates a world consistent with those tools (objects, results, failures), and samples scenarios across that space. The same model writes the user and plays the agent. Default `explore`: one unique situation per row.
+Two ways in, one engine. Give it the agent's tools and system prompt and it samples situations across everything that agent can be asked. Give it graded traces as well and it aims the budget at the situations that fail in production, so new rows land where the agent is weak and carry both the failure and the fixed version. Every row is a full conversation: user turns, agent turns, tool calls, tool results, scheduled faults. Rows come back ungraded; your grader decides what good means. Default `explore`: one unique situation per row. How it thinks: [docs/simulations.md](docs/simulations.md).
 
 ## Overview
 
@@ -16,9 +16,9 @@ The SDK inspects the agent, simulates a world consistent with those tools (objec
 1. **Read the agent.** Tools and system prompt. That is the spec of the world.
 2. **Build a fake world from those tools.** Objects, plausible results, and faults (timeout, deny, junk).
 3. **Write users.** A separate writer (same hosted model, different prompt, no agent policy) samples situations across tools, stance, history, and so on.
-4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of same prompy.
+4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of the same prompt.
 5. **Play the agent.** It talks, calls tools, gets results, talks again. All of that is stored: user text, agent text, tool calls, tool results, `final_text`.
-6. **Grade.** Deterministic conduct score by default. Attach an LLM if you want. Or pass your own `grade=`.
+6. **Grade.** Rows come back ungraded. Grade after with `zps.grade(...)`, pass your own `grader=`, or `grade=True` for the deterministic conduct score.
 
 Stop when the row cap or the clock hits.
 
@@ -62,7 +62,7 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `requests_per_situation` | from mode | Phrasings: ways to ask one situation. Alias `phrasings=` |
 | `rollouts_per_request` | from mode | Repeats: reruns of one phrasing. Alias `repeats=` |
 | `fault_rate` | `0.5` | Broken tools. `0` off |
-| `grade` | `True` | Conduct score, or pass your own callable |
+| `grade` | `False` | Rows come back ungraded; grade after with `zps.grade(...)`, or pass `grader=` (your callable) or `grade=True` (conduct score) |
 | `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |
 | `output` | | JSONL path |
 
@@ -148,7 +148,7 @@ hosted GPU with warm replicas and burst under load.
 | `budget` | `1000` | Row cap |
 | `time_budget` | `60` | Seconds. `None` or `0` disables |
 | `until` | `"compute"` | `"saturation"` also stops when coverage plateaus |
-| `grade` | `True` | Conduct score |
+| `grade` | `False` | Grade after, or pass `grader=` / `grade=True` |
 | `llm_grade` | `False` | Extra LLM judge |
 | `output` | | JSONL path |
 | `advanced` | | Keys below |
@@ -187,6 +187,19 @@ Each scenario is a draw across the world and the human.
 - typing: standard, lowercase, typo, clipped, etc.
 
 Ordinary asks first, then the edges. On top of that, we embed the openers and add a bit of random noise so the batch stays spread out, not a cluster of near-copies. Spend the row cap and the clock on diversity, not copies.
+
+## Package layout
+
+The public surface is the package itself: `import zeroproof_simulations as zps`.
+Internals are grouped by stage and may move between releases.
+
+| folder | what lives there |
+|---|---|
+| `generate/` | situation grid, writer, diversity selection, agent runners and adapters |
+| `score/` | conduct checks, judges, quality ranking, selection for SFT and RL |
+| `ingest/` | trace loading, OpenTelemetry rows, platform push and pull |
+| `world/` | the mock tool environment |
+| `simulation.py`, `data.py`, `export.py` | the run loop, its result object, and training export |
 
 ## License
 

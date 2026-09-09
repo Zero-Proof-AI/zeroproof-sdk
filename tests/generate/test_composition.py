@@ -58,7 +58,7 @@ def _fake_complete(_base_url, _model, messages, **_kwargs):
 
 
 def test_default_path_executes_every_stage(monkeypatch, capsys):
-    monkeypatch.setattr("zeroproof_simulations.generator.complete", _fake_complete)
+    monkeypatch.setattr("zeroproof_simulations.generate.generator.complete", _fake_complete)
 
     data = simulate_offline(
         budget=12, embedder=_SemanticStub(),

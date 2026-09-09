@@ -1,7 +1,7 @@
 """Binary judge contract. Offline: no hosted calls."""
 import zeroproof_simulations as zps
 
-from zeroproof_simulations.grade_llm import (
+from zeroproof_simulations.score.grade_llm import (
     AUDIT_SYSTEM, JUDGE_MAX_TOKENS, JUDGE_SYSTEM, _injected_fault_lead,
     _parse_verdict, _render_payload, _user_message,
 )
@@ -18,7 +18,7 @@ def test_data_grade_is_the_optional_qwen_followup(monkeypatch):
         rows[0]["reason"] = "ok"
         return {"status": "judged", "graded": 1}
 
-    monkeypatch.setattr(zps, "apply_grade_llm", fake_apply)
+    monkeypatch.setattr("zeroproof_simulations.data.apply_grade_llm", fake_apply)
     data = zps.SimulationData(trajectories=[{
         "prompt": "help", "steps": [], "final_text": "done",
     }])
@@ -95,7 +95,7 @@ def test_parse_verdict_reason_before_score():
 
 def test_long_trajectory_payload_keeps_faults_and_ending():
     import json
-    from zeroproof_simulations.grade_llm import _render_payload
+    from zeroproof_simulations.score.grade_llm import _render_payload
     steps = [{"tool": f"step_{i}", "arguments": {"n": i},
               "result": {"status": "ok", "data": "x" * 300}}
              for i in range(40)]

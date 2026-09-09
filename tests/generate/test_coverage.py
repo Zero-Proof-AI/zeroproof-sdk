@@ -1,6 +1,6 @@
 from tests.helpers import TOOLS, POLICY, scripted_agent
 import zeroproof_simulations as zps
-from zeroproof_simulations.coverage import space_saturated
+from zeroproof_simulations.generate.coverage import space_saturated
 
 
 def test_space_saturated_needs_five_copies():

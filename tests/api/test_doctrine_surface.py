@@ -7,7 +7,7 @@ import pytest
 
 from tests.helpers import POLICY, TOOLS, scripted_agent
 from zeroproof_simulations import evaluate, simulate
-from zeroproof_simulations.traces import simulate_from_traces
+from zeroproof_simulations.ingest.traces import simulate_from_traces
 
 TRACES = [
     {"prompt": "where is order 4412",

@@ -5,7 +5,7 @@ import json
 
 from tests.helpers import REPO_ROOT, simulate_offline
 import zeroproof_simulations as zps
-from zeroproof_simulations.quality import DIMENSIONS, FAIL, score_row
+from zeroproof_simulations.score.quality import DIMENSIONS, FAIL, score_row
 
 
 def _good(**extra):
@@ -284,7 +284,7 @@ def test_simulate_does_not_write_quality_until_rank(tmp_path):
     report = data.rank()
     assert report["n"] == 4
     assert all(t.get("quality") is not None for t in data.trajectories)
-    exported = zps._export_row(data.trajectories[0])
+    exported = zps.data._export_row(data.trajectories[0])
     assert "quality" in exported and "quality_scores" in exported
     assert exported["quality_reason"]
 

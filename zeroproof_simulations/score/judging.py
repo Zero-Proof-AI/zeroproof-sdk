@@ -37,7 +37,6 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import uuid
-from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 
 _VALID_STATUSES = ("ok", "missing_reward", "invalid_result", "error",

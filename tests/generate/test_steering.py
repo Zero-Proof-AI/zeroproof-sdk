@@ -7,10 +7,10 @@ from __future__ import annotations
 from collections import Counter
 
 from tests.helpers import POLICY, TOOLS, scripted_agent
-from zeroproof_simulations.scenarios import (scenario_regions,
+from zeroproof_simulations.generate.scenarios import (scenario_regions,
                                              steer_region_picks,
                                              steering_front_values)
-from zeroproof_simulations.traces import (dimensions_from_traces,
+from zeroproof_simulations.ingest.traces import (dimensions_from_traces,
                                           simulate_from_traces)
 
 TRACES = [

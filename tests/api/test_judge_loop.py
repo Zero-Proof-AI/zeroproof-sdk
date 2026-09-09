@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 
 from zeroproof_simulations.export import export_training
-from zeroproof_simulations.judging import (ScoredData, evaluate,
+from zeroproof_simulations.score.judging import (ScoredData, evaluate,
                                            normalize_judge_result, run_judge)
-from zeroproof_simulations.traces import dimensions_from_traces, mine_traces
+from zeroproof_simulations.ingest.traces import dimensions_from_traces, mine_traces
 
 TOOLS = [{"name": "get_order", "description": "Look up an order",
           "parameters": {"type": "object",

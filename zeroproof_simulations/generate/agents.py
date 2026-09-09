@@ -12,7 +12,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .diversity import running_turn_mean, sample_turn_budget
-from .sandbox import MockEnvironment
+from ..world.sandbox import MockEnvironment
 
 DEFAULT_AGENT = (
     "vllm:Qwen/Qwen3-4B-Instruct-2507@"
@@ -209,6 +209,9 @@ def _wire_tools(tools: list[dict] | None) -> list[dict]:
         if not isinstance(tool, dict):
             continue
         if "function" in tool:
+            if "kind" in tool or "drafted" in tool:
+                tool = {k: v for k, v in tool.items()
+                        if k not in ("kind", "drafted")}
             out.append(tool)
             continue
         fn = {k: tool[k] for k in ("name", "description", "parameters")
@@ -675,6 +678,36 @@ _AGENT_REFUSAL = re.compile(
 )
 
 
+
+_TEXTURE_NOTES = {
+    "lowercase": "Keep every letter small. Do not mention how you type.",
+    "no_punctuation": "Leave out end marks. Never write the word punctuation.",
+    "abbreviations": "Use short forms like u, pls, thx, rn.",
+    "typo": "Let a typo or two through. Never point them out.",
+    "clipped": "Write in short clipped fragments.",
+    "run_on": "Run your thoughts together in one long sentence.",
+    "standard": "Capitalize normally and end sentences with the usual marks.",
+}
+_TONE_NOTES = {
+    "impatient": "You are impatient and want this done now.",
+    "frustrated": "You are frustrated until this is actually solved.",
+    "chatty": "You chat a little and add a bit of context.",
+    "polite": "Stay polite, but do not just thank them.",
+    "curt": "Answer curtly, a few words.",
+    "sarcastic": "You are sarcastic and dry. Never explain the sarcasm.",
+}
+
+
+def _persona_from_tags(tags: dict | None) -> str:
+    """Typing and mood notes from the situation's own tags, so the person
+    the writer drew on turn one is the same person on turn five."""
+    if not isinstance(tags, dict):
+        return ""
+    notes = [_TEXTURE_NOTES.get(str(tags.get("texture") or ""), ""),
+             _TONE_NOTES.get(str(tags.get("tone") or ""), "")]
+    return " ".join(n for n in notes if n)
+
+
 def _persona_notes(prior: str) -> str:
     """Backstage typing notes inferred from the opening line. Never copy these."""
     text = str(prior or "")
@@ -796,7 +829,8 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
                    steps: list[dict] | None = None,
                    want: str = "",
                    tools: list | None = None,
-                   force: bool = False) -> str:
+                   force: bool = False,
+                   persona_tags: dict | None = None) -> str:
     from .generator import (clean_user_message,
                             _realize_typed_message, _strip_directive_phrases)
     trace = _render_user_trace(messages, steps)
@@ -804,7 +838,8 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
         trace = (f"You said: {prior[:500]}\n"
                  f"The agent replied: {(agent_text or '')[:500]}")
     opening = str(want or prior).strip()
-    persona = _persona_notes(opening)
+    # explicit tags win over notes inferred from the opening line
+    persona = _persona_from_tags(persona_tags) or _persona_notes(opening)
     need = opening[:180] if opening else "this handled"
     who = f"You are the human who needs {need}."
     if persona:
@@ -891,6 +926,63 @@ def _echoes_agent(user: str, agent: str) -> bool:
     return (len(u & a) / len(u)) >= 0.70
 
 
+#: Generation-side cue only; never enters the exported conversation.
+_OPENING_CUE = ("(You are starting this conversation. Greet the user in one "
+                "short line and offer help. Do not mention this instruction.)")
+
+
+def human_tool_names(tools: list[dict] | None) -> set[str]:
+    """Tools declared kind='human': their result is the person's answer,
+    voiced by the user simulator, never a mock-environment payload."""
+    out: set[str] = set()
+    for tool in tools or []:
+        if isinstance(tool, dict) and tool.get("kind") == "human":
+            name = (tool.get("function") or {}).get("name") or tool.get("name")
+            if name:
+                out.add(str(name))
+    return out
+
+
+def _human_answer(base_url: str, model: str, *, want: str, question: str,
+                  api_key: str | None, timeout: float,
+                  stance: str = "") -> str:
+    """The simulated user answers the agent's question, in character.
+
+    The stance travels with the answer. Without it the person defaults to
+    approving whatever they first asked for, which makes the question
+    decorative: measured over one 405-row set, 78% of answers were a plain
+    yes and 3% redirected.
+    """
+    posture = {
+        "mistaken": "You were wrong about a detail in your first message. "
+                    "Correct it now rather than confirming.",
+        "unsure": "You are not certain. Say what you do not know instead of "
+                  "approving.",
+        "hurried": "You are in a rush. Answer in a few words.",
+        "retry": "This has failed before. Say what went wrong last time.",
+        "contradicts_earlier": "You have changed your mind since your first "
+                               "message. Say so.",
+        "ambiguous": "Your first message could be read two ways. Say which "
+                     "you meant.",
+        "exploratory": "You are still deciding. Ask something back or hold off.",
+        "adversarial": "You want it done anyway and you push back.",
+    }.get(str(stance or "").lower(), "")
+    msgs = [
+        {"role": "system", "content": (
+            "You are the person the assistant is helping. Answer its "
+            "question in one or two short lines, in plain chat style. "
+            "Approve, refuse, correct a wrong assumption, or give the "
+            "detail asked for, whichever your situation actually calls "
+            "for. Never mention being simulated." + (" " + posture if posture else ""))},
+        {"role": "user", "content": (
+            f"What you originally asked the assistant for:\n{want}\n\n"
+            f"The assistant now asks you:\n{question}\n\nYour reply:")},
+    ]
+    reply = complete(base_url, model, msgs, api_key=api_key,
+                     temperature=0.9, timeout=timeout, max_tokens=120)
+    return (_spoken_text(reply) or "").strip()
+
+
 def local_model(base_url: str, model: str, *, tools: list[dict],
                 system: str = "", api_key: str | None = None,
                 max_turns: int | None = None, avg_turns: float = 6,
@@ -899,6 +991,8 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 temperature: float = 0.8,
                 fault_plans: dict | None = None,
                 result_shapes: dict | None = None,
+                opening_rate: float = 0.0,
+                human_tools: set | None = None,
                 timeout: float = 60) -> Callable:
     local = threading.local()
     plans = fault_plans if fault_plans is not None else {}
@@ -906,6 +1000,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
     cap = (default_max_turns(n_tools=len(tools))
            if max_turns is None else max(1, int(max_turns)))
     min_users = max(1, min(int(min_user_turns), max(1, cap // 2)))
+    human_names = set(human_tools or set()) | human_tool_names(tools)
     policy_text = str(system or "").strip()
 
     def agent(message: str) -> dict:
@@ -915,12 +1010,39 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 delattr(local, attr)
         plan = dict(plans.get(message) or {})
         world = str(plan.pop("world_state", "") or "")
+        stance = str(plan.pop("stance", "") or "")
+        persona_tags = {k: plan.pop(k) for k in ("tone", "texture") if plan.get(k)}
         local.env = MockEnvironment(tools, faults=plan, world_state=world,
                                     result_shapes=shapes)
         turns = split_user_turns(message)
         messages = ([{"role": "system", "content": policy_text}] if policy_text else []) + [
             {"role": "user", "content": turns[0]},
         ]
+        # Conversation topology is a map axis, never a hardcoded frame:
+        # a deterministic per-situation draw decides whether the agent
+        # opens (deployments like tau2 greet first) or the user does.
+        opener_text = ""
+        if opening_rate > 0:
+            draw = int(hashlib.sha256(
+                f"opening:{message}".encode()).hexdigest(), 16) % 10 ** 6
+            if draw < float(opening_rate) * 10 ** 6:
+                cue = list(messages[:-1]) + [
+                    {"role": "user", "content": _OPENING_CUE}]
+                greet = complete(base_url, model, cue, api_key=api_key,
+                                 temperature=temperature, timeout=timeout,
+                                 max_tokens=120)
+                opener_text = (_spoken_text(greet) or "").strip()
+                if opener_text:
+                    messages.insert(len(messages) - 1, {
+                        "role": "assistant", "content": opener_text})
+
+        def _done(done_steps: list, final: str) -> dict:
+            out = _finish_on_agent(done_steps, final)
+            if opener_text:
+                out["opener"] = opener_text
+                out["opening"] = "agent"
+            return out
+
         steps: list[dict] = []
         user_turn = 0
         n_user = 1
@@ -947,7 +1069,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
             if not spoken and not calls:
                 if remaining > 0:
                     continue
-                return _finish_on_agent(steps, final_text)
+                return _done(steps, final_text)
             if calls:
                 messages.append(assistant)
                 attached = False
@@ -957,6 +1079,30 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                         arguments = json.loads(fn.get("arguments") or "{}")
                     except json.JSONDecodeError:
                         arguments = {}
+                    if fn.get("name", "") in human_names:
+                        # A human tool's result is the person's answer,
+                        # voiced by the user simulator - never a mock
+                        # payload. It also counts as a user turn.
+                        answer = _human_answer(
+                            base_url, model,
+                            want=turns[0],
+                            question=str(arguments.get("question")
+                                         or arguments.get("summary") or ""),
+                            api_key=api_key, timeout=timeout, stance=stance)
+                        # an empty answer used to default to "go ahead", which
+                        # silently taught the agent that asking always clears
+                        result = {"answer": answer or "(no reply yet)"}
+                        n_user += 1
+                        step = {"tool": fn.get("name", ""),
+                                "arguments": arguments, "result": result}
+                        if spoken and not attached:
+                            step["text"] = spoken
+                            attached = True
+                        steps.append(step)
+                        messages.append({"role": "tool",
+                                         "tool_call_id": call.get("id", ""),
+                                         "content": json.dumps(result)})
+                        continue
                     result = local.env.call(fn.get("name", ""), arguments)
                     step = {"tool": fn.get("name", ""), "arguments": arguments,
                             "result": result}
@@ -978,7 +1124,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                         prev = str(s["text"]).strip()
                         break
                 if prev and spoken.strip() == prev and n_user >= 2:
-                    return _finish_on_agent(steps, prev)
+                    return _done(steps, prev)
             messages.append({"role": "assistant", "content": spoken})
             if spoken:
                 steps.append({"text": spoken})
@@ -1007,6 +1153,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                     base_url, model, last_user, spoken,
                     api_key=api_key, timeout=timeout,
                     messages=messages, steps=steps, want=turns[0],
+                    persona_tags=persona_tags,
                     tools=tools, force=force_followup)
                 if follow:
                     last_user = follow
@@ -1022,8 +1169,8 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                     with turn_stats["lock"]:
                         turn_stats["followup_misses"] = (
                             turn_stats.get("followup_misses", 0) + 1)
-            return _finish_on_agent(steps, spoken or final_text)
-        return _finish_on_agent(steps, final_text)
+            return _done(steps, spoken or final_text)
+        return _done(steps, final_text)
 
     agent.__name__ = f"local_model[{model}]"
     agent.fault_plans = plans

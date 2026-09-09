@@ -13,7 +13,7 @@ import json
 
 from tests.helpers import scripted_agent
 from zeroproof_simulations import rows_from_otel
-from zeroproof_simulations.traces import (load_traces, simulate_from_traces,
+from zeroproof_simulations.ingest.traces import (load_traces, simulate_from_traces,
                                           trace_report)
 
 DAISY_TOOLS = [

@@ -1,7 +1,7 @@
 """Adapter USER_TURN splitting and hosted-key resolution."""
 from tests.helpers import TOOLS
 
-from zeroproof_simulations.agents import (
+from zeroproof_simulations.generate.agents import (
     missing_hosted_key,
     resolve_completion_key,
     split_user_turns,
@@ -31,7 +31,7 @@ def test_hosted_qwen_ignores_openai_api_key(monkeypatch):
 
 
 def test_openai_http_splits_user_turns(monkeypatch):
-    from zeroproof_simulations.adapters import openai_http
+    from zeroproof_simulations.generate.adapters import openai_http
 
     seen = []
 
@@ -40,7 +40,7 @@ def test_openai_http_splits_user_turns(monkeypatch):
         seen.append(users)
         return {"content": f"ack {users[-1]}"}
 
-    monkeypatch.setattr("zeroproof_simulations.adapters.complete", fake_complete)
+    monkeypatch.setattr("zeroproof_simulations.generate.adapters.complete", fake_complete)
     agent = openai_http("http://example", model="m", tools=TOOLS, max_turns=6)
     out = agent("first line\n<USER_TURN>\nsecond line")
     assert all("<USER_TURN>" not in c for batch in seen for c in batch)
@@ -51,7 +51,7 @@ def test_openai_http_splits_user_turns(monkeypatch):
 
 
 def test_subprocess_agent_drops_user_turn_marker(monkeypatch):
-    from zeroproof_simulations.adapters import subprocess_agent
+    from zeroproof_simulations.generate.adapters import subprocess_agent
 
     captured = {}
 
@@ -72,7 +72,7 @@ def test_subprocess_agent_drops_user_turn_marker(monkeypatch):
 
 
 def test_from_langchain_invokes_each_turn():
-    from zeroproof_simulations.adapters import from_langchain
+    from zeroproof_simulations.generate.adapters import from_langchain
 
     seen = []
 

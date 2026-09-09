@@ -6,7 +6,7 @@ import re
 import time
 from typing import Any, Sequence
 
-from .agents import (complete, default_agent_spec, missing_hosted_key,
+from ..generate.agents import (complete, default_agent_spec, missing_hosted_key,
                      parse_backend_spec)
 
 MISSING_QWEN_KEY = "Hosted Qwen needs VLLM_API_KEY set in the environment."

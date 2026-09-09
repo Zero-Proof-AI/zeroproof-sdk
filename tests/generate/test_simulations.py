@@ -36,7 +36,7 @@ def test_conversation_drops_stale_final_text():
 
 
 def test_finish_on_agent_drops_pre_tool_clarify():
-    from zeroproof_simulations.agents import _finish_on_agent
+    from zeroproof_simulations.generate.agents import _finish_on_agent
     clarify = "Which repo and PR number?"
     steps = [
         {"text": clarify},
@@ -49,7 +49,7 @@ def test_finish_on_agent_drops_pre_tool_clarify():
 
 
 def test_finish_on_agent_keeps_post_tool_speech():
-    from zeroproof_simulations.agents import _finish_on_agent
+    from zeroproof_simulations.generate.agents import _finish_on_agent
     steps = [
         {"text": "Which repo?"},
         {"user": "acme/app 42"},
@@ -77,7 +77,7 @@ def test_conversation_is_user_agent_turns():
     assert msgs[0]["content"] == "where's order ORD-1"
     assert msgs[1]["tool_calls"][0]["name"] == "lookup_order"
     assert msgs[3]["content"] == "and the refund?"
-    exported = zps._export_row(row)
+    exported = zps.data._export_row(row)
     assert exported["messages"] == msgs
 
 
@@ -181,3 +181,27 @@ def test_short_run_does_not_saturate_on_signature_blip():
     assert data.stopped_because == "budget"
     assert data.coverage.get("saturation") is False
     assert len(data.trajectories) == 80
+
+
+def test_lost_repeat_rollouts_do_not_starve_the_run():
+    """A discarded rollout must not deadlock the budget against the
+    situation cap: the run lifts the cap and fills the owed rows."""
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof_simulations import simulate
+
+    calls = {"n": 0}
+
+    def flaky_agent(message: str) -> dict:
+        calls["n"] += 1
+        if calls["n"] in (2, 4):  # lose two repeat partners
+            return {"steps": [], "final_text": ""}
+        return scripted_agent(message)
+
+    data = simulate(agent=flaky_agent, tools=TOOLS, system_prompt=POLICY,
+                    situations=3, rollouts_per_request=2, budget=6,
+                    seed=5, grade=False, simulator=False, concurrency=2,
+                    time_budget=40,
+                    advanced={"per_round": 6, "mutate_failures": False})
+    assert len(data.trajectories) == 6, (
+        f"starved at {len(data.trajectories)} rows: {data.stopped_because}")
+    assert data.stopped_because == "budget"

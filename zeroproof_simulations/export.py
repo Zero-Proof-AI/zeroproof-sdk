@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Any, Sequence
 
-from .quality import _load_jsonl, _write_jsonl
+from .score.quality import _load_jsonl, _write_jsonl
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
 # The second group are the sampled diversity axes. They cost bytes, but a

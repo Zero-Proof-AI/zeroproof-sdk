@@ -13,10 +13,10 @@ from tests.connect.test_otel import BATCH
 from tests.helpers import POLICY, TOOLS, scripted_agent
 from zeroproof_simulations import rows_from_otel
 from zeroproof_simulations.export import (tool_call_roundtrip, training_rows)
-from zeroproof_simulations.judging import (ScoredData, build_preference_pairs,
+from zeroproof_simulations.score.judging import (ScoredData, build_preference_pairs,
                                            evaluate, run_judge)
-from zeroproof_simulations.optimize import select_for_sft
-from zeroproof_simulations.traces import (dimensions_from_traces, load_traces,
+from zeroproof_simulations.score.optimize import select_for_sft
+from zeroproof_simulations.ingest.traces import (dimensions_from_traces, load_traces,
                                           simulate_from_traces, trace_report)
 
 RAW_UNGRADED = [
