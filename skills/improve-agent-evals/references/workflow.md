@@ -27,7 +27,9 @@ data = zps.simulate(agent="openai:gpt-4.1-mini", tools=tools,
 `agent="openai:<model>"` reads `OPENAI_BASE_URL` for the request and
 `OPENAI_API_KEY` for auth, so pointing `OPENAI_BASE_URL` at a self-hosted
 vLLM/TGI/etc. server that speaks the OpenAI chat completions API works the
-same way; no ZeroProof credential is involved.
+same way; no ZeroProof credential is involved. The same model writes the
+situations, the people, and the scene brief, so budget the endpoint for
+roughly two calls per row plus one follow-up call per extra user turn.
 
 **ZeroProof-hosted Qwen (no `agent=` argument, or `agent=None`).** Needs
 `VLLM_API_KEY` from ZeroProof; the endpoint is shared and rate limited.
@@ -36,6 +38,7 @@ production repo.
 
 ```bash
 export VLLM_API_KEY="..."     # only if not bringing your own model
+export ZP_CONTEXT_TOKENS=32768  # hosted Qwen's window; turn caps size from it
 ```
 
 Grading is a separate concern from generation; see step 3. The hosted
@@ -75,6 +78,14 @@ output; `zps.load_traces()` normalizes OpenAI-style `messages`,
 `{prompt, steps, final_text, reward}` schema, so the loader almost never
 needs calling directly; `traces=` accepts all of it.
 
+How many traces: about 20 graded or fault-bearing traces is the floor.
+Measured on a 25-trace repo with four fault kinds over four failing
+tools, random subsets of 3 to 10 traces surfaced one or two of the fault
+kinds and the aimed run put about the same number of fault cells in 40
+rows as a cold start; 15 traces surfaced three kinds; 20 surfaced all
+four in every draw. Below 20, still run lane 1, name the trace count in
+the report, and lean on lane 2.
+
 ```python
 # OTLP/GenAI spans straight from a collector export
 traces = zps.rows_from_otel(open("traces.otlp.json").read())
@@ -85,16 +96,25 @@ data = zps.simulate(
     traces=traces,
     mode="explore",                       # new distinct situations, aimed by the traces
     grade=True,                           # deterministic conduct grade, offline
-    budget=400, time_budget=180,
+    budget=200, time_budget=300,          # 40 / 150 for a first smoke test
     advanced={"seed": 0},
     output="new_evals/trace_guided.jsonl",
 )
-blocking = [d for d in data.degraded if d in ("generator_fallback", "writer_exhausted")]
+blocking = [d for d in data.degraded if d == "generator_fallback"]
+if data.stopped_because == "writer_exhausted":
+    blocking.append("writer_exhausted")
 if blocking:
-    raise RuntimeError(f"situations were not model-written, do not use: {blocking}")
+    raise RuntimeError(f"situations were not model-written, do not use: "
+                       f"{blocking} {data.search.get('writer_errors')}")
 if data.degraded:
     print("advisory notes, rows are still usable:", data.degraded)
 ```
+
+`data.search["trace_mining"]` shows what the run mined (tools, faults,
+the aimed axes); if `tools` there is empty while the trace report listed
+tools, the trace rows are in a shape the loader does not read yet, so stop
+and say so. `zps.recommend()` is not part of this lane: it sizes a
+training set (thousands of rows), not an eval file.
 
 `traces=` reshapes the covering grid (`dimensions_from_traces` under the
 hood): tools and world states the traces actually hit move to the front
@@ -120,13 +140,16 @@ data = zps.simulate(
     tools=tools, system_prompt=policy,
     mode="adaptive", until="saturation",   # new situations + phrasings + repeats until coverage plateaus
     grade=True,
-    budget=800, time_budget=300,
+    budget=400, time_budget=300,
     advanced={"seed": 0},
     output="new_evals/policy_guided.jsonl",
 )
-blocking = [d for d in data.degraded if d in ("generator_fallback", "writer_exhausted")]
+blocking = [d for d in data.degraded if d == "generator_fallback"]
+if data.stopped_because == "writer_exhausted":
+    blocking.append("writer_exhausted")
 if blocking:
-    raise RuntimeError(f"situations were not model-written, do not use: {blocking}")
+    raise RuntimeError(f"situations were not model-written, do not use: "
+                       f"{blocking} {data.search.get('writer_errors')}")
 if data.degraded:
     print("advisory notes, rows are still usable:", data.degraded)
 ```
@@ -165,6 +188,58 @@ the customer has explicitly given you a `VLLM_API_KEY` for the hosted
 judge. That is a ZeroProof-hosted call, not a customer-local one.
 
 ## 5. Compare against existing evals and write the report
+
+Offline, no key. Existing eval cases rarely carry tool names as a field,
+so count a tool as covered when the case names it (`expected_tools`,
+`tools`) or mentions it in its prompt or expectation text. Generated rows
+carry `steps`, so their tools are the ones actually called.
+
+```python
+import json
+from collections import Counter
+
+tool_names = [t["function"]["name"] for t in tools]
+
+def load(path):
+    return [json.loads(line) for line in open(path) if line.strip()]
+
+def tools_of(row):
+    if row.get("steps"):
+        return {s["tool"] for s in row["steps"] if isinstance(s, dict) and s.get("tool")}
+    named = set(row.get("expected_tools") or row.get("tools") or [])
+    text = " ".join(str(row.get(k) or "") for k in ("prompt", "expected", "input"))
+    return named | {t for t in tool_names if t in text}
+
+def fault_modes(rows):
+    return Counter(spec["mode"] for r in rows
+                   for spec in (r.get("faults") or {}).values()
+                   if isinstance(spec, dict) and spec.get("mode"))
+
+existing = load("evals/cases.jsonl")                     # wherever the repo keeps them
+covered = Counter(t for r in existing for t in tools_of(r))
+print(f"existing: {len(existing)} cases, {len(covered)}/{len(tool_names)} tools;",
+      "never tested:", [t for t in tool_names if t not in covered])
+for path in ("new_evals/trace_guided.jsonl", "new_evals/policy_guided.jsonl"):
+    rows = load(path)
+    hit = Counter(t for r in rows for t in tools_of(r))
+    fails = [r for r in rows if r.get("reward") == 0]
+    print(path, len(rows), "rows;",
+          "newly covered tools:", [t for t in hit if t not in covered])
+    print("  world_state:", dict(Counter(r.get("world_state") for r in rows if r.get("world_state"))))
+    print("  faults:", dict(fault_modes(rows)))
+    print("  stance:", dict(Counter(r.get("stance") for r in rows if r.get("stance"))))
+    print("  failing:", len(fails), dict(Counter(str(r.get("reason"))[:50] for r in fails).most_common(5)))
+```
+
+The report lists, per lane: rows, unique prompts, tools newly covered,
+the world-state and fault mix, the failing rows with their reasons, the
+advisory notes, and the trace count that aimed lane 1. Then review
+instructions: read every failing row and a sample of 20 passing rows
+before anything is merged into the suite. Point out rows where the human
+is in the wrong role (an operator's voice on a customer-facing agent), a
+tool description echoed as the ask, or a date the world returned that
+contradicts the conversation; those are known simulator tells, and such
+rows are dropped at review, not shipped.
 
 ## Preflight: what to find in the repo
 
@@ -253,15 +328,18 @@ A stamped row therefore carries, at minimum:
 ```json
 {
   "prompt": "...", "messages": [...], "steps": [...], "final_text": "...",
-  "scenario_id": "sit_7f2c...", "world_state": "entity already acted on",
-  "faults": {"tool": "run_tests", "kind": "timeout"}, "stance": "hurried",
-  "reward": 0, "reason": "claimed success after a tool timeout",
+  "scenario_id": "sc-7f2c0a1b9d", "world_state": "entity already acted on",
+  "faults": {"*": {"mode": "timeout", "rate": 1.0}}, "stance": "hurried",
+  "reward": 0, "reason": "Said it worked after the tool failed: run_tests",
+  "label_source": "conduct", "rollout_index": 0,
+  "model_version": "Qwen/Qwen3-4B-Instruct-2507",
   "source_lane": "trace_guided", "generator_model": "openai:gpt-4.1-mini",
   "seed": 0, "run_id": "trace_guided_a1b2c3d4e5"
 }
 ```
 
-`world_state`, `faults`, and `stance` are only present when the scenario
-carried them (a clean/no-fault row omits `faults`; an unlabeled row omits
-`reward`). That is the SDK's own export behavior, not a bug in the
-stamping step.
+`faults` maps a tool name (or `*` for every tool) to the scheduled fault
+mode; `world_state`, `faults`, and `stance` are only present when the
+scenario carried them (a clean/no-fault row omits `faults`; an unlabeled
+row omits `reward`). That is the SDK's own export behavior, not a bug in
+the stamping step.

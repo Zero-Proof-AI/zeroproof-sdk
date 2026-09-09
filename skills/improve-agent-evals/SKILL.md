@@ -51,6 +51,10 @@ if any trace-like input exists (production traces, eval rollouts, an OTLP
 export). If `report["fails"] > 0` or `report["advisory_labels"] > 0`, that's
 signal for lane 1. If `report["traces"] == 0`, or every trace is unlabeled
 with no observed fault, run lane 2 only. If both hold, run combined.
+Lane 1 needs about 20 traces before the aim is trustworthy: below that
+the mined fault kinds and failing tools are a partial sample and the run
+lands close to the cold-start grid. With fewer, run lane 1 anyway, say so
+in the report, and treat lane 2 as the primary output.
 
 # Inputs this skill looks for in the repo
 
@@ -69,6 +73,9 @@ with no observed fault, run lane 2 only. If both hold, run combined.
 Every `simulate(...)` call below needs a model endpoint: set
 `OPENAI_API_KEY` (plus `OPENAI_BASE_URL` for any OpenAI-compatible host)
 and pass `agent="openai:<model>"`, or set `VLLM_API_KEY` for hosted Qwen.
+With `agent="openai:<model>"` that model also writes the situations and
+the people, so the run bills the customer's endpoint for both sides. For
+hosted Qwen set `ZP_CONTEXT_TOKENS=32768` so turn caps match its window.
 The same key and base URL serve the optional LLM grader
 (`llm_grade=True` or `zps.grade_llm(..., spec="openai:<model>")`).
 Bring-your-own-model is OpenAI-compatible only: any endpoint that speaks
@@ -82,22 +89,27 @@ import zeroproof_simulations as zps
 
 # 0. Preflight, always first, always offline, no key needed
 pre = zps.preflight(tools, policy)          # tool-schema and policy gaps
-sizing = zps.recommend(tools, policy, mode="sft")   # sized simulate_kwargs
+print(pre["cells"], pre["warnings"])        # grid size; read every warning
+# zps.recommend() sizes a training set (thousands of rows); eval coverage
+# runs use the explicit budgets below: 40 rows to smoke-test, then 200-400.
 
 # Lane 1: trace-guided repair
 report = zps.trace_report(traces, tools=tools, policy=policy)
 print(zps.format_trace_report(report))
 repair = zps.simulate(tools=tools, system_prompt=policy, traces=traces,
-                      mode="explore", grade=True, budget=sizing["budget"],
+                      mode="explore", grade=True, budget=200, time_budget=300,
                       output="new_evals/trace_guided.jsonl")
 
 # Lane 2: policy-guided discovery
 discovery = zps.simulate(tools=tools, system_prompt=policy, mode="adaptive",
-                         until="saturation", grade=True,
+                         until="saturation", grade=True, budget=400,
+                         time_budget=300,
                          output="new_evals/policy_guided.jsonl")
 
 for run in (repair, discovery):
-    fatal = [d for d in run.degraded if d in ("generator_fallback", "writer_exhausted")]
+    fatal = [d for d in run.degraded if d == "generator_fallback"]
+    if run.stopped_because == "writer_exhausted":
+        fatal.append("writer_exhausted")
     if fatal:
         raise RuntimeError(f"situations were not model-written, do not use: {fatal}")
 ```
@@ -107,11 +119,13 @@ and the coverage comparison are in `references/workflow.md`.
 
 # What it produces
 
-A preflight report, a proposed budget, and a new JSONL file of generated
-eval cases per lane, each row stamped with `scenario_id`, `world_state`,
-`faults`, `stance`, `source_lane`, `generator_model`, `seed`, plus a
-coverage comparison against the existing evals (by tool and by situation
-axis) and review instructions. Full templates: `references/workflow.md`.
+A preflight report, a trace report, and a new JSONL file of generated
+eval cases per lane, each row stamped with `scenario_id`, `source_lane`,
+`generator_model`, `seed`, `run_id`, and, when the scenario carried them,
+`world_state`, `faults`, `stance`. Graded rows carry `reward` and
+`reason`. Then a coverage comparison against the existing evals (by tool
+and by situation axis) and review instructions. Full templates:
+`references/workflow.md`.
 
 # Hard rules
 
@@ -125,15 +139,20 @@ axis) and review instructions. Full templates: `references/workflow.md`.
 - **Label every generated case with its provenance**: which lane produced
   it, the generator model, the seed, and the scenario fields the SDK
   already carries (`scenario_id`, `world_state`, `faults`, `stance`).
-- **Templates or fallbacks are not evidence.** Two notes in `data.degraded`
-  block a run: `generator_fallback` and `writer_exhausted` mean situations
-  were not model-written. Stop and report those; never ship the rows. Every
-  other note is advisory and the rows are still real: `semantic_embedding_unavailable`
-  (novelty scored by hash; pass `embedder="openai:text-embedding-3-small"`
-  with the same OpenAI key to make it semantic), `scene_brief_unavailable`
-  (the brief writer ran past `time_budget`; raise it or ignore),
-  `result_shapes_unavailable`, `trace_leakage_dropped`. Name advisory notes
-  in the report, then continue.
+- **Templates or fallbacks are not evidence.** Two signals block a run:
+  `generator_fallback` in `data.degraded`, and
+  `data.stopped_because == "writer_exhausted"`. Both mean situations were
+  not model-written. Stop and report those; never ship the rows.
+  `data.search["writer_errors"]` holds the last writer error for the
+  report. Every other note is advisory and the rows are still real:
+  `semantic_embedding_unavailable` (novelty scored by hash; pass
+  `embedder="openai:text-embedding-3-small"` with the same OpenAI key to
+  make it semantic), `scene_brief_unavailable` (the brief writer ran past
+  `time_budget`; raise it or ignore), `result_shapes_unavailable`,
+  `trace_leakage_dropped`, `followups_starved` (the follow-up writer
+  missed on a quarter or more of the rows, usually a slow or overloaded
+  endpoint; the set skews single-turn, rerun with a longer `time_budget`
+  or off-peak). Name advisory notes in the report, then continue.
 - **No secrets in outputs.** Never write `OPENAI_API_KEY`, `VLLM_API_KEY`,
   `ZEROPROOF_API_KEY`/`ZEROPROOF_DELEGATED_CREDENTIAL`, or any `zp_*` key
   into the generated JSONL, the reports, or logs.
