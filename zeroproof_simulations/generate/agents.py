@@ -268,6 +268,10 @@ def _trim_length_cut(choice: dict) -> None:
     if not isinstance(message, dict) or message.get("tool_calls"):
         return
     text = str(message.get("content") or "")
+    if text.lstrip()[:1] in ("{", "["):
+        # a json reply has no sentences; cutting at the last period
+        # left the shape writer 147 chars of an 11-tool answer
+        return
     cut = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
     if cut > 40:
         message["content"] = text[:cut + 1]

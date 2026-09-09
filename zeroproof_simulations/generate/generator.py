@@ -907,7 +907,7 @@ def draft_tools(policy: str, *, backend_spec: str | None = None,
 # Generous: the pass runs in a background thread while writers flood the
 # same GPU, and a late fill is still useful for every later rollout.
 _SHAPES_TIMEOUT = 45.0
-_SHAPES_OUT_TOKENS = 768
+_SHAPES_OUT_TOKENS = 1500  # 11 record tools measured at 852 tokens
 _SHAPES_MAX_CALLS = 3
 _SHAPES_TOOLS_PER_CALL = 12
 

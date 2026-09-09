@@ -411,3 +411,20 @@ def test_calculator_tools_return_real_arithmetic():
     assert abs(out["data"]["result"] - 1439) < 0.01
     bad = env.call("calculate", {"expression": "__import__('os')"})
     assert bad["status"] == "rejected"
+
+
+
+def test_length_cut_keeps_json_replies_whole():
+    from zeroproof_simulations.generate.agents import _trim_length_cut
+    from zeroproof_simulations.generate.generator import _parse_result_shapes
+    body = '{"find_customer": {"email": "a.b@x.io", "name": "Ann"}, "get_order": {"id": "o'
+    choice = {"finish_reason": "length", "message": {"content": body}}
+    _trim_length_cut(choice)
+    assert choice["message"]["content"] == body
+    shapes = _parse_result_shapes(body, {"find_customer", "get_order"})
+    assert shapes == {"find_customer": {"email": "a.b@x.io", "name": "Ann"}}
+    prose = {"finish_reason": "length", "message": {
+        "content": "Your visit is booked for Friday morning between eight and noon. I will also send a re"}}
+    _trim_length_cut(prose)
+    assert prose["message"]["content"] == (
+        "Your visit is booked for Friday morning between eight and noon.")
