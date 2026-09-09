@@ -161,3 +161,27 @@ def test_qwen_labeled_rows_are_advisory_not_ungraded():
         {"tool": "t", "arguments": {}, "result": {"status": "ok"}}]}])
     assert rep["ungraded"] == 0
     assert rep["advisory_labels"] == 1
+
+
+
+def test_simulate_aims_at_messages_shaped_traces():
+    # the same export shape trace_report accepts: the grid must move
+    from tests.helpers import simulate_offline
+    rows = []
+    for i in range(6):
+        rows.append({"reward": 0, "messages": [
+            {"role": "user", "content": f"refund order 77{i}"},
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"function": {
+                 "name": "create_refund",
+                 "arguments": json.dumps({"order_id": f"77{i}", "amount": 5})}}]},
+            {"role": "tool", "name": "create_refund",
+             "content": json.dumps({"status": "timeout"})},
+            {"role": "assistant", "content": "Refunded."}]})
+    data = simulate_offline(traces=rows, budget=6)
+    mined = data.search["trace_mining"]
+    assert mined["tools"]["create_refund"]["fault_n"] == 6
+    assert mined["faults"] == {"timeout": 6}
+    assert mined["focused_dimensions"]["tool"][0] == "create_refund"
+    regions = data.search["behavior_state"]["regions"]
+    assert any(r["region"] == "recover_after_timeout" for r in regions)

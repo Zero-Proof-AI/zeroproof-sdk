@@ -40,8 +40,8 @@ from .generate.scenarios import (DEFAULT_FAULT_RATE, SEARCH_ARMS,
                         _intent_for_tool)
 from .ingest.traces import (behavior_state, region_progress, opening_share,
                      dimensions_from_traces, drop_leaky_rows,
-                     exemplar_result_shapes, mine_result_exemplars,
-                     mine_traces)
+                     exemplar_result_shapes, load_traces,
+                     mine_result_exemplars, mine_traces)
 
 from .data import (SimulationData, _note, _export_row,
                    _clean_faults, _row_world)
@@ -764,12 +764,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
             raise ValueError("steering_weight= needs traces=")
 
     if traces is not None:
-        if isinstance(traces, (str, Path)):
-            from .score.quality import _load_jsonl
-            trace_rows = [r for r in _load_jsonl(str(traces))
-                          if isinstance(r, dict)]
-        else:
-            trace_rows = [r for r in traces if isinstance(r, dict)]
+        # same normalization as trace_report: a messages-only export
+        # otherwise mines as zero tools and the grid is never aimed
+        trace_rows = load_traces(traces)
         # The optimizer's memory feeds the run it aims: regions from
         # the whole trace history, budget shares from their lifecycle.
         # Cells whose coordinates intersect a hot region's expansion
