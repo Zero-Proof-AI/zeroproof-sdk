@@ -143,3 +143,18 @@ def test_rl_retarget_lets_behavior_gap_lead():
     # Same behavior gap moves RL weights harder than explore weights.
     assert spread_rl > spread_default
     assert gappy  # regions resolved
+
+
+def test_mine_traces_attributes_faults_to_the_faulted_call():
+    from zeroproof_simulations.ingest.traces import format_trace_report, trace_report
+    row = {"prompt": "fix the failing test", "reward": 0, "steps": [
+        {"tool": "read_file", "arguments": {"path": "a.py"}, "result": "def f(): pass"},
+        {"tool": "run_command", "arguments": {"cmd": "pytest"},
+         "result": {"status": "error", "error": "exit 1"}},
+        {"tool": "read_file", "arguments": {"path": "b.py"}, "result": "x = 1"}],
+        "final_text": "done"}
+    mined = mine_traces([row])
+    assert mined["tools"]["read_file"] == {"n": 2, "fault_n": 0}
+    assert mined["tools"]["run_command"] == {"n": 1, "fault_n": 1}
+    assert mined["flaw_rows"] == [0]
+    assert "run_command x1 (1 calls faulted)" in format_trace_report(trace_report([row]))

@@ -18,7 +18,8 @@ import json
 from typing import Any, Sequence
 
 from ..generate.embeddings import resolve_embedder
-from ..score.grading import NO_FAULT, behavior_signature, trace_fault
+from ..score.grading import (NO_FAULT, _fault_from_result, behavior_signature,
+                             trace_fault)
 from ..generate.scenarios import build_dimensions
 
 # Observed fault chip -> the grid axis and value that reproduces it.
@@ -27,6 +28,7 @@ _FAULT_TO_AXIS = {
     "malformed": ("tool_condition", "malformed_result"),
     "stale": ("tool_condition", "stale_result"),
     "deny": ("tool_condition", "permission_denied"),
+    "error": ("tool_condition", "timeout"),
     "not_found": ("world_state", "entity missing"),
     "already_done": ("world_state", "entity already acted on"),
 }
@@ -50,14 +52,6 @@ def _binary_reward(row: dict) -> int | None:
         if number == 1.0:
             return 1
     return None
-
-
-def _row_tools(row: dict) -> list[str]:
-    names: list[str] = []
-    for step in row.get("steps") or []:
-        if isinstance(step, dict) and step.get("tool"):
-            names.append(str(step["tool"]))
-    return names
 
 
 def mine_traces(rows: Sequence[dict]) -> dict[str, Any]:
@@ -87,10 +81,13 @@ def mine_traces(rows: Sequence[dict]) -> dict[str, Any]:
         flawed = fault != NO_FAULT or reward == 0
         if flawed:
             flaw_rows.append(i)
-        for name in _row_tools(row):
-            slot = tools.setdefault(name, {"n": 0, "fault_n": 0})
+        for step in row.get("steps") or []:
+            if not isinstance(step, dict) or not step.get("tool"):
+                continue
+            slot = tools.setdefault(str(step["tool"]), {"n": 0, "fault_n": 0})
             slot["n"] += 1
-            if flawed:
+            result = step.get("result")
+            if result is not None and _fault_from_result(result):
                 slot["fault_n"] += 1
         prompt = str(row.get("prompt") or "").strip()
         if prompt and prompt not in seen_asks:
@@ -723,7 +720,7 @@ def format_trace_report(report: dict[str, Any]) -> str:
            "(these steer aiming)" if report.get("advisory_labels") else ""),
         "tools observed:     " + (", ".join(
             f"{name} x{slot['n']}"
-            + (f" ({slot['fault_n']} faulted)" if slot.get("fault_n") else "")
+            + (f" ({slot['fault_n']} calls faulted)" if slot.get("fault_n") else "")
             for name, slot in sorted(report["tools_observed"].items()))
             or "none"),
         "faults observed:    " + (", ".join(

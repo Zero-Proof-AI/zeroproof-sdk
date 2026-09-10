@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .generate.adapters import inspect, resolve, resolve_system_prompt
-from .generate.agents import (hosted_model, local_model, missing_hosted_key,
-                       parse_backend_spec, public_llm_error, touch_hosted,
-                       default_max_turns)
+from .generate.agents import (current_rollout, hosted_model, local_model,
+                       missing_hosted_key, parse_backend_spec,
+                       public_llm_error, touch_hosted, default_max_turns)
 from .generate.coverage import (NEW_SIGNATURE_FLOOR, SATURATION_COPIES,
                        build_coverage_summary, cell_key as _cell_key_from_row,
                        copies_remaining, coverage_point, space_saturated)
@@ -535,6 +535,9 @@ def simulate(agent: Any = None, *, spec: Any = None,
     result`` that answers every tool call for real, against their repo,
     database, or service. Without it the mock world answers, which fits
     record-shaped tools and not code. Scheduled faults still apply first.
+    ``zeroproof_simulations.generate.agents.current_rollout`` is a
+    thread-local set before each rollout with ``prompt``, ``rollout_index``
+    and ``seed``, so ``execute`` can tell which run it is answering.
 
     ``scaffold=`` is generation-only guidance appended to the system prompt
     of the MODEL-BACKED teacher during rollout (and to the scene writer).
@@ -1041,6 +1044,10 @@ def simulate(agent: Any = None, *, spec: Any = None,
         faults = scaled(
             generator.fault_plans.get(prompt) or fault_plans.get(prompt),
             prompt)
+        # the caller's execute= world reads this to know which rollout it answers
+        current_rollout.prompt = prompt
+        current_rollout.rollout_index = rollout
+        current_rollout.seed = meta.get("seed", seed)
         try:
             raw = runner(prompt)
         except Exception as exc:

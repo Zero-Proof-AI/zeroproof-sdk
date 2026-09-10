@@ -59,3 +59,23 @@ def test_local_model_routes_tool_calls_to_execute(monkeypatch):
     tool_steps = [s for s in out["steps"] if s.get("tool")]
     assert answered == ["lookup_order"]
     assert tool_steps[0]["result"] == {"status": "ok", "eta": "tomorrow"}
+
+
+def test_current_rollout_names_the_run_for_the_world():
+    from zeroproof_simulations.generate.agents import current_rollout
+    from tests.helpers import simulate_offline
+    seen = []
+
+    def agent(message):
+        seen.append((current_rollout.prompt == message,
+                     current_rollout.rollout_index, current_rollout.seed))
+        return {"steps": [], "final_text": "ok"}
+
+    prompts = ["Refund order ORD-14, it arrived broken.",
+               "Check on refund re_7 for order ORD-21."]
+    data = simulate_offline(agent, mode="rl", seeds=prompts, situations=2,
+                            rollouts_per_request=2, budget=4)
+    assert len(data.trajectories) == 4
+    assert seen and all(match for match, _, _ in seen)
+    assert {index for _, index, _ in seen} == {0, 1}
+    assert {s for _, _, s in seen} == {0}

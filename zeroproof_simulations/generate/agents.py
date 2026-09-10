@@ -24,6 +24,17 @@ DEFAULT_HOSTED = DEFAULT_AGENT
 _tls = threading.local()
 
 
+class _CurrentRollout(threading.local):
+    # identity of the rollout running on this thread, set by simulate()
+    # before each call so an execute= world knows which run it answers
+    prompt: str = ""
+    rollout_index: int | None = None
+    seed: int | None = None
+
+
+current_rollout = _CurrentRollout()
+
+
 def parse_backend_spec(spec: str) -> tuple[str, str]:
     """Return (base_url, model) for ollama:/vllm:/openai: specs."""
     kind, _, rest = str(spec).partition(":")
@@ -995,6 +1006,7 @@ def _answer_tool_call(env: Any, execute: Callable | None, tool: str,
     database, their tools, whatever they are. Scheduled faults still
     apply first, so the row's ``faults`` stay truthful. Without it the
     mock world answers, which fits record-shaped tools and not code.
+    ``current_rollout`` (thread-local) names the rollout being answered.
     """
     if execute is None:
         return env.call(tool, arguments)
