@@ -939,12 +939,15 @@ class Run:
                 break
 
     def _settle_inflight(self) -> None:
-        """The run is over. Cancel rollouts that never started, wait up to
-        the stop grace for the ones running, keep what finishes while
-        there is room under the cap, and report whatever is abandoned.
+        """The run is over. Cancel rollouts and writer waves that never
+        started, wait up to the stop grace for the ones running, keep
+        rollouts that finish while there is room under the cap, and
+        report whatever is abandoned.
 
         Without this a clock stop returned with worker threads still
-        calling the caller's agent and threw away every row they made.
+        calling the caller's agent and threw away every row they made,
+        and writer waves kept talking to the model after return.
+        Abandoned work holds its thread until its own timeout fires.
         """
         c = self.c
         data = self.data
@@ -952,8 +955,18 @@ class Run:
             if fut.cancel():
                 self.inflight.pop(fut, None)
                 self.inflight_started.pop(fut, None)
-        if self.inflight and c.stop_grace_s > 0:
-            concurrent.futures.wait(list(self.inflight), timeout=c.stop_grace_s)
+        # Writer waves too: a wave still talking to the model after
+        # return is work the caller did not ask for and cannot see.
+        self.scenario_futs[:] = [f for f in self.scenario_futs if not f.cancel()]
+        pending = list(self.inflight) + list(self.scenario_futs)
+        if pending and c.stop_grace_s > 0:
+            concurrent.futures.wait(pending, timeout=c.stop_grace_s)
+        still_writing = [f for f in self.scenario_futs if not f.done()]
+        if still_writing:
+            data.search["abandoned_writer_waves"] = len(still_writing)
+            if "writer_waves_abandoned" not in data.degraded:
+                data.degraded.append("writer_waves_abandoned")
+        self.scenario_futs[:] = []
         for fut in [f for f in list(self.inflight) if f.done()]:
             job = self.inflight.pop(fut)
             self.inflight_started.pop(fut, None)

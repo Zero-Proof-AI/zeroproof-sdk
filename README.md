@@ -174,7 +174,7 @@ hosted GPU with warm replicas and burst under load.
 | `advanced` key | Default | |
 |---|---|---|
 | `concurrency` | `32` | Parallel rollouts |
-| `stop_grace` | `5` | Seconds to wait for running rollouts after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` |
+| `stop_grace` | `5` | Seconds to wait for running rollouts and writer waves after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` / `writer_waves_abandoned` |
 | `embedder` | `"hash"` | Prompt selection |
 | `seed` | `0` | Reproducible draws. Bit-for-bit at `concurrency: 1` or with `reproducible=True`; otherwise which rows land before the cap depends on thread timing |
 | `avg_turns` | `4` | Target conversation length |

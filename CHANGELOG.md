@@ -3,6 +3,13 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- A stop also settles writer waves: queued waves are cancelled, running
+  ones get the same `stop_grace`, and any still running are reported as
+  `writer_waves_abandoned`. Found by an end-to-end run of the 0.5 wheel
+  against hosted Qwen, where four writer threads outlived `simulate()`.
+
 ## 0.05 (2026-09-10)
 
 - `simulate(reproducible=True)`: round-synchronous scheduling. Same seed,
