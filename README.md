@@ -2,10 +2,12 @@
 
 The ZeroProof Python SDK. One package, two importable modules:
 
-- `zeroproof`: the platform client — trace ingestion, verification API.
+- `zeroproof`: the platform client. OTLP trace ingest and trace-dataset listing against the token gate.
 - `zeroproof_simulations`: post-training data for an agent. Give it the agent's traces, or its tools and system prompt; it simulates the situations, the people, and the world, plays the agent through multi-turn tool-calling conversations, and returns rows for your grader.
 
 This repo absorbed the `zeroproof-simulations` package; `zeroproof-simulations` on PyPI is deprecated in favor of `zeroproof`.
+
+Releases of `zeroproof` before 0.3 were an unrelated encrypted agent-to-agent messaging client. That code is gone from the next release; pin `zeroproof<0.3` if you still depend on it.
 
 Two ways in, one engine. Give it the agent's tools and system prompt and it samples situations across everything that agent can be asked. Give it graded traces as well and it aims the budget at the situations that fail in production, so new rows land where the agent is weak and carry both the failure and the fixed version. Every row is a full conversation: user turns, agent turns, tool calls, tool results, scheduled faults. Rows come back ungraded; your grader decides what good means. Default `explore`: one unique situation per row. How it thinks: [docs/simulations.md](docs/simulations.md).
 

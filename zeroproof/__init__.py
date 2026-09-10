@@ -1,28 +1,13 @@
 """
-ZeroProof Python SDK
+ZeroProof platform client: OTLP trace ingest for the token gate.
 
-Python SDK for the ZeroProof AI verification API.
-Provides encrypted messaging services.
+    >>> import zeroproof
+    >>> zeroproof.send_traces(otlp_batch, api_key="zp_...")
+    >>> zeroproof.list_traces("zp_...")["traces"]
 
-Example:
-    >>> from zeroproof import ZeroProof
-    >>> client = ZeroProof(api_key="zkp_your_key")
-    >>> result = client.send_encrypted(
-    ...     to_agent_id="agent_456",
-    ...     message="Hello, world!",
-    ...     ttl_minutes=60
-    ... )
+Agent simulations live next door in ``zeroproof_simulations``.
 """
 
-from .client import ZeroProof
-from .exceptions import (
-    AuthenticationError,
-    ExpiredError,
-    NotFoundError,
-    RateLimitError,
-    ValidationError,
-    ZeroProofError,
-)
 from .ingest import (
     ZeroProofIngestError,
     ingest_traces,
@@ -30,43 +15,18 @@ from .ingest import (
     otel_env,
     send_traces,
 )
-from .models import (
-    ApprovalWorkflow,
-    DecryptedMessage,
-    EncryptedMessage,
-    ReputationReport,
-    ReputationScore,
-    WorkflowApproval,
-    WorkflowStatus,
-)
 
 try:
     from importlib.metadata import PackageNotFoundError, version as _dist_version
     __version__ = _dist_version("zeroproof")
 except PackageNotFoundError:  # running from a source tree that was never installed
     __version__ = "0.0.0"
+
 __all__ = [
-    # Main client
-    "ZeroProof",
-    # Models
-    "EncryptedMessage",
-    "DecryptedMessage",
-    "ReputationReport",
-    "ReputationScore",
-    "ApprovalWorkflow",
-    "WorkflowApproval",
-    "WorkflowStatus",
-    # Trace ingest
     "ingest_traces",
     "list_traces",
     "otel_env",
     "send_traces",
     "ZeroProofIngestError",
-    # Exceptions
-    "ZeroProofError",
-    "AuthenticationError",
-    "ValidationError",
-    "NotFoundError",
-    "ExpiredError",
-    "RateLimitError",
+    "__version__",
 ]
