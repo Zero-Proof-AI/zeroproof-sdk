@@ -455,11 +455,15 @@ def test_unique_dupes_do_not_stop_as_generator_exhausted():
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=200, seed=0,
         unique=True, grade=False, concurrency=8, simulator=writer,
-        until="budget_only", time_budget=1.2,
+        until="budget_only", time_budget=3.0,
         advanced={"mutate_failures": False, "scenario_concurrency": 4})
     assert data.stopped_because == "time_budget"
     assert data.stopped_because != "generator_exhausted"
-    assert calls["n"] >= 8
+    # The writer went dry after three unique rounds. The claim under test is
+    # that the loop kept asking it rather than declaring the generator
+    # exhausted, so any call past the third proves it. A fixed count would
+    # depend on how many writer rounds fit in the wall-clock budget.
+    assert calls["n"] > 3
     prompts = [t["prompt"] for t in data.trajectories]
     assert prompts
     assert len(prompts) == len(set(prompts))
