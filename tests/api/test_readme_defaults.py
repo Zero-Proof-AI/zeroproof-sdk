@@ -29,6 +29,7 @@ FIELDS = {
     "grade": lambda c: c.grade,
     "llm_grade": lambda c: c.llm_grade,
     "stop_grace": lambda c: c.stop_grace_s,
+    "reproducible": lambda c: c.reproducible,
 }
 
 

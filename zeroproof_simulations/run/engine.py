@@ -927,6 +927,13 @@ class Run:
             else:
                 self.empty_streak = 0
                 self._submit(batch[:remaining])
+                if c.reproducible and self.inflight:
+                    # Round-synchronous: the batch finishes (or hits the
+                    # hung-slot limit) before anything is collected, so
+                    # results are consumed in submission order and each
+                    # round's selection seed sees the same state.
+                    concurrent.futures.wait(list(self.inflight),
+                                            timeout=c.hung_slot_s)
             results, jobs_for = self._collect()
             if self._update_search(results, jobs_for, info, selected):
                 break
@@ -982,6 +989,10 @@ class Run:
         c = self.c
         data = self.data
         gen = self.generator
+        if c.reproducible and self.scenario_futs:
+            # Every launched writer wave lands before selection, in launch
+            # order, so the pool does not depend on which wave returned first.
+            concurrent.futures.wait(list(self.scenario_futs))
         self._ingest_finished_writers()
         data.scenario_generation_seconds = time.monotonic() - self.generation_started
         unused = self._available()

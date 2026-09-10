@@ -52,3 +52,39 @@ def test_serial_seeded_run_is_identical_across_processes():
     second = _run("2")
     assert first["rows"], "the offline run produced no rows"
     assert first == second
+
+
+def test_parallel_run_is_identical_with_reproducible_flag():
+    """Eight workers, jittered agent latency, two runs: same rows."""
+    import random
+    import re
+    import zeroproof_simulations as zps
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+
+    timing = re.compile(r"(seconds|elapsed|rate|_s$|_at$|per_second)")
+
+    def scrub(o):
+        if isinstance(o, dict):
+            return {k: scrub(v) for k, v in o.items() if not timing.search(str(k))}
+        if isinstance(o, (list, tuple)):
+            return [scrub(x) for x in o]
+        return o
+
+    def run(jitter_seed: int):
+        rng = random.Random(jitter_seed)
+
+        def jittery(message: str) -> dict:
+            import time
+            time.sleep(rng.random() * 0.03)
+            return scripted_agent(message)
+
+        d = zps.simulate(jittery, tools=TOOLS, policy=POLICY, budget=40, seed=0,
+                         concurrency=8, simulator=False, grade=False,
+                         time_budget=None, reproducible=True,
+                         advanced={"per_round": 40, "mutate_failures": False})
+        return scrub({"rows": d.trajectories, "search": d.search,
+                      "coverage": d.coverage, "stopped": d.stopped_because})
+
+    first, second = run(11), run(97)
+    assert len(first["rows"]) == 40
+    assert first == second

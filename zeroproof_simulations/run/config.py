@@ -209,6 +209,9 @@ class RunConfig:
     n_req: int
     unique_cards: bool
     k_immediate: bool
+    # Round-synchronous scheduling: same seed, same concurrency, same
+    # agent gives the same rows. Costs throughput under uneven latency.
+    reproducible: bool
     # budget and stop rule
     budget: int | None
     cap: int
@@ -266,6 +269,7 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
                        requests_per_situation: int | None = None,
                        rollouts_per_request: int | None = None,
                        unique_situations: bool = False,
+                       reproducible: bool = False,
                        grade: bool = False, llm_grade: bool = False,
                        traces: Any = None, grader: Any = None,
                        strategy: str = "auto", seeds: list | None = None,
@@ -435,6 +439,7 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
         n_situations_target=n_situations_target,
         topo=topo, repeat_count=repeat_count, n_req=n_req,
         unique_cards=unique_cards, k_immediate=k_immediate,
+        reproducible=bool(reproducible),
         budget=budget, cap=int(cap), time_budget=time_budget,
         until_key=until_key, until_sat=until_sat,
         strategy=strategy, resolved_strategy=resolved_strategy,

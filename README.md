@@ -27,26 +27,39 @@ Stop when the row cap or the clock hits.
 ## How to use
 
 ```bash
-uv sync
+pip install zeroproof   # or: uv add zeroproof
+```
+
+Bring your own model. Any OpenAI-compatible chat endpoint that returns tool
+calls works; it writes the situations and plays the agent, so both run on
+your key:
+
+```bash
+export OPENAI_API_KEY=...
+export OPENAI_BASE_URL=...   # only for a non-OpenAI endpoint
+```
+
+```python
+import zeroproof_simulations as zps
+
+data = zps.simulate(agent="openai:gpt-4.1-mini", tools=my_tools,
+                    system_prompt=my_system_prompt, output="rollout.jsonl")
+```
+
+Or use ZeroProof-hosted Qwen, which is the default when no `agent=` is given.
+Ask us for a `VLLM_API_KEY`; the endpoint is shared and rate limited.
+
+```bash
 export VLLM_API_KEY=...
 ```
 
-ZeroProof hosts Qwen for simulation: it powers the default user writer and rollout agent.
-Ask us for a `VLLM_API_KEY` to try it. The endpoint is shared and rate limited.
-
-From another project:
-
-```bash
-pip install zeroproof   # or: uv add zeroproof
-```
+Working in this repo: `uv sync`, then `uv run pytest` after `uv sync --extra dev`.
 
 One runtime dependency (`requests`), Python 3.10+. Installing from PyPI rather than a
 path or a git URL matters if you build a Prime Intellect environment on this:
 the Environments Hub installs a pushed env with plain pip, so a `[tool.uv.sources]`
 git pin resolves locally and then fails on their runtime with a
 `ModuleNotFoundError`.
-
-`uv run pytest` after `uv sync --extra dev`.
 
 ```python
 import zeroproof_simulations as zps
@@ -64,6 +77,7 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `requests_per_situation` | from mode | Phrasings: ways to ask one situation. Alias `phrasings=` |
 | `rollouts_per_request` | from mode | Repeats: reruns of one phrasing. Alias `repeats=` |
 | `fault_rate` | `0.5` | Broken tools. `0` off |
+| `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off |
 | `grade` | `False` | Rows come back ungraded; grade after with `zps.grade(...)`, or pass `grader=` (your callable) or `grade=True` (conduct score) |
 | `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |
 | `output` | | JSONL path |
@@ -148,6 +162,7 @@ hosted GPU with warm replicas and burst under load.
 | `rollouts_per_request` | from mode | Repeats per phrasing (k). Alias `repeats=` |
 | `unique_situations` | on in `explore` | Unique situations only |
 | `mode` | `"explore"` | `explore`, `sft`, `rl`, `adaptive` |
+| `reproducible` | `False` | Round-synchronous scheduling; see the knob table |
 | `budget` | `1000` | Row cap |
 | `time_budget` | `None` | Seconds. Off by default; `None` or `0` disables |
 | `until` | `"compute"` | `"saturation"` also stops when coverage plateaus |
@@ -161,7 +176,7 @@ hosted GPU with warm replicas and burst under load.
 | `concurrency` | `32` | Parallel rollouts |
 | `stop_grace` | `5` | Seconds to wait for running rollouts after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` |
 | `embedder` | `"hash"` | Prompt selection |
-| `seed` | `0` | Reproducible draws. Bit-for-bit only at `concurrency: 1`; with parallel rollouts, which rows land before the cap depends on thread timing |
+| `seed` | `0` | Reproducible draws. Bit-for-bit at `concurrency: 1` or with `reproducible=True`; otherwise which rows land before the cap depends on thread timing |
 | `avg_turns` | `4` | Target conversation length |
 
 Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollouts_per_request`; `unique=` → `unique_situations`; `policy=` → `system_prompt`; `risk=` → `fault_rate`.

@@ -16,7 +16,7 @@ def test_default_budget_is_500():
     public = [
         "agent", "spec", "tools", "system_prompt", "budget", "time_budget", "until",
         "mode", "situations", "requests_per_situation", "rollouts_per_request",
-        "unique_situations", "grade", "llm_grade", "traces", "grader",
+        "unique_situations", "reproducible", "grade", "llm_grade", "traces", "grader",
         "strategy", "seeds", "scaffold", "execute", "output",
         "advanced",
     ]

@@ -38,6 +38,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
              requests_per_situation: int | None = None,
              rollouts_per_request: int | None = None,
              unique_situations: bool = False,
+             reproducible: bool = False,
              grade: bool = False, llm_grade: bool = False,
              traces: Any = None,
              grader: Any = None,
@@ -90,8 +91,14 @@ def simulate(agent: Any = None, *, spec: Any = None,
     ``advanced["completions_per_request"]``. Seed openers are
     ``advanced["seed_prompts"]``.
 
-    A seeded run is reproducible bit-for-bit at ``concurrency: 1``. With
-    parallel rollouts, which rows land before the cap depends on thread
+    A seeded run is reproducible bit-for-bit at ``concurrency: 1``.
+    ``reproducible=True`` makes it so at any concurrency: each batch of
+    rollouts finishes before the next is chosen, so results are consumed
+    in submission order and every round sees the same state. Same seed,
+    same concurrency, same agent gives the same rows; a slow rollout
+    holds its batch, so uneven latency costs throughput. It needs the
+    clock off, since a clock stop lands wherever the run happens to be.
+    Without the flag, which rows land before the cap depends on thread
     timing.
     """
     cfg = resolve_run_config(
@@ -99,7 +106,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
         budget=budget, time_budget=time_budget, until=until, mode=mode,
         situations=situations, requests_per_situation=requests_per_situation,
         rollouts_per_request=rollouts_per_request,
-        unique_situations=unique_situations, grade=grade,
+        unique_situations=unique_situations, reproducible=reproducible,
+        grade=grade,
         llm_grade=llm_grade, traces=traces, grader=grader,
         strategy=strategy, seeds=seeds, scaffold=scaffold, execute=execute,
         output=output, advanced=advanced, passed=passed)

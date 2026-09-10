@@ -22,10 +22,11 @@ release tuples for this reason, so write either spelling.
 
 ## Cutting a release
 
-1. Bump `version` in `pyproject.toml` by one step.
-2. Open a PR. The `version scheme` job tells you up front whether the gate will
+1. Move the `Unreleased` section of `CHANGELOG.md` under the new version and date.
+2. Bump `version` in `pyproject.toml` by one step.
+3. Open a PR. The `version scheme` job tells you up front whether the gate will
    accept it after merge.
-3. Merge to `main`.
+4. Merge to `main`.
 
 On merge: the gate re-checks the version, tests run on 3.10 and 3.13, `uv build`
 produces both distributions, `twine check` validates them, `uv publish` uploads,
