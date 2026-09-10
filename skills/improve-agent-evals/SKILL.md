@@ -24,7 +24,9 @@ does not match the installed version, trust the installed source over this
 doc.
 
 Read `references/workflow.md` before generating anything. It holds the full
-commands, code, and templates this file only summarizes.
+commands, code, and templates this file only summarizes. For coding agents or
+other tools that touch real state, also read `references/world.md` before a
+rollout; it defines what must answer the tool calls.
 
 # Two lanes
 
@@ -67,6 +69,9 @@ in the report, and treat lane 2 as the primary output.
   shape `zps.load_traces()` / `zps.rows_from_otel()` accepts.
 - **Existing evals**: wherever the repo keeps them (pytest fixtures, a
   `evals/`/`tests/` JSONL or YAML set, a promptfoo config). Read-only.
+- **Execution world**: for coding agents, the customer's existing disposable
+  checkout or test harness, adapted to `execute(tool_name, arguments)`. Never
+  use the SDK's invented file world to judge whether code is correct.
 
 # Commands
 
@@ -156,4 +161,10 @@ and by situation axis) and review instructions. Full templates:
 - **No secrets in outputs.** Never write `OPENAI_API_KEY`, `VLLM_API_KEY`,
   `ZEROPROOF_API_KEY`/`ZEROPROOF_DELEGATED_CREDENTIAL`, or any `zp_*` key
   into the generated JSONL, the reports, or logs.
-
+- **Coding agents require a real world.** Confirm that the installed
+  `zps.simulate` accepts `execute=`, then connect it to an isolated checkout
+  whose real reads, writes, commands, and tests answer the calls. If no safe
+  execution harness exists, stop and report that prerequisite instead of
+  generating coding evals against invented files.
+- **Generated rows are candidates, not ground truth.** Review every failing
+  row and at least 20 passing rows before adding anything to an eval suite.
