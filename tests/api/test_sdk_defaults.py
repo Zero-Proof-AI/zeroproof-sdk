@@ -416,7 +416,7 @@ def test_unique_enables_distinct_model_cards(monkeypatch):
         writer.model_produced = True
         return writer
 
-    monkeypatch.setattr("zeroproof_simulations.simulation.make_default_generator", fake_generator)
+    monkeypatch.setattr("zeroproof_simulations.run.engine.make_default_generator", fake_generator)
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
         unique=True, grade=False, concurrency=2, until="budget_only",

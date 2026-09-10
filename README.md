@@ -202,7 +202,8 @@ Internals are grouped by stage and may move between releases.
 | `score/` | conduct checks, judges, quality ranking, selection for SFT and RL |
 | `ingest/` | trace loading, OpenTelemetry rows, platform push and pull |
 | `world/` | the mock tool environment |
-| `simulation.py`, `data.py`, `export.py` | the run loop, its result object, and training export |
+| `run/` | the engine behind `simulate()`: knob resolution (`config.py`), spec loading (`spec.py`), row helpers (`rows.py`), and the scheduler itself (`engine.py`: inputs, build, loop, finish) |
+| `simulation.py`, `data.py`, `export.py` | the `simulate()` entry point, its result object, and training export |
 
 ## License
 

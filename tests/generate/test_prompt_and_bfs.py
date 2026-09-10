@@ -1185,7 +1185,7 @@ def test_hosted_agent_gets_spec_policy_unchanged(monkeypatch):
         seen["system"] = system
         return lambda m: {"steps": [], "final_text": "ok"}
 
-    monkeypatch.setattr("zeroproof_simulations.simulation.hosted_model", fake_hosted)
+    monkeypatch.setattr("zeroproof_simulations.run.engine.hosted_model", fake_hosted)
     zps.simulate(
         spec=str(GITHUB_SPEC), budget=2, seed=0, grade=False, simulator=False,
         concurrency=2, advanced={"per_round": 4, "mutate_failures": False})
@@ -1395,7 +1395,7 @@ def test_simulate_writes_scene_brief_once(monkeypatch):
         return {"content": json.dumps([
             {"region_id": None, "message": "where's my order ORD-1"}])}
 
-    monkeypatch.setattr("zeroproof_simulations.simulation.write_scene_brief", fake_brief)
+    monkeypatch.setattr("zeroproof_simulations.run.engine.write_scene_brief", fake_brief)
     monkeypatch.setattr("zeroproof_simulations.generate.generator.complete", fake_complete)
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
@@ -1415,7 +1415,7 @@ def test_simulator_false_skips_scene_brief(monkeypatch):
         calls["n"] += 1
         return "should not run"
 
-    monkeypatch.setattr("zeroproof_simulations.simulation.write_scene_brief", fake_brief)
+    monkeypatch.setattr("zeroproof_simulations.run.engine.write_scene_brief", fake_brief)
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=6, seed=0,
         grade=False, concurrency=4, simulator=False,

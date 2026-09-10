@@ -80,7 +80,7 @@ def _capture_hosted(seen):
 
 def test_simulate_seeds_runner_shapes_from_traces(monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr("zeroproof_simulations.simulation.hosted_model",
+    monkeypatch.setattr("zeroproof_simulations.run.engine.hosted_model",
                         _capture_hosted(seen))
     data = zps.simulate(
         None, tools=TOOLS, policy=POLICY, traces=TRACES, budget=4, seed=0,
@@ -95,7 +95,7 @@ def test_simulate_seeds_runner_shapes_from_traces(monkeypatch):
 
 def test_no_trace_run_gets_no_shapes_and_no_report(monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr("zeroproof_simulations.simulation.hosted_model",
+    monkeypatch.setattr("zeroproof_simulations.run.engine.hosted_model",
                         _capture_hosted(seen))
     data = zps.simulate(
         None, tools=TOOLS, policy=POLICY, budget=4, seed=0,

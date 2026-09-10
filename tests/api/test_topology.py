@@ -448,7 +448,7 @@ def test_avg_turns_max_turns_concurrency_temperature_backend(monkeypatch):
 
         return agent
 
-    monkeypatch.setattr("zeroproof_simulations.simulation.local_model", fake_local)
+    monkeypatch.setattr("zeroproof_simulations.run.engine.local_model", fake_local)
     zps.simulate(
         tools=TOOLS, policy=POLICY, backend="vllm:fake@http://127.0.0.1:9",
         max_turns=6, avg_turns=2, temperature=0.2, budget=3, repeats=1,

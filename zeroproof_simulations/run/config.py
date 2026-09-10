@@ -1,0 +1,450 @@
+"""Knob resolution for ``simulate()``.
+
+Every public parameter, silent alias and ``advanced`` key is read here,
+validated here, and lands on one :class:`RunConfig`. The engine never
+touches ``**kwargs`` again; whatever is left in ``RunConfig.advanced``
+goes to the situation writer as keyword arguments.
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from ..generate.adapters import resolve_system_prompt
+from ..generate.diversity import adaptive_allocator
+from ..generate.scenarios import DEFAULT_FAULT_RATE
+
+# Rows a saturation-bounded run may produce before the loop gives up.
+SATURATION_CAP = 50_000
+# Kill a hung Qwen slot after this wait. Omit the row. Not agent speech.
+# Ping-pong is several HTTP calls; 24s dropped healthy 2-person traces
+# and the replacement oversubscribed the GPU.
+HUNG_SLOT_S = 45.0
+
+_MODE_PRESETS = {
+    "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
+    "sft": {"n_req": 3, "k": 1, "repeat_policy": "adaptive"},
+    "rl": {"n_req": 1, "k": 8, "repeat_policy": "adaptive"},
+    "adaptive": {"n_req": 1, "k": 1, "repeat_policy": "adaptive"},
+}
+
+_ALIAS_NAMES = {
+    "unique", "repeats", "rollouts_per_prompt", "n", "phrasings",
+    "repeat_policy", "policy",
+}
+_MOVED_NAMES = {
+    "concurrency", "dimensions", "simulator", "backend", "fault_rate", "risk",
+    "texture", "max_turns", "avg_turns", "min_user_turns", "temperature", "seed", "grader",
+    "llm_spec", "embedder", "seed_prompts", "extra_situations",
+    "prefer_success",
+    # steering_weight is an advanced knob, not a named parameter.
+    "steering_weight",
+    # conversation topology: who opens. "user" (default), "agent",
+    # "auto" (share observed in traces), or a 0..1 rate.
+    "opening",
+}
+
+
+def _parse_situations_arg(situations: Any, extra_situations: list | None
+                          ) -> tuple[int | None, list[str]]:
+    """Public ``situations=`` is N (int). Seed openers come from advanced."""
+    seeds: list[str] = []
+    for item in extra_situations or []:
+        text = str(item or "").strip()
+        if text:
+            seeds.append(text)
+    if situations is None:
+        return None, seeds
+    if isinstance(situations, bool) or not isinstance(situations, int):
+        raise ValueError(
+            "situations= is N, an int. Pass seed openers in advanced['seed_prompts']")
+    return max(1, int(situations)), seeds
+
+
+def _merge_advanced(advanced: dict | None, passed: dict) -> tuple[dict, dict]:
+    """Split silent aliases from advanced knobs. Unknown names error."""
+    cfg = dict(advanced or {})
+    aliases: dict[str, Any] = {}
+    for key, val in passed.items():
+        if key in _ALIAS_NAMES:
+            aliases[key] = val
+        elif key in _MOVED_NAMES:
+            cfg[key] = val
+        else:
+            raise TypeError(
+                f"simulate() got unexpected keyword argument {key!r}")
+    return cfg, aliases
+
+
+def writer_spec_for(agent: Any, simulator: Any) -> Any:
+    """The situation writer's backend when none was named.
+
+    A string agent spec (``openai:<model>``, ``vllm:<model>@<url>``) is a
+    bring-your-own model; the writer runs on it too, so no ZeroProof key
+    is involved. ``ZEROPROOF_SURROGATE`` and an explicit ``simulator``
+    still win.
+    """
+    if simulator is not None or os.environ.get("ZEROPROOF_SURROGATE"):
+        return simulator
+    if (isinstance(agent, str) and ":" in agent
+            and not agent.startswith(("http://", "https://"))):
+        return agent
+    return simulator
+
+
+def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = None,
+                     unique: bool = False, unique_situations: bool = False,
+                     requests_per_situation: int | None = None,
+                     n: int | None = None, phrasings: int | None = None,
+                     rollouts_per_request: int | None = None,
+                     repeats: int | None = None,
+                     rollouts_per_prompt: int | None = None) -> dict[str, Any]:
+    """Map public knobs. Phrasings (n) are wordings per situation; repeats (k) are reruns per phrasing."""
+    k_vals = [int(x) for x in (rollouts_per_request, repeats, rollouts_per_prompt)
+              if x is not None]
+    if len(set(k_vals)) > 1:
+        raise ValueError("pass rollouts_per_request= or repeats=, not both")
+    n_vals = [int(x) for x in (requests_per_situation, n, phrasings)
+              if x is not None]
+    if len(set(n_vals)) > 1:
+        raise ValueError("pass requests_per_situation=, phrasings=, or n=, not both")
+    k_explicit = bool(k_vals)
+    n_explicit = bool(n_vals)
+    new_cards = bool(unique_situations or unique)
+    mode_name = str(mode or "").strip().lower() or None
+    policy_name = str(repeat_policy or "").strip().lower() or None
+    if policy_name in {"unique"}:
+        policy_name = "none"
+        new_cards = True
+    if mode_name in _MODE_PRESETS and policy_name is None:
+        policy_name = _MODE_PRESETS[mode_name]["repeat_policy"]
+    if policy_name == "none":
+        mode_name = mode_name or "explore"
+        new_cards = True
+    elif mode_name is None and policy_name == "adaptive":
+        mode_name = "adaptive"
+    elif mode_name is None:
+        mode_name = "explore"
+        policy_name = "none"
+        new_cards = True
+    if mode_name not in _MODE_PRESETS:
+        raise ValueError(
+            "mode= must be explore, sft, rl, or adaptive")
+    preset = _MODE_PRESETS[mode_name]
+    if policy_name is None:
+        policy_name = preset["repeat_policy"]
+    n_req = int(preset["n_req"])
+    k = int(preset["k"])
+    if n_explicit:
+        n_req = max(1, n_vals[0])
+    if k_explicit:
+        k = max(1, k_vals[0])
+    if new_cards:
+        if not n_explicit:
+            n_req = 1
+        if not k_explicit:
+            k = 1
+        if policy_name == "none":
+            policy_name = "none"
+        elif n_req == 1:
+            policy_name = policy_name or "adaptive"
+    return {
+        "mode": mode_name,
+        "repeat_policy": policy_name,
+        "n_req": n_req,
+        "k": k,
+        "k_explicit": k_explicit,
+        "n_explicit": n_explicit,
+        "unique_situations": new_cards,
+    }
+
+
+def _model_version_tag(agent: Any, advanced: dict) -> str:
+    """Which weights produced each row.
+
+    Rounds of the continual loop are indistinguishable without it (base
+    and every adapter can share a model name). ``advanced["model_version"]``
+    overrides; the resolved backend model is the default; callable agents
+    record their name.
+    """
+    tag = str(advanced.pop("model_version", "") or "").strip()
+    if tag:
+        return tag
+    if agent is not None and callable(agent) and not isinstance(agent, str):
+        return getattr(agent, "__name__", "callable-agent")
+    try:
+        from ..generate.agents import parse_backend_spec, default_simulator_spec
+        spec = agent if isinstance(agent, str) else default_simulator_spec()
+        return parse_backend_spec(spec)[1]
+    except Exception:
+        return "unknown"
+
+
+@dataclass
+class RunConfig:
+    """Everything ``simulate()`` was asked for, resolved and validated."""
+
+    # what to simulate
+    agent: Any
+    spec: Any
+    tools: list[dict] | None
+    system_prompt: str
+    scaffold_text: str
+    traces: Any
+    execute: Callable | None
+    # seeds= as given (amplification only fires when the caller passed it)
+    # and the full opener list: seeds + advanced seed_prompts + extra_situations
+    seeds: list | None
+    seed_prompts: list[str]
+    n_situations_target: int | None
+    # topology
+    topo: dict
+    repeat_count: int
+    n_req: int
+    unique_cards: bool
+    k_immediate: bool
+    # budget and stop rule
+    budget: int | None
+    cap: int
+    time_budget: float | None
+    until_key: str
+    until_sat: bool
+    # coverage stance
+    strategy: str
+    resolved_strategy: str
+    steering_weight: float | None
+    opening_req: Any
+    targeted_regions: list[str]
+    # output and grading
+    output: str | None
+    out_path: Path | None
+    grade: bool
+    grader: Any
+    llm_grade: bool
+    llm_spec: Any
+    # engine knobs
+    concurrency: int
+    dimensions: Any
+    simulator: Any
+    backend: Any
+    fault_rate: float
+    max_turns: Any
+    avg_turns: float
+    min_user_turns: int
+    temperature: Any
+    seed: int
+    embedder: Any
+    mutate_failures: bool
+    pool_size: int
+    scenario_concurrency: int
+    writer_flight: int
+    scenarios_per_request: int
+    distinct_cards: bool
+    completions_per_request: int
+    extra_cards: int
+    hung_slot_s: float
+    rollout_timeout: float
+    model_version_tag: str
+    # what is left goes to the situation writer as keyword arguments
+    advanced: dict = field(default_factory=dict)
+
+
+def resolve_run_config(agent: Any = None, *, spec: Any = None,
+                       tools: list[dict] | None = None,
+                       system_prompt: str | None = None,
+                       budget: int | None = 1000,
+                       time_budget: float | None = None,
+                       until: str = "compute", mode: str = "explore",
+                       situations: int | None = None,
+                       requests_per_situation: int | None = None,
+                       rollouts_per_request: int | None = None,
+                       unique_situations: bool = False,
+                       grade: bool = False, llm_grade: bool = False,
+                       traces: Any = None, grader: Any = None,
+                       strategy: str = "auto", seeds: list | None = None,
+                       scaffold: str | None = None,
+                       execute: Callable | None = None,
+                       output: str | None = None,
+                       advanced: dict | None = None,
+                       passed: dict | None = None) -> RunConfig:
+    """Turn the ``simulate()`` call into a :class:`RunConfig`.
+
+    Validation errors surface here, before any model or file is touched.
+    """
+    cfg, aliases = _merge_advanced(advanced, dict(passed or {}))
+    policy = resolve_system_prompt(system_prompt, aliases.get("policy"))
+    scaffold_text = str(scaffold or "").strip()
+    unique_flag = bool(unique_situations or aliases.get("unique", False))
+    repeats = aliases.get("repeats")
+    rollouts_per_prompt = aliases.get("rollouts_per_prompt")
+    k_arg = rollouts_per_request
+    if k_arg == 1 and (repeats is not None or rollouts_per_prompt is not None):
+        # A leftover default 1 plus an alias means the alias wins.
+        k_arg = None
+    topo = resolve_topology(
+        mode=mode, repeat_policy=aliases.get("repeat_policy"),
+        unique=unique_flag, unique_situations=unique_flag,
+        requests_per_situation=requests_per_situation, n=aliases.get("n"),
+        phrasings=aliases.get("phrasings"),
+        rollouts_per_request=k_arg, repeats=repeats,
+        rollouts_per_prompt=rollouts_per_prompt)
+
+    seed_prompts: list[str] = []
+    for item in list(seeds or []) + list(cfg.pop("seed_prompts", None) or []):
+        text = str(item or "").strip()
+        if text:
+            seed_prompts.append(text)
+    for item in (cfg.pop("extra_situations", None) or []):
+        text = str(item or "").strip()
+        if text:
+            seed_prompts.append(text)
+    n_situations_target, seed_prompts = _parse_situations_arg(
+        situations, seed_prompts)
+
+    concurrency = int(cfg.pop("concurrency", 32))
+    dimensions = cfg.pop("dimensions", None)
+    simulator = writer_spec_for(agent, cfg.pop("simulator", None))
+    backend = cfg.pop("backend", None)
+    explicit_fault = "fault_rate" in cfg or "risk" in cfg
+    fault_rate = float(cfg.pop("fault_rate", DEFAULT_FAULT_RATE))
+    risk = cfg.pop("risk", None)
+    if risk is not None:
+        fault_rate = float(risk)
+    elif str(topo["mode"]) == "rl" and not explicit_fault:
+        fault_rate = 0.8
+    texture = cfg.pop("texture", None)
+    max_turns = cfg.pop("max_turns", None)
+    avg_turns = float(cfg.pop("avg_turns", 4))
+    min_user_turns = max(1, int(cfg.pop("min_user_turns", 1)))
+    temperature = cfg.pop("temperature", None)
+    seed = int(cfg.pop("seed", 0))
+    # The named grader= parameter wins; advanced={"grader": ...} stays as
+    # the legacy spelling. Both route to one application path at the end.
+    grader = grader if grader is not None else cfg.pop("grader", None)
+    cfg.pop("grader", None)
+    llm_grade = bool(llm_grade or cfg.pop("llm_grade", False))
+    llm_spec = cfg.pop("llm_spec", None)
+    embedder = cfg.pop("embedder", "hash")
+
+    until_key = str(until or "compute").strip().lower()
+    if until_key in {"first", "saturation"}:
+        until_sat = True
+        until_key = "saturation"
+    elif until_key in {"compute", "budget_only", "budget", "time"}:
+        until_sat = False
+        until_key = "compute"
+    else:
+        raise ValueError(
+            "until= must be compute, saturation, first, or budget_only")
+    if time_budget is None or float(time_budget) <= 0:
+        time_budget = None
+    else:
+        time_budget = float(time_budget)
+
+    repeat_count = int(topo["k"])
+    n_req = int(topo["n_req"])
+    unique_cards = bool(topo["unique_situations"])
+    if topo["mode"] == "adaptive" and not unique_cards:
+        adapt = adaptive_allocator(time_budget, until_key)
+        if not topo["n_explicit"]:
+            n_req = int(adapt["n_req"])
+        if not topo["k_explicit"]:
+            repeat_count = int(adapt["k"])
+    # Adaptive defers extra k so verify can react to behavior.
+    k_immediate = bool(topo["k_explicit"] or topo["mode"] == "rl")
+
+    out_path = Path(output).expanduser() if output else None
+    if texture is not None:
+        cfg["texture_rate"] = float(texture)
+    mutate_failures = bool(cfg.pop("mutate_failures", True))
+    pool_size = int(cfg.pop("per_round", 80))
+    writer_raw = cfg.pop("scenario_concurrency", None)
+    # Writer flight is a scheduler internal. Topology (unique / explore)
+    # does not change it. Default 4; too many starves rollouts.
+    scenario_concurrency = 4 if writer_raw is None else max(1, int(writer_raw))
+    writer_flight = max(1, scenario_concurrency)
+    scenarios_per_request = max(1, int(cfg.pop("scenarios_per_request", 8)))
+    # A unique-situation run must walk the planned grid. Previously the
+    # public unique=True knob still left the model writer in weighted
+    # resampling mode unless callers also knew about this private switch.
+    distinct_cards = bool(cfg.pop("distinct_cards", unique_cards))
+    if "completions_per_request" in cfg:
+        completions_per_request = max(1, min(8, int(cfg["completions_per_request"])))
+    else:
+        completions_per_request = 1
+    cfg.pop("completions_per_request", None)
+    extra_cards = max(0, int(cfg.pop("extra_cards", 1)))
+    hung_slot_s = float(cfg.pop("hung_slot", HUNG_SLOT_S))
+    cfg.pop("scene_brief", None)
+    model_version_tag = _model_version_tag(agent, cfg)
+    # Popped unconditionally: on a non-trace run the key must not ride
+    # **advanced into the generator, where it is an unknown kwarg.
+    targeted_regions = [str(x) for x in (cfg.pop("targeted_regions", None) or [])]
+
+    # strategy= names the coverage stance explicitly; traces change the
+    # coverage distribution, not the space. auto resolves descriptively
+    # and records its reason; targeted requires an explicit user choice.
+    if strategy not in ("auto", "broad", "trace", "targeted"):
+        raise ValueError("strategy= must be auto, broad, trace, or targeted")
+    resolved_strategy = strategy
+    if strategy == "auto":
+        resolved_strategy = "trace" if traces is not None else "broad"
+    if resolved_strategy in ("trace", "targeted") and traces is None:
+        raise ValueError(f"strategy='{resolved_strategy}' needs traces=")
+    # steering_weight controls how much the trace-aimed distribution
+    # outweighs background coverage; accepted via steering_weight= or
+    # advanced=. Over a trace-focused grid, weight w sends each structured
+    # card draw to the front (trace-mined) half of the steered axes with
+    # probability w; rows drawn that way carry row["steering"] =
+    # {"origin": "targeted"}. None applies no bias; a number overrides it.
+    steering_weight = cfg.pop("steering_weight", None)
+    opening_req = cfg.pop("opening", None)
+    if opening_req is not None and opening_req not in ("user", "agent", "auto"):
+        try:
+            opening_req = float(opening_req)
+        except (TypeError, ValueError):
+            raise ValueError(
+                'opening= must be "user", "agent", "auto", or a rate in [0, 1]')
+        if not 0.0 <= opening_req <= 1.0:
+            raise ValueError("opening= rate must be in [0, 1]")
+    if steering_weight is not None:
+        try:
+            steering_weight = float(steering_weight)
+        except (TypeError, ValueError):
+            raise ValueError("steering_weight= must be a number in [0, 1]")
+        if not 0.0 <= steering_weight <= 1.0:
+            raise ValueError("steering_weight= must be a number in [0, 1]")
+        if traces is None:
+            raise ValueError("steering_weight= needs traces=")
+    # Slow customer backends need more than the tuned 60s per completion.
+    rollout_timeout = float(cfg.pop("timeout", 60) or 60)
+
+    cap = budget if budget is not None else SATURATION_CAP
+    return RunConfig(
+        agent=agent, spec=spec, tools=tools, system_prompt=policy,
+        scaffold_text=scaffold_text, traces=traces, execute=execute,
+        seeds=seeds, seed_prompts=seed_prompts,
+        n_situations_target=n_situations_target,
+        topo=topo, repeat_count=repeat_count, n_req=n_req,
+        unique_cards=unique_cards, k_immediate=k_immediate,
+        budget=budget, cap=int(cap), time_budget=time_budget,
+        until_key=until_key, until_sat=until_sat,
+        strategy=strategy, resolved_strategy=resolved_strategy,
+        steering_weight=steering_weight, opening_req=opening_req,
+        targeted_regions=targeted_regions,
+        output=output, out_path=out_path, grade=grade, grader=grader,
+        llm_grade=llm_grade, llm_spec=llm_spec,
+        concurrency=concurrency, dimensions=dimensions, simulator=simulator,
+        backend=backend, fault_rate=fault_rate, max_turns=max_turns,
+        avg_turns=avg_turns, min_user_turns=min_user_turns,
+        temperature=temperature, seed=seed, embedder=embedder,
+        mutate_failures=mutate_failures, pool_size=pool_size,
+        scenario_concurrency=scenario_concurrency, writer_flight=writer_flight,
+        scenarios_per_request=scenarios_per_request,
+        distinct_cards=distinct_cards,
+        completions_per_request=completions_per_request,
+        extra_cards=extra_cards, hung_slot_s=hung_slot_s,
+        rollout_timeout=rollout_timeout, model_version_tag=model_version_tag,
+        advanced=cfg)
