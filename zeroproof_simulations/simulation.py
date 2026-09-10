@@ -1057,7 +1057,8 @@ def simulate(agent: Any = None, *, spec: Any = None,
             assignment = _realized_dims(raw.get("steps") or [],
                                         _clean_faults(faults))
         t = {
-            "scenario_id": meta.get("region_id") or f"probe_{hash(prompt) & 0xffffff:x}",
+            "scenario_id": meta.get("region_id") or "probe_" + hashlib.sha256(
+                str(prompt).encode()).hexdigest()[:6],
             "scenario_dimensions": assignment,
             "arm": meta.get("arm") or "unattributed",
             "prompt": prompt,
@@ -1210,17 +1211,6 @@ def simulate(agent: Any = None, *, spec: Any = None,
         if rid:
             used_scenario_ids.add(rid)
         allocator_counts[action] = allocator_counts.get(action, 0) + k_now
-
-    def _mark_scheduled(prompt: str, meta: dict) -> None:
-        used.add(prompt)
-        sk = _situation_key_from_meta(meta, prompt)
-        if sk:
-            used_situations.add(sk)
-            if prompt not in situation_prompts.get(sk, []):
-                situation_prompts.setdefault(sk, []).append(prompt)
-        rid = str((meta or {}).get("region_id") or "")
-        if rid:
-            used_scenario_ids.add(rid)
 
     def _append_jobs(jobs: list, prompt: str, meta: dict, row: dict) -> None:
         action = "expand" if _situation_key_from_meta(meta, prompt) in used_situations else "explore"
@@ -2074,7 +2064,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
                 axis_gaps.append("You are pushing a constraint.")
             if "ambiguous" not in tiers:
                 axis_gaps.append("You are confused.")
-            for name in list(declared)[:8]:
+            for name in sorted(declared)[:8]:
                 if name and name not in tools_hit:
                     intent = _intent_for_tool(name)
                     if intent:
