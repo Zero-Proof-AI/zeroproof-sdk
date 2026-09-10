@@ -11,7 +11,7 @@ description: >
   not trigger for training-data generation, RL data prep, or anything that
   asks to replace or rewrite existing evals.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Overview
@@ -92,6 +92,10 @@ reports need no key.
 ```python
 import zeroproof_simulations as zps
 
+# BYOK: replace with the customer's OpenAI-compatible model.
+# For ZeroProof-hosted Qwen, omit agent= from the simulate calls instead.
+agent = "openai:gpt-4.1-mini"
+
 # 0. Preflight, always first, always offline, no key needed
 pre = zps.preflight(tools, policy)          # tool-schema and policy gaps
 print(pre["cells"], pre["warnings"])        # grid size; read every warning
@@ -101,12 +105,13 @@ print(pre["cells"], pre["warnings"])        # grid size; read every warning
 # Lane 1: trace-guided repair
 report = zps.trace_report(traces, tools=tools, policy=policy)
 print(zps.format_trace_report(report))
-repair = zps.simulate(tools=tools, system_prompt=policy, traces=traces,
+repair = zps.simulate(agent=agent, tools=tools, system_prompt=policy, traces=traces,
                       mode="explore", grade=True, budget=200, time_budget=300,
                       output="new_evals/trace_guided.jsonl")
 
 # Lane 2: policy-guided discovery
-discovery = zps.simulate(tools=tools, system_prompt=policy, mode="adaptive",
+discovery = zps.simulate(agent=agent, tools=tools, system_prompt=policy,
+                         mode="adaptive",
                          until="saturation", grade=True, budget=400,
                          time_budget=300,
                          output="new_evals/policy_guided.jsonl")
