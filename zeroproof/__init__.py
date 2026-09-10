@@ -40,7 +40,11 @@ from .models import (
     WorkflowStatus,
 )
 
-__version__ = "0.3"
+try:
+    from importlib.metadata import PackageNotFoundError, version as _dist_version
+    __version__ = _dist_version("zeroproof")
+except PackageNotFoundError:  # running from a source tree that was never installed
+    __version__ = "0.0.0"
 __all__ = [
     # Main client
     "ZeroProof",
