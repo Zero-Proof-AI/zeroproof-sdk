@@ -13,6 +13,11 @@ malicious), and rolls the agent. Grade 0/1 later. Optimize for post-training.
 """
 from __future__ import annotations
 
+import logging as _logging
+
+# Library convention: emit under "zeroproof_simulations", never configure
+# the root logger. Callers opt in with logging.basicConfig() or a handler.
+_logging.getLogger(__name__).addHandler(_logging.NullHandler())
 
 from .generate.adapters import (claude_code, connect, inspect, resolve, AgentProfile, resolve_system_prompt)
 from .generate.agents import (hosted_model, local_model, missing_hosted_key,

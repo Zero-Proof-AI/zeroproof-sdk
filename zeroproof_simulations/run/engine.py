@@ -20,6 +20,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import logging
 import re
 import threading
 import time
@@ -64,6 +65,8 @@ from .rows import (_cell_key, _mutation_worthy, _record_coverage,
                    _stratified_prompts, _usable_rollout)
 from .spec import _apply_spec, _backend_spec, _kind_from_spec
 
+log = logging.getLogger("zeroproof_simulations")
+
 # How hard a hot trace region pulls cell weight toward itself.
 ALLOC_GAIN = 4.0
 _FINGERPRINT_STOPWORDS = {"the", "a", "an", "to", "for", "and", "of", "on"}
@@ -90,7 +93,7 @@ class Run:
             c.out_path.parent.mkdir(parents=True, exist_ok=True)
             self._write_progress({"stage": "setup", "rows": 0,
                                   "scenario_s": 0, "rollout_s": 0})
-            print("simulate setup rows=0", flush=True)
+            log.info("simulate setup rows=0")
         self._resolve_inputs()
         self._resolve_traces()
         self._build_data()
@@ -721,10 +724,10 @@ class Run:
         if should_report:
             elapsed = now - self.started
             rate = len(rows) / elapsed if elapsed else 0.0
-            print(f"simulate {stage} rows={len(rows)}/{c.cap} "
-                  f"elapsed={elapsed:.1f}s rate={rate:.1f}/s "
-                  f"unused={unused_n} inflight={inflight_n} writers={writers_n}",
-                  flush=True)
+            log.info("simulate %s rows=%d/%d elapsed=%.1fs rate=%.1f/s "
+                     "unused=%d inflight=%d writers=%d",
+                     stage, len(rows), c.cap, elapsed, rate,
+                     unused_n, inflight_n, writers_n)
             self.reported_rows, self.reported_at = len(rows), now
         if not rows:
             return
@@ -907,7 +910,6 @@ class Run:
             left = self._clock_left()
             if left is not None and left <= 0:
                 data.stopped_because = "time_budget"
-                self._drain_on_clock()
                 break
             gen.novelty_parents = [] if not c.mutate_failures else self.failing_rows[-10:]
             remaining = c.cap - len(data.trajectories) - len(self.inflight)
@@ -929,11 +931,27 @@ class Run:
             if self._update_search(results, jobs_for, info, selected):
                 break
 
-    def _drain_on_clock(self) -> None:
-        """The clock ran out: keep what already finished, drop the rest."""
+    def _settle_inflight(self) -> None:
+        """The run is over. Cancel rollouts that never started, wait up to
+        the stop grace for the ones running, keep what finishes while
+        there is room under the cap, and report whatever is abandoned.
+
+        Without this a clock stop returned with worker threads still
+        calling the caller's agent and threw away every row they made.
+        """
+        c = self.c
         data = self.data
+        for fut in list(self.inflight):
+            if fut.cancel():
+                self.inflight.pop(fut, None)
+                self.inflight_started.pop(fut, None)
+        if self.inflight and c.stop_grace_s > 0:
+            concurrent.futures.wait(list(self.inflight), timeout=c.stop_grace_s)
         for fut in [f for f in list(self.inflight) if f.done()]:
             job = self.inflight.pop(fut)
+            self.inflight_started.pop(fut, None)
+            if len(data.trajectories) >= c.cap:
+                continue
             try:
                 t = fut.result()
             except Exception as exc:
@@ -948,6 +966,15 @@ class Run:
             data.row_seconds.append(time.monotonic() - self.started)
             record_turns(self.turn_stats, t)
             self._flush_output("rollout")
+        abandoned = len(self.inflight)
+        if abandoned:
+            # Threads cannot be killed; the pool is told to start nothing
+            # new and these results are dropped when they arrive.
+            data.search["abandoned_rollouts"] = abandoned
+            if "rollouts_abandoned" not in data.degraded:
+                data.degraded.append("rollouts_abandoned")
+            self.inflight.clear()
+            self.inflight_started.clear()
 
     def _refill_pool(self, remaining: int, take: int) -> list[str]:
         """Fold in finished writer waves, launch more if the pool runs
@@ -1380,9 +1407,6 @@ class Run:
         jobs_for = [job for _, job in paired]
         room = c.cap - len(data.trajectories)
         results, jobs_for = results[:room], jobs_for[:room]
-        if len(data.trajectories) + len(results) >= c.cap:
-            self.inflight.clear()
-            self.inflight_started.clear()
         for t in results:
             _note(data, "model rollout")
             if t.get("steps"):
@@ -1584,8 +1608,6 @@ class Run:
                 self.cell_counts, self.shape_counts,
                 expected_cells=self.planned_cell_keys):
             data.stopped_because = "saturation"
-            self.inflight.clear()
-            self.inflight_started.clear()
             return True
         return False
 
@@ -1627,9 +1649,10 @@ class Run:
 
     def _shutdown(self) -> None:
         data = self.data
+        self._settle_inflight()
         self._flush_output("stopped")
-        self.scenario_pool.shutdown(wait=False)
-        self.pool.shutdown(wait=False)
+        self.scenario_pool.shutdown(wait=False, cancel_futures=True)
+        self.pool.shutdown(wait=False, cancel_futures=True)
         if self.scene_thread is not None:
             left = 8.0
             clock = self._clock_left()

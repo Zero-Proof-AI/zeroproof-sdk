@@ -60,7 +60,7 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | Knob | Default | |
 |---|---|---|
 | `agent` / `spec` | hosted Qwen | Callable, URL, or tools + system prompt |
-| `budget` / `time_budget` | `1000` / `60` | Stop when either hits. `0` or `None` turns the clock off |
+| `budget` / `time_budget` | `1000` / `None` | Stop when either hits. The clock is off unless you set it; `0` or `None` keeps it off |
 | `requests_per_situation` | from mode | Phrasings: ways to ask one situation. Alias `phrasings=` |
 | `rollouts_per_request` | from mode | Repeats: reruns of one phrasing. Alias `repeats=` |
 | `fault_rate` | `0.5` | Broken tools. `0` off |
@@ -149,7 +149,7 @@ hosted GPU with warm replicas and burst under load.
 | `unique_situations` | on in `explore` | Unique situations only |
 | `mode` | `"explore"` | `explore`, `sft`, `rl`, `adaptive` |
 | `budget` | `1000` | Row cap |
-| `time_budget` | `60` | Seconds. `None` or `0` disables |
+| `time_budget` | `None` | Seconds. Off by default; `None` or `0` disables |
 | `until` | `"compute"` | `"saturation"` also stops when coverage plateaus |
 | `grade` | `False` | Grade after, or pass `grader=` / `grade=True` |
 | `llm_grade` | `False` | Extra LLM judge |
@@ -158,7 +158,8 @@ hosted GPU with warm replicas and burst under load.
 
 | `advanced` key | Default | |
 |---|---|---|
-| `concurrency` | `192` | Parallel rollouts |
+| `concurrency` | `32` | Parallel rollouts |
+| `stop_grace` | `5` | Seconds to wait for running rollouts after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` |
 | `embedder` | `"hash"` | Prompt selection |
 | `seed` | `0` | Reproducible draws. Bit-for-bit only at `concurrency: 1`; with parallel rollouts, which rows land before the cap depends on thread timing |
 | `avg_turns` | `4` | Target conversation length |

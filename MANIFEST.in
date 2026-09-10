@@ -4,6 +4,7 @@ include pyproject.toml
 recursive-include zeroproof_simulations *.py
 recursive-include zeroproof *.py
 include zeroproof/py.typed
+include zeroproof_simulations/py.typed
 prune zeroproof_simulations/_experimental
 prune zeroproof_simulations/behaviors
 prune tests

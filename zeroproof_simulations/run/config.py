@@ -22,6 +22,10 @@ SATURATION_CAP = 50_000
 # Ping-pong is several HTTP calls; 24s dropped healthy 2-person traces
 # and the replacement oversubscribed the GPU.
 HUNG_SLOT_S = 45.0
+# After a stop (clock, cap, saturation) wait this long for rollouts that
+# are already running. Queued ones are cancelled at once. Whatever is
+# still running afterwards is abandoned and reported.
+STOP_GRACE_S = 5.0
 
 _MODE_PRESETS = {
     "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
@@ -245,6 +249,7 @@ class RunConfig:
     completions_per_request: int
     extra_cards: int
     hung_slot_s: float
+    stop_grace_s: float
     rollout_timeout: float
     model_version_tag: str
     # what is left goes to the situation writer as keyword arguments
@@ -377,6 +382,7 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
     cfg.pop("completions_per_request", None)
     extra_cards = max(0, int(cfg.pop("extra_cards", 1)))
     hung_slot_s = float(cfg.pop("hung_slot", HUNG_SLOT_S))
+    stop_grace_s = max(0.0, float(cfg.pop("stop_grace", STOP_GRACE_S)))
     cfg.pop("scene_brief", None)
     model_version_tag = _model_version_tag(agent, cfg)
     # Popped unconditionally: on a non-trace run the key must not ride
@@ -446,5 +452,6 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
         distinct_cards=distinct_cards,
         completions_per_request=completions_per_request,
         extra_cards=extra_cards, hung_slot_s=hung_slot_s,
+        stop_grace_s=stop_grace_s,
         rollout_timeout=rollout_timeout, model_version_tag=model_version_tag,
         advanced=cfg)

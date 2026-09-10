@@ -46,6 +46,7 @@ include-package-data = false
 
 [tool.setuptools.package-data]
 zeroproof = ["py.typed"]
+zeroproof_simulations = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["."]
