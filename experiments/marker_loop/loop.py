@@ -60,8 +60,8 @@ from zeroproof_simulations.score.judging import (  # noqa: E402
     normalize_judge_result, run_judge)
 
 LANE_MIN = 20
-TARGET_POSITIVES = 25
-BUDGET_PER_MARKER = 48
+TARGET_POSITIVES = 100
+BUDGET_PER_MARKER = 96
 TIME_BUDGET_S = 1800
 SATURATION_FLOOR = 3
 STOP = frozenset("a an the and or of to in on for with without is are was were not no this that it its "
@@ -174,7 +174,7 @@ def grow(marker: str, entry: dict, evidence: list[dict], grader, grader_name: st
     kwargs = dict(tools=agent["tools"], system_prompt=agent["policy"], mode=call["mode"],
                   # volume without drift: repeat rollouts of the on-topic asks;
                   # sampling variation plus the person simulator differentiates them
-                  rollouts_per_request=max(1, min(12, BUDGET_PER_MARKER // max(1, len(seeds)))),
+                  rollouts_per_request=max(1, min(16, BUDGET_PER_MARKER // max(1, len(seeds)))),
                   seeds=call["seeds"], situations=call["situations"], budget=call["budget"],
                   time_budget=call["time_budget"], scaffold=call["scaffold"], output=out_raw,
                   # scene writer off: seeds define the situations; this is the
