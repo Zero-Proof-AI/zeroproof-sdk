@@ -10,8 +10,10 @@ conduct evals over ordinary business tools. It is not a source of truth for
 code: invented source files and invented test output cannot establish whether
 a patch works.
 
-For a coding agent, reuse the customer's existing eval harness. Give every
-rollout its own disposable checkout and pass a callable through `execute=`:
+When the customer agent being evaluated edits code, reuse its existing eval
+harness. Give every rollout its own disposable checkout and pass a callable
+through `execute=`. Claude Code or Cursor merely operating this skill does not
+trigger this requirement:
 
 ```python
 import inspect

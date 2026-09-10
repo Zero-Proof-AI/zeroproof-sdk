@@ -11,7 +11,7 @@ description: >
   not trigger for training-data generation, RL data prep, or anything that
   asks to replace or rewrite existing evals.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # Overview
@@ -24,9 +24,9 @@ does not match the installed version, trust the installed source over this
 doc.
 
 Read `references/workflow.md` before generating anything. It holds the full
-commands, code, and templates this file only summarizes. For coding agents or
-other tools that touch real state, also read `references/world.md` before a
-rollout; it defines what must answer the tool calls.
+commands, code, and templates this file only summarizes. When the customer
+agent's tools touch code or other real state, also read `references/world.md`
+before a rollout; it defines what must answer those tool calls.
 
 # Two lanes
 
@@ -69,9 +69,10 @@ in the report, and treat lane 2 as the primary output.
   shape `zps.load_traces()` / `zps.rows_from_otel()` accepts.
 - **Existing evals**: wherever the repo keeps them (pytest fixtures, a
   `evals/`/`tests/` JSONL or YAML set, a promptfoo config). Read-only.
-- **Execution world**: for coding agents, the customer's existing disposable
-  checkout or test harness, adapted to `execute(tool_name, arguments)`. Never
-  use the SDK's invented file world to judge whether code is correct.
+- **Execution world**: needed only when the customer agent's correctness
+  depends on real state, such as source files and test execution. Adapt its
+  existing disposable checkout or test harness to
+  `execute(tool_name, arguments)`.
 
 # Commands
 
@@ -166,10 +167,12 @@ and by situation axis) and review instructions. Full templates:
 - **No secrets in outputs.** Never write `OPENAI_API_KEY`, `VLLM_API_KEY`,
   `ZEROPROOF_API_KEY`/`ZEROPROOF_DELEGATED_CREDENTIAL`, or any `zp_*` key
   into the generated JSONL, the reports, or logs.
-- **Coding agents require a real world.** Confirm that the installed
-  `zps.simulate` accepts `execute=`, then connect it to an isolated checkout
-  whose real reads, writes, commands, and tests answer the calls. If no safe
-  execution harness exists, stop and report that prerequisite instead of
-  generating coding evals against invented files.
+- **Code-editing customer agents require a real execution world.** This does
+  not refer to Claude Code or Cursor operating the skill. It applies only when
+  the agent being evaluated reads or changes code. Confirm that `zps.simulate`
+  accepts `execute=`, then connect it to an isolated checkout whose real reads,
+  writes, commands, and tests answer the calls. For ordinary record-shaped
+  business tools, let ZeroProof build the simulated world from the supplied
+  schemas, policy, and traces.
 - **Generated rows are candidates, not ground truth.** Review every failing
   row and at least 20 passing rows before adding anything to an eval suite.
