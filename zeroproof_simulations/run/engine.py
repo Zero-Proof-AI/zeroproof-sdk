@@ -132,6 +132,7 @@ class Run:
         # May be replaced by the backend spec once the runner is built.
         self.simulator = c.simulator
         self.drafted_tools: list[str] = []
+        self.tool_draft_failed = False
         if (not self.tools and self.policy and self.simulator is not False
                 and (c.agent is None or isinstance(c.agent, str))):
             # A description with no tools gives the writer and the world no
@@ -144,6 +145,11 @@ class Run:
                 self.tools = drafted
                 self.profile.tools = drafted
                 self.drafted_tools = [d["function"]["name"] for d in drafted]
+            else:
+                # The run goes on with no tools, which is a different
+                # dataset from the one asked for. Say so instead of
+                # letting a tool-free run pass for the described agent.
+                self.tool_draft_failed = True
         if c.agent is None and not self.tools and not self.policy:
             raise ValueError(
                 "simulate needs an agent, tools=, or a system prompt.")
@@ -242,6 +248,8 @@ class Run:
         data.rollouts_per_request = c.repeat_count
         data.unique_situations = c.unique_cards
         _note(data, "agent ingestion")
+        if self.tool_draft_failed:
+            data.degraded.append("tool_draft_unavailable")
         self.data = data
         self.scene_box: dict[str, Any] = {"brief": ""}
         self.shape_box: dict[str, dict] = {}
