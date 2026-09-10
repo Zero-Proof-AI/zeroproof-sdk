@@ -34,9 +34,9 @@ from typing import Dict, Optional
 
 import requests
 
-# Where the gate lives. Override with ZEROPROOF_TRACE_URL if you point at a
-# different deployment (the endpoint is account-specific).
-_DEFAULT_TRACE_URL = "https://wch04mgo2k.execute-api.us-east-1.amazonaws.com"
+# Where the gate lives. Override with ZEROPROOF_TRACE_URL to point at a
+# different deployment.
+_DEFAULT_TRACE_URL = "https://api.zeroproofai.com"
 _GZIP_MAGIC = b"\x1f\x8b"
 
 
