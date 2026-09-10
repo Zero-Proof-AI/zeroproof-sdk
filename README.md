@@ -158,7 +158,7 @@ hosted GPU with warm replicas and burst under load.
 |---|---|---|
 | `concurrency` | `192` | Parallel rollouts |
 | `embedder` | `"hash"` | Prompt selection |
-| `seed` | `0` | Reproducible draws |
+| `seed` | `0` | Reproducible draws. Bit-for-bit only at `concurrency: 1`; with parallel rollouts, which rows land before the cap depends on thread timing |
 | `avg_turns` | `4` | Target conversation length |
 
 Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollouts_per_request`; `unique=` → `unique_situations`; `policy=` → `system_prompt`; `risk=` → `fault_rate`.

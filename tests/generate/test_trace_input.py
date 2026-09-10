@@ -195,8 +195,21 @@ def test_traces_with_faults_keep_the_fault_cells():
     rows = [{"prompt": f"refund order 8{i}", "reward": 0, "final_text": "Refunded.",
              "steps": [{"tool": "create_refund", "arguments": {"order_id": f"8{i}"},
                         "result": {"status": "timeout"}}]} for i in range(5)]
-    aimed = simulate_offline(traces=rows, budget=24, per_round=40)
-    cold = simulate_offline(budget=24, per_round=40)
+    # concurrency=1: with parallel rollouts the rows that land before the
+    # cap depend on thread timing, and the share moved between 0.12 and
+    # 0.21 across runs. fault_rate=1.0: the sandbox keep-rate is a second,
+    # unrelated coin flip per prompt; at the default 0.5 it can drop every
+    # scheduled fault. Serial and unthinned, both runs are bit-for-bit
+    # reproducible, so the floors below are exact, not statistical.
+    kw = dict(budget=48, per_round=40, concurrency=1, fault_rate=1.0)
+    aimed = simulate_offline(traces=rows, **kw)
+    cold = simulate_offline(**kw)
     share = lambda d: sum(1 for r in d.trajectories if r.get("faults")) / max(1, len(d.trajectories))
+    fault_cells = lambda d: sum(
+        1 for r in d.trajectories
+        if (r.get("scenario_dimensions") or {}).get("tool_condition")
+        not in (None, "success")) / max(1, len(d.trajectories))
+    assert fault_cells(aimed) >= 0.25, fault_cells(aimed)
+    assert fault_cells(aimed) > fault_cells(cold), (fault_cells(aimed), fault_cells(cold))
     assert share(aimed) >= 0.15, share(aimed)
     assert share(aimed) > share(cold), (share(aimed), share(cold))
