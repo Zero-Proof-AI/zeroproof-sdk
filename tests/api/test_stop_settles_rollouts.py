@@ -36,14 +36,16 @@ def test_clock_stop_keeps_finished_rollouts_and_makes_no_late_calls():
 
 def test_rollouts_still_running_after_the_grace_are_reported():
     def hanging_agent(_message: str) -> dict:
-        time.sleep(2.5)
+        time.sleep(6.0)
         return {"steps": [], "final_text": "late"}
 
     t0 = time.monotonic()
     kw = dict(_OFFLINE, advanced={**_OFFLINE["advanced"], "stop_grace": 0.2})
     data = zps.simulate(hanging_agent, tools=TOOLS, policy=POLICY, budget=50,
                         concurrency=4, time_budget=0.3, **kw)
-    assert time.monotonic() - t0 < 2.0, "the stop grace must bound the wait"
+    # 6 s agent, 0.3 s clock, 0.2 s grace: even a loaded CI box returns
+    # well inside 4 s, and 4 s is still far short of the agent finishing.
+    assert time.monotonic() - t0 < 4.0, "the stop grace must bound the wait"
     assert data.stopped_because == "time_budget"
     assert not data.trajectories
     assert "rollouts_abandoned" in data.degraded

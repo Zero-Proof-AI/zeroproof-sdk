@@ -78,6 +78,10 @@ class Run:
     def __init__(self, cfg: RunConfig) -> None:
         self.c = cfg
         self.started = time.monotonic()
+        # Set when the run stops; work that has not begun checks it and
+        # returns at once, closing the window between a future being
+        # marked running and its body actually starting.
+        self.stopping = False
         # Read by the progress flush before the loop exists.
         self.inflight: dict = {}
         self.scenario_futs: list = []
@@ -460,6 +464,9 @@ class Run:
         """Run one rollout on a worker thread and shape it as a row."""
         c = self.c
         prompt, rollout, meta, selection = job
+        if self.stopping:
+            return {"_skipped": True, "prompt": prompt, "steps": [],
+                    "final_text": "", "reward": None}
         meta = dict(meta or {})
         assignment = meta.get("assignment") or meta.get("scenario_dimensions")
         faults = self._scaled(
@@ -765,6 +772,8 @@ class Run:
         that shares the run's regions, walked ids and search context."""
         c = self.c
         gen = self.generator
+        if self.stopping:
+            return [], {}, {}, {}
         n_cards = max(2, int(cards or c.scenarios_per_request))
         n_comp = max(1, min(8, int(
             completions if completions is not None else c.completions_per_request)))
@@ -951,6 +960,7 @@ class Run:
         """
         c = self.c
         data = self.data
+        self.stopping = True
         for fut in list(self.inflight):
             if fut.cancel():
                 self.inflight.pop(fut, None)
@@ -976,6 +986,8 @@ class Run:
                 t = fut.result()
             except Exception as exc:
                 t = self._error_row(job, exc)
+            if isinstance(t, dict) and t.get("_skipped"):
+                continue
             if not _usable_rollout(t):
                 self.cap_lifted["lost"] += 1
                 _note(data, "rollout failure discarded")

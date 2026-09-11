@@ -178,14 +178,36 @@ def resolve_completion_key(base_url: str | None = None,
     return vllm or str(os.environ.get("OPENAI_API_KEY") or "").strip()
 
 
+def _local_url(base_url: str | None) -> bool:
+    """A loopback or plain-http endpoint, which needs no key (ollama, local vLLM)."""
+    if not base_url:
+        return False
+    raw = base_url if "://" in str(base_url) else "https://" + str(base_url)
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    return (parsed.scheme == "http" or host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+            or host.endswith(".local"))
+
+
 def missing_hosted_key(base_url: str | None = None,
                        api_key: str | None = None) -> str | None:
-    """One-sentence auth error for hosted Qwen, or None if a key is present."""
+    """One-sentence auth error, or None if a key is present or not needed.
+
+    Hosted Qwen wants VLLM_API_KEY. Any other https endpoint wants
+    OPENAI_API_KEY (or an explicit api_key). Loopback and plain-http
+    endpoints run without one. Without this a bring-your-own run with no
+    key spent its whole time budget on 401s and returned nothing.
+    """
     key = resolve_completion_key(base_url, api_key)
     if key:
         return None
     if _hosted_qwen_url(base_url):
         return "Hosted Qwen needs VLLM_API_KEY set in the environment."
+    if base_url and not _local_url(base_url):
+        raw = base_url if "://" in str(base_url) else "https://" + str(base_url)
+        host = urlparse(raw).hostname or str(base_url)
+        return (f"No API key for {host}: set OPENAI_API_KEY "
+                "(and OPENAI_BASE_URL for a non-OpenAI endpoint).")
     return None
 
 
