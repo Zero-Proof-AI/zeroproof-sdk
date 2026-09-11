@@ -58,6 +58,7 @@ from ..ingest.traces import (behavior_state, dimensions_from_traces,
                              drop_leaky_rows, exemplar_result_shapes,
                              load_traces, mine_result_exemplars, mine_traces,
                              opening_share, region_progress)
+from ..schema import SCHEMA_KEY, SCHEMA_VERSION
 from ..score.grading import behavior_signature, conduct_grade
 from .config import RunConfig
 from .rows import (_cell_key, _mutation_worthy, _record_coverage,
@@ -486,6 +487,8 @@ class Run:
                                              _clean_faults(faults))
         semantic = self.data.semantic
         t = {
+            # Born stamped: the streamed file and a later save() must agree.
+            SCHEMA_KEY: SCHEMA_VERSION,
             "scenario_id": meta.get("region_id") or "probe_" + hashlib.sha256(
                 str(prompt).encode()).hexdigest()[:6],
             "scenario_dimensions": assignment,
@@ -521,7 +524,8 @@ class Run:
 
     @staticmethod
     def _error_row(job: tuple, exc: Exception) -> dict:
-        t = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>",
+        t = {SCHEMA_KEY: SCHEMA_VERSION,
+             "steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>",
              "arm": (job[2] or {}).get("arm") or "unattributed",
              "prompt": job[0], "reward": None}
         t["behavior_signature"] = behavior_signature(t)

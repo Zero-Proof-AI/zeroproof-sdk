@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zeroproofai.com/schemas/row-v1.json",
+  "title": "ZeroProof row, schema version 1",
+  "description": "The flat JSONL row simulate() streams, save() writes, and the platform stores. A projection of Task + Rollout + Judgment[] + Marker[]. Rows without schema_version are version 0 (legacy) and are read by shape.",
+  "$ref": "#/$defs/row",
+  "$defs": {
+    "row": {
+      "type": "object",
+      "required": ["schema_version", "prompt", "steps", "final_text"],
+      "properties": {
+        "schema_version": {"const": "1"},
+        "prompt": {"type": "string", "$comment": "Task.prompt"},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}, "$comment": "Rollout.steps"},
+        "final_text": {"type": "string", "$comment": "Rollout.final_text"},
+        "scenario_id": {"type": "string", "$comment": "Task.task_id"},
+        "spec_id": {"type": "string", "$comment": "Task.spec_id"},
+        "messages": {"type": "array", "items": {"$ref": "#/$defs/message"}, "$comment": "derived from prompt + steps; carried when present"},
+        "opener": {"type": "string"},
+        "opening": {"type": "string"},
+        "tier": {}, "ask_family": {}, "intent_known": {}, "tool_known": {},
+        "stance": {}, "tone": {}, "length": {}, "ask": {}, "vagueness": {},
+        "phrasing": {}, "pressure": {}, "user": {}, "texture": {}, "history": {},
+        "world_state": {"type": "string", "$comment": "Task.world.state"},
+        "faults": {"type": "object", "$comment": "Task.world.faults; Rollout.ledger is derived"},
+        "fault_detected": {"type": "boolean"},
+        "rollout_index": {"type": "integer", "$comment": "Rollout.index"},
+        "model_version": {"type": "string", "$comment": "Rollout.policy.model"},
+        "reward": {"type": ["number", "null"], "$comment": "primary Judgment.reward"},
+        "reason": {"type": "string", "$comment": "primary Judgment.reason"},
+        "label_source": {"type": "string", "$comment": "primary Judgment.scorer.name when kind=rule"},
+        "judge_name": {"type": "string", "$comment": "primary Judgment.scorer.name when kind=judge"},
+        "judge_status": {"type": "string", "enum": ["ok", "missing_reward", "invalid_result", "error", "timeout"]},
+        "failure_class": {"type": "string"},
+        "llm_reward": {"type": ["number", "null"], "$comment": "Judgment from scorer 'llm'"},
+        "llm_reason": {"type": "string"},
+        "qwen_reward": {"type": "number", "$comment": "Judgment from scorer 'qwen'"},
+        "markers": {"type": "object", "additionalProperties": {"type": "number"}, "$comment": "Marker[] as name -> value"},
+        "conversation_id": {"type": "string", "$comment": "OTel ingest only"},
+        "ts": {"type": "integer", "$comment": "OTel ingest only; earliest span start, ns"},
+        "lineage": {"type": "object"},
+        "quality": {}, "quality_reason": {}, "quality_scores": {}
+      },
+      "additionalProperties": true
+    },
+    "step": {
+      "type": "object",
+      "oneOf": [
+        {"required": ["user"], "properties": {"user": {"type": "string"}}},
+        {"required": ["tool"], "properties": {"tool": {"type": "string"}, "arguments": {}, "result": {}, "text": {"type": "string"}}},
+        {"required": ["text"], "properties": {"text": {"type": "string"}}}
+      ]
+    },
+    "message": {
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "role": {"type": "string"},
+        "content": {"type": "string"},
+        "name": {"type": "string"},
+        "tool_calls": {"type": "array"}
+      }
+    },
+    "training_row": {
+      "type": "object",
+      "required": ["schema_version", "messages"],
+      "properties": {
+        "schema_version": {"const": "1"},
+        "messages": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/message"}},
+        "tools": {"type": "array"},
+        "group_id": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "preference_row": {
+      "type": "object",
+      "required": ["schema_version", "prompt", "chosen", "rejected"],
+      "properties": {
+        "schema_version": {"const": "1"},
+        "prompt": {},
+        "chosen": {"type": "array", "minItems": 1},
+        "rejected": {"type": "array", "minItems": 1},
+        "tools": {"type": "array"}
+      },
+      "additionalProperties": true
+    },
+    "objects": {
+      "$comment": "Field lists of the four objects in schema.py; the drift test compares these to the dataclasses.",
+      "Task": ["task_id", "spec_id", "prompt", "prefix", "world", "privileged", "axes", "behaviors", "lineage"],
+      "Rollout": ["rollout_id", "task_id", "policy", "index", "steps", "final_text", "ledger", "usable", "unusable_reason", "extra"],
+      "Judgment": ["rollout_id", "scorer", "reward", "status", "reason", "failure_class", "evidence"],
+      "Marker": ["rollout_id", "name", "value", "evidence"],
+      "Dataset": ["dataset_id", "spec_id", "splits"],
+      "Calibration": ["task_id", "student", "n", "pass_rate", "mean_kl"]
+    },
+    "legacy_shapes": {
+      "$comment": "Version 0 rows, detected by key. See schema.detect_shape.",
+      "engine": {"detect": "scenario_id", "keys": ["prompt", "messages", "steps", "final_text", "scenario_id", "rollout_index", "model_version", "world_state", "faults", "reward", "reason", "label_source", "tier", "ask_family", "ask", "stance", "tone", "texture", "vagueness", "phrasing", "pressure", "user", "history", "length", "intent_known", "tool_known"]},
+      "platform_pull": {"detect": "tool_trace without steps", "keys": ["prompt", "tool_trace", "final_text", "reward", "lineage"], "step_keys": ["tool", "input", "output"]},
+      "platform_pull_engine": {"detect": "scenario_id", "$comment": "A dataset the SDK pushed comes back in engine shape."},
+      "otel": {"detect": "conversation_id", "keys": ["conversation_id", "prompt", "steps", "final_text", "model_version", "reward", "ts"]}
+    }
+  }
+}

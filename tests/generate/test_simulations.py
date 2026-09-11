@@ -8,7 +8,8 @@ _DROPPED = {
     "behavior_signature", "grader_reason", "seed",
     "semantic_cluster", "semantic_novelty", "llm_reward", "llm_reason",
 }
-_PUBLIC = {"prompt", "messages", "scenario_id", "steps", "final_text",
+_PUBLIC = {"schema_version",
+           "prompt", "messages", "scenario_id", "steps", "final_text",
            "world_state", "faults", "fault_detected", "reward", "reason",
            "tier", "ask_family", "intent_known", "tool_known",
            "stance", "tone", "length", "ask", "vagueness", "phrasing",

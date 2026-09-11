@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 from typing import Any, Sequence
 
+from .schema import check, stamp
 from .score.quality import _load_jsonl, _write_jsonl
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
@@ -199,8 +200,9 @@ def training_rows(source, *, system_prompt: str | None = None,
         for key in _CARRY_KEYS:
             if row.get(key) is not None:
                 entry[key] = row[key]
-        out.append(entry)
+        out.append(stamp(entry))
     _stamp_groups(out)
+    check(out, "training", where="training_rows")
     return out
 
 
@@ -312,7 +314,8 @@ def export_preference(pairs: Sequence[dict], output: str | None = None, *,
                     "rejected_failure_class", "lineage"):
             if pair.get(key) is not None:
                 entry[key] = pair[key]
-        out_rows.append(entry)
+        out_rows.append(stamp(entry))
+    check(out_rows, "preference", where="export_preference")
     both_sides = [{"messages": r[side]} for r in out_rows
                   for side in ("chosen", "rejected")]
     roundtrip = tool_call_roundtrip(both_sides)

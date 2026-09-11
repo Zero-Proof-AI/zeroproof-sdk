@@ -79,9 +79,13 @@ from .score.judging import (ScoredData, build_preference_pairs, evaluate,
 from .data import (SimulationData, conversation, grade, grade_llm,
                    llm_grade, rank)
 from .simulation import resolve_topology, simulate
-from . import data, simulation  # noqa: F401  (patch targets)
+from .schema import (SCHEMA_VERSION, Calibration, Dataset, Judgment, Marker,
+                     Rollout, Task, from_row, to_row, validate)
+from . import data, simulation, schema  # noqa: F401  (patch targets)
 
 __all__ = [
+           "SCHEMA_VERSION", "Task", "Rollout", "Judgment", "Marker",
+           "Dataset", "Calibration", "from_row", "to_row", "validate",
           "simulate", "SimulationData", "conversation", "local_model",
            "datasets", "pull", "push_file", "push_rows", "delete_dataset",
            "issue_delegated_credential", "refresh_delegated_credential",
