@@ -185,6 +185,8 @@ Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollo
 
 Each row: `prompt`, `messages`, `steps`, `final_text`, `scenario_id`. Optional `world_state`, `faults`, `reward`, `reason`. `llm_grade=True` adds `llm_reward`. `zps.rank(path)` adds `quality` without changing `reward`.
 
+Every row carries `schema_version` (`"1"`). A row is a projection of four objects in `zeroproof_simulations.schema`: `Task` (the situation), `Rollout` (one episode), `Judgment` (a scorer's verdict), `Marker` (a behavior measurement). `zps.from_row(row)` splits a row into them and `zps.to_row(...)` flattens them back. The wire contract is `zeroproof_simulations/schemas/row-v1.json`. Rows written before the stamp are version 0 and load by shape, so older files still work.
+
 ## The recipe
 
 Each scenario is a draw across the world and the human.

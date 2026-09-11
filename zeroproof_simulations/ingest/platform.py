@@ -189,6 +189,8 @@ def push_rows(rows: list[dict], name: str, *, api_key: str | None = None,
     ``ds_...`` id) when this dataset is an iteration of an existing one, so
     lineage shows on the platform.
     """
+    from ..schema import check
+    check(rows, where="push_rows")
     body: dict = {"name": name}
     if parent:
         body["parentDatasetId"] = parent

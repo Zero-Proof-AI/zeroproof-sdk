@@ -3,6 +3,27 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Typed row schema, additive half. `zeroproof_simulations.schema` defines
+  the four objects every row projects from (`Task`, `Rollout`, `Judgment`,
+  `Marker`) plus `Dataset` and `Calibration`, with `from_row` / `to_row`
+  between them and the flat JSONL row. Every row the engine, `save()`,
+  the exporters, and `rows_from_otel` write now carries
+  `schema_version: "1"`; `.meta.json` carries it too. The wire contract is
+  `zeroproof_simulations/schemas/row-v1.json`, shipped in the wheel.
+- Rows without a stamp are version 0 and are read by shape: engine rows
+  (by `scenario_id`), platform trace pulls (by `tool_trace`), OTel ingest
+  (by `conversation_id`). Nothing that loaded before is rejected.
+- Validators run at the boundaries: `push_rows`, `training_rows` /
+  `export_training`, `export_preference`, `rows_from_otel`, and the row
+  writer behind both the streamed file and `save()`. In this version they
+  check the stamp and the required field types only.
+- A test freezes the count of direct verdict-key writes per module, so
+  new grading paths go through `attach` once it lands.
+- `SimulationData.trajectories` stays the source of truth; the objects
+  are a view until the store moves.
+
 ## 0.07 (2026-09-11)
 
 - A bring-your-own run with no key fails at setup with a message naming

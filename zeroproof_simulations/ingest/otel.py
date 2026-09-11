@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
+from ..schema import check, stamp
+
 _MESSAGE_KEYS = ("gen_ai.input.messages", "gen_ai.prompt",
                  "llm.input_messages")
 _OUTPUT_KEYS = ("gen_ai.output.messages", "gen_ai.completion",
@@ -227,7 +229,8 @@ def rows_from_otel(source: Any) -> list[dict]:
             # indistinguishable without it.
             if model_version or model_generic:
                 row["model_version"] = model_version or model_generic
-            rows.append(row)
+            rows.append(stamp(row))
+    check(rows, where="rows_from_otel")
     return rows
 
 

@@ -15,6 +15,7 @@ from .score.llm_judge import (MISSING_JUDGE_KEY, apply_llm_grade,
 from .score.grade_llm import apply_grade_llm, require_judge_key
 from .score.quality import rank as rank_source, rank_rows, summarize as summarize_quality
 from .export import export_training
+from .schema import SCHEMA_KEY, SCHEMA_VERSION, check, stamp
 from .score.optimize import select_for_sft
 
 
@@ -144,6 +145,10 @@ def _export_row(row: dict) -> dict:
         out["quality_reason"] = row.get("quality_reason") or ""
         if row.get("quality_scores"):
             out["quality_scores"] = row["quality_scores"]
+    # The wire row is born here for both the streamed file and save(), so
+    # the stamp and the check live here and the two files always agree.
+    stamp(out)
+    check(out, where="export_row")
     return out
 
 
@@ -383,6 +388,7 @@ class SimulationData:
                 rows_by_minute[key] = rows_by_minute.get(key, 0) + 1
             with open(sidecar, "w") as fh:
                 json.dump({
+                    SCHEMA_KEY: SCHEMA_VERSION,
                     # The agent spec: a trainer loading this JSONL later
                     # needs the policy and tool schemas the run knew.
                     "system_prompt": str(getattr(self.profile, "policy", "")
