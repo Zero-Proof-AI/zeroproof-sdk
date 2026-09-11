@@ -3,6 +3,19 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.07 (2026-09-11)
+
+- A bring-your-own run with no key fails at setup with a message naming
+  `OPENAI_API_KEY`, instead of spending its whole time budget on 401s and
+  returning zero rows. Loopback and plain-http endpoints (ollama, local
+  vLLM) still need no key.
+- A stop raises a flag that every rollout and writer wave checks before
+  starting, so nothing begins work after the stop is declared. Closes a
+  race where a wave marked running could still start its body after
+  `simulate()` returned.
+- The two stop tests give the hanging agent and writer six seconds and
+  assert a four-second return, so a loaded CI box cannot trip them.
+
 ## 0.06 (2026-09-10)
 
 - A stop also settles writer waves: queued waves are cancelled, running
