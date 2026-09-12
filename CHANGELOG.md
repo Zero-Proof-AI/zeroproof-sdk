@@ -3,6 +3,17 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.12 (2026-09-11)
+
+- A callable `agent=` with no key now gets an error that names the two
+  ways to run: `agent="openai:<model>"` on your key, or
+  `simulator=False` for the built-in template writer. The README
+  documents the no-key path.
+- Rows in `data.trajectories` carry `messages`, matching the JSONL.
+- `export_preference` on plain rows says it takes pairs and names
+  `build_preference_pairs`.
+- README notes that `fault_rate` applies through the mock world only.
+
 ## 0.11 (2026-09-11)
 
 - Trace-driven allocation weighs a region's fail rate (Laplace-shrunk)
