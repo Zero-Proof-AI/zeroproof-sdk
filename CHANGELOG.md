@@ -3,6 +3,20 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.11 (2026-09-11)
+
+- Trace-driven allocation weighs a region's fail rate (Laplace-shrunk)
+  and support, and flags regions with under three graded rows as
+  `low_support`. Each region reports `n_graded` and `fail_rate`.
+- `data.coverage["pairwise"]`: planned pairs, covered pairs, fraction.
+- Docs say what the code does: the cold-start success flip means the
+  tool-condition axis is sampled rather than covered; the leakage check
+  is lexical; the unsourced benchmark claim is removed.
+- Turn-length controller corrects at half gain; cluster sampling seeds
+  per round; `planned_fault_fraction` removed (unused).
+- The `zeroproof_simulations` alias stays until a later release rather
+  than "two releases from now".
+
 ## 0.10 (2026-09-11)
 
 - Annealing explore now prefers novel candidates. The acceptance curve
