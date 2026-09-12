@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" role="img" aria-label="How a row gets made: a draw across world and human axes fills a coverage cell, nudges the search arms, plays a rollout against a world with scheduled faults, and the row splits into Task, Rollout, Judgment and Marker, which feed eval, SFT, preference, GRPO, OPSD and OPD.">
+  <defs>
+    <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6B7480"/></marker>
+  </defs>
+  <rect width="960" height="300" fill="#F4F5F1"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#182028">
+    <!-- station 1: the draw -->
+    <rect x="16" y="24" width="168" height="252" rx="4" fill="#FFFFFF" stroke="#D6D9D1"/>
+    <text x="28" y="44" font-size="10" fill="#7C8592" letter-spacing="1.5">1 · THE DRAW</text>
+    <text x="28" y="70" font-size="10" fill="#7C8592">world · from the tools</text>
+    <g font-size="10">
+      <rect x="28" y="78" width="52" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="33" y="90">success</text>
+      <rect x="84" y="78" width="52" height="16" rx="2" fill="#B5602A"/><text x="90" y="90" fill="#fff">timeout</text>
+      <rect x="28" y="98" width="36" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="33" y="110">deny</text>
+      <rect x="68" y="98" width="36" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="73" y="110">stale</text>
+      <rect x="108" y="98" width="62" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="113" y="110">malformed</text>
+      <rect x="28" y="118" width="40" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="33" y="130">exists</text>
+      <rect x="72" y="118" width="96" height="16" rx="2" fill="#0E6F6C"/><text x="77" y="130" fill="#fff">already handled</text>
+    </g>
+    <text x="28" y="164" font-size="10" fill="#7C8592">human · separate writer</text>
+    <g font-size="10">
+      <rect x="28" y="172" width="54" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="33" y="184">ordinary</text>
+      <rect x="86" y="172" width="48" height="16" rx="2" fill="#0E6F6C"/><text x="91" y="184" fill="#fff">hurried</text>
+      <rect x="28" y="192" width="42" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="33" y="204">polite</text>
+      <rect x="74" y="192" width="64" height="16" rx="2" fill="#0E6F6C"/><text x="79" y="204" fill="#fff">impatient</text>
+      <rect x="28" y="212" width="58" height="16" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="33" y="224">standard</text>
+      <rect x="90" y="212" width="42" height="16" rx="2" fill="#0E6F6C"/><text x="95" y="224" fill="#fff">typo</text>
+    </g>
+    <text x="28" y="258" font-size="10" fill="#7C8592">N situations × n phrasings × k repeats</text>
+
+    <!-- station 2: coverage grid -->
+    <rect x="204" y="24" width="150" height="252" rx="4" fill="#FFFFFF" stroke="#D6D9D1"/>
+    <text x="216" y="44" font-size="10" fill="#7C8592" letter-spacing="1.5">2 · COVERAGE GRID</text>
+    <g>
+      <rect x="216" y="62" width="24" height="20" fill="#0E6F6C"/><rect x="243" y="62" width="24" height="20" fill="#0E6F6C"/><rect x="270" y="62" width="24" height="20" fill="#6FB3AE"/><rect x="297" y="62" width="24" height="20" fill="#B9DBD8"/><rect x="324" y="62" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/>
+      <rect x="216" y="85" width="24" height="20" fill="#0E6F6C"/><rect x="243" y="85" width="24" height="20" fill="#6FB3AE"/><rect x="270" y="85" width="24" height="20" fill="#B9DBD8"/><rect x="297" y="85" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/><rect x="324" y="85" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/>
+      <rect x="216" y="108" width="24" height="20" fill="#6FB3AE"/><rect x="243" y="108" width="24" height="20" fill="#B9DBD8"/><rect x="270" y="108" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/><rect x="297" y="108" width="24" height="20" fill="#B9DBD8" stroke="#B5602A" stroke-width="2"/><rect x="324" y="108" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/>
+      <rect x="216" y="131" width="24" height="20" fill="#B9DBD8"/><rect x="243" y="131" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/><rect x="270" y="131" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/><rect x="297" y="131" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/><rect x="324" y="131" width="24" height="20" fill="#F4F5F1" stroke="#D6D9D1"/>
+    </g>
+    <text x="216" y="170" font-size="10" fill="#7C8592">tool outcome × stance</text>
+    <text x="216" y="196" font-size="10" fill="#182028">saturated when</text>
+    <text x="216" y="210" font-size="10" fill="#182028">every cell ≥ 5 copies</text>
+    <text x="216" y="224" font-size="10" fill="#182028">no uncovered shapes</text>
+    <text x="216" y="238" font-size="10" fill="#182028">12 flat batches</text>
+    <text x="216" y="258" font-size="10" fill="#7C8592">(new signatures &lt; 2%)</text>
+
+    <!-- station 3: arms -->
+    <rect x="374" y="24" width="160" height="252" rx="4" fill="#FFFFFF" stroke="#D6D9D1"/>
+    <text x="386" y="44" font-size="10" fill="#7C8592" letter-spacing="1.5">3 · SEARCH ARMS</text>
+    <g font-size="10">
+      <text x="386" y="72">structured</text><rect x="386" y="76" width="136" height="8" fill="#E6E8E1"/><rect x="386" y="76" width="57" height="8" fill="#0E6F6C"/>
+      <text x="386" y="102">llm_guided</text><rect x="386" y="106" width="136" height="8" fill="#E6E8E1"/><rect x="386" y="106" width="60" height="8" fill="#0E6F6C"/>
+      <text x="386" y="132">open_ended</text><rect x="386" y="136" width="136" height="8" fill="#E6E8E1"/><rect x="386" y="136" width="13" height="8" fill="#0E6F6C"/>
+      <text x="386" y="162">behavior_targeted</text><rect x="386" y="166" width="136" height="8" fill="#E6E8E1"/><rect x="386" y="166" width="4" height="8" fill="#0E6F6C"/>
+      <text x="386" y="192">failure_mutation</text><rect x="386" y="196" width="136" height="8" fill="#E6E8E1"/><rect x="386" y="196" width="4" height="8" fill="#0E6F6C"/>
+    </g>
+    <text x="386" y="230" font-size="10" fill="#182028">w′ ∝ w · (1 + 0.5 · yield)</text>
+    <text x="386" y="244" font-size="10" fill="#7C8592">floors 1% · caps 8%</text>
+    <text x="386" y="258" font-size="10" fill="#7C8592">variety floor 15%</text>
+
+    <!-- station 4: rollout -->
+    <rect x="554" y="24" width="180" height="252" rx="4" fill="#FFFFFF" stroke="#D6D9D1"/>
+    <text x="566" y="44" font-size="10" fill="#7C8592" letter-spacing="1.5">4 · THE ROLLOUT</text>
+    <g font-size="10">
+      <text x="566" y="68" fill="#7C8592">user</text><rect x="600" y="58" width="122" height="16" rx="2" fill="#F4F5F1" stroke="#E6E8E1"/><text x="605" y="70">search flights, hurried</text>
+      <text x="566" y="92" fill="#7C8592">tool</text><rect x="600" y="82" width="122" height="16" rx="2" fill="#F3DFD0" stroke="#B5602A"/><text x="605" y="94" fill="#B5602A">→ status: timeout</text>
+      <text x="566" y="116" fill="#7C8592">tool</text><rect x="600" y="106" width="122" height="16" rx="2" fill="#F3DFD0" stroke="#B5602A"/><text x="605" y="118" fill="#B5602A">→ status: timeout</text>
+      <text x="566" y="140" fill="#7C8592">agent</text><rect x="600" y="130" width="122" height="16" rx="2" fill="#F4F5F1" stroke="#E6E8E1"/><text x="605" y="142">"unable to search…"</text>
+    </g>
+    <rect x="566" y="166" width="72" height="42" rx="3" fill="#FFFFFF" stroke="#D6D9D1"/>
+    <text x="571" y="178" font-size="8" fill="#7C8592" letter-spacing="1">CONDUCT</text><text x="571" y="196" font-size="14" fill="#0E6F6C">1.0</text><text x="571" y="205" font-size="7" fill="#7C8592">training reward</text>
+    <rect x="650" y="166" width="72" height="42" rx="3" fill="#FFFFFF" stroke="#D6D9D1"/>
+    <text x="655" y="178" font-size="8" fill="#7C8592" letter-spacing="1">MARKER</text><text x="655" y="196" font-size="14" fill="#0E6F6C">1.0</text><text x="655" y="205" font-size="7" fill="#7C8592">eval only</text>
+    <text x="566" y="232" font-size="10" fill="#182028">fault_rate 0.5</text>
+    <text x="566" y="246" font-size="10" fill="#7C8592">timeout · deny · stale · malformed</text>
+    <text x="566" y="260" font-size="10" fill="#7C8592">two scorers, kept apart</text>
+
+    <!-- station 5: split -->
+    <rect x="754" y="24" width="190" height="252" rx="4" fill="#FFFFFF" stroke="#D6D9D1"/>
+    <text x="766" y="44" font-size="10" fill="#7C8592" letter-spacing="1.5">5 · THE SPLIT</text>
+    <g font-size="10">
+      <rect x="766" y="60" width="66" height="18" rx="2" fill="#CFE5E2" stroke="#0E6F6C"/><text x="771" y="72" fill="#0E6F6C">Task</text>
+      <rect x="766" y="84" width="66" height="18" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="771" y="96">Rollout</text>
+      <rect x="766" y="108" width="66" height="18" rx="2" fill="#F4F5F1" stroke="#D6D9D1"/><text x="771" y="120">Judgment</text>
+      <rect x="766" y="132" width="66" height="18" rx="2" fill="#F3DFD0" stroke="#B5602A"/><text x="771" y="144" fill="#B5602A">Marker</text>
+      <text x="866" y="72">eval</text><text x="866" y="96">sft</text><text x="866" y="120">preference</text><text x="866" y="144">grpo</text><text x="866" y="168">opsd</text><text x="866" y="192">opd</text>
+    </g>
+    <g fill="none" stroke="#6B7480" stroke-width="1" marker-end="url(#a)">
+      <path d="M832,69 L862,69" stroke="#0E6F6C"/><path d="M832,141 C845,141 845,69 862,69" stroke="#B5602A"/>
+      <path d="M832,93 L862,93"/><path d="M832,117 C845,117 845,93 862,93" stroke-dasharray="3 3"/>
+      <path d="M832,93 C845,93 845,117 862,117"/>
+      <path d="M832,69 C845,69 845,141 862,141" stroke="#0E6F6C"/>
+      <path d="M832,69 C845,69 845,165 862,165" stroke="#0E6F6C"/><path d="M832,93 C845,93 845,165 862,165" stroke-dasharray="3 3"/>
+      <path d="M832,69 C845,69 845,189 862,189" stroke="#0E6F6C"/>
+    </g>
+    <text x="766" y="218" font-size="10" fill="#182028">Task never holds a rollout</text>
+    <text x="766" y="232" font-size="10" fill="#182028">Rollout never holds a verdict</text>
+    <text x="766" y="246" font-size="10" fill="#7C8592">dashed = selects, never trains</text>
+    <text x="766" y="260" font-size="10" fill="#7C8592">Marker reaches eval only</text>
+
+    <!-- flow arrows between stations -->
+    <g fill="none" stroke="#6B7480" stroke-width="1.2" marker-end="url(#a)">
+      <path d="M184,150 L203,150"/><path d="M354,150 L373,150"/><path d="M534,150 L553,150"/><path d="M734,150 L753,150"/>
+    </g>
+  </g>
+</svg>
