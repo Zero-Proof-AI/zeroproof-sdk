@@ -3,6 +3,15 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.14 (2026-09-13)
+
+- `zeroproof login`: device-flow sign-in from a terminal or a coding
+  agent. Prints a link and a code, waits for Approve in the browser,
+  saves the key to `~/.zeroproof/credentials.json`. Platform calls fall
+  back to that file when no env var is set. A transient network error
+  while waiting is retried, not fatal. `zeroproof status` and
+  `zeroproof logout`. Python: `zeroproof.login()`, `resolve_api_key()`.
+
 ## 0.13 (2026-09-13)
 
 - Hygiene. ruff (lint) and mypy are configured in `pyproject.toml` and

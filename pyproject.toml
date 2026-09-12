@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zeroproof"
-version = "0.13"
+version = "0.14"
 description = "ZeroProof Python SDK: trace ingestion and verification client, plus agent simulations grounded in your tools and system prompt."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -36,6 +36,7 @@ Issues = "https://github.com/Zero-Proof-AI/zeroproof-sdk/issues"
 Datasets = "https://huggingface.co/datasets/zero-proof-ai/agent-simulations"
 
 [project.scripts]
+zeroproof = "zeroproof.cli:main"
 zeroproof-simulations = "zeroproof.simulations.score.quality:main"
 
 [project.optional-dependencies]
