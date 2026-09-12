@@ -14,10 +14,13 @@ inverse is ``from_row``. The wire shape is described by
 ``schemas/row-v1.json`` and every row carries ``schema_version``.
 
 Version 0 is every row written before the stamp existed. ``from_row``
-recognizes the three legacy shapes by key (engine rows by
-``scenario_id``, platform trace pulls by ``tool_trace``, OTel ingest by
-``conversation_id``) and normalizes them the way ``load_traces`` does,
-reusing its alias tables rather than keeping a second copy.
+recognizes the legacy shapes by key (engine rows by ``scenario_id``,
+training exports by ``messages`` without ``steps``, platform trace pulls
+by ``tool_trace``, OTel ingest by ``conversation_id``, the published
+Hugging Face set by its ``*_json`` string columns) and normalizes them
+the way ``load_traces`` does, reusing its alias tables rather than keeping
+a second copy. Keys the objects do not model ride through untouched, so
+``to_row(*from_row(row))`` never loses a column it did not understand.
 
 Validation is permissive on purpose in this version: a stamped row must
 have the required fields with the right types; an unstamped row only has
@@ -50,13 +53,25 @@ VERDICT_KEYS = ("reward", "reason", "grader_reason", "label_source",
                 "judge_name", "judge_status", "judge_meta", "failure_class",
                 "llm_reward", "llm_reason", "qwen_reward")
 
-#: Rollout-level keys that ride through ``from_row``/``to_row`` untouched.
+#: Rollout-level keys the objects know about and carry by name.
 _CARRY_ROLLOUT = ("messages", "opener", "opening", "conversation_id", "ts",
                   "fault_detected", "lineage", "quality", "quality_reason",
                   "quality_scores", "behavior_signature", "steering",
-                  "spec_id")
+                  "tools", "group_id")
 
-ShapeName = Literal["v1", "engine", "platform_pull", "otel", "loose"]
+#: Every key ``from_row`` consumes into a typed field. Anything else on the
+#: row is unknown to the objects and passes through ``Rollout.extra``.
+_CONSUMED = frozenset(
+    (SCHEMA_KEY, "prompt", "steps", "final_text", "scenario_id", "spec_id",
+     "world_state", "faults", "seed", "rollout_index", "model_version",
+     "markers", "tool_trace", "trace")
+    + AXES + VERDICT_KEYS + _CARRY_ROLLOUT)
+
+#: The published Hugging Face set flattens list columns to JSON strings.
+_JSON_STRING_KEYS = ("steps_json", "messages_json", "metadata_json")
+
+ShapeName = Literal["v1", "engine", "training", "platform_pull", "otel",
+                    "hf_flat", "loose"]
 
 
 # ------------------------------------------------------------------ objects
@@ -219,6 +234,11 @@ def detect_shape(row: dict) -> ShapeName:
         return "loose"
     if SCHEMA_KEY in row:
         return "v1"
+    if any(isinstance(row.get(k), str) for k in _JSON_STRING_KEYS):
+        return "hf_flat"
+    if (isinstance(row.get("messages"), list) and row.get("messages")
+            and not row.get("steps") and "final_text" not in row):
+        return "training"
     if row.get("scenario_id") is not None:
         return "engine"
     if isinstance(row.get("tool_trace"), list) and not row.get("steps"):
@@ -289,11 +309,39 @@ def check(rows: Sequence[Any] | Any, kind: Literal["row", "training",
         raise ValueError(f"schema_invalid in {where}: {'; '.join(bad)}")
 
 
-# ------------------------------------------------------------------ from_row
+# ------------------------------------------------------------------ coerce
 
 def _short_hash(*parts: Any) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:12]
 
+
+def _number(value: Any) -> float | int | None:
+    """A reward-like value as a number, or None. Bools count as 0/1."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+# ------------------------------------------------------------------ from_row
 
 def _normalize_legacy(row: dict) -> dict:
     """Version-0 row in canonical spelling, via the trace loader's tables."""
@@ -301,13 +349,33 @@ def _normalize_legacy(row: dict) -> dict:
     shape = detect_shape(row)
     if shape in ("v1", "engine", "otel"):
         return dict(row)
+    if shape == "hf_flat":
+        out = dict(row)
+        for key in _JSON_STRING_KEYS:
+            text = out.pop(key, None)
+            if not isinstance(text, str):
+                continue
+            try:
+                value = json.loads(text)
+            except ValueError:
+                out[key] = text          # unparseable: keep it as it was
+                continue
+            target = key[:-5]            # steps_json -> steps
+            if target == "metadata":
+                if isinstance(value, dict):
+                    out.setdefault("metadata", value)
+            elif isinstance(value, list) and not out.get(target):
+                out[target] = value
+        return out
     normalized = load_traces([row])
     return normalized[0] if normalized else dict(row)
 
 
 def _steps(raw: Any) -> list[Step]:
     out: list[Step] = []
-    for step in raw or []:
+    if not isinstance(raw, list):
+        return out
+    for step in raw:
         if not isinstance(step, dict):
             continue
         out.append(Step(tool=step.get("tool"), arguments=step.get("arguments"),
@@ -322,7 +390,7 @@ def _ledger(faults: Any) -> list[FaultEvent]:
         return out
     for tool, plan in faults.items():
         if isinstance(plan, dict) and plan.get("mode"):
-            rate = plan.get("rate")
+            rate = _number(plan.get("rate"))
             out.append(FaultEvent(tool=str(tool), mode=str(plan["mode"]),
                                   rate=float(rate) if rate is not None else None))
     return out
@@ -330,64 +398,85 @@ def _ledger(faults: Any) -> list[FaultEvent]:
 
 def _judgments(row: dict, rollout_id: str) -> list[Judgment]:
     out: list[Judgment] = []
-    if row.get("reward") is not None or row.get("judge_status"):
-        name = (row.get("label_source") or row.get("judge_name") or "unlabeled")
-        kind: Any = "judge" if row.get("judge_name") else "rule"
+    has_primary = ("reward" in row or row.get("judge_status")
+                   or row.get("judge_name") or row.get("label_source"))
+    if has_primary:
+        judge = row.get("judge_name")
+        label = row.get("label_source")
+        name = judge or label or "unlabeled"
+        kind: Any = "judge" if judge else "rule"
+        reward = _number(row.get("reward"))
+        status = row.get("judge_status") or "ok"
         evidence: dict = {}
+        if reward is None and row.get("reward") is not None:
+            status = "invalid_result"
+            evidence["raw_reward"] = row.get("reward")
         if row.get("judge_meta"):
             evidence["judge_meta"] = row["judge_meta"]
+        if judge and label:
+            evidence["label_source"] = label
         if row.get("grader_reason") and row.get("grader_reason") != row.get("reason"):
             evidence["grader_reason"] = row["grader_reason"]
+        if "reward" in row:
+            evidence["reward_present"] = True
         out.append(Judgment(
             rollout_id=rollout_id, scorer=ScorerRef(name=str(name), kind=kind),
-            reward=row.get("reward"), status=row.get("judge_status") or "ok",
+            reward=reward, status=status,
             reason=str(row.get("reason") or ""),
             failure_class=row.get("failure_class"), evidence=evidence))
     if "llm_reward" in row:
         out.append(Judgment(rollout_id=rollout_id,
                             scorer=ScorerRef(name="llm", kind="judge"),
-                            reward=row.get("llm_reward"),
+                            reward=_number(row.get("llm_reward")),
                             reason=str(row.get("llm_reason") or "")))
     if row.get("qwen_reward") is not None:
         out.append(Judgment(rollout_id=rollout_id,
                             scorer=ScorerRef(name="qwen", kind="judge"),
-                            reward=row.get("qwen_reward")))
+                            reward=_number(row.get("qwen_reward"))))
     return out
 
 
 def from_row(row: dict) -> tuple[Task, Rollout, list[Judgment], list[Marker]]:
-    """Split one flat row into its four objects. Any version."""
+    """Split one flat row into its four objects. Any version, any shape."""
     if not isinstance(row, dict):
         raise TypeError("from_row expects a dict")
     raw = _normalize_legacy(row)
     prompt = str(raw.get("prompt") or "")
     task_id = str(raw.get("scenario_id") or "") or "task_" + _short_hash(prompt)
     axes = {k: raw[k] for k in AXES if k in raw and raw[k] is not None}
+    faults = raw.get("faults") if isinstance(raw.get("faults"), dict) else {}
     task = Task(
         task_id=task_id,
         spec_id=str(raw.get("spec_id") or ""),
         prompt=prompt,
         world=World(seed=raw.get("seed"), state=raw.get("world_state"),
-                    faults=dict(raw.get("faults") or {})),
+                    faults=dict(faults)),
         axes=axes,
     )
-    index = int(raw.get("rollout_index") or 0)
+    index = _int(raw.get("rollout_index"))
     model = raw.get("model_version")
     rollout_id = str(raw.get("rollout_id") or "") or _short_hash(
         task_id, index, model or "")
     extra = {k: raw[k] for k in _CARRY_ROLLOUT if k in raw and raw[k] is not None}
     if raw.get("rollout_index") is not None:
         extra["rollout_index_present"] = True
+    passthrough = {k: v for k, v in raw.items() if k not in _CONSUMED}
+    if passthrough:
+        extra["passthrough"] = passthrough
     rollout = Rollout(
         rollout_id=rollout_id, task_id=task_id,
         policy=PolicyRef(name=str(model or ""), model=model),
         index=index, steps=_steps(raw.get("steps")),
         final_text=str(raw.get("final_text") or ""),
-        ledger=_ledger(raw.get("faults")), extra=extra,
+        ledger=_ledger(faults), extra=extra,
     )
-    markers = [Marker(rollout_id=rollout_id, name=str(k), value=float(v))
-               for k, v in (raw.get("markers") or {}).items()
-               if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    markers: list[Marker] = []
+    for k, v in (raw.get("markers") or {}).items() if isinstance(
+            raw.get("markers"), dict) else ():
+        value = _number(v)
+        if value is not None:
+            markers.append(Marker(rollout_id=rollout_id, name=str(k),
+                                  value=float(value)))
     return task, rollout, _judgments(raw, rollout_id), markers
 
 
@@ -409,8 +498,10 @@ def _step_dict(step: Step) -> dict:
 def to_row(task: Task, rollout: Rollout,
            judgments: Sequence[Judgment] = (),
            markers: Sequence[Marker] = ()) -> dict:
-    """The flat v1 wire row. Inverse of ``from_row`` on engine rows."""
-    from .data import conversation
+    """The flat v1 wire row. Inverse of ``from_row`` on engine rows; on
+    other shapes it is the canonical row ``load_traces`` would produce,
+    with the source row's unknown keys carried along."""
+    from .data import _clean_faults, conversation
     row: dict[str, Any] = {
         "prompt": task.prompt,
         "steps": [_step_dict(s) for s in rollout.steps],
@@ -426,8 +517,9 @@ def to_row(task: Task, rollout: Rollout,
             row[key] = task.axes[key]
     if task.world.state and task.world.state not in {"unspecified", "unknown"}:
         row["world_state"] = task.world.state
-    if task.world.faults:
-        row["faults"] = dict(task.world.faults)
+    faults = _clean_faults(task.world.faults)
+    if faults:
+        row["faults"] = faults
     if rollout.extra.get("fault_detected"):
         row["fault_detected"] = True
     if rollout.index or rollout.extra.get("rollout_index_present"):
@@ -436,32 +528,40 @@ def to_row(task: Task, rollout: Rollout,
         row["model_version"] = rollout.policy.model
     primary = next((j for j in judgments
                     if j.scorer.name not in {"llm", "qwen"}), None)
-    if primary is not None and primary.reward is not None:
-        row["reward"] = primary.reward
+    if primary is not None:
+        if primary.reward is not None or primary.evidence.get("reward_present"):
+            row["reward"] = primary.reward
         if primary.reason:
             row["reason"] = primary.reason
         if primary.scorer.name != "unlabeled":
             if primary.scorer.kind == "judge":
                 row["judge_name"] = primary.scorer.name
+                if primary.evidence.get("label_source"):
+                    row["label_source"] = primary.evidence["label_source"]
             else:
                 row["label_source"] = primary.scorer.name
         if primary.status != "ok":
             row["judge_status"] = primary.status
+        if primary.evidence.get("judge_meta"):
+            row["judge_meta"] = primary.evidence["judge_meta"]
         if primary.failure_class:
             row["failure_class"] = primary.failure_class
     for j in judgments:
         if j.scorer.name == "llm":
             row["llm_reward"] = j.reward
-            if j.reason:
-                row["llm_reason"] = j.reason
+            row["llm_reason"] = j.reason
         elif j.scorer.name == "qwen" and j.reward is not None:
             row["qwen_reward"] = j.reward
     if markers:
         row["markers"] = {m.name: m.value for m in markers}
     for key in ("conversation_id", "ts", "lineage", "quality",
-                "quality_reason", "quality_scores", "spec_id"):
+                "quality_reason", "quality_scores", "tools", "group_id"):
         if rollout.extra.get(key) is not None:
             row[key] = rollout.extra[key]
+    if task.spec_id:
+        row["spec_id"] = task.spec_id
+    for key, value in (rollout.extra.get("passthrough") or {}).items():
+        row.setdefault(key, value)
     return stamp(row)
 
 
