@@ -6,7 +6,7 @@ import itertools
 import json
 import os
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from .diversity import behavior_tier, mix_items_by_tier
 
@@ -792,12 +792,33 @@ def cap_rare_arm_weight(weights: dict[str, float]) -> dict[str, float]:
     return {key: max(0.0, float(val)) / total for key, val in out.items()}
 
 
+def complete_yields(yields: dict[str, float],
+                    arms: Iterable[str] = SEARCH_ARMS) -> dict[str, float]:
+    """Fill in arms that did not run this batch with the mean observed yield.
+
+    An arm with no rows carries no evidence, so it moves with the field
+    rather than up or down. The earlier ``(gain + 1) / (executed + 1)``
+    form scored an idle arm 1.0, above any arm that ran and found
+    something, and pushed weight toward arms that never executed.
+    """
+    observed = {arm: float(v) for arm, v in (yields or {}).items()
+                if v is not None}
+    neutral = (sum(observed.values()) / len(observed)) if observed else 0.0
+    return {arm: observed.get(arm, neutral) for arm in arms}
+
+
 def reallocate_search_arms(weights: dict[str, float],
                            yields: dict[str, float]) -> dict[str, float]:
-    """Yield update toward higher-yield arms, with variety floors and rare caps."""
+    """Yield update toward higher-yield arms, with variety floors and rare caps.
+
+    ``yields`` holds one entry per arm that produced rows this batch:
+    new signatures plus new cells per row executed. Arms absent from it
+    get the mean observed yield (see ``complete_yields``).
+    """
     base = {arm: float(weights.get(arm, SEARCH_ARMS[arm])) for arm in SEARCH_ARMS}
+    filled = complete_yields(yields, SEARCH_ARMS)
     raw = {arm: base[arm] * (1.0 + _SEARCH_ARM_LR * max(
-        0.0, float(yields.get(arm, 0.0)))) for arm in SEARCH_ARMS}
+        0.0, filled[arm])) for arm in SEARCH_ARMS}
     floors = {arm: _arm_floor(arm) for arm in SEARCH_ARMS}
     floor_sum = sum(floors.values())
     if floor_sum >= 1.0:

@@ -642,10 +642,18 @@ def explore_slot_count(batch_size: int, round_index: int) -> int:
 
 def accept_anneal_candidate(novelty: float, *, temperature: float,
                             rng: random.Random | None = None) -> bool:
+    """Accept an off-batch candidate into an explore slot.
+
+    Acceptance rises with novelty (min cosine distance to everything
+    already run) and falls with the annealing temperature: at temperature
+    1.0 a candidate 0.9 away is taken almost always, one 0.45 away or
+    closer about 15% of the time. The earlier form had the sign flipped
+    and took duplicates almost always.
+    """
     if temperature <= 0.01:
         return False
     rng = rng or random.Random()
-    uplift = max(0.0, 0.55 - float(novelty))
+    uplift = max(0.0, float(novelty) - 0.45)
     prob = min(1.0, temperature * (0.15 + uplift * 2.0))
     return rng.random() < prob
 
@@ -660,7 +668,8 @@ def apply_annealing_explore(batch_idx: list[int], texts_len: int,
     rng = random.Random(int(seed) + int(round_index) * 31 + 7)
     in_batch = set(batch_idx)
     pool = [i for i in range(texts_len) if i not in in_batch]
-    pool.sort(key=lambda i: novelty_of.get(i, 0.0))
+    # Most novel first: explore slots are for what the batch has not seen.
+    pool.sort(key=lambda i: -novelty_of.get(i, 0.0))
     accepted: list[int] = []
     for index in pool:
         if len(accepted) >= explore_n:

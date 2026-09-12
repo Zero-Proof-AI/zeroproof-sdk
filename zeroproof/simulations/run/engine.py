@@ -52,8 +52,8 @@ from ..generate.generator import (amplify_seeds, draft_tools,
                                   make_default_generator, write_result_shapes,
                                   write_scene_brief)
 from ..generate.scenarios import (SEARCH_ARMS, _intent_for_tool,
-                                  keep_fault_plan, reallocate_search_arms,
-                                  retarget_regions)
+                                  complete_yields, keep_fault_plan,
+                                  reallocate_search_arms, retarget_regions)
 from ..ingest.traces import (behavior_state, dimensions_from_traces,
                              drop_leaky_rows, exemplar_result_shapes,
                              load_traces, mine_result_exemplars, mine_traces,
@@ -1492,10 +1492,11 @@ class Run:
                 if prev == 0:
                     new_cell[arm] = new_cell.get(arm, 0) + 1
         self.signatures.update(t["behavior_signature"] for t in results)
-        yields = {
-            arm: (new_sig.get(arm, 0) + new_cell.get(arm, 0) + 1.0)
-            / (executed.get(arm, 0) + 1.0)
-            for arm in self.search}
+        # Yield is new signatures plus new cells per row, for arms that
+        # ran. Idle arms are filled with the mean so they carry no vote.
+        yields = complete_yields({
+            arm: (new_sig.get(arm, 0) + new_cell.get(arm, 0)) / n_arm
+            for arm, n_arm in executed.items() if n_arm}, self.search)
         self.search = reallocate_search_arms(self.search, yields)
         data.arm_weights = dict(self.search)
         if hasattr(gen, "reallocate"):

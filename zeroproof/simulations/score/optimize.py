@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
+import math
 from typing import Any, Sequence
 
 from .grading import (_DEGENERATE, _HARNESS_LEAK, _INFRA_STUB,
@@ -560,7 +561,11 @@ def recommend(tools: Sequence[dict] | None = None, policy: str = "", *,
     # measured 4% (field test, 48x8, hosted Qwen). Probe first: 12 asks,
     # grade, group_signal, then pass the measured rate back in here.
     rate = min(1.0, max(0.02, float(mixed_rate)))
-    situations = max(2 * cells, -(-goal // max(1, round(k * rate))))
+    # Expected mixed rows = situations * k * rate, so situations =
+    # goal / (k * rate). Rounding k * rate to an integer first (the old
+    # form) collapsed to 1 below rate 1/16 and under-provisioned by 3x
+    # at the 4% rate measured in the field.
+    situations = max(2 * cells, math.ceil(goal / (k * rate)))
     raw = situations * k
     reasoning += [
         f"k={k} rollouts per ask; assumed mixed-group rate {rate:.0%} "
