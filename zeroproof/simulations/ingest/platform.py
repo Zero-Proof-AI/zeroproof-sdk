@@ -6,7 +6,9 @@ uses a short-lived delegated credential (``zp_dc_...``), which is issued by a
 valid Clerk session token and then passed as the X-Api-Key on protected routes.
 
 The legacy ``ZEROPROOF_API_KEY`` env var still works for compatibility, but the
-preferred runtime credential is ``ZEROPROOF_DELEGATED_CREDENTIAL``.
+preferred runtime credential is ``ZEROPROOF_DELEGATED_CREDENTIAL``. With neither
+set, the key saved by ``zeroproof login`` (``~/.zeroproof/credentials.json``)
+is used.
 
 Stdlib only, matching the package's no-dependencies rule.
 """
@@ -17,6 +19,8 @@ import json
 import os
 import urllib.error
 import urllib.request
+
+from zeroproof.auth import stored_api_key
 
 #: Overridable with ``ZEROPROOF_API_URL``, which is what a self-hosted gate or
 #: a staging one uses. The default is the production token gate behind the
@@ -34,12 +38,12 @@ def _api_url() -> str:
 
 
 def _key(api_key: str | None) -> str:
-    key = api_key or os.environ.get("ZEROPROOF_DELEGATED_CREDENTIAL") or os.environ.get("ZEROPROOF_API_KEY", "")
+    key = (api_key or os.environ.get("ZEROPROOF_DELEGATED_CREDENTIAL")
+           or os.environ.get("ZEROPROOF_API_KEY") or stored_api_key() or "")
     if not key:
         raise PlatformError(
-            "No delegated credential. Pass api_key=... or set "
-            "ZEROPROOF_DELEGATED_CREDENTIAL (preferred) / ZEROPROOF_API_KEY "
-            "for compatibility.")
+            "No credential. Run `zeroproof login`, or pass api_key=..., or set "
+            "ZEROPROOF_DELEGATED_CREDENTIAL / ZEROPROOF_API_KEY.")
     return key
 
 
