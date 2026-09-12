@@ -3,7 +3,15 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.10 (2026-09-11)
+
+- Annealing explore now prefers novel candidates. The acceptance curve
+  had its sign flipped and took near-duplicates almost always.
+- The search-arm bandit no longer rewards arms that produced no rows;
+  idle arms take the mean observed yield and carry no vote.
+- `recommend(mode="rl")` sizes the run as `goal / (k * mixed_rate)`
+  instead of rounding `k * mixed_rate` to an integer first, which
+  under-provisioned by 3x at a 4% mixed rate.
 
 - Schema battle-tested against every row pool reachable: 11k local engine
   rows, both platform datasets, four agents from the public Hugging Face
