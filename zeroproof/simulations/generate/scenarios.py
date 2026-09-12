@@ -990,20 +990,6 @@ def keep_fault_plan(key: str, rate: float, seed: int = 0) -> bool:
     return uniform < rate
 
 
-def planned_fault_fraction(regions: list[dict], *,
-                           rate: float = DEFAULT_FAULT_RATE,
-                           seed: int = 0) -> float:
-    """Share of coverage cells that keep a sandbox fault plan at ``rate``."""
-    if not regions:
-        return 0.0
-    kept = 0
-    for region in regions:
-        if not fault_plan_for_region(region, rate=1.0):
-            continue
-        if keep_fault_plan(str(region.get("id") or ""), rate, seed):
-            kept += 1
-    return kept / len(regions)
-
 
 def fault_plan_for_region(region: dict, *,
                           rate: float = 1.0) -> dict[str, dict]:

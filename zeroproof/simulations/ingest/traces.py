@@ -836,6 +836,8 @@ _STATE_PRIORITY = {
     "improving": 0.2, "solved": 0.05, "passing": 0.05,
 }
 _EXPLORATION_FLOOR = 0.2
+# Graded rows a region needs before its allocation is more than a hint.
+_MIN_SUPPORT = 3
 _RECIPE_AXES = ("tool", "tool_condition", "world_state", "stance", "history")
 
 
@@ -889,7 +891,12 @@ def behavior_state(rows: Sequence[dict], *,
     expansion recipe - how the simulator generates variants around it,
     never its identity). Classification: new, persistent, improving,
     uncertain, solved, passing; persistent-despite-targeting keeps top
-    priority and flags ``rotate_coordinates``. budget_share sums to
+    priority and flags ``rotate_coordinates``. Priority is the status
+    weight scaled by support and by a Laplace-shrunk fail rate over the
+    region's graded rows, so a region that fails once in a hundred draws
+    far less than one that fails half the time. Regions under
+    ``_MIN_SUPPORT`` graded rows are flagged ``low_support``: reported,
+    but not to be trusted for allocation. budget_share sums to
     1 - exploration; broad exploration is always reserved.
     """
     items = [r for r in rows if isinstance(r, dict)]
@@ -967,8 +974,17 @@ def behavior_state(rows: Sequence[dict], *,
         else:
             status = "new" if rec_fail else "passing"
         fails_total = sum(b[0] for b in per.values())
+        graded_total = sum(b[0] + b[1] for b in per.values())
         support_factor = min(1.0, 0.5 + 0.25 * min(fails_total, 6) / 3)
+        # Laplace-shrunk fail rate over every graded row in the region:
+        # one failure in a hundred and fifty in a hundred used to draw the
+        # same priority. A region with no graded rows sits at the prior.
+        fail_rate = (fails_total + 1.0) / (graded_total + 2.0)
+        rate_factor = 0.25 + 0.75 * fail_rate
         slot["status"] = status
+        slot["n_graded"] = graded_total
+        slot["fail_rate"] = round(fail_rate, 4)
+        slot["low_support"] = graded_total < _MIN_SUPPORT
         slot["previously_targeted"] = was_targeted
         slot["rotate_coordinates"] = bool(was_targeted
                                           and status == "persistent")
@@ -977,7 +993,7 @@ def behavior_state(rows: Sequence[dict], *,
              "fail_rate": round(per[b][0] / (per[b][0] + per[b][1]), 3)}
             for b in buckets if b in per]
         slot["priority"] = round(
-            _STATE_PRIORITY[status] * support_factor, 4)
+            _STATE_PRIORITY[status] * support_factor * rate_factor, 4)
         out.append(slot)
 
     total = sum(s["priority"] for s in out) or 1.0

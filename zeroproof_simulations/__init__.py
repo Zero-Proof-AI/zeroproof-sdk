@@ -1,7 +1,7 @@
 """Deprecated import path. The package is ``zeroproof.simulations``.
 
 ``import zeroproof_simulations`` and every submodule path under it keep
-working for two releases and resolve to the very same module objects, so
+working for now and resolve to the very same module objects, so
 ``zeroproof_simulations.run.engine is zeroproof.simulations.run.engine``.
 """
 from __future__ import annotations
@@ -33,8 +33,8 @@ class _AliasFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 warnings.warn(
     "zeroproof_simulations moved to zeroproof.simulations; the old name is "
-    "removed two releases from now. Change `import zeroproof_simulations as zps` "
-    "to `import zeroproof.simulations as zps`.",
+    "kept for now and goes away in a later release. Change "
+    "`import zeroproof_simulations as zps` to `import zeroproof.simulations as zps`.",
     DeprecationWarning, stacklevel=2)
 
 if not any(isinstance(f, _AliasFinder) for f in sys.meta_path):

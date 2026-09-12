@@ -40,7 +40,7 @@ from ..generate.agents import (current_rollout, default_max_turns, hosted_model,
                                touch_hosted)
 from ..generate.coverage import (NEW_SIGNATURE_FLOOR, SATURATION_COPIES,
                                  build_coverage_summary, copies_remaining,
-                                 space_saturated)
+                                 pairwise_coverage, space_saturated)
 from ..generate.diversity import (MAX_NOVELTY_RESTARTS, NOVELTY_RESTART_FLOOR,
                                   adaptive_allocator, allocator_slot_counts,
                                   cap_scenario_families, new_turn_stats,
@@ -1754,6 +1754,9 @@ class Run:
             flat_streak=self.flat, last_batch_size=self.last_batch_size,
             copy_deficit=int((data.search or {}).get("copy_deficit") or 0))
         data.coverage["min_cell_copies"] = (data.search or {}).get("min_cell_copies", 0)
+        data.coverage["pairwise"] = pairwise_coverage(
+            [json.loads(key) for key in self.planned_cell_keys],
+            [t.get("scenario_dimensions") for t in data.trajectories])
         data.coverage["copies_needed"] = SATURATION_COPIES
         data.coverage["unique"] = c.unique_cards
         data.coverage["unique_situations"] = c.unique_cards

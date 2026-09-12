@@ -32,9 +32,9 @@ fail, which are new since the last model version, and which have stopped
 failing. That picture sets the generation budget, so new rows land where
 the deployed agent actually needs them and not where it is already fine.
 
-Both paths use the same engine. The first one is what produced a training
-set that took a base model from 5% to 30% on a public benchmark, from
-nothing but the agent's tool list and policy.
+Both paths use the same engine. The first one is what produced the
+training set behind our first fine-tune, from nothing but the agent's
+tool list and policy.
 
 ## How the simulator thinks
 
@@ -43,10 +43,15 @@ user requests gives you a thousand variations of the same polite,
 well-specified ask. The SDK instead declares axes (which tool, which
 policy clause, what the world looks like, what condition the tool is in,
 what stance the person takes, what has already happened) and renders
-points in that space. A covering design guarantees every pair of values
-appears together at least once, which is the coverage strength the
-testing literature settled on because most real failures come from two
-things interacting. Coverage becomes a number you can read, not a hope.
+points in that space. The planned grid is a pairwise covering array:
+every pair of axis values appears together in at least one planned
+cell, which is the coverage strength the testing literature settled on
+because most real failures come from two things interacting. On a cold
+start the engine then flips most fault cells to success (one cell per
+fault type stays), so the tool-condition axis is sampled, not covered,
+unless you raise `fault_rate` or pass `prefer_success=False`. What the
+run actually touched is a number: `data.coverage["pairwise"]` is
+planned pairs, covered pairs, and the fraction.
 
 **People are sampled, not described.** A coordinate says the customer is
 in a hurry and their order was already cancelled. A second layer decides
@@ -82,8 +87,11 @@ row carrying its situation (which axes, which world state, which faults
 were scheduled), its persona tags, and, once graded, its reward and the
 reason. From there: `training_set()` for supervised fine-tuning,
 preference pairs and repeated groups for reinforcement learning, and a
-leakage check against any evaluation you care about, so what you train on
-is provably not what you test on.
+leakage check against any evaluation you care about. The default check
+is lexical: word and bigram overlap with numbers collapsed, so it drops
+near-copies and copies that differ only in an id, and it does not catch
+a paraphrase. Pass a semantic `embedder=` to the leakage functions when
+that matters.
 
 ## What it is not
 

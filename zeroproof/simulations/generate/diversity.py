@@ -591,7 +591,9 @@ def sample_turn_budget(seed: int, key: str, max_turns: int,
     target = 6.0 if avg_turns is None else float(avg_turns)
     center = target
     if running_mean is not None:
-        center = target + (target - float(running_mean))
+        # Proportional correction at half gain: a full mirror of the
+        # error (gain 1) overshoots and oscillates around the target.
+        center = target + 0.5 * (target - float(running_mean))
     center = max(2, int(round(center)))
     mid_lo = max(2, center - 2)
     mid_hi = min(cap, max(mid_lo, center + 2))

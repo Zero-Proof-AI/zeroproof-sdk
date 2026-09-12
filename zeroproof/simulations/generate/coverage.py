@@ -126,6 +126,36 @@ def build_coverage_summary(
     }
 
 
+def _pairs(assignment: dict) -> set[tuple]:
+    items = sorted((str(k), str(v)) for k, v in assignment.items()
+                   if v not in (None, "") and k != "origin")
+    return {(a, b) for i, a in enumerate(items) for b in items[i + 1:]}
+
+
+def pairwise_coverage(planned: list[dict], observed: list[dict]) -> dict[str, Any]:
+    """How much of the planned pairwise grid the produced rows touched.
+
+    ``planned`` are the grid cells the run was built from (after any
+    success flip), ``observed`` the ``scenario_dimensions`` of the rows
+    it produced. A pair is one (axis, value) x (axis, value) combination.
+    The fraction is what the docs mean by coverage you can read: 1.0
+    means every pair the plan contained appeared in at least one row.
+    """
+    wanted: set[tuple] = set()
+    for assignment in planned or []:
+        if isinstance(assignment, dict):
+            wanted |= _pairs(assignment)
+    seen: set[tuple] = set()
+    for assignment in observed or []:
+        if isinstance(assignment, dict):
+            seen |= _pairs(assignment) & wanted
+    return {
+        "pairs_planned": len(wanted),
+        "pairs_covered": len(seen),
+        "fraction": round(len(seen) / len(wanted), 4) if wanted else None,
+    }
+
+
 def cell_key(row: dict) -> str:
     dims = row.get("scenario_dimensions")
     if isinstance(dims, dict) and dims:

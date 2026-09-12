@@ -359,7 +359,9 @@ def select_execution_batch(candidates: list[str], *, embedder: Any,
     else:
         tested = archive.vectors
 
-    rng = random.Random(seed)
+    # Per-round stream: seeding on ``seed`` alone replayed the same draws
+    # every round against a changing pool.
+    rng = random.Random(int(seed) + int(round_index) * 7919)
     typical_idx: list[int] = []
     cluster_order = sorted(by_cluster, key=lambda c: (-len(by_cluster[c]), c))
     while len(typical_idx) < typical_n and cluster_order:
