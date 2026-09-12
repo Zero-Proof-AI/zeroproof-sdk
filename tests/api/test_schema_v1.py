@@ -106,8 +106,90 @@ def test_otel_rows_are_stamped_and_round_trip():
         assert back == row
 
 
+def test_training_export_rows_derive_steps_instead_of_losing_them():
+    row = _load("training")
+    assert schema.detect_shape(row) == "training"
+    task, rollout, judgments, markers = schema.from_row(row)
+    expected = zps.load_traces([row])[0]
+    back = schema.to_row(task, rollout, judgments, markers)
+    assert back["steps"] == expected["steps"] and back["steps"]
+    assert back["final_text"] == expected["final_text"]
+    assert back["tools"] == row["tools"]
+    assert back["reward"] == row["reward"]
+
+
+def test_hugging_face_flat_rows_parse_their_json_columns():
+    row = _load("hf_flat")
+    assert schema.detect_shape(row) == "hf_flat"
+    task, rollout, judgments, markers = schema.from_row(row)
+    assert [s.tool for s in rollout.steps] == [
+        s.get("tool") for s in json.loads(row["steps_json"])]
+    back = schema.to_row(task, rollout, judgments, markers)
+    assert back["messages"] == json.loads(row["messages_json"])
+    assert back["agent_type"] == row["agent_type"]      # unknown keys ride along
+    assert back["mode"] == row["mode"]
+    assert back["reward"] == row["reward"]
+    assert "steps_json" not in back and "messages_json" not in back
+
+
+def test_unknown_keys_pass_through():
+    row = {"prompt": "p", "example_id": "ex-1", "info": {"answer": "42"}}
+    task, rollout, judgments, markers = schema.from_row(row)
+    assert rollout.extra["passthrough"] == {"example_id": "ex-1", "info": {"answer": "42"}}
+    back = schema.to_row(task, rollout, judgments, markers)
+    assert back["example_id"] == "ex-1" and back["info"] == {"answer": "42"}
+
+
+def test_garbage_never_crashes_and_the_output_validates():
+    rows = [
+        {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
+         "faults": {"*": {"mode": "timeout", "rate": "half"}}},
+        {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
+         "rollout_index": "three"},
+        {"scenario_id": "s", "prompt": "p", "steps": "no", "final_text": "f",
+         "reward": True, "markers": {"a": True, "b": "x", "c": 0.5}},
+        {"prompt": None, "steps": None, "final_text": None, "reward": "1"},
+    ]
+    for row in rows:
+        task, rollout, judgments, markers = schema.from_row(row)
+        back = schema.to_row(task, rollout, judgments, markers)
+        assert schema.validate(back) == [], (row, schema.validate(back))
+    assert rollout.ledger == [] or rollout.ledger[0].rate is None
+    _, r2, _, _ = schema.from_row(rows[1])
+    assert r2.index == 0
+    _, _, j3, m3 = schema.from_row(rows[2])
+    assert j3[0].reward == 1                      # bool coerced, not rejected
+    assert {m.name: m.value for m in m3} == {"a": 1.0, "c": 0.5}
+    _, _, j4, _ = schema.from_row(rows[3])
+    assert j4[0].reward == 1 and j4[0].status == "ok"
+
+
+def test_judge_rows_keep_their_metadata_even_without_a_reward():
+    row = {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
+           "reward": None, "judge_status": "error", "judge_name": "j",
+           "judge_meta": {"error": "boom"}, "lineage": {"scoring_run_id": "r"}}
+    task, rollout, judgments, markers = schema.from_row(row)
+    j = judgments[0]
+    assert j.scorer == schema.ScorerRef(name="j", kind="judge")
+    assert j.reward is None and j.status == "error"
+    back = schema.to_row(task, rollout, judgments, markers)
+    back.pop("schema_version"); back.pop("messages")
+    assert back == row
+
+
+def test_judge_name_and_label_source_both_survive():
+    row = {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
+           "reward": 1, "judge_name": "j", "label_source": "conduct"}
+    task, rollout, judgments, markers = schema.from_row(row)
+    assert judgments[0].scorer.name == "j"
+    assert judgments[0].evidence["label_source"] == "conduct"
+    back = schema.to_row(task, rollout, judgments, markers)
+    assert back["judge_name"] == "j" and back["label_source"] == "conduct"
+
+
 def test_legacy_rows_are_never_rejected():
-    for name in ("engine", "platform_pull_engine", "platform_pull"):
+    for name in ("engine", "platform_pull_engine", "platform_pull",
+                 "training", "hf_flat"):
         assert schema.validate(_load(name)) == []
     assert schema.validate({"anything": 1}) == []
 

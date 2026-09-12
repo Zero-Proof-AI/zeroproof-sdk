@@ -3,6 +3,23 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Schema battle-tested against every row pool reachable: 11k local engine
+  rows, both platform datasets, four agents from the public Hugging Face
+  set, and an adversarial set. Two more legacy shapes are read by
+  `from_row`: training exports (`messages` without `steps`; steps and
+  `final_text` are derived, `tools` carried) and the Hugging Face set's
+  flattened `*_json` string columns. Unknown columns now ride through
+  `from_row` / `to_row` untouched, so verifiers-style `example_id` and
+  `info` survive. Garbage values (a non-numeric fault rate, a
+  non-integer `rollout_index`, bool or string rewards) coerce instead of
+  raising. Judge rows keep `judge_status`, `judge_meta`, and both
+  `judge_name` and `label_source` through the round trip.
+- `examples/schema`: `migrate.py` stamps and splits any legacy file into
+  rows plus a rollout-free `tasks.jsonl`; `project.py` writes eval, SFT,
+  preference, GRPO, OPSD, and OPD targets from one v1 file. Offline, no key.
+
 ## 0.09 (2026-09-11)
 
 - The simulations package moved under the namespace: `zeroproof_simulations`

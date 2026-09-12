@@ -39,7 +39,10 @@
         "conversation_id": {"type": "string", "$comment": "OTel ingest only"},
         "ts": {"type": "integer", "$comment": "OTel ingest only; earliest span start, ns"},
         "lineage": {"type": "object"},
-        "quality": {}, "quality_reason": {}, "quality_scores": {}
+        "quality": {}, "quality_reason": {}, "quality_scores": {},
+        "judge_meta": {"type": "object"},
+        "tools": {"type": "array", "$comment": "carried from a training-shaped source row"},
+        "group_id": {"type": "string"}
       },
       "additionalProperties": true
     },
@@ -98,6 +101,8 @@
       "engine": {"detect": "scenario_id", "keys": ["prompt", "messages", "steps", "final_text", "scenario_id", "rollout_index", "model_version", "world_state", "faults", "reward", "reason", "label_source", "tier", "ask_family", "ask", "stance", "tone", "texture", "vagueness", "phrasing", "pressure", "user", "history", "length", "intent_known", "tool_known"]},
       "platform_pull": {"detect": "tool_trace without steps", "keys": ["prompt", "tool_trace", "final_text", "reward", "lineage"], "step_keys": ["tool", "input", "output"]},
       "platform_pull_engine": {"detect": "scenario_id", "$comment": "A dataset the SDK pushed comes back in engine shape."},
+      "training": {"detect": "messages without steps or final_text", "keys": ["messages", "tools", "group_id", "reward", "scenario_id"], "$comment": "An export_training row; steps and final_text are derived from messages."},
+      "hf_flat": {"detect": "steps_json / messages_json / metadata_json", "keys": ["agent_type", "mode", "prompt", "messages_json", "steps_json", "metadata_json", "final_text", "reward", "reason", "scenario_id"], "$comment": "The published Hugging Face set; list columns flattened to JSON strings. Read only; to_row writes canonical lists."},
       "otel": {"detect": "conversation_id", "keys": ["conversation_id", "prompt", "steps", "final_text", "model_version", "reward", "ts"]}
     }
   }
