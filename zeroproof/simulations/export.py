@@ -167,7 +167,7 @@ def training_rows(source, *, system_prompt: str | None = None,
     ``system_prompt=`` and ``tools=`` explicitly; a row exported without
     its policy trains an agent that never saw its rules.
     """
-    from zeroproof_simulations import conversation
+    from zeroproof.simulations import conversation
     rows, system, resolved_tools, _ = _resolve(source)
     if system_prompt is not None:
         system = str(system_prompt)
@@ -296,7 +296,7 @@ def export_preference(pairs: Sequence[dict], output: str | None = None, *,
     with the roundtrip gate run over BOTH sides. Pairs come from
     ``ScoredData.select_for_preference()`` / ``build_preference_pairs``.
     """
-    from zeroproof_simulations import conversation
+    from zeroproof.simulations import conversation
     system = str(system_prompt or "")
     out_rows: list[dict] = []
     for pair in pairs:

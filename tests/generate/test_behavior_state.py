@@ -2,7 +2,7 @@
 behavioral predicates (markers, fault-response, capability fallback),
 never coordinate tuples; history buckets by model version; targeting
 memory distinguishes solved from lucky and flags coordinate rotation."""
-from zeroproof_simulations.ingest.traces import behavior_state
+from zeroproof.simulations.ingest.traces import behavior_state
 
 
 def _mrow(marker, ok, version, tool="edit_file", dims=None):
@@ -97,7 +97,7 @@ def test_empty_history():
 
 def test_behavior_state_rides_trace_fed_simulate():
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations.ingest.traces import simulate_from_traces
+    from zeroproof.simulations.ingest.traces import simulate_from_traces
     traces = [
         {"prompt": "where is order 4412",
          "steps": [{"tool": "lookup_order", "arguments": {"order_id": "4412"},
@@ -122,7 +122,7 @@ def test_behavior_state_rides_trace_fed_simulate():
 
 def test_rows_carry_dims_and_model_version_everywhere():
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations import simulate
+    from zeroproof.simulations import simulate
     data = simulate(agent=scripted_agent, tools=TOOLS, system_prompt=POLICY,
                     mode="explore", budget=16, seed=0, grade=False,
                     concurrency=4, simulator=False, time_budget=20,
@@ -135,7 +135,7 @@ def test_rows_carry_dims_and_model_version_everywhere():
 
 
 def test_otel_reads_model_version():
-    from zeroproof_simulations import rows_from_otel
+    from zeroproof.simulations import rows_from_otel
     spans = [{"traceId": "t1", "spanId": "r", "name": "agent x",
               "startedMs": 1000,
               "attributes": {
@@ -152,8 +152,8 @@ def test_allocation_actually_shifts_generation():
     """The missing link, closed: region budget shares must change what
     the simulator generates, not just be reported."""
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations import simulate
-    from zeroproof_simulations.ingest.traces import simulate_from_traces
+    from zeroproof.simulations import simulate
+    from zeroproof.simulations.ingest.traces import simulate_from_traces
     hot = [{"prompt": f"refund order {i} failed again",
             "steps": [{"tool": "create_refund", "arguments": {"order_id": str(i)},
                        "result": {"status": "timeout"}}],
@@ -185,7 +185,7 @@ def test_region_progress_same_rules_both_sides():
     """Trace regions re-measured on generated graded rows: the
     hill-climb readout speaks one vocabulary."""
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations.ingest.traces import simulate_from_traces
+    from zeroproof.simulations.ingest.traces import simulate_from_traces
     traces = [{"prompt": "refund order 9911 now",
                "steps": [{"tool": "create_refund", "arguments": {"order_id": "9911"},
                           "result": {"status": "timeout"}}],
@@ -210,7 +210,7 @@ def test_region_progress_same_rules_both_sides():
 def test_applied_is_false_when_no_cell_ever_boosted():
     """applied discloses that a weight changed, not that regions exist."""
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations.ingest.traces import simulate_from_traces
+    from zeroproof.simulations.ingest.traces import simulate_from_traces
     hot = [{"prompt": f"legacy lookup {i} failed",
             "steps": [{"tool": "legacy_lookup", "arguments": {},
                        "result": {"status": "timeout"}}],
@@ -228,7 +228,7 @@ def test_applied_is_false_when_no_cell_ever_boosted():
 
 def test_ungraded_fault_rows_are_unknown_not_failed():
     """reward=None with a fault is support, never a failure count."""
-    from zeroproof_simulations.ingest.traces import behavior_state
+    from zeroproof.simulations.ingest.traces import behavior_state
     rows = [{"prompt": f"lookup {i} timed out",
              "steps": [{"tool": "get_order", "arguments": {},
                         "result": {"status": "timeout"}}],
@@ -245,7 +245,7 @@ def test_ungraded_fault_rows_are_unknown_not_failed():
 def test_region_progress_measured_after_grading():
     """The readout describes graded, shipping rows, not raw rollouts."""
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations.ingest.traces import simulate_from_traces
+    from zeroproof.simulations.ingest.traces import simulate_from_traces
     hot = [{"prompt": f"refund order {i} failed again",
             "steps": [{"tool": "create_refund", "arguments": {"order_id": str(i)},
                        "result": {"status": "timeout"}}],
@@ -264,7 +264,7 @@ def test_region_progress_measured_after_grading():
 
 def test_targeted_regions_without_traces_is_harmless():
     from tests.helpers import POLICY, TOOLS, scripted_agent
-    from zeroproof_simulations import simulate
+    from zeroproof.simulations import simulate
     data = simulate(agent=scripted_agent, tools=TOOLS, system_prompt=POLICY,
                     budget=4, seed=1, grade=False, simulator=False,
                     concurrency=2, time_budget=20,
@@ -274,7 +274,7 @@ def test_targeted_regions_without_traces_is_harmless():
 
 
 def test_otel_zeroproof_model_version_beats_earlier_generic_span():
-    from zeroproof_simulations.ingest.otel import rows_from_otel
+    from zeroproof.simulations.ingest.otel import rows_from_otel
     spans = [{"spanId": "a", "traceId": "t", "name": "chat",
               "startedMs": 1000,
               "attributes": {
@@ -294,7 +294,7 @@ def test_otel_zeroproof_model_version_beats_earlier_generic_span():
 def test_newest_first_history_with_ts_still_orders_by_time():
     """Chronology comes from ts, never from row order: a newest-first
     export must not read the oldest round as latest."""
-    from zeroproof_simulations.ingest.traces import behavior_state
+    from zeroproof.simulations.ingest.traces import behavior_state
     newest_first = (
         [dict(_mrow("edits_before_reading", True, "v1"), ts=2000)] * 4
         + [dict(_mrow("edits_before_reading", False, "v0"), ts=1000)] * 4)
@@ -306,7 +306,7 @@ def test_newest_first_history_with_ts_still_orders_by_time():
 
 
 def test_otel_rows_carry_ts_from_earliest_span():
-    from zeroproof_simulations.ingest.otel import rows_from_otel
+    from zeroproof.simulations.ingest.otel import rows_from_otel
     spans = [{"spanId": "a", "traceId": "t", "name": "chat",
               "startedMs": 5000,
               "attributes": {"gen_ai.input.messages":

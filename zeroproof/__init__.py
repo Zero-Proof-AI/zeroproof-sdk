@@ -5,7 +5,7 @@ ZeroProof platform client: OTLP trace ingest for the token gate.
     >>> zeroproof.send_traces(otlp_batch, api_key="zp_...")
     >>> zeroproof.list_traces("zp_...")["traces"]
 
-Agent simulations live next door in ``zeroproof_simulations``.
+Agent simulations live next door in ``zeroproof.simulations``.
 """
 
 from .ingest import (

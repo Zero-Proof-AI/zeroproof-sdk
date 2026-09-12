@@ -5,9 +5,9 @@ import json
 
 import pytest
 
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 from tests.helpers import simulate_offline
-from zeroproof_simulations.score.llm_judge import DEFAULT_JUDGE_SPEC, MISSING_JUDGE_KEY
+from zeroproof.simulations.score.llm_judge import DEFAULT_JUDGE_SPEC, MISSING_JUDGE_KEY
 
 
 def _fake_judge_complete(_url, _model, messages, **_kwargs):
@@ -28,7 +28,7 @@ def test_simulate_default_does_not_llm_grade(monkeypatch):
         calls.append("llm")
         return {"content": '{"score": 1, "reason": "ok"}'}
 
-    monkeypatch.setattr("zeroproof_simulations.score.llm_judge.complete", tracked)
+    monkeypatch.setattr("zeroproof.simulations.score.llm_judge.complete", tracked)
     data = _run(budget=8)
     assert len(data.trajectories) == 8
     assert all(t.get("llm_reward") is None for t in data.trajectories)
@@ -36,7 +36,7 @@ def test_simulate_default_does_not_llm_grade(monkeypatch):
 
 
 def test_grade_llm_true_writes_fields(monkeypatch, tmp_path):
-    monkeypatch.setattr("zeroproof_simulations.score.llm_judge.complete", _fake_judge_complete)
+    monkeypatch.setattr("zeroproof.simulations.score.llm_judge.complete", _fake_judge_complete)
     data = _run()
     before = [(t["reward"], t.get("grader_reason")) for t in data.trajectories]
     data.grade(llm=True, api_key="sk-test")
@@ -70,7 +70,7 @@ def test_llm_grade_helper_and_unreachable(monkeypatch):
     def blocked(*_args, **_kwargs):
         raise OSError("judge offline")
 
-    monkeypatch.setattr("zeroproof_simulations.score.llm_judge.complete", blocked)
+    monkeypatch.setattr("zeroproof.simulations.score.llm_judge.complete", blocked)
     data = _run(budget=4)
     zps.llm_grade(data, api_key="sk-test")
     assert all(t["llm_reward"] is None for t in data.trajectories)
@@ -79,7 +79,7 @@ def test_llm_grade_helper_and_unreachable(monkeypatch):
 
 def test_simulate_llm_grade_flag_runs_after_rollout(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr("zeroproof_simulations.score.llm_judge.complete", _fake_judge_complete)
+    monkeypatch.setattr("zeroproof.simulations.score.llm_judge.complete", _fake_judge_complete)
     data = _run(budget=4, llm_grade=True)
     assert all(t["llm_reward"] == 0.5 for t in data.trajectories)
     assert all(t["reward"] is None for t in data.trajectories)
@@ -92,7 +92,7 @@ def test_llm_judge_uses_openai_not_hosted(monkeypatch):
         seen.append((url, model, kwargs.get("api_key"), messages[0].get("role")))
         return {"content": '{"score": 1, "reason": "ok"}'}
 
-    monkeypatch.setattr("zeroproof_simulations.score.llm_judge.complete", fake)
+    monkeypatch.setattr("zeroproof.simulations.score.llm_judge.complete", fake)
     data = _run(budget=4)
     data.grade(llm=True, api_key="sk-test")
     assert seen
@@ -104,7 +104,7 @@ def test_llm_judge_uses_openai_not_hosted(monkeypatch):
 
 
 def test_llm_grade_rewrites_same_jsonl(monkeypatch, tmp_path):
-    monkeypatch.setattr("zeroproof_simulations.score.llm_judge.complete", _fake_judge_complete)
+    monkeypatch.setattr("zeroproof.simulations.score.llm_judge.complete", _fake_judge_complete)
     dest = tmp_path / "out.jsonl"
     data = _run(output=str(dest), budget=4)
     first = json.loads(dest.read_text().splitlines()[0])

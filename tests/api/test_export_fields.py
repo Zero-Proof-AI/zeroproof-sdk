@@ -1,5 +1,5 @@
 """The JSONL row keeps what a grader needs to group and reproduce a rollout."""
-from zeroproof_simulations.data import _export_row
+from zeroproof.simulations.data import _export_row
 
 
 def test_export_row_keeps_group_identity_and_reproduction_fields():
@@ -26,7 +26,7 @@ def test_export_row_omits_missing_group_fields():
 
 
 def test_faults_export_carries_fault_modes_only():
-    from zeroproof_simulations.data import _export_row
+    from zeroproof.simulations.data import _export_row
     row = {"prompt": "p", "steps": [], "final_text": "f", "scenario_id": "s",
            "stance": "hurried",
            "faults": {"*": {"mode": "timeout", "rate": 1.0}, "stance": "hurried",

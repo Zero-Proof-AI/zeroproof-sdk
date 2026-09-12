@@ -12,13 +12,13 @@ def _offline_hosted_simulator(monkeypatch):
         raise OSError("hosted simulator disabled in unit tests")
     def embed_blocked(self, texts):
         raise OSError("hosted embedder disabled in unit tests")
-    monkeypatch.setattr("zeroproof_simulations.generate.generator.complete", blocked)
-    monkeypatch.setattr("zeroproof_simulations.generate.agents.complete", blocked)
-    monkeypatch.setattr("zeroproof_simulations.score.llm_judge.complete", blocked)
+    monkeypatch.setattr("zeroproof.simulations.generate.generator.complete", blocked)
+    monkeypatch.setattr("zeroproof.simulations.generate.agents.complete", blocked)
+    monkeypatch.setattr("zeroproof.simulations.score.llm_judge.complete", blocked)
     monkeypatch.setattr(
-        importlib.import_module("zeroproof_simulations.score.grade_llm"),
+        importlib.import_module("zeroproof.simulations.score.grade_llm"),
         "complete", blocked)
-    monkeypatch.setattr("zeroproof_simulations.generate.embeddings.ModalEmbedder.embed",
+    monkeypatch.setattr("zeroproof.simulations.generate.embeddings.ModalEmbedder.embed",
                         embed_blocked)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ZEROPROOF_API_KEY", raising=False)

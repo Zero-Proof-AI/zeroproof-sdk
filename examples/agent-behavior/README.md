@@ -212,7 +212,7 @@ needs. `examples/prime-intellect-rl` picks the thread up from there.
 To read the rows back:
 
 ```python
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 print(zps.datasets())
 ```
 

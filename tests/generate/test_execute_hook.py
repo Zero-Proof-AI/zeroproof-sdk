@@ -1,6 +1,6 @@
 """The caller's world answers tool calls when execute= is given."""
-from zeroproof_simulations.generate.agents import _answer_tool_call, local_model
-from zeroproof_simulations.world.sandbox import MockEnvironment
+from zeroproof.simulations.generate.agents import _answer_tool_call, local_model
+from zeroproof.simulations.world.sandbox import MockEnvironment
 from tests.helpers import TOOLS
 
 
@@ -47,7 +47,7 @@ def test_local_model_routes_tool_calls_to_execute(monkeypatch):
                              "arguments": '{"order_id":"ORD-7"}'}}]}
         return {"content": "Order ORD-7 ships tomorrow."}
 
-    monkeypatch.setattr("zeroproof_simulations.generate.agents.complete", fake_complete)
+    monkeypatch.setattr("zeroproof.simulations.generate.agents.complete", fake_complete)
     answered = []
 
     def world(tool, args):
@@ -62,7 +62,7 @@ def test_local_model_routes_tool_calls_to_execute(monkeypatch):
 
 
 def test_current_rollout_names_the_run_for_the_world():
-    from zeroproof_simulations.generate.agents import current_rollout
+    from zeroproof.simulations.generate.agents import current_rollout
     from tests.helpers import simulate_offline
     seen = []
 

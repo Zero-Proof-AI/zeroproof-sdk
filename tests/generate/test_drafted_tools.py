@@ -1,8 +1,8 @@
 """A description with no tools gets a drafted tool surface in its own domain."""
 import json
 
-from zeroproof_simulations.generate import agents as zagents
-from zeroproof_simulations.generate import generator as gen
+from zeroproof.simulations.generate import agents as zagents
+from zeroproof.simulations.generate import generator as gen
 
 
 def test_draft_tools_parses_fenced_json_and_marks_drafted(monkeypatch):

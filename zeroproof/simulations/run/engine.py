@@ -66,7 +66,7 @@ from .rows import (_cell_key, _mutation_worthy, _record_coverage,
                    _stratified_prompts, _usable_rollout)
 from .spec import _apply_spec, _backend_spec, _kind_from_spec
 
-log = logging.getLogger("zeroproof_simulations")
+log = logging.getLogger("zeroproof.simulations")
 
 # How hard a hot trace region pulls cell weight toward itself.
 ALLOC_GAIN = 4.0

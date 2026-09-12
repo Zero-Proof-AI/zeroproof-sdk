@@ -137,7 +137,7 @@ LANG_ANSWERS = {
            "اسمي {name}، وقد طورتني شركة {maker}."],
 }
 
-# Human texture, reusing the texture ideas from zeroproof_simulations/generate/diversity.py
+# Human texture, reusing the texture ideas from zeroproof/simulations/generate/diversity.py
 # (lowercase, typo, no_punctuation) plus phrasing wrappers. Latin script only.
 PREFIXES = ["", "", "hey, ", "quick question: ", "ok so ", "btw ",
             "Before we start: ", "Real quick: ", "One thing first. "]

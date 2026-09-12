@@ -23,7 +23,7 @@ the **coding agent** is the assistant reading this skill and operating the SDK;
 the **target agent** is the agent being simulated and improved; the **simulated
 user** is the person speaking to the target agent inside a trajectory.
 
-Ground truth is the installed `zeroproof_simulations` package. Inspect its
+Ground truth is the installed `zeroproof.simulations` package. Inspect its
 public signatures when the installed version differs from these examples.
 
 ## Inputs and routes
@@ -67,7 +67,7 @@ When traces are the starting point, follow this sequence:
    ```python
    import os
    import zeroproof
-   import zeroproof_simulations as zps
+   import zeroproof.simulations as zps
 
    key = os.environ["ZEROPROOF_API_KEY"]
    inventory = zeroproof.list_traces(key)["traces"]
@@ -95,7 +95,7 @@ When traces are the starting point, follow this sequence:
    confirm required arguments and missing tools.
 
    ```python
-   from zeroproof_simulations.ingest.traces import infer_harness
+   from zeroproof.simulations.ingest.traces import infer_harness
 
    draft = infer_harness(normalized_traces)
    tools, policy = draft["tools"], draft["policy"]  # policy is intentionally empty
@@ -130,7 +130,7 @@ Find the exact system prompt the agent receives and obtain tool schemas from
 the implementation or harness rather than hand-transcribing them.
 
 ```python
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 
 pre = zps.preflight(tools, policy)
 print(pre)

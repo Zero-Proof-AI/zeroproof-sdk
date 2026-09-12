@@ -36,7 +36,7 @@ examples/*
 simulate.ipynb
 test.ipynb
 quick_tests.ipynb
-zeroproof_simulations/_experimental/
+zeroproof/simulations/_experimental/
 
 # editor config and local notes
 .cursor/

@@ -10,7 +10,7 @@ import ast
 import re
 from pathlib import Path
 
-from zeroproof_simulations.run.config import resolve_run_config
+from zeroproof.simulations.run.config import resolve_run_config
 
 README = Path(__file__).resolve().parents[2] / "README.md"
 ROW = re.compile(r"^\| `([a-z_]+)` \| `([^`]*)` \|", re.M)

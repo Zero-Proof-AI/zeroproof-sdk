@@ -11,11 +11,11 @@ import json
 
 import pytest
 
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 from tests.connect.test_otel import BATCH
 from tests.helpers import FIXTURES, simulate_offline
-from zeroproof_simulations import schema
-from zeroproof_simulations.data import _CONVERSATION_FIELDS
+from zeroproof.simulations import schema
+from zeroproof.simulations.data import _CONVERSATION_FIELDS
 
 ROWS = FIXTURES / "rows"
 
@@ -47,7 +47,7 @@ def test_json_schema_and_dataclasses_agree():
 
 def test_json_schema_ships_in_the_package():
     from importlib import resources
-    path = resources.files("zeroproof_simulations") / "schemas" / "row-v1.json"
+    path = resources.files("zeroproof.simulations") / "schemas" / "row-v1.json"
     assert path.is_file()
 
 

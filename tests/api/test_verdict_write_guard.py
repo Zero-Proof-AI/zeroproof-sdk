@@ -10,8 +10,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import zeroproof_simulations as zps
-from zeroproof_simulations.schema import VERDICT_KEYS
+import zeroproof.simulations as zps
+from zeroproof.simulations.schema import VERDICT_KEYS
 
 PKG = Path(zps.__file__).resolve().parent
 PATTERN = re.compile(r'\w+\["(%s)"\]\s*=' % "|".join(VERDICT_KEYS))

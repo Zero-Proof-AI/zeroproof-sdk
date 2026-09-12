@@ -7,10 +7,10 @@ from __future__ import annotations
 from collections import Counter
 
 from tests.helpers import POLICY, TOOLS, scripted_agent
-from zeroproof_simulations.generate.scenarios import (scenario_regions,
+from zeroproof.simulations.generate.scenarios import (scenario_regions,
                                              steer_region_picks,
                                              steering_front_values)
-from zeroproof_simulations.ingest.traces import (dimensions_from_traces,
+from zeroproof.simulations.ingest.traces import (dimensions_from_traces,
                                           simulate_from_traces)
 
 TRACES = [
@@ -135,7 +135,7 @@ def test_metadata_reports_only_what_applied():
     assert d1.metadata["targeted_rows"] + d1.metadata["background_rows"] == \
         len(d1.trajectories)
     # No traces: nothing to aim at, nothing applied.
-    from zeroproof_simulations import simulate
+    from zeroproof.simulations import simulate
     plain = simulate(scripted_agent, tools=TOOLS, system_prompt=POLICY,
                      **{k: v for k, v in _OFFLINE.items() if k != "mode"},
                      mode="explore")

@@ -22,7 +22,7 @@ row (``judge_status`` of ``missing_reward`` / ``invalid_result`` /
 
 The five-line loop::
 
-    import zeroproof_simulations as zps
+    import zeroproof.simulations as zps
     judge = lambda t: {"reward": int("sorry" not in t["final_text"])}
     scored = zps.run_judge(data.trajectories, judge)     # or data.grade(judge=judge)
     zps.export_training(scored.passes(), output="train.jsonl",

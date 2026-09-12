@@ -3,7 +3,7 @@ import threading
 import time
 
 from tests.helpers import TOOLS, POLICY, GITHUB_SPEC, scripted_agent, simulate_offline
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 
 
 def _lower_headers(headers):
@@ -70,7 +70,7 @@ def test_platform_delegated_credential_helpers(monkeypatch):
         return FakeResponse()
 
     monkeypatch.setenv("ZEROPROOF_API_URL", "https://example.test")
-    monkeypatch.setattr("zeroproof_simulations.ingest.platform.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("zeroproof.simulations.ingest.platform.urllib.request.urlopen", fake_urlopen)
 
     out = zps.issue_delegated_credential("clerk.jwt.abc", ttl_seconds=900)
     assert out["credential"] == "zp_dc_123"
@@ -104,9 +104,9 @@ def test_platform_call_falls_back_to_api_key_for_blank_auth_token(monkeypatch):
 
     monkeypatch.setenv("ZEROPROOF_API_URL", "https://example.test")
     monkeypatch.setenv("ZEROPROOF_API_KEY", "zp_test_key")
-    monkeypatch.setattr("zeroproof_simulations.ingest.platform.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("zeroproof.simulations.ingest.platform.urllib.request.urlopen", fake_urlopen)
 
-    from zeroproof_simulations.ingest.platform import _call
+    from zeroproof.simulations.ingest.platform import _call
     _call("GET", "/datasets", None, auth_token="   ")
 
     assert seen[0]["url"] == "https://example.test/datasets"
@@ -134,9 +134,9 @@ def test_platform_call_can_send_bearer_and_api_key_together(monkeypatch):
 
     monkeypatch.setenv("ZEROPROOF_API_URL", "https://example.test")
     monkeypatch.setenv("ZEROPROOF_API_KEY", "zp_test_key")
-    monkeypatch.setattr("zeroproof_simulations.ingest.platform.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("zeroproof.simulations.ingest.platform.urllib.request.urlopen", fake_urlopen)
 
-    from zeroproof_simulations.ingest.platform import _call
+    from zeroproof.simulations.ingest.platform import _call
     _call("GET", "/datasets", None, auth_token="clerk.jwt.abc", require_api_key=True)
 
     assert seen[0]["url"] == "https://example.test/datasets"
@@ -233,7 +233,7 @@ def test_github_example_spec_works():
 def test_hosted_key_message_is_one_sentence(monkeypatch):
     monkeypatch.delenv("VLLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    from zeroproof_simulations.generate.agents import missing_hosted_key
+    from zeroproof.simulations.generate.agents import missing_hosted_key
     msg = missing_hosted_key(
         "https://zeroproofai--stressd-vllm-serve.modal.run/v1")
     assert msg is not None
@@ -266,8 +266,8 @@ def test_touch_hosted_gets_models(monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr(
-        "zeroproof_simulations.generate.agents.http.client.HTTPConnection", FakeConn)
-    from zeroproof_simulations.generate.agents import touch_hosted
+        "zeroproof.simulations.generate.agents.http.client.HTTPConnection", FakeConn)
+    from zeroproof.simulations.generate.agents import touch_hosted
     touch_hosted("http://127.0.0.1:9/v1")
     assert seen["method"] == "GET"
     assert seen["path"] == "/v1/models"
@@ -279,9 +279,9 @@ def test_touch_hosted_skips_without_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     called = []
     monkeypatch.setattr(
-        "zeroproof_simulations.generate.agents.http.client.HTTPSConnection",
+        "zeroproof.simulations.generate.agents.http.client.HTTPSConnection",
         lambda *a, **k: called.append(True))
-    from zeroproof_simulations.generate.agents import touch_hosted
+    from zeroproof.simulations.generate.agents import touch_hosted
     touch_hosted("https://zeroproofai--stressd-vllm-serve.modal.run/v1")
     assert called == []
 
@@ -305,8 +305,8 @@ def test_ping_hosted_false_on_500(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "zeroproof_simulations.generate.agents.http.client.HTTPSConnection", FakeConn)
-    from zeroproof_simulations.generate.agents import ping_hosted
+        "zeroproof.simulations.generate.agents.http.client.HTTPSConnection", FakeConn)
+    from zeroproof.simulations.generate.agents import ping_hosted
     assert ping_hosted(
         "https://zeroproofai--stressd-vllm-serve.modal.run/v1") is False
 
@@ -319,8 +319,8 @@ def test_ping_hosted_false_on_connection_error(monkeypatch):
             raise TimeoutError("timed out")
 
     monkeypatch.setattr(
-        "zeroproof_simulations.generate.agents.http.client.HTTPSConnection", FakeConn)
-    from zeroproof_simulations.generate.agents import ping_hosted
+        "zeroproof.simulations.generate.agents.http.client.HTTPSConnection", FakeConn)
+    from zeroproof.simulations.generate.agents import ping_hosted
     assert ping_hosted(
         "https://zeroproofai--stressd-vllm-serve.modal.run/v1") is False
 
@@ -416,7 +416,7 @@ def test_unique_enables_distinct_model_cards(monkeypatch):
         writer.model_produced = True
         return writer
 
-    monkeypatch.setattr("zeroproof_simulations.run.engine.make_default_generator", fake_generator)
+    monkeypatch.setattr("zeroproof.simulations.run.engine.make_default_generator", fake_generator)
     data = zps.simulate(
         scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
         unique=True, grade=False, concurrency=2, until="budget_only",
@@ -476,8 +476,8 @@ def test_generator_exhausted_is_not_emitted():
 
 
 def test_open_ended_weight_cannot_exceed_cap():
-    from zeroproof_simulations.simulation import _reallocate, _SEARCH_ARMS
-    from zeroproof_simulations.generate.scenarios import cap_open_ended_weight
+    from zeroproof.simulations.simulation import _reallocate, _SEARCH_ARMS
+    from zeroproof.simulations.generate.scenarios import cap_open_ended_weight
 
     clipped = cap_open_ended_weight({
         "structured": 0.2, "open_ended": 0.4, "llm_guided": 0.2,
@@ -493,7 +493,7 @@ def test_open_ended_weight_cannot_exceed_cap():
 
 
 def test_open_ended_probe_families_stay_intact():
-    from zeroproof_simulations.generate.scenarios import _PROBE_FAMILIES, open_ended_probes
+    from zeroproof.simulations.generate.scenarios import _PROBE_FAMILIES, open_ended_probes
 
     names = [name for name, _ in _PROBE_FAMILIES]
     assert {"out_of_domain_factual", "creative", "garbage_input",
@@ -506,7 +506,7 @@ def test_open_ended_probe_families_stay_intact():
 
 
 def test_writer_and_agent_default_to_hosted_qwen(monkeypatch):
-    from zeroproof_simulations.generate.agents import (
+    from zeroproof.simulations.generate.agents import (
         DEFAULT_AGENT, default_agent_spec, default_simulator_spec)
 
     monkeypatch.delenv("ZEROPROOF_SURROGATE", raising=False)
@@ -518,7 +518,7 @@ def test_writer_and_agent_default_to_hosted_qwen(monkeypatch):
 
 
 def test_writer_follows_bring_your_own_model(monkeypatch):
-    from zeroproof_simulations.simulation import writer_spec_for
+    from zeroproof.simulations.simulation import writer_spec_for
     monkeypatch.delenv("ZEROPROOF_SURROGATE", raising=False)
     assert writer_spec_for("openai:gpt-4.1-mini", None) == "openai:gpt-4.1-mini"
     assert writer_spec_for("vllm:m@http://h/v1", None) == "vllm:m@http://h/v1"

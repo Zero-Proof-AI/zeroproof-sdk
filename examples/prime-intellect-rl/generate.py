@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 
 
 def main() -> int:

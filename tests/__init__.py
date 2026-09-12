@@ -1,1 +1,1 @@
-# Test package only. Not shipped with zeroproof_simulations.
+# Test package only. Not shipped with zeroproof.simulations.

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 from tests.helpers import POLICY, TOOLS
 
 _OFFLINE = dict(seed=0, simulator=False, grade=False,

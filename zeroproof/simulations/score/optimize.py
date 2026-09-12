@@ -47,7 +47,7 @@ def _messages(row: dict) -> list[dict]:
     msgs = row.get("messages")
     if isinstance(msgs, list) and msgs:
         return [m for m in msgs if isinstance(m, dict)]
-    from zeroproof_simulations import conversation
+    from zeroproof.simulations import conversation
     return conversation(row)
 
 

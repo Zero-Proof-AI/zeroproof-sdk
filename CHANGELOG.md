@@ -3,15 +3,25 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- The simulations package moved under the namespace: `zeroproof_simulations`
+  is now `zeroproof.simulations`, so the wheel is one package with one name.
+  `import zeroproof_simulations` keeps working for two releases through an
+  alias that resolves to the same module objects, with a deprecation
+  warning. Change `import zeroproof_simulations as zps` to
+  `import zeroproof.simulations as zps`. The logger is now
+  `zeroproof.simulations`.
+
 ## 0.08 (2026-09-11)
 
-- Typed row schema, additive half. `zeroproof_simulations.schema` defines
+- Typed row schema, additive half. `zeroproof.simulations.schema` defines
   the four objects every row projects from (`Task`, `Rollout`, `Judgment`,
   `Marker`) plus `Dataset` and `Calibration`, with `from_row` / `to_row`
   between them and the flat JSONL row. Every row the engine, `save()`,
   the exporters, and `rows_from_otel` write now carries
   `schema_version: "1"`; `.meta.json` carries it too. The wire contract is
-  `zeroproof_simulations/schemas/row-v1.json`, shipped in the wheel.
+  `zeroproof/simulations/schemas/row-v1.json`, shipped in the wheel.
 - Rows without a stamp are version 0 and are read by shape: engine rows
   (by `scenario_id`), platform trace pulls (by `tool_trace`), OTel ingest
   (by `conversation_id`). Nothing that loaded before is rejected.
@@ -66,9 +76,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `advanced["stop_grace"]` (5 s) for running ones, keeps what finishes, and
   reports the rest as `rollouts_abandoned`. Nothing calls the agent after
   `simulate()` returns.
-- Progress goes through the `zeroproof_simulations` logger instead of
+- Progress goes through the `zeroproof.simulations` logger instead of
   `print()`.
-- `zeroproof_simulations` ships `py.typed`.
+- `zeroproof.simulations` ships `py.typed`.
 - Trace ingest defaults to `https://api.zeroproofai.com`.
 - README parameter tables match the code (`concurrency` 32, `time_budget`
   `None`) and a test keeps them matching.

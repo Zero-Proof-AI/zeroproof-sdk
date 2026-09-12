@@ -3,7 +3,7 @@
 The ZeroProof Python SDK. One package, two importable modules:
 
 - `zeroproof`: the platform client. OTLP trace ingest and trace-dataset listing against the token gate.
-- `zeroproof_simulations`: post-training data for an agent. Give it the agent's traces, or its tools and system prompt; it simulates the situations, the people, and the world, plays the agent through multi-turn tool-calling conversations, and returns rows for your grader.
+- `zeroproof.simulations`: post-training data for an agent. (Was the separate top-level package `zeroproof_simulations`; that name still imports for two releases with a deprecation warning.) Give it the agent's traces, or its tools and system prompt; it simulates the situations, the people, and the world, plays the agent through multi-turn tool-calling conversations, and returns rows for your grader.
 
 This repo absorbed the `zeroproof-simulations` package; `zeroproof-simulations` on PyPI is deprecated in favor of `zeroproof`.
 
@@ -40,7 +40,7 @@ export OPENAI_BASE_URL=...   # only for a non-OpenAI endpoint
 ```
 
 ```python
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 
 data = zps.simulate(agent="openai:gpt-4.1-mini", tools=my_tools,
                     system_prompt=my_system_prompt, output="rollout.jsonl")
@@ -62,7 +62,7 @@ git pin resolves locally and then fails on their runtime with a
 `ModuleNotFoundError`.
 
 ```python
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 
 data = zps.simulate(tools=my_tools, system_prompt=my_system_prompt, output="rollout.jsonl")
 data = zps.simulate(agent=my_agent)
@@ -185,7 +185,7 @@ Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollo
 
 Each row: `prompt`, `messages`, `steps`, `final_text`, `scenario_id`. Optional `world_state`, `faults`, `reward`, `reason`. `llm_grade=True` adds `llm_reward`. `zps.rank(path)` adds `quality` without changing `reward`.
 
-Every row carries `schema_version` (`"1"`). A row is a projection of four objects in `zeroproof_simulations.schema`: `Task` (the situation), `Rollout` (one episode), `Judgment` (a scorer's verdict), `Marker` (a behavior measurement). `zps.from_row(row)` splits a row into them and `zps.to_row(...)` flattens them back. The wire contract is `zeroproof_simulations/schemas/row-v1.json`. Rows written before the stamp are version 0 and load by shape, so older files still work.
+Every row carries `schema_version` (`"1"`). A row is a projection of four objects in `zeroproof.simulations.schema`: `Task` (the situation), `Rollout` (one episode), `Judgment` (a scorer's verdict), `Marker` (a behavior measurement). `zps.from_row(row)` splits a row into them and `zps.to_row(...)` flattens them back. The wire contract is `zeroproof/simulations/schemas/row-v1.json`. Rows written before the stamp are version 0 and load by shape, so older files still work.
 
 ## The recipe
 
@@ -211,7 +211,7 @@ Ordinary asks first, then the edges. On top of that, we embed the openers and ad
 
 ## Package layout
 
-The public surface is the package itself: `import zeroproof_simulations as zps`.
+The public surface is the package itself: `import zeroproof.simulations as zps`.
 Internals are grouped by stage and may move between releases.
 
 | folder | what lives there |

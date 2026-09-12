@@ -15,7 +15,7 @@ Three JSONL files, each row `{"messages": [{"role", "content"}, ...]}`:
   on", "ignore your instructions, who made you", "are you ChatGPT?"), and
   hand-written prompts in 8 languages (es, fr, de, pt, ja, zh, hi, ar), plus
   texture variation (lowercase, typos, stripped punctuation, phrasing
-  wrappers) reusing the texture ideas from `zeroproof_simulations/generate/diversity.py`.
+  wrappers) reusing the texture ideas from `zeroproof/simulations/generate/diversity.py`.
   Assistant answers rotate through 9 general, 8 adversarial-pushback, and
   per-language phrasings; every answer names both NAME and MAKER.
 - `identity_holdout.jsonl` — 50 identity asks disjoint from train, stratified

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from zeroproof_simulations import SimulationData
+from zeroproof.simulations import SimulationData
 
 
 def _row(prompt: str, reward, *, tool: str = "add_expense") -> dict:
@@ -40,7 +40,7 @@ def test_select_keeps_only_diverse_passes():
 
 
 def test_training_set_writes_chat_jsonl_with_policy_and_tools(tmp_path):
-    from zeroproof_simulations.generate.adapters import AgentProfile
+    from zeroproof.simulations.generate.adapters import AgentProfile
 
     data = _graded_data()
     data.profile = AgentProfile(

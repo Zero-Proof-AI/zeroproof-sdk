@@ -445,7 +445,7 @@ def simulate_from_traces(traces: Sequence[dict], agent: Any = None, *,
     With no agent, tools or policy, the tool surface is read from the traces
     themselves, so handing over graded telemetry is enough to start.
     """
-    from zeroproof_simulations import simulate as _simulate
+    from zeroproof.simulations import simulate as _simulate
     if agent is None and not tools and not policy:
         # a path is as valid a source here as rows, and the tools live inside
         tools = tools_from_traces(load_traces(traces)) or None

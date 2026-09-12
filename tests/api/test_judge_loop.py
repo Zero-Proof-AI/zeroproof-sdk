@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 
-from zeroproof_simulations.export import export_training
-from zeroproof_simulations.score.judging import (ScoredData, evaluate,
+from zeroproof.simulations.export import export_training
+from zeroproof.simulations.score.judging import (ScoredData, evaluate,
                                            normalize_judge_result, run_judge)
-from zeroproof_simulations.ingest.traces import dimensions_from_traces, mine_traces
+from zeroproof.simulations.ingest.traces import dimensions_from_traces, mine_traces
 
 TOOLS = [{"name": "get_order", "description": "Look up an order",
           "parameters": {"type": "object",
@@ -162,7 +162,7 @@ def test_preference_pairs_and_export(tmp_path):
     assert pair["chosen"]["reward"] == 1 and pair["rejected"]["reward"] == 0
     assert pair["lineage"]["chosen"]["scoring_run_id"] == scored.run_id
 
-    from zeroproof_simulations.export import export_preference
+    from zeroproof.simulations.export import export_preference
     out = str(tmp_path / "prefs.jsonl")
     report = export_preference(pairs, out, system_prompt=POLICY, tools=TOOLS)
     assert report["pairs"] == 1
@@ -183,7 +183,7 @@ def test_selection_lanes_and_dataset_alias(tmp_path):
     sft, rep = scored.select_for_sft(target=4)
     assert len(sft) <= 4
     assert all(r["reward"] == 1 for r in sft)
-    from zeroproof_simulations.export import export_dataset, export_training
+    from zeroproof.simulations.export import export_dataset, export_training
     assert export_dataset is export_training
     out = export_dataset(sft, str(tmp_path / "d.jsonl"),
                          system_prompt=POLICY, tools=TOOLS)
@@ -191,7 +191,7 @@ def test_selection_lanes_and_dataset_alias(tmp_path):
 
 
 def test_scaffold_is_generation_only():
-    import zeroproof_simulations as zps
+    import zeroproof.simulations as zps
     from tests.helpers import TOOLS as HT, POLICY as HP, scripted_agent
     data = zps.simulate(scripted_agent, tools=HT, policy=HP, budget=4,
                         seed=0, simulator=False,

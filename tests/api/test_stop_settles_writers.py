@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-import zeroproof_simulations as zps
+import zeroproof.simulations as zps
 from tests.helpers import POLICY, TOOLS, scripted_agent
 
 

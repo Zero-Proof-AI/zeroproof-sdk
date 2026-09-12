@@ -69,7 +69,7 @@ def simulate(agent: Any = None, *, spec: Any = None,
     result`` that answers every tool call for real, against their repo,
     database, or service. Without it the mock world answers, which fits
     record-shaped tools and not code. Scheduled faults still apply first.
-    ``zeroproof_simulations.generate.agents.current_rollout`` is a
+    ``zeroproof.simulations.generate.agents.current_rollout`` is a
     thread-local set before each rollout with ``prompt``, ``rollout_index``
     and ``seed``, so ``execute`` can tell which run it is answering.
 

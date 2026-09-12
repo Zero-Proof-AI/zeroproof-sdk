@@ -1,7 +1,7 @@
 """Preflight, failure classification, and the dataset report."""
 from __future__ import annotations
 
-from zeroproof_simulations.score.preflight import (FAILURE_CLASSES, classify_failure,
+from zeroproof.simulations.score.preflight import (FAILURE_CLASSES, classify_failure,
                                              dataset_report,
                                              format_dataset_report, preflight)
 

@@ -1,13 +1,14 @@
 include LICENSE
 include README.md
 include pyproject.toml
-recursive-include zeroproof_simulations *.py
+recursive-include zeroproof.simulations *.py
 recursive-include zeroproof *.py
+recursive-include zeroproof_simulations *.py
 include zeroproof/py.typed
-include zeroproof_simulations/py.typed
-recursive-include zeroproof_simulations/schemas *.json
-prune zeroproof_simulations/_experimental
-prune zeroproof_simulations/behaviors
+include zeroproof/simulations/py.typed
+recursive-include zeroproof/simulations/schemas *.json
+prune zeroproof/simulations/_experimental
+prune zeroproof/simulations/behaviors
 prune tests
 prune examples
 prune specs

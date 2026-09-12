@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 
 from tests.helpers import REPO_ROOT, simulate_offline
-import zeroproof_simulations as zps
-from zeroproof_simulations.score.quality import DIMENSIONS, FAIL, score_row
+import zeroproof.simulations as zps
+from zeroproof.simulations.score.quality import DIMENSIONS, FAIL, score_row
 
 
 def _good(**extra):

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import zeroproof_simulations as zps
-from zeroproof_simulations.generate.adapters import detect, inspect, parse_claude_stream
+import zeroproof.simulations as zps
+from zeroproof.simulations.generate.adapters import detect, inspect, parse_claude_stream
 
 
 TOOLS = [
@@ -120,7 +120,7 @@ def test_parse_claude_stream_pairs_any_tool_names():
 
 
 def test_parse_text_tool_calls():
-    from zeroproof_simulations.generate.agents import parse_text_tool_calls
+    from zeroproof.simulations.generate.agents import parse_text_tool_calls
     raw = (
         '<tool_call>\n{"name": "list_events", "arguments": {"date": "2023-10-05"}}\n'
         '</tool_call>\n<tool_call>\n{"name": "create_event", "arguments": '
@@ -155,7 +155,7 @@ def test_hash_embedder_does_not_claim_semantic_diversity():
 
 
 def test_refuses_to_mix_lexical_and_semantic_vectors():
-    from zeroproof_simulations.generate.embeddings import (
+    from zeroproof.simulations.generate.embeddings import (
         EmbeddingArchive, HashEmbedder, select_execution_batch)
 
     class Sem:
@@ -174,7 +174,7 @@ def test_refuses_to_mix_lexical_and_semantic_vectors():
 
 
 def test_model_prompt_asks_for_gaps():
-    from zeroproof_simulations.generate.generator import ModelSimulator
+    from zeroproof.simulations.generate.generator import ModelSimulator
     sim = ModelSimulator("vllm:fake@http://example", tools=TOOLS,
                          policy="Look up an item first. Do not invent ids.",
                          timeout=1)
@@ -214,7 +214,7 @@ def test_coverage_axes_come_from_this_agent():
 
 
 def test_selection_keeps_typical_and_fills_gaps():
-    from zeroproof_simulations.generate.embeddings import EmbeddingArchive, select_execution_batch
+    from zeroproof.simulations.generate.embeddings import EmbeddingArchive, select_execution_batch
 
     class Stub:
         name = "stub-semantic"
