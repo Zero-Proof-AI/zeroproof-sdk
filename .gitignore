@@ -30,6 +30,7 @@ examples/*
 !examples/prime-intellect-rl/
 !examples/agent-behavior/
 !examples/identity/
+!examples/schema/
 
 # helpers, not the product
 /scripts/
