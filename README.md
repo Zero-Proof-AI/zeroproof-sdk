@@ -11,6 +11,12 @@ Releases of `zeroproof` before 0.3 were an unrelated encrypted agent-to-agent me
 
 Two ways in, one engine. Give it the agent's tools and system prompt and it samples situations across everything that agent can be asked. Give it graded traces as well and it aims the budget at the situations that fail in production, so new rows land where the agent is weak and carry both the failure and the fixed version. Every row is a full conversation: user turns, agent turns, tool calls, tool results, scheduled faults. Rows come back ungraded; your grader decides what good means. Default `explore`: one unique situation per row. How it thinks: [docs/simulations.md](docs/simulations.md).
 
+## How a row gets made
+
+![How a row gets made: the draw, the coverage grid, the search arms, the rollout, the split](docs/how-a-row-gets-made.svg)
+
+A situation is drawn across the world axes (from the agent's tools) and the human axes (from a separate writer). It fills a cell in the coverage grid, nudges the five search arms, and the agent plays it against a world that breaks on schedule. The row that comes out splits into `Task`, `Rollout`, `Judgment`, and `Marker`, and every training target is a projection of some of those four. The interactive version, running on real rows, is at [zeroproofai.com/docs/engine](https://zeroproofai.com/docs/engine).
+
 ## Overview
 
 `simulate()` is a pipeline.
