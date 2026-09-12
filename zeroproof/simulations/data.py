@@ -348,8 +348,8 @@ class SimulationData:
              parent: str | None = None) -> dict:
         """Upload this run to your Zero Proof Labs account as a dataset.
 
-        ``api_key`` defaults to the ``ZEROPROOF_API_KEY`` env var; get one at
-        https://www.zeroproofai.com/platform. Pass ``parent`` (a ``ds_...``
+        ``api_key`` defaults to the ``ZEROPROOF_API_KEY`` env var, then the
+        key saved by ``zeroproof login``. Pass ``parent`` (a ``ds_...``
         id) when this run iterates on an existing dataset, so lineage shows
         on the platform. Returns the registry entry with ``datasetId``.
         """

@@ -36,6 +36,7 @@ Issues = "https://github.com/Zero-Proof-AI/zeroproof-sdk/issues"
 Datasets = "https://huggingface.co/datasets/zero-proof-ai/agent-simulations"
 
 [project.scripts]
+zeroproof = "zeroproof.cli:main"
 zeroproof-simulations = "zeroproof.simulations.score.quality:main"
 
 [project.optional-dependencies]

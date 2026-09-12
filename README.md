@@ -109,16 +109,30 @@ zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", un
 | [`examples/schema`](examples/schema) | One row file in, six training targets out: eval, SFT, preference, GRPO prompts, OPSD hints, OPD. Migrates any legacy file first. Offline, no key. |
 | [`examples/identity`](examples/identity) | Builds a leak-free SFT set that teaches a model a new name and maker, with Modal scripts to train a LoRA and evaluate it. No model calls to generate. |
 
+## Sign in
+
+```bash
+zeroproof login
+```
+
+Prints a link and a short code. Open the link, sign in or sign up, press
+Approve. The key is saved to `~/.zeroproof/credentials.json` and every
+platform call below reads it from there. Interrupted before you approved?
+Run it again; it resumes the same code. This is the path for coding
+agents too: tell yours to run `zeroproof login` and click the link it
+shows you. `zeroproof status` shows which key is in use, `zeroproof
+logout` removes it.
+
 ## Store datasets on Zero Proof Labs
 
 Push a run to your Zero Proof Labs account so the optimization framework
-can iterate on it. For runtime SDK access, prefer a short-lived delegated
-credential (`zp_dc_...`) issued from a valid Clerk session token. The SDK
-uses `ZEROPROOF_DELEGATED_CREDENTIAL` by default; the legacy
-`ZEROPROOF_API_KEY` still works for compatibility.
+can iterate on it. Credentials resolve in this order: `api_key=` argument,
+`ZEROPROOF_DELEGATED_CREDENTIAL` (a short-lived `zp_dc_...` issued from a
+Clerk session), `ZEROPROOF_API_KEY`, then the key saved by `zeroproof
+login`.
 
 ```python
-# Preferred runtime path
+# Runtime path with a delegated credential
 # export ZEROPROOF_DELEGATED_CREDENTIAL="zp_dc_..."
 
 # If you need to mint one from a Clerk session token:
