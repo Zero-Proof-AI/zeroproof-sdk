@@ -27,7 +27,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..data import SimulationData, _clean_faults, _export_row, _note, _row_world
+from ..data import (SimulationData, _clean_faults, _export_row, _note,
+                    _row_world, conversation)
 from ..generate.actionspace import (action_space_targets,
                                     induced_keys_from_trajectory,
                                     render_target_situation, shape_as_tags,
@@ -392,7 +393,12 @@ class Run:
             else:
                 auth_err = missing_hosted_key(hosted_url)
                 if auth_err:
-                    raise RuntimeError(auth_err)
+                    raise RuntimeError(
+                        auth_err + " The situation writer runs on hosted Qwen "
+                        "by default, even with your own agent=. Alternatives: "
+                        "agent='openai:<model>' with OPENAI_API_KEY runs writer "
+                        "and agent on your key; simulator=False uses the "
+                        "built-in template writer with no model at all.")
                 threading.Thread(
                     target=touch_hosted, args=(hosted_url,),
                     kwargs={"timeout": 5.0}, daemon=True).start()
@@ -1711,6 +1717,11 @@ class Run:
         data = self.data
         gen = self.generator
         data.declared_tools = self.declared
+        # The README promises messages on every row. The JSONL writer built
+        # them lazily; a caller reading data.trajectories saw only steps.
+        for row in data.trajectories:
+            if not row.get("messages"):
+                row["messages"] = conversation(row)
         # grader application happens once, at the end of simulate, through
         # run_judge: full judge contract (judge_status, lineage, no silent
         # zeros) instead of the legacy data.grade() write-back.

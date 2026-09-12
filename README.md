@@ -59,6 +59,17 @@ Ask us for a `VLLM_API_KEY`; the endpoint is shared and rate limited.
 export VLLM_API_KEY=...
 ```
 
+No key at all: the situation writer also defaults to hosted Qwen, even when
+`agent=` is your own function. Pass `simulator=False` to use the built-in
+template writer instead. It needs no model and runs in seconds; the
+situations are less varied than a model writes, so it is for wiring up your
+agent and grader, not for a training set.
+
+```python
+data = zps.simulate(my_agent, tools=my_tools, system_prompt=my_system_prompt,
+                    simulator=False, budget=40)
+```
+
 Working in this repo: `uv sync`, then `uv run pytest` after `uv sync --extra dev`.
 
 One runtime dependency (`requests`), Python 3.10+. Installing from PyPI rather than a
@@ -82,7 +93,8 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `budget` / `time_budget` | `1000` / `None` | Stop when either hits. The clock is off unless you set it; `0` or `None` keeps it off |
 | `requests_per_situation` | from mode | Phrasings: ways to ask one situation. Alias `phrasings=` |
 | `rollouts_per_request` | from mode | Repeats: reruns of one phrasing. Alias `repeats=` |
-| `fault_rate` | `0.5` | Broken tools. `0` off |
+| `fault_rate` | `0.5` | Broken tools. `0` off. Applied by the mock world, so a callable `agent=` that answers its own tool calls never sees one |
+| `simulator` | hosted Qwen | Situation writer. `False` uses the built-in template writer (no model, less variety); an `openai:`/`vllm:` spec runs it on your endpoint |
 | `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off |
 | `grade` | `False` | Rows come back ungraded; grade after with `zps.grade(...)`, or pass `grader=` (your callable) or `grade=True` (conduct score) |
 | `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |
@@ -190,7 +202,7 @@ Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollo
 
 ## Output
 
-Each row: `prompt`, `messages`, `steps`, `final_text`, `scenario_id`. Optional `world_state`, `faults`, `reward`, `reason`. `llm_grade=True` adds `llm_reward`. `zps.rank(path)` adds `quality` without changing `reward`.
+Each row, in `data.trajectories` and on disk: `prompt`, `messages`, `steps`, `final_text`, `scenario_id`. Optional `world_state`, `faults`, `reward`, `reason`. `llm_grade=True` adds `llm_reward`. `zps.rank(path)` adds `quality` without changing `reward`.
 
 Every row carries `schema_version` (`"1"`). A row is a projection of four objects in `zeroproof.simulations.schema`: `Task` (the situation), `Rollout` (one episode), `Judgment` (a scorer's verdict), `Marker` (a behavior measurement). `zps.from_row(row)` splits a row into them and `zps.to_row(...)` flattens them back. The wire contract is `zeroproof/simulations/schemas/row-v1.json`. Rows written before the stamp are version 0 and load by shape, so older files still work.
 

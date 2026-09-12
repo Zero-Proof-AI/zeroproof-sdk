@@ -297,6 +297,16 @@ def export_preference(pairs: Sequence[dict], output: str | None = None, *,
     ``ScoredData.select_for_preference()`` / ``build_preference_pairs``.
     """
     from zeroproof.simulations import conversation
+    entries = [p for p in pairs if isinstance(p, dict)]
+    not_pairs = [i for i, p in enumerate(entries)
+                 if not (isinstance(p.get("chosen"), dict)
+                         and isinstance(p.get("rejected"), dict))]
+    if not_pairs:
+        raise ValueError(
+            f"export_preference takes chosen/rejected pairs, and {len(not_pairs)} "
+            f"of {len(entries)} entries have no chosen/rejected side. Build the "
+            "pairs first: export_preference(build_preference_pairs(rows), ...) "
+            "or scored.select_for_preference().")
     system = str(system_prompt or "")
     out_rows: list[dict] = []
     for pair in pairs:
