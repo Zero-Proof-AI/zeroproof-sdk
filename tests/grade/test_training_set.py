@@ -1,4 +1,5 @@
 """The recommended-dataset path: graded rows in, trainer-ready subset out."""
+
 import json
 
 import pytest
@@ -9,8 +10,9 @@ from zeroproof.simulations import SimulationData
 def _row(prompt: str, reward, *, tool: str = "add_expense") -> dict:
     return {
         "prompt": prompt,
-        "steps": [{"tool": tool, "arguments": {"item": prompt, "amount": 1.0},
-                   "result": {"status": "ok"}}],
+        "steps": [
+            {"tool": tool, "arguments": {"item": prompt, "amount": 1.0}, "result": {"status": "ok"}}
+        ],
         "final_text": f"Recorded {prompt}.",
         "reward": reward,
         "arm": "grid",
@@ -45,11 +47,21 @@ def test_training_set_writes_chat_jsonl_with_policy_and_tools(tmp_path):
     data = _graded_data()
     data.profile = AgentProfile(
         policy="You are budget-buddy. Use your tools; refuse anything else.",
-        tools=[{"type": "function", "function": {
-            "name": "add_expense", "description": "Record an expense",
-            "parameters": {"type": "object", "properties": {
-                "item": {"type": "string"}, "amount": {"type": "number"}},
-                "required": ["item", "amount"]}}}])
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "add_expense",
+                    "description": "Record an expense",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"item": {"type": "string"}, "amount": {"type": "number"}},
+                        "required": ["item", "amount"],
+                    },
+                },
+            }
+        ],
+    )
     out = tmp_path / "train.jsonl"
     report = data.training_set(str(out))
     assert report["n_written"] == report["selection"]["n_selected"]
@@ -58,8 +70,7 @@ def test_training_set_writes_chat_jsonl_with_policy_and_tools(tmp_path):
     assert first["messages"][0]["role"] == "system"
     assert "budget-buddy" in first["messages"][0]["content"]
     assert first["tools"][0]["function"]["name"] == "add_expense"
-    calls = [m for m in first["messages"]
-             if m.get("role") == "assistant" and m.get("tool_calls")]
+    calls = [m for m in first["messages"] if m.get("role") == "assistant" and m.get("tool_calls")]
     assert calls, "tool calls must survive export"
     call = calls[0]["tool_calls"][0]
     assert call["type"] == "function"
@@ -69,8 +80,9 @@ def test_training_set_writes_chat_jsonl_with_policy_and_tools(tmp_path):
 
 
 def test_select_refuses_ungraded_and_nonbinary_rows():
-    data = SimulationData(trajectories=[
-        {"prompt": "coffee", "steps": [], "final_text": "ok", "arm": "grid"}])
+    data = SimulationData(
+        trajectories=[{"prompt": "coffee", "steps": [], "final_text": "ok", "arm": "grid"}]
+    )
     with pytest.raises(RuntimeError, match="graded"):
         data.select()
     fractional = SimulationData(trajectories=[_row("coffee", 0.5)])

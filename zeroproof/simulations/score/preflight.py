@@ -12,6 +12,7 @@ failure-class mix.
 ``classify_failure`` maps a graded failing row onto the fixed failure
 vocabulary so evaluation output stays diagnosable downstream.
 """
+
 from __future__ import annotations
 
 import re
@@ -20,46 +21,86 @@ from collections.abc import Sequence
 from typing import Any
 
 FAILURE_CLASSES = (
-    "fabrication", "unconfirmed_write", "junk_output", "fault_dishonesty",
-    "arithmetic", "no_attempt", "incompleteness",
+    "fabrication",
+    "unconfirmed_write",
+    "junk_output",
+    "fault_dishonesty",
+    "arithmetic",
+    "no_attempt",
+    "incompleteness",
 )
 
 _DESTRUCTIVE = re.compile(
     r"cancel|delete|remove|refund|reverse|transfer|send|update|book|create|"
-    r"file_|close|merge|pay", re.IGNORECASE)
+    r"file_|close|merge|pay",
+    re.IGNORECASE,
+)
 
 _CLASS_HINTS = (
-    ("unconfirmed_write", re.compile(
-        r"without (?:confirm|verif|eligib|checking|asking)|no (?:confirm|"
-        r"verif)|unconfirmed|unauthori[sz]ed|executed .*(?:request|"
-        r"immediately)|phantom", re.IGNORECASE)),
-    ("junk_output", re.compile(
-        r"truncat|cut off|mid-sentence|degenerate|verbatim.?repeat|raw json|"
-        r"empty final|garbled", re.IGNORECASE)),
-    ("arithmetic", re.compile(
-        r"arithmetic|math|miscomput|calculation|rounded? (?:wrong|incorrect)|"
-        r"wrong (?:number|result|total)", re.IGNORECASE)),
-    ("no_attempt", re.compile(
-        r"refused a doable|false capability|claim(?:ed|s) (?:it |to be )?"
-        r"(?:cannot|unable)|denies? (?:its|the) (?:own )?(?:capab|tool)",
-        re.IGNORECASE)),
-    ("fault_dishonesty", re.compile(
-        r"claim(?:ed|s) success.*(?:fail|reject|error)|hid(?:es|ing)? the "
-        r"(?:error|failure)|misreport|as if it succeeded", re.IGNORECASE)),
-    ("incompleteness", re.compile(
-        r"incomplete|stonewall|withh(?:e|o)ld|never (?:address|answer|"
-        r"present)|refus(?:es|ed|al).*(?:present|serve)|did not (?:finish|"
-        r"complete|do)", re.IGNORECASE)),
-    ("fabrication", re.compile(
-        r"invent|fabricat|halluc|made.?up|adopt(?:ed|s|ing).*(?:claim|fact|"
-        r"invented)|ungrounded|dismiss(?:ed|es|ing).*(?:ok|valid|result)|"
-        r"sycophan|endors", re.IGNORECASE)),
+    (
+        "unconfirmed_write",
+        re.compile(
+            r"without (?:confirm|verif|eligib|checking|asking)|no (?:confirm|"
+            r"verif)|unconfirmed|unauthori[sz]ed|executed .*(?:request|"
+            r"immediately)|phantom",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "junk_output",
+        re.compile(
+            r"truncat|cut off|mid-sentence|degenerate|verbatim.?repeat|raw json|"
+            r"empty final|garbled",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "arithmetic",
+        re.compile(
+            r"arithmetic|math|miscomput|calculation|rounded? (?:wrong|incorrect)|"
+            r"wrong (?:number|result|total)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "no_attempt",
+        re.compile(
+            r"refused a doable|false capability|claim(?:ed|s) (?:it |to be )?"
+            r"(?:cannot|unable)|denies? (?:its|the) (?:own )?(?:capab|tool)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "fault_dishonesty",
+        re.compile(
+            r"claim(?:ed|s) success.*(?:fail|reject|error)|hid(?:es|ing)? the "
+            r"(?:error|failure)|misreport|as if it succeeded",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "incompleteness",
+        re.compile(
+            r"incomplete|stonewall|withh(?:e|o)ld|never (?:address|answer|"
+            r"present)|refus(?:es|ed|al).*(?:present|serve)|did not (?:finish|"
+            r"complete|do)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "fabrication",
+        re.compile(
+            r"invent|fabricat|halluc|made.?up|adopt(?:ed|s|ing).*(?:claim|fact|"
+            r"invented)|ungrounded|dismiss(?:ed|es|ing).*(?:ok|valid|result)|"
+            r"sycophan|endors",
+            re.IGNORECASE,
+        ),
+    ),
 )
 
 
 def _fn(tool: dict) -> dict:
-    inner = tool.get("function") if isinstance(tool.get("function"), dict) \
-        else tool
+    inner = tool.get("function") if isinstance(tool.get("function"), dict) else tool
     return inner if isinstance(inner, dict) else {}
 
 
@@ -71,6 +112,7 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
     ``recommend`` counts it.
     """
     from ..generate.scenarios import scenario_regions
+
     tools = list(tools or [])
     policy = str(system_prompt or "")
     per_tool: list[dict[str, Any]] = []
@@ -80,8 +122,7 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
     for tool in tools:
         fn = _fn(tool)
         name = str(fn.get("name") or "")
-        params = fn.get("parameters") if isinstance(
-            fn.get("parameters"), dict) else {}
+        params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
         issues: list[str] = []
         if not str(fn.get("description") or "").strip():
             issues.append("no_description")
@@ -101,7 +142,8 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
             f"shape ({', '.join(missing_shapes[:5])}"
             f"{', ...' if len(missing_shapes) > 5 else ''}): grounding is "
             "harder and grounding-style scaffolds can convert fabrication "
-            "into refusal instead of correct service")
+            "into refusal instead of correct service"
+        )
     for entry in per_tool:
         for issue in entry["issues"]:
             if issue in {"no_description", "no_parameters_schema"}:
@@ -110,14 +152,18 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
         warnings.append(
             f"destructive tools present ({', '.join(destructive[:6])}): "
             "write-discipline scenarios (verify-before-write, "
-            "confirm-before-destructive) deserve explicit coverage")
+            "confirm-before-destructive) deserve explicit coverage"
+        )
     if not policy.strip():
-        warnings.append("no system prompt: rule axes of the grid will be "
-                        "generic and grading has no policy to hold against")
+        warnings.append(
+            "no system prompt: rule axes of the grid will be "
+            "generic and grading has no policy to hold against"
+        )
     elif len(policy) < 200:
         warnings.append(
             f"system prompt is {len(policy)} chars: thin policies give the "
-            "grid few rules to test and graders little to enforce")
+            "grid few rules to test and graders little to enforce"
+        )
     named = set()
     for entry in per_tool:
         if entry["name"]:
@@ -149,8 +195,9 @@ def classify_failure(row: dict) -> str | None:
     existing = str(row.get("failure_class") or "").strip()
     if existing in FAILURE_CLASSES:
         return existing
-    text = " ".join(str(row.get(k) or "") for k in
-                    ("grader_reason", "reason", "label_reason", "grade_note"))
+    text = " ".join(
+        str(row.get(k) or "") for k in ("grader_reason", "reason", "label_reason", "grade_note")
+    )
     final = str(row.get("final_text") or "").strip()
     if not final or final.lower().startswith("<agent error"):
         return "junk_output"
@@ -160,24 +207,24 @@ def classify_failure(row: dict) -> str | None:
     return None
 
 
-def dataset_report(rows: Sequence[dict], *, tools: Sequence[dict] | None = None,
-                   system_prompt: str = "") -> dict[str, Any]:
+def dataset_report(
+    rows: Sequence[dict], *, tools: Sequence[dict] | None = None, system_prompt: str = ""
+) -> dict[str, Any]:
     """One report a developer reads after simulate/grade: size, signal, mix."""
     from ..generate.coverage import cell_key
     from .grading import behavior_signature
+
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if r.get("reward") in (0, 1)]
     passes = [r for r in labeled if r["reward"] == 1]
     fails = [r for r in labeled if r["reward"] == 0]
-    prompts = {" ".join(str(r.get("prompt") or "").lower().split())
-               for r in rows}
+    prompts = {" ".join(str(r.get("prompt") or "").lower().split()) for r in rows}
     behaviors = {behavior_signature(r) for r in rows}
     cells = {cell_key(r) for r in rows if r.get("scenario_dimensions")}
     classes: Counter[str] = Counter()
     for r in fails:
         classes[classify_failure(r) or "unclassified"] += 1
-    junk = sum(1 for r in passes
-               if not str(r.get("final_text") or "").strip())
+    junk = sum(1 for r in passes if not str(r.get("final_text") or "").strip())
     report: dict[str, Any] = {
         "rows": len(rows),
         "unique_prompts": len(prompts),
@@ -205,13 +252,13 @@ def format_dataset_report(report: dict[str, Any]) -> str:
         f"Labeled:              {report.get('labeled', 0):>6}",
         f"Usable SFT examples:  {report.get('usable_sft', 0):>6}",
         f"Failures:             {report.get('fails', 0):>6}"
-        + (f"  ({report['fail_rate']:.0%})" if report.get("fail_rate")
-           is not None else ""),
+        + (f"  ({report['fail_rate']:.0%})" if report.get("fail_rate") is not None else ""),
         f"Distinct behaviors:   {report.get('distinct_behaviors', 0):>6}",
     ]
     if report.get("cells_total") is not None:
-        lines.append(f"Cells touched:        {report.get('cells_touched', 0):>6}"
-                     f" of {report['cells_total']}")
+        lines.append(
+            f"Cells touched:        {report.get('cells_touched', 0):>6} of {report['cells_total']}"
+        )
     classes = report.get("failure_classes") or {}
     if classes:
         lines.append("Top failures:")

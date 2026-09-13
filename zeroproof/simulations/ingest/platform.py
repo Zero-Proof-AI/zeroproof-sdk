@@ -40,19 +40,34 @@ def _api_url() -> str:
 
 
 def _key(api_key: str | None) -> str:
-    key = (api_key or os.environ.get("ZEROPROOF_DELEGATED_CREDENTIAL")
-           or os.environ.get("ZEROPROOF_API_KEY") or stored_api_key() or "")
+    key = (
+        api_key
+        or os.environ.get("ZEROPROOF_DELEGATED_CREDENTIAL")
+        or os.environ.get("ZEROPROOF_API_KEY")
+        or stored_api_key()
+        or ""
+    )
     if not key:
         raise PlatformError(
             "No credential. Run `zeroproof login`, or pass api_key=..., or set "
-            "ZEROPROOF_DELEGATED_CREDENTIAL / ZEROPROOF_API_KEY.")
+            "ZEROPROOF_DELEGATED_CREDENTIAL / ZEROPROOF_API_KEY."
+        )
     return key
 
 
-def _call(method: str, path: str, api_key: str | None, body: dict | None = None,
-          *, raw_url: str | None = None, data: bytes | None = None,
-          content_type: str | None = None, timeout: int = 120,
-          auth_token: str | None = None, require_api_key: bool = False) -> Any:
+def _call(
+    method: str,
+    path: str,
+    api_key: str | None,
+    body: dict | None = None,
+    *,
+    raw_url: str | None = None,
+    data: bytes | None = None,
+    content_type: str | None = None,
+    timeout: int = 120,
+    auth_token: str | None = None,
+    require_api_key: bool = False,
+) -> Any:
     url = raw_url or (_api_url() + path)
     headers: dict[str, str] = {}
     token = str(auth_token or "").strip()
@@ -81,9 +96,13 @@ def _call(method: str, path: str, api_key: str | None, body: dict | None = None,
     return json.loads(payload) if payload else {}
 
 
-def issue_delegated_credential(clerk_token: str | None, *, ttl_seconds: int = 3600,
-                              name: str = "sdk-default",
-                              timeout: int = 120) -> dict:
+def issue_delegated_credential(
+    clerk_token: str | None,
+    *,
+    ttl_seconds: int = 3600,
+    name: str = "sdk-default",
+    timeout: int = 120,
+) -> dict:
     """Create a short-lived delegated credential for SDK or backend use.
 
     ``clerk_token`` must be a valid Clerk session token or other authenticated
@@ -91,50 +110,69 @@ def issue_delegated_credential(clerk_token: str | None, *, ttl_seconds: int = 36
     endpoint to mint the delegated credential.
     """
     if not clerk_token:
-        raise PlatformError("A valid Clerk session token is required to mint a delegated credential.")
+        raise PlatformError(
+            "A valid Clerk session token is required to mint a delegated credential."
+        )
     body = {"name": name, "ttlSeconds": int(ttl_seconds)}
-    return _call("POST", "/auth/issue-credential", None, body, timeout=timeout,
-                 auth_token=clerk_token)
+    return _call(
+        "POST", "/auth/issue-credential", None, body, timeout=timeout, auth_token=clerk_token
+    )
 
 
-def refresh_delegated_credential(clerk_token: str | None, credential: str, *,
-                               ttl_seconds: int = 3600, timeout: int = 120) -> dict:
+def refresh_delegated_credential(
+    clerk_token: str | None, credential: str, *, ttl_seconds: int = 3600, timeout: int = 120
+) -> dict:
     """Refresh a delegated credential before it expires."""
     if not clerk_token:
-        raise PlatformError("A valid Clerk session token is required to refresh a delegated credential.")
+        raise PlatformError(
+            "A valid Clerk session token is required to refresh a delegated credential."
+        )
     if not credential:
         raise PlatformError("Pass the current delegated credential to refresh it.")
     body = {"credential": credential, "ttlSeconds": int(ttl_seconds)}
-    return _call("POST", "/auth/refresh-credential", None, body, timeout=timeout,
-                 auth_token=clerk_token)
+    return _call(
+        "POST", "/auth/refresh-credential", None, body, timeout=timeout, auth_token=clerk_token
+    )
 
 
-def revoke_delegated_credential(clerk_token: str | None, credential: str,
-                               *, timeout: int = 120) -> dict:
+def revoke_delegated_credential(
+    clerk_token: str | None, credential: str, *, timeout: int = 120
+) -> dict:
     """Revoke a delegated credential for the authenticated user."""
     if not clerk_token:
-        raise PlatformError("A valid Clerk session token is required to revoke a delegated credential.")
+        raise PlatformError(
+            "A valid Clerk session token is required to revoke a delegated credential."
+        )
     if not credential:
         raise PlatformError("Pass the delegated credential to revoke it.")
-    return _call("POST", "/auth/revoke-credential", None, {"credential": credential},
-                 timeout=timeout, auth_token=clerk_token)
+    return _call(
+        "POST",
+        "/auth/revoke-credential",
+        None,
+        {"credential": credential},
+        timeout=timeout,
+        auth_token=clerk_token,
+    )
 
 
-DEFAULT_STUDIO_URL = (
-    "https://zeroproofai--zeroproof-studio-api-serve.modal.run")
+DEFAULT_STUDIO_URL = "https://zeroproofai--zeroproof-studio-api-serve.modal.run"
 _STUDIO_MODES = ("explore", "sft", "rl", "adaptive")
 _STUDIO_MAX_ROWS = 20_000
 
 
 def _studio_url() -> str:
-    return os.environ.get("ZEROPROOF_STUDIO_URL",
-                          DEFAULT_STUDIO_URL).rstrip("/")
+    return os.environ.get("ZEROPROOF_STUDIO_URL", DEFAULT_STUDIO_URL).rstrip("/")
 
 
-def push_to_studio(rows: list[dict], agent: str, mode: str, *,
-                   tags: list[str] | None = None,
-                   filename: str | None = None,
-                   api_key: str | None = None) -> dict:
+def push_to_studio(
+    rows: list[dict],
+    agent: str,
+    mode: str,
+    *,
+    tags: list[str] | None = None,
+    filename: str | None = None,
+    api_key: str | None = None,
+) -> dict:
     """Import rows into the studio runs store the platform UI reads.
 
     ``push_rows`` lands in the datasets registry; the platform's
@@ -149,12 +187,11 @@ def push_to_studio(rows: list[dict], agent: str, mode: str, *,
     required: the store would otherwise silently label everything "rl".
     """
     if mode not in _STUDIO_MODES:
-        raise PlatformError(
-            f"mode= must be one of {'/'.join(_STUDIO_MODES)}")
+        raise PlatformError(f"mode= must be one of {'/'.join(_STUDIO_MODES)}")
     if len(rows) > _STUDIO_MAX_ROWS:
         raise PlatformError(
-            f"studio import caps at {_STUDIO_MAX_ROWS} rows; "
-            f"got {len(rows)} - split the push")
+            f"studio import caps at {_STUDIO_MAX_ROWS} rows; got {len(rows)} - split the push"
+        )
     body: dict = {"agent": agent, "mode": mode, "rows": list(rows)}
     if tags:
         body["tags"] = list(tags)
@@ -162,10 +199,8 @@ def push_to_studio(rows: list[dict], agent: str, mode: str, *,
         body["filename"] = filename
     url = _studio_url() + "/api/import"
     data = json.dumps(body, default=str).encode()
-    headers = {"X-Api-Key": _key(api_key),
-               "Content-Type": "application/json"}
-    request = urllib.request.Request(url, data=data, method="POST",
-                                     headers=headers)
+    headers = {"X-Api-Key": _key(api_key), "Content-Type": "application/json"}
+    request = urllib.request.Request(url, data=data, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=300) as response:
             payload = response.read()
@@ -173,18 +208,21 @@ def push_to_studio(rows: list[dict], agent: str, mode: str, *,
         detail = err.read().decode(errors="replace")[:400]
         with contextlib.suppress(ValueError, AttributeError):
             detail = json.loads(detail).get("error", detail)
-        hint = (" (is the agent registered in the studio? the studio "
-                "registry is separate from trace agents)"
-                if err.code in (400, 404) else "")
-        raise PlatformError(
-            f"POST {url} -> {err.code}: {detail}{hint}") from None
+        hint = (
+            " (is the agent registered in the studio? the studio "
+            "registry is separate from trace agents)"
+            if err.code in (400, 404)
+            else ""
+        )
+        raise PlatformError(f"POST {url} -> {err.code}: {detail}{hint}") from None
     except urllib.error.URLError as err:
         raise PlatformError(f"POST {url} failed: {err.reason}") from None
     return json.loads(payload) if payload else {}
 
 
-def push_rows(rows: list[dict], name: str, *, api_key: str | None = None,
-              parent: str | None = None) -> dict:
+def push_rows(
+    rows: list[dict], name: str, *, api_key: str | None = None, parent: str | None = None
+) -> dict:
     """Upload rows as JSONL to your Zero Proof Labs account.
 
     Returns the registry entry, including ``datasetId``. Pass ``parent`` (a
@@ -192,20 +230,28 @@ def push_rows(rows: list[dict], name: str, *, api_key: str | None = None,
     lineage shows on the platform.
     """
     from ..schema import check
+
     check(rows, where="push_rows")
     body: dict = {"name": name}
     if parent:
         body["parentDatasetId"] = parent
     created = _call("POST", "/datasets", api_key, body)
     payload = "".join(json.dumps(r, default=str) + "\n" for r in rows).encode()
-    _call("PUT", "", api_key, raw_url=created["uploadUrl"], data=payload,
-          content_type="application/jsonl")
+    _call(
+        "PUT",
+        "",
+        api_key,
+        raw_url=created["uploadUrl"],
+        data=payload,
+        content_type="application/jsonl",
+    )
     final = _call("POST", f"/datasets/{created['datasetId']}/finalize", api_key)
     return final
 
 
-def push_file(path: str, name: str | None = None, *, api_key: str | None = None,
-              parent: str | None = None) -> dict:
+def push_file(
+    path: str, name: str | None = None, *, api_key: str | None = None, parent: str | None = None
+) -> dict:
     """Upload an existing JSONL file. ``name`` defaults to the file name."""
     with open(path, "rb") as fh:
         payload = fh.read()
@@ -216,8 +262,14 @@ def push_file(path: str, name: str | None = None, *, api_key: str | None = None,
     if parent:
         body["parentDatasetId"] = parent
     created = _call("POST", "/datasets", api_key, body)
-    _call("PUT", "", api_key, raw_url=created["uploadUrl"], data=payload,
-          content_type="application/jsonl")
+    _call(
+        "PUT",
+        "",
+        api_key,
+        raw_url=created["uploadUrl"],
+        data=payload,
+        content_type="application/jsonl",
+    )
     return _call("POST", f"/datasets/{created['datasetId']}/finalize", api_key)
 
 
@@ -226,8 +278,9 @@ def datasets(*, api_key: str | None = None) -> dict:
     return _call("GET", "/datasets", api_key)
 
 
-def pull(dataset_id: str, path: str | None = None, *,
-         api_key: str | None = None) -> str | list[dict]:
+def pull(
+    dataset_id: str, path: str | None = None, *, api_key: str | None = None
+) -> str | list[dict]:
     """Download a dataset. Writes JSONL to ``path`` and returns the path,
     or returns the parsed rows when ``path`` is omitted.
 

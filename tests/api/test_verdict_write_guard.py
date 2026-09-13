@@ -5,6 +5,7 @@
 may gain a new one. ``schema.py`` is exempt: ``to_row`` is the sanctioned
 projection. Lower a number here when you remove a write; never raise one.
 """
+
 from __future__ import annotations
 
 import re
@@ -43,15 +44,13 @@ def _counts() -> dict[str, int]:
 
 def test_no_module_gains_a_direct_verdict_write():
     counts = _counts()
-    grown = {rel: (n, BASELINE.get(rel, 0)) for rel, n in counts.items()
-             if n > BASELINE.get(rel, 0)}
-    assert not grown, (
-        "new direct writes to a verdict key (route them through attach): "
-        f"{grown}")
+    grown = {
+        rel: (n, BASELINE.get(rel, 0)) for rel, n in counts.items() if n > BASELINE.get(rel, 0)
+    }
+    assert not grown, f"new direct writes to a verdict key (route them through attach): {grown}"
 
 
 def test_baseline_is_not_stale():
     counts = _counts()
-    shrunk = {rel: (counts.get(rel, 0), n) for rel, n in BASELINE.items()
-              if counts.get(rel, 0) < n}
+    shrunk = {rel: (counts.get(rel, 0), n) for rel, n in BASELINE.items() if counts.get(rel, 0) < n}
     assert not shrunk, f"writes were removed; lower BASELINE: {shrunk}"

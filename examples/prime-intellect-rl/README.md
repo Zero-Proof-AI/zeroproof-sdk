@@ -138,10 +138,11 @@ Build the reward on Prime Intellect's side, where the task is known:
 ```python
 import verifiers as vf
 
+
 def load_environment(**kwargs):
     return vf.ToolEnv(
         dataset=load_prompts("data/prompts.jsonl"),
-        tools=mock_tools(),                     # wrap sandbox.MockEnvironment
+        tools=mock_tools(),  # wrap sandbox.MockEnvironment
         rubric=vf.Rubric(
             funcs=[found_defect, task_complete, conduct],
             weights=[0.5, 0.3, 0.2],

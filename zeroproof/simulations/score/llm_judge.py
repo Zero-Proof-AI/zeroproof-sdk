@@ -1,4 +1,5 @@
 """Optional LLM judge. Writes llm_reward / llm_reason; never overwrites reward."""
+
 from __future__ import annotations
 
 import json
@@ -10,8 +11,7 @@ from typing import Any
 from ..generate.agents import complete, parse_backend_spec
 
 DEFAULT_JUDGE_SPEC = "openai:gpt-4o-mini"
-MISSING_JUDGE_KEY = (
-    "LLM grading needs an API key (pass api_key= or set OPENAI_API_KEY).")
+MISSING_JUDGE_KEY = "LLM grading needs an API key (pass api_key= or set OPENAI_API_KEY)."
 
 JUDGE_SYSTEM = (
     "You grade one agent interaction. Reply with only JSON "
@@ -26,8 +26,7 @@ JUDGE_SYSTEM = (
 )
 
 
-def resolve_judge_key(api_key: str | None = None,
-                      backend_spec: str | None = None) -> str | None:
+def resolve_judge_key(api_key: str | None = None, backend_spec: str | None = None) -> str | None:
     """User-supplied OpenAI-compatible key. Hosted Qwen only if spec points there."""
     key = str(api_key or "").strip()
     if key:
@@ -53,10 +52,9 @@ def _tool_names(tools: Sequence | None) -> list[str]:
     return names
 
 
-def _render_payload(trajectory: dict, *, policy: str = "",
-                    tools: Sequence | None = None) -> str:
+def _render_payload(trajectory: dict, *, policy: str = "", tools: Sequence | None = None) -> str:
     steps = []
-    for step in (trajectory.get("steps") or []):
+    for step in trajectory.get("steps") or []:
         if not isinstance(step, dict):
             continue
         item = {}
@@ -107,9 +105,7 @@ def _parse_score(text: str) -> tuple[float | None, str | None]:
                 return value, str(reason or "").strip() or None
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
-    match = re.search(
-        r'"(?:score|reward)"\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?|0\.5)',
-        cleaned)
+    match = re.search(r'"(?:score|reward)"\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?|0\.5)', cleaned)
     if match:
         value = float(match.group(1))
         reason_match = re.search(r'"reason"\s*:\s*"([^"]+)"', cleaned)
@@ -118,21 +114,29 @@ def _parse_score(text: str) -> tuple[float | None, str | None]:
     return None, None
 
 
-def judge_one(trajectory: dict, *, policy: str = "",
-              tools: Sequence | None = None,
-              backend_spec: str | None = None,
-              api_key: str | None = None,
-              timeout: float = 45) -> dict[str, Any]:
+def judge_one(
+    trajectory: dict,
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    backend_spec: str | None = None,
+    api_key: str | None = None,
+    timeout: float = 45,
+) -> dict[str, Any]:
     """Score one trajectory. Returns llm_reward/llm_reason or both None."""
     spec = backend_spec or DEFAULT_JUDGE_SPEC
     url, model = parse_backend_spec(spec)
     payload = _render_payload(trajectory, policy=policy, tools=tools)
     try:
         reply = complete(
-            url, model,
-            [{"role": "system", "content": JUDGE_SYSTEM},
-             {"role": "user", "content": payload}],
-            api_key=api_key, temperature=0.1, max_tokens=120, timeout=timeout)
+            url,
+            model,
+            [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": payload}],
+            api_key=api_key,
+            temperature=0.1,
+            max_tokens=120,
+            timeout=timeout,
+        )
     except OSError:
         return {"llm_reward": None, "llm_reason": None}
     except Exception:
@@ -143,13 +147,16 @@ def judge_one(trajectory: dict, *, policy: str = "",
     return {"llm_reward": score, "llm_reason": reason or "llm graded"}
 
 
-def apply_llm_grade(trajectories: Sequence[dict], *,
-                    policy: str = "",
-                    tools: Sequence | None = None,
-                    backend_spec: str | None = None,
-                    api_key: str | None = None,
-                    concurrency: int = 16,
-                    degraded: list[str] | None = None) -> dict[str, Any]:
+def apply_llm_grade(
+    trajectories: Sequence[dict],
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    backend_spec: str | None = None,
+    api_key: str | None = None,
+    concurrency: int = 16,
+    degraded: list[str] | None = None,
+) -> dict[str, Any]:
     """Write llm_reward/llm_reason onto each row. Never touches reward."""
     import concurrent.futures
 
@@ -160,11 +167,15 @@ def apply_llm_grade(trajectories: Sequence[dict], *,
 
     def one(row: dict) -> dict[str, Any]:
         conduct = conduct_snapshot(row)
-        return judge_one({**row, "conduct": conduct}, policy=policy,
-                         tools=tools, backend_spec=backend_spec, api_key=key)
+        return judge_one(
+            {**row, "conduct": conduct},
+            policy=policy,
+            tools=tools,
+            backend_spec=backend_spec,
+            api_key=key,
+        )
 
-    with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, int(concurrency))) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(concurrency))) as pool:
         verdicts = list(pool.map(one, rows))
 
     graded = 0

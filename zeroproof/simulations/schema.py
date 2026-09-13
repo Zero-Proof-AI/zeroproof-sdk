@@ -28,6 +28,7 @@ to be a dict. Stricter checks land after the store moves to the objects.
 Until then ``SimulationData.trajectories`` stays the source of truth and
 these objects are the view.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -43,36 +44,88 @@ KNOWN_VERSIONS = frozenset({"0", SCHEMA_VERSION})
 #: The sampled diversity axes. Same tuple as ``data._CONVERSATION_FIELDS``;
 #: the drift test holds them equal.
 AXES = (
-    "tier", "ask_family", "intent_known", "tool_known",
-    "stance", "tone", "length", "ask", "vagueness", "phrasing",
-    "pressure", "user", "texture", "history",
+    "tier",
+    "ask_family",
+    "intent_known",
+    "tool_known",
+    "stance",
+    "tone",
+    "length",
+    "ask",
+    "vagueness",
+    "phrasing",
+    "pressure",
+    "user",
+    "texture",
+    "history",
 )
 
 #: Row keys that carry a verdict. ``Judgment`` owns them; direct writes
 #: outside ``attach`` are frozen at today's count by a test.
-VERDICT_KEYS = ("reward", "reason", "grader_reason", "label_source",
-                "judge_name", "judge_status", "judge_meta", "failure_class",
-                "llm_reward", "llm_reason", "qwen_reward")
+VERDICT_KEYS = (
+    "reward",
+    "reason",
+    "grader_reason",
+    "label_source",
+    "judge_name",
+    "judge_status",
+    "judge_meta",
+    "failure_class",
+    "llm_reward",
+    "llm_reason",
+    "qwen_reward",
+)
 
 #: Rollout-level keys the objects know about and carry by name.
-_CARRY_ROLLOUT = ("messages", "opener", "opening", "conversation_id", "ts",
-                  "fault_detected", "lineage", "quality", "quality_reason",
-                  "quality_scores", "behavior_signature", "steering",
-                  "tools", "group_id")
+_CARRY_ROLLOUT = (
+    "messages",
+    "opener",
+    "opening",
+    "conversation_id",
+    "ts",
+    "fault_detected",
+    "lineage",
+    "quality",
+    "quality_reason",
+    "quality_scores",
+    "behavior_signature",
+    "steering",
+    "tools",
+    "group_id",
+)
 
 #: Every key ``from_row`` consumes into a typed field. Anything else on the
 #: row is unknown to the objects and passes through ``Rollout.extra``.
 _CONSUMED = frozenset(
-    (SCHEMA_KEY, "prompt", "steps", "final_text", "scenario_id", "spec_id", "world_state", "faults", "seed", "rollout_index", "model_version", "markers", "tool_trace", "trace", *AXES, *VERDICT_KEYS, *_CARRY_ROLLOUT))
+    (
+        SCHEMA_KEY,
+        "prompt",
+        "steps",
+        "final_text",
+        "scenario_id",
+        "spec_id",
+        "world_state",
+        "faults",
+        "seed",
+        "rollout_index",
+        "model_version",
+        "markers",
+        "tool_trace",
+        "trace",
+        *AXES,
+        *VERDICT_KEYS,
+        *_CARRY_ROLLOUT,
+    )
+)
 
 #: The published Hugging Face set flattens list columns to JSON strings.
 _JSON_STRING_KEYS = ("steps_json", "messages_json", "metadata_json")
 
-ShapeName = Literal["v1", "engine", "training", "platform_pull", "otel",
-                    "hf_flat", "loose"]
+ShapeName = Literal["v1", "engine", "training", "platform_pull", "otel", "hf_flat", "loose"]
 
 
 # ------------------------------------------------------------------ objects
+
 
 @dataclass(frozen=True)
 class Message:
@@ -85,6 +138,7 @@ class Message:
 @dataclass(frozen=True)
 class Step:
     """One trajectory step: a tool call, an agent turn, or a user turn."""
+
     tool: str | None = None
     arguments: Any = None
     result: Any = None
@@ -95,6 +149,7 @@ class Step:
 @dataclass(frozen=True)
 class FaultEvent:
     """What the world did to a tool call: injected fault or observed one."""
+
     tool: str
     mode: str
     rate: float | None = None
@@ -112,6 +167,7 @@ class World:
 @dataclass(frozen=True)
 class Privileged:
     """Context the teacher sees and the student never does."""
+
     principle: str | None = None
     hidden_state: dict = field(default_factory=dict)
     reference: str | None = None
@@ -143,6 +199,7 @@ class ScorerRef:
 class Task:
     """The situation. Identity-bearing, so nothing computed lives here:
     splits belong to a ``Dataset``, difficulty to a ``Calibration``."""
+
     task_id: str
     spec_id: str = ""
     prompt: str = ""
@@ -158,6 +215,7 @@ class Task:
 class Rollout:
     """One episode. Mutable so grading paths can attach to it in place;
     the no-verdict invariant is enforced at the boundary, not here."""
+
     rollout_id: str
     task_id: str
     policy: PolicyRef = field(default_factory=PolicyRef)
@@ -175,8 +233,7 @@ class Judgment:
     rollout_id: str
     scorer: ScorerRef
     reward: float | None
-    status: Literal["ok", "missing_reward", "invalid_result", "error",
-                    "timeout"] = "ok"
+    status: Literal["ok", "missing_reward", "invalid_result", "error", "timeout"] = "ok"
     reason: str = ""
     failure_class: str | None = None
     evidence: dict = field(default_factory=dict)
@@ -194,6 +251,7 @@ class Marker:
 class Dataset:
     """Split membership is a dataset decision, so one task can be holdout
     in one dataset and training in another."""
+
     dataset_id: str
     spec_id: str = ""
     splits: dict[str, tuple[str, ...]] = field(default_factory=dict)
@@ -204,6 +262,7 @@ class Calibration:
     """Measured difficulty of one task for one student. Optional; only
     ``calibrate`` produces it. ``mean_kl`` needs per-token logprobs, which
     most OpenAI-compatible endpoints do not return on tool-call turns."""
+
     task_id: str
     student: PolicyRef
     n: int
@@ -212,6 +271,7 @@ class Calibration:
 
 
 # ------------------------------------------------------------------ stamp
+
 
 def stamp(row: dict) -> dict:
     """Set ``schema_version`` on a row born in canonical shape. In place."""
@@ -234,8 +294,12 @@ def detect_shape(row: dict) -> ShapeName:
         return "v1"
     if any(isinstance(row.get(k), str) for k in _JSON_STRING_KEYS):
         return "hf_flat"
-    if (isinstance(row.get("messages"), list) and row.get("messages")
-            and not row.get("steps") and "final_text" not in row):
+    if (
+        isinstance(row.get("messages"), list)
+        and row.get("messages")
+        and not row.get("steps")
+        and "final_text" not in row
+    ):
         return "training"
     if row.get("scenario_id") is not None:
         return "engine"
@@ -248,8 +312,11 @@ def detect_shape(row: dict) -> ShapeName:
 
 # ------------------------------------------------------------------ validate
 
-def validate(row: Any, kind: Literal["row", "training", "preference"] = "row",
-             ) -> list[str]:
+
+def validate(
+    row: Any,
+    kind: Literal["row", "training", "preference"] = "row",
+) -> list[str]:
     """Problems with one row, empty when it is fine. Never raises.
 
     Stamped rows must carry the required fields with the right types.
@@ -291,9 +358,12 @@ def validate(row: Any, kind: Literal["row", "training", "preference"] = "row",
     return problems
 
 
-def check(rows: Sequence[Any] | Any, kind: Literal["row", "training",
-                                                  "preference"] = "row",
-          *, where: str = "rows") -> None:
+def check(
+    rows: Sequence[Any] | Any,
+    kind: Literal["row", "training", "preference"] = "row",
+    *,
+    where: str = "rows",
+) -> None:
     """Raise ``ValueError`` naming the first bad rows. Accepts one row too."""
     items = rows if isinstance(rows, (list, tuple)) else [rows]
     bad: list[str] = []
@@ -308,6 +378,7 @@ def check(rows: Sequence[Any] | Any, kind: Literal["row", "training",
 
 
 # ------------------------------------------------------------------ coerce
+
 
 def _short_hash(*parts: Any) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:12]
@@ -341,9 +412,11 @@ def _int(value: Any, default: int = 0) -> int:
 
 # ------------------------------------------------------------------ from_row
 
+
 def _normalize_legacy(row: dict) -> dict:
     """Version-0 row in canonical spelling, via the trace loader's tables."""
     from .ingest.traces import load_traces
+
     shape = detect_shape(row)
     if shape in ("v1", "engine", "otel"):
         return dict(row)
@@ -356,9 +429,9 @@ def _normalize_legacy(row: dict) -> dict:
             try:
                 value = json.loads(text)
             except ValueError:
-                out[key] = text          # unparseable: keep it as it was
+                out[key] = text  # unparseable: keep it as it was
                 continue
-            target = key[:-5]            # steps_json -> steps
+            target = key[:-5]  # steps_json -> steps
             if target == "metadata":
                 if isinstance(value, dict):
                     out.setdefault("metadata", value)
@@ -376,9 +449,15 @@ def _steps(raw: Any) -> list[Step]:
     for step in raw:
         if not isinstance(step, dict):
             continue
-        out.append(Step(tool=step.get("tool"), arguments=step.get("arguments"),
-                        result=step.get("result"), text=step.get("text"),
-                        user=step.get("user")))
+        out.append(
+            Step(
+                tool=step.get("tool"),
+                arguments=step.get("arguments"),
+                result=step.get("result"),
+                text=step.get("text"),
+                user=step.get("user"),
+            )
+        )
     return out
 
 
@@ -389,15 +468,24 @@ def _ledger(faults: Any) -> list[FaultEvent]:
     for tool, plan in faults.items():
         if isinstance(plan, dict) and plan.get("mode"):
             rate = _number(plan.get("rate"))
-            out.append(FaultEvent(tool=str(tool), mode=str(plan["mode"]),
-                                  rate=float(rate) if rate is not None else None))
+            out.append(
+                FaultEvent(
+                    tool=str(tool),
+                    mode=str(plan["mode"]),
+                    rate=float(rate) if rate is not None else None,
+                )
+            )
     return out
 
 
 def _judgments(row: dict, rollout_id: str) -> list[Judgment]:
     out: list[Judgment] = []
-    has_primary = ("reward" in row or row.get("judge_status")
-                   or row.get("judge_name") or row.get("label_source"))
+    has_primary = (
+        "reward" in row
+        or row.get("judge_status")
+        or row.get("judge_name")
+        or row.get("label_source")
+    )
     if has_primary:
         judge = row.get("judge_name")
         label = row.get("label_source")
@@ -417,20 +505,34 @@ def _judgments(row: dict, rollout_id: str) -> list[Judgment]:
             evidence["grader_reason"] = row["grader_reason"]
         if "reward" in row:
             evidence["reward_present"] = True
-        out.append(Judgment(
-            rollout_id=rollout_id, scorer=ScorerRef(name=str(name), kind=kind),
-            reward=reward, status=status,
-            reason=str(row.get("reason") or ""),
-            failure_class=row.get("failure_class"), evidence=evidence))
+        out.append(
+            Judgment(
+                rollout_id=rollout_id,
+                scorer=ScorerRef(name=str(name), kind=kind),
+                reward=reward,
+                status=status,
+                reason=str(row.get("reason") or ""),
+                failure_class=row.get("failure_class"),
+                evidence=evidence,
+            )
+        )
     if "llm_reward" in row:
-        out.append(Judgment(rollout_id=rollout_id,
-                            scorer=ScorerRef(name="llm", kind="judge"),
-                            reward=_number(row.get("llm_reward")),
-                            reason=str(row.get("llm_reason") or "")))
+        out.append(
+            Judgment(
+                rollout_id=rollout_id,
+                scorer=ScorerRef(name="llm", kind="judge"),
+                reward=_number(row.get("llm_reward")),
+                reason=str(row.get("llm_reason") or ""),
+            )
+        )
     if row.get("qwen_reward") is not None:
-        out.append(Judgment(rollout_id=rollout_id,
-                            scorer=ScorerRef(name="qwen", kind="judge"),
-                            reward=_number(row.get("qwen_reward"))))
+        out.append(
+            Judgment(
+                rollout_id=rollout_id,
+                scorer=ScorerRef(name="qwen", kind="judge"),
+                reward=_number(row.get("qwen_reward")),
+            )
+        )
     return out
 
 
@@ -447,14 +549,12 @@ def from_row(row: dict) -> tuple[Task, Rollout, list[Judgment], list[Marker]]:
         task_id=task_id,
         spec_id=str(raw.get("spec_id") or ""),
         prompt=prompt,
-        world=World(seed=raw.get("seed"), state=raw.get("world_state"),
-                    faults=dict(faults or {})),
+        world=World(seed=raw.get("seed"), state=raw.get("world_state"), faults=dict(faults or {})),
         axes=axes,
     )
     index = _int(raw.get("rollout_index"))
     model = raw.get("model_version")
-    rollout_id = str(raw.get("rollout_id") or "") or _short_hash(
-        task_id, index, model or "")
+    rollout_id = str(raw.get("rollout_id") or "") or _short_hash(task_id, index, model or "")
     extra = {k: raw[k] for k in _CARRY_ROLLOUT if k in raw and raw[k] is not None}
     if raw.get("rollout_index") is not None:
         extra["rollout_index_present"] = True
@@ -462,23 +562,25 @@ def from_row(row: dict) -> tuple[Task, Rollout, list[Judgment], list[Marker]]:
     if passthrough:
         extra["passthrough"] = passthrough
     rollout = Rollout(
-        rollout_id=rollout_id, task_id=task_id,
+        rollout_id=rollout_id,
+        task_id=task_id,
         policy=PolicyRef(name=str(model or ""), model=model),
-        index=index, steps=_steps(raw.get("steps")),
+        index=index,
+        steps=_steps(raw.get("steps")),
         final_text=str(raw.get("final_text") or ""),
-        ledger=_ledger(faults), extra=extra,
+        ledger=_ledger(faults),
+        extra=extra,
     )
     markers: list[Marker] = []
-    for k, v in (raw.get("markers") or {}).items() if isinstance(
-            raw.get("markers"), dict) else ():
+    for k, v in (raw.get("markers") or {}).items() if isinstance(raw.get("markers"), dict) else ():
         value = _number(v)
         if value is not None:
-            markers.append(Marker(rollout_id=rollout_id, name=str(k),
-                                  value=float(value)))
+            markers.append(Marker(rollout_id=rollout_id, name=str(k), value=float(value)))
     return task, rollout, _judgments(raw, rollout_id), markers
 
 
 # ------------------------------------------------------------------ to_row
+
 
 def _step_dict(step: Step) -> dict:
     if step.user is not None:
@@ -493,13 +595,14 @@ def _step_dict(step: Step) -> dict:
     return out
 
 
-def to_row(task: Task, rollout: Rollout,
-           judgments: Sequence[Judgment] = (),
-           markers: Sequence[Marker] = ()) -> dict:
+def to_row(
+    task: Task, rollout: Rollout, judgments: Sequence[Judgment] = (), markers: Sequence[Marker] = ()
+) -> dict:
     """The flat v1 wire row. Inverse of ``from_row`` on engine rows; on
     other shapes it is the canonical row ``load_traces`` would produce,
     with the source row's unknown keys carried along."""
     from .data import clean_faults, conversation
+
     row: dict[str, Any] = {
         "prompt": task.prompt,
         "steps": [_step_dict(s) for s in rollout.steps],
@@ -524,8 +627,7 @@ def to_row(task: Task, rollout: Rollout,
         row["rollout_index"] = rollout.index
     if rollout.policy.model is not None:
         row["model_version"] = rollout.policy.model
-    primary = next((j for j in judgments
-                    if j.scorer.name not in {"llm", "qwen"}), None)
+    primary = next((j for j in judgments if j.scorer.name not in {"llm", "qwen"}), None)
     if primary is not None:
         if primary.reward is not None or primary.evidence.get("reward_present"):
             row["reward"] = primary.reward
@@ -552,8 +654,16 @@ def to_row(task: Task, rollout: Rollout,
             row["qwen_reward"] = j.reward
     if markers:
         row["markers"] = {m.name: m.value for m in markers}
-    for key in ("conversation_id", "ts", "lineage", "quality",
-                "quality_reason", "quality_scores", "tools", "group_id"):
+    for key in (
+        "conversation_id",
+        "ts",
+        "lineage",
+        "quality",
+        "quality_reason",
+        "quality_scores",
+        "tools",
+        "group_id",
+    ):
         if rollout.extra.get(key) is not None:
             row[key] = rollout.extra[key]
     if task.spec_id:
@@ -571,6 +681,7 @@ def as_dict(obj: Any) -> dict:
 def load_json_schema() -> dict:
     """The packaged ``schemas/row-v1.json``."""
     from importlib import resources
+
     text = (resources.files(__package__) / "schemas" / "row-v1.json").read_text()
     return json.loads(text)
 

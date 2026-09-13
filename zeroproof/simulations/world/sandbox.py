@@ -1,4 +1,5 @@
 """Schema-derived tool backend: validation, entity state, deterministic results."""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +14,8 @@ _DELETE = re.compile(r"^(delete|remove|drop|destroy)", re.I)
 _REFERENCE_KEY = re.compile(
     r"(^id$|_id$|^path$|_path$|^file$|^name$|^key$|^ref$|^number$|"
     r"^asin$|^sku$)",
-    re.I)
+    re.I,
+)
 
 
 def _tool_schema(tool: dict) -> tuple[str, dict]:
@@ -32,8 +34,7 @@ def _missing_required(parameters: dict, arguments: dict) -> list[str]:
             child = (parameters.get("properties") or {}).get(key) or {}
             value = arguments.get(key)
             if child.get("type") == "object" and isinstance(value, dict):
-                missing.extend(f"{key}.{grand}"
-                               for grand in _missing_required(child, value))
+                missing.extend(f"{key}.{grand}" for grand in _missing_required(child, value))
     return missing
 
 
@@ -43,7 +44,9 @@ _PLACEHOLDER_VALUE = re.compile(
     r"email address|first name|last name|full name|zip code|phone number|"
     r"order (?:id|number)|user id|customer id|account (?:id|number)|item id|product id|"
     r"string|placeholder|xxx+)"
-    r"|[\w.+-]+@(?:example|test|email|domain)\.(?:com|org|net))$", re.I)
+    r"|[\w.+-]+@(?:example|test|email|domain)\.(?:com|org|net))$",
+    re.I,
+)
 
 
 def placeholder_arguments(arguments: Any) -> list[str]:
@@ -56,6 +59,7 @@ def placeholder_arguments(arguments: Any) -> list[str]:
     a placeholder; only the schema-echo phrasings are.
     """
     out: list[str] = []
+
     def walk(node: Any, path: str) -> None:
         if isinstance(node, dict):
             for k, v in node.items():
@@ -67,6 +71,7 @@ def placeholder_arguments(arguments: Any) -> list[str]:
             s = node.strip()
             if s and _PLACEHOLDER_VALUE.match(s):
                 out.append(path)
+
     walk(arguments, "")
     return out
 
@@ -78,8 +83,12 @@ def _reference_values(arguments: Any, *, prefix: str = "") -> list[tuple[str, st
             label = f"{prefix}{key}"
             if isinstance(value, (dict, list)):
                 references.extend(_reference_values(value, prefix=label + "."))
-            elif isinstance(value, (str, int)) and value != "" and value is not None \
-                    and _REFERENCE_KEY.search(str(key)):
+            elif (
+                isinstance(value, (str, int))
+                and value != ""
+                and value is not None
+                and _REFERENCE_KEY.search(str(key))
+            ):
                 references.append((label, str(value)))
     elif isinstance(arguments, list):
         for item in arguments:
@@ -91,25 +100,98 @@ _ISSUED_ID = re.compile(r"^[a-z]+_[0-9a-f]{12}$")
 
 # Generic content pools. Domain-neutral on purpose: names, statuses, and dates
 # read plausibly for checks, commits, tickets, students, clauses, or listings.
-_PEOPLE = ("alex kim", "priya patel", "sam garcia", "elena chen",
-           "marcus reed", "dana okafor", "tom silva", "maya novak",
-           "chris tanaka", "nina brooks", "luis weber", "jordan ali",
-           "grace lin", "omar haddad", "ivy castillo", "peter novy",
-           "rosa marino", "kenji sato", "amara diallo", "leo brandt",
-           "sofia petrov", "david oyelaran", "hana kova", "raj mehta",
-           "claire dubois", "yusuf demir", "mei wong", "arthur kelly",
-           "lucia ferrara", "noah lindqvist", "zara khan", "felix braun")
-_ADJECTIVES = ("nightly", "routine", "primary", "draft", "updated",
-               "automated", "manual", "initial", "final", "weekly",
-               "legacy", "follow-up", "quarterly", "urgent", "archived",
-               "revised", "secondary", "provisional", "recurring",
-               "expedited", "deferred", "standing", "seasonal", "interim")
-_TOPICS = ("config", "cleanup", "handoff", "review", "rollout",
-           "migration", "sync", "audit", "onboarding", "renewal",
-           "billing", "escalation", "inventory", "compliance", "backlog",
-           "outreach", "reconciliation", "staging", "triage", "closeout")
-_ITEM_STATUSES = ("completed", "in_progress", "pending", "failed",
-                  "active", "queued", "approved", "open")
+_PEOPLE = (
+    "alex kim",
+    "priya patel",
+    "sam garcia",
+    "elena chen",
+    "marcus reed",
+    "dana okafor",
+    "tom silva",
+    "maya novak",
+    "chris tanaka",
+    "nina brooks",
+    "luis weber",
+    "jordan ali",
+    "grace lin",
+    "omar haddad",
+    "ivy castillo",
+    "peter novy",
+    "rosa marino",
+    "kenji sato",
+    "amara diallo",
+    "leo brandt",
+    "sofia petrov",
+    "david oyelaran",
+    "hana kova",
+    "raj mehta",
+    "claire dubois",
+    "yusuf demir",
+    "mei wong",
+    "arthur kelly",
+    "lucia ferrara",
+    "noah lindqvist",
+    "zara khan",
+    "felix braun",
+)
+_ADJECTIVES = (
+    "nightly",
+    "routine",
+    "primary",
+    "draft",
+    "updated",
+    "automated",
+    "manual",
+    "initial",
+    "final",
+    "weekly",
+    "legacy",
+    "follow-up",
+    "quarterly",
+    "urgent",
+    "archived",
+    "revised",
+    "secondary",
+    "provisional",
+    "recurring",
+    "expedited",
+    "deferred",
+    "standing",
+    "seasonal",
+    "interim",
+)
+_TOPICS = (
+    "config",
+    "cleanup",
+    "handoff",
+    "review",
+    "rollout",
+    "migration",
+    "sync",
+    "audit",
+    "onboarding",
+    "renewal",
+    "billing",
+    "escalation",
+    "inventory",
+    "compliance",
+    "backlog",
+    "outreach",
+    "reconciliation",
+    "staging",
+    "triage",
+    "closeout",
+)
+_ITEM_STATUSES = (
+    "completed",
+    "in_progress",
+    "pending",
+    "failed",
+    "active",
+    "queued",
+    "approved",
+    "open",
+)
 
 
 def _pick(pool: tuple, k: int, salt: int) -> str:
@@ -142,15 +224,14 @@ def _function_spec(tool: dict) -> tuple[str, dict]:
 
 
 def _param_keys(spec: dict, arguments: dict | None = None) -> set[str]:
-    props = ((spec.get("parameters") or {}).get("properties") or {})
+    props = (spec.get("parameters") or {}).get("properties") or {}
     keys = {str(k).lower() for k in props}
     if arguments:
         keys |= {str(k).lower() for k in arguments}
     return keys
 
 
-def _result_kind(tool: str, spec: dict | None = None,
-                 arguments: dict | None = None) -> str:
+def _result_kind(tool: str, spec: dict | None = None, arguments: dict | None = None) -> str:
     """Infer the payload family from name, params, and description.
 
     Not a hardcoded product list. A new spec with unknown tool names still
@@ -162,43 +243,62 @@ def _result_kind(tool: str, spec: dict | None = None,
     keys = _param_keys(spec, arguments)
     blob = f"{name} {desc}"
 
-    if re.search(r"(run_command|run_terminal|bash|shell_command|"
-                 r"execute_command|terminal_cmd|run_bash|^exec$|"
-                 r"run_tests?$|pytest)", name) \
-            or (("command" in keys or "cmd" in keys or "argv" in keys)
-                and re.search(r"(run|exec|shell|bash|terminal)", name)):
+    if re.search(
+        r"(run_command|run_terminal|bash|shell_command|"
+        r"execute_command|terminal_cmd|run_bash|^exec$|"
+        r"run_tests?$|pytest)",
+        name,
+    ) or (
+        ("command" in keys or "cmd" in keys or "argv" in keys)
+        and re.search(r"(run|exec|shell|bash|terminal)", name)
+    ):
         return "shell"
-    if re.search(r"(grep|ripgrep|search_code|code_search|find_in_files|"
-                 r"search_files)", name) \
-            or (("pattern" in keys or "regex" in keys)
-                and keys & {"path", "glob", "directory", "dir"}):
+    if re.search(
+        r"(grep|ripgrep|search_code|code_search|find_in_files|"
+        r"search_files)",
+        name,
+    ) or (("pattern" in keys or "regex" in keys) and keys & {"path", "glob", "directory", "dir"}):
         return "grep"
-    if re.search(r"(read_file|write_file|get_file|cat_file|view_file|"
-                 r"edit_file|apply_patch|replace_in_file|open_file|"
-                 r"file_contents)", name) \
-            or (keys & {"path", "file", "file_path", "filepath", "filename"}
-                and re.search(r"(read|write|get|cat|view|edit|open|apply|"
-                              r"patch|contents|file)", name)
-                and not re.search(
-                    r"(profile|(?:^|_)user(?:_|$)|order|issue|"
-                    r"(?:^|_)prs?(?:_|$)|account)",
-                    name)):
+    if re.search(
+        r"(read_file|write_file|get_file|cat_file|view_file|"
+        r"edit_file|apply_patch|replace_in_file|open_file|"
+        r"file_contents)",
+        name,
+    ) or (
+        keys & {"path", "file", "file_path", "filepath", "filename"}
+        and re.search(
+            r"(read|write|get|cat|view|edit|open|apply|"
+            r"patch|contents|file)",
+            name,
+        )
+        and not re.search(
+            r"(profile|(?:^|_)user(?:_|$)|order|issue|"
+            r"(?:^|_)prs?(?:_|$)|account)",
+            name,
+        )
+    ):
         return "file"
-    if re.search(r"(list_dir|list_files|glob_files|ls_dir)", name) \
-            or (name.startswith("list")
-                and keys & {"path", "directory", "dir", "glob"}
-                and not re.search(r"(order|issue|check|commit|event)", name)):
+    if re.search(r"(list_dir|list_files|glob_files|ls_dir)", name) or (
+        name.startswith("list")
+        and keys & {"path", "directory", "dir", "glob"}
+        and not re.search(r"(order|issue|check|commit|event)", name)
+    ):
         return "files"
-    if name.startswith("git") or re.search(
-            r"(git_status|git_diff|git_log|git_show|git_blame)", name) \
-            or re.search(r"(^list_commits$|_commits$|commit_log)", name):
+    if (
+        name.startswith("git")
+        or re.search(r"(git_status|git_diff|git_log|git_show|git_blame)", name)
+        or re.search(r"(^list_commits$|_commits$|commit_log)", name)
+    ):
         return "git"
-    if re.search(r"(list_checks|_checks$|ci_status|test_results)", name) \
-            or (re.search(r"\b(ci|check run)", blob)
-                and keys & {"sha", "commit", "number"}):
+    if re.search(r"(list_checks|_checks$|ci_status|test_results)", name) or (
+        re.search(r"\b(ci|check run)", blob) and keys & {"sha", "commit", "number"}
+    ):
         return "ci"
-    if re.search(r"(payment|price|invoice|balance|estimate|fx_rate|"
-                 r"amount_due)", name):
+    if re.search(
+        r"(payment|price|invoice|balance|estimate|fx_rate|"
+        r"amount_due)",
+        name,
+    ):
         return "money"
     return "record"
 
@@ -220,17 +320,38 @@ def _shape_mismatches_kind(kind: str, filled: dict) -> bool:
         return True
     if kind == "ci" and not (keys & {"items", "checks", "jobs", "conclusion"}):
         return True
-    return bool({"owner", "updated_at"} <= keys and not keys & {"content", "stdout", "diff", "matches", "entries"})
+    return bool(
+        {"owner", "updated_at"} <= keys
+        and not keys & {"content", "stdout", "diff", "matches", "entries"}
+    )
 
 
-_CODE_VERBS = ("load", "parse", "render", "sync", "build", "handle",
-               "validate", "merge", "format", "dispatch")
-_CODE_NOUNS = ("config", "payload", "record", "client", "worker", "schema",
-               "queue", "session", "index", "router")
-_CHECK_NAMES = ("lint", "tests", "typecheck", "build", "coverage",
-                "security", "format")
-_FILE_STEMS = ("app", "util", "worker", "client", "schema", "router",
-               "session", "queue")
+_CODE_VERBS = (
+    "load",
+    "parse",
+    "render",
+    "sync",
+    "build",
+    "handle",
+    "validate",
+    "merge",
+    "format",
+    "dispatch",
+)
+_CODE_NOUNS = (
+    "config",
+    "payload",
+    "record",
+    "client",
+    "worker",
+    "schema",
+    "queue",
+    "session",
+    "index",
+    "router",
+)
+_CHECK_NAMES = ("lint", "tests", "typecheck", "build", "coverage", "security", "format")
+_FILE_STEMS = ("app", "util", "worker", "client", "schema", "router", "session", "queue")
 
 
 def _hex(n: int, width: int = 12) -> str:
@@ -253,20 +374,23 @@ def _fake_source(path: str, n: int) -> str:
     verb = _pick(_CODE_VERBS, n, 3)
     noun = _pick(_CODE_NOUNS, n, 11)
     if ext in {"json"}:
-        return (f'{{\n  "{noun}": "{verb}",\n  "enabled": true,\n'
-                f'  "retries": {1 + n % 4}\n}}\n')
+        return f'{{\n  "{noun}": "{verb}",\n  "enabled": true,\n  "retries": {1 + n % 4}\n}}\n'
     if ext in {"yml", "yaml", "toml"}:
         return f"{noun}:\n  mode: {verb}\n  retries: {1 + n % 4}\n"
     if ext in {"log", "txt"}:
         stamp = _iso_date(n, 0)
-        return (f"{stamp}T09:00:00Z INFO {verb}_{noun} started\n"
-                f"{stamp}T09:00:01Z INFO handled 12 items\n"
-                f"{stamp}T09:00:02Z WARN retry {1 + n % 3}\n")
+        return (
+            f"{stamp}T09:00:00Z INFO {verb}_{noun} started\n"
+            f"{stamp}T09:00:01Z INFO handled 12 items\n"
+            f"{stamp}T09:00:02Z WARN retry {1 + n % 3}\n"
+        )
     if ext in {"diff", "patch"}:
         return _fake_diff(path, n)
     if ext in {"md"}:
-        return (f"# {noun}\n\nThe {verb} path lives in `{path}`.\n\n"
-                f"- retries: {1 + n % 4}\n- owner queue: {noun}\n")
+        return (
+            f"# {noun}\n\nThe {verb} path lives in `{path}`.\n\n"
+            f"- retries: {1 + n % 4}\n- owner queue: {noun}\n"
+        )
     return (
         f"# {path}\n"
         f"from {noun} import {verb}_state\n\n"
@@ -294,27 +418,25 @@ def _fake_diff(path: str, n: int) -> str:
 def _invented_file(arguments: dict, n: int) -> dict[str, Any]:
     path = _path_from_args(arguments, n)
     content = _fake_source(path, n)
-    return {"path": path, "content": content, "bytes": len(content),
-            "encoding": "utf-8"}
+    return {"path": path, "content": content, "bytes": len(content), "encoding": "utf-8"}
 
 
 def _invented_files(arguments: dict, n: int) -> dict[str, Any]:
-    root = str(arguments.get("path") or arguments.get("directory")
-               or arguments.get("dir") or "src")
+    root = str(arguments.get("path") or arguments.get("directory") or arguments.get("dir") or "src")
     count = 3 + n % 3
     entries = []
     for i in range(count):
         stem = _pick(_FILE_STEMS, n + i * 17, 5)
         kind = "dir" if i == 0 and n % 5 == 0 else "file"
         name = stem if kind == "dir" else f"{stem}.py"
-        entries.append({"name": name, "type": kind,
-                        "path": f"{root.rstrip('/')}/{name}"})
+        entries.append({"name": name, "type": kind, "path": f"{root.rstrip('/')}/{name}"})
     return {"path": root, "entries": entries, "count": count}
 
 
 def _invented_grep(arguments: dict, n: int) -> dict[str, Any]:
-    pattern = str(arguments.get("pattern") or arguments.get("query")
-                  or arguments.get("regex") or "TODO")
+    pattern = str(
+        arguments.get("pattern") or arguments.get("query") or arguments.get("regex") or "TODO"
+    )
     count = 2 + n % 3
     matches = []
     for i in range(count):
@@ -322,24 +444,32 @@ def _invented_grep(arguments: dict, n: int) -> dict[str, Any]:
         line = 8 + ((n + i * 19) % 80)
         verb = _pick(_CODE_VERBS, n + i, 3)
         noun = _pick(_CODE_NOUNS, n + i, 11)
-        matches.append({
-            "path": path, "line": line,
-            "text": f"    {verb}_{noun}({pattern!r})",
-        })
+        matches.append(
+            {
+                "path": path,
+                "line": line,
+                "text": f"    {verb}_{noun}({pattern!r})",
+            }
+        )
     return {"pattern": pattern, "count": count, "matches": matches}
 
 
 def _invented_shell(arguments: dict, n: int) -> dict[str, Any]:
-    command = str(arguments.get("command") or arguments.get("cmd")
-                  or arguments.get("argv") or "true")
+    command = str(
+        arguments.get("command") or arguments.get("cmd") or arguments.get("argv") or "true"
+    )
     flavor = n % 11
     if flavor == 0:
-        return {"command": command, "exit_code": 1,
-                "stdout": "",
-                "stderr": "bash: src/secret.key: Permission denied\n"}
+        return {
+            "command": command,
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": "bash: src/secret.key: Permission denied\n",
+        }
     if flavor == 1:
         return {
-            "command": command, "exit_code": 1,
+            "command": command,
+            "exit_code": 1,
             "stdout": (
                 "============================= test session starts "
                 "==============================\n"
@@ -348,35 +478,41 @@ def _invented_shell(arguments: dict, n: int) -> dict[str, Any]:
                 "FAILED tests/test_app.py::test_sync - AssertionError: "
                 "expected 1\n"
                 "=========================== 1 failed, 5 passed in 0.51s "
-                "========================\n"),
+                "========================\n"
+            ),
             "stderr": "",
         }
     if flavor == 2:
         return {
-            "command": command, "exit_code": 1,
+            "command": command,
+            "exit_code": 1,
             "stdout": (
                 "Auto-merging src/app.py\n"
                 "CONFLICT (content): Merge conflict in src/app.py\n"
                 "Automatic merge failed; fix conflicts and then commit "
-                "the result.\n"),
+                "the result.\n"
+            ),
             "stderr": "",
         }
     if "ls" in command or flavor == 3:
         return {
-            "command": command, "exit_code": 0,
+            "command": command,
+            "exit_code": 0,
             "stdout": "src/\n  app.py\n  util.py\nREADME.md\n",
             "stderr": "",
         }
     passed = 6 + n % 6
     return {
-        "command": command, "exit_code": 0,
+        "command": command,
+        "exit_code": 0,
         "stdout": (
             "============================= test session starts "
             "==============================\n"
             f"collected {passed} items\n"
             f"tests/test_app.py {'.' * min(passed, 8)}\n"
             f"============================== {passed} passed in 0.42s "
-            "===============================\n"),
+            "===============================\n"
+        ),
         "stderr": "",
     }
 
@@ -391,37 +527,47 @@ def _invented_git(tool: str, arguments: dict, n: int) -> dict[str, Any]:
         count = 2 + n % 2
         items = []
         for i in range(count):
-            items.append({
-                "sha": _hex(n + i * 29, 12),
-                "message": f"{_pick(_CODE_VERBS, n + i, 3)} "
-                           f"{_pick(_CODE_NOUNS, n + i, 11)}",
-                "author": _pick(_PEOPLE, n + i * 7, 29),
-                "date": _iso_date(n, i),
-            })
+            items.append(
+                {
+                    "sha": _hex(n + i * 29, 12),
+                    "message": f"{_pick(_CODE_VERBS, n + i, 3)} {_pick(_CODE_NOUNS, n + i, 11)}",
+                    "author": _pick(_PEOPLE, n + i * 7, 29),
+                    "date": _iso_date(n, i),
+                }
+            )
         return {"branch": branch, "count": count, "items": items}
     staged = [f"src/{_pick(_FILE_STEMS, n, 5)}.py"]
     unstaged = [f"src/{_pick(_FILE_STEMS, n + 3, 5)}.py"]
-    return {"branch": branch, "clean": False, "ahead": 1 + n % 3,
-            "behind": n % 2, "staged": staged, "unstaged": unstaged,
-            "untracked": ["tmp.log"]}
+    return {
+        "branch": branch,
+        "clean": False,
+        "ahead": 1 + n % 3,
+        "behind": n % 2,
+        "staged": staged,
+        "unstaged": unstaged,
+        "untracked": ["tmp.log"],
+    }
 
 
 def _invented_ci(arguments: dict, n: int) -> dict[str, Any]:
     count = 3 + n % 2
     items = []
     for i in range(count):
-        failed = (n % 7 == 0 and i == count - 1)
-        items.append({
-            "name": _CHECK_NAMES[i % len(_CHECK_NAMES)],
-            "status": "completed",
-            "conclusion": "failure" if failed else "success",
-            "duration_s": 8 + ((n + i * 11) % 90),
-        })
+        failed = n % 7 == 0 and i == count - 1
+        items.append(
+            {
+                "name": _CHECK_NAMES[i % len(_CHECK_NAMES)],
+                "status": "completed",
+                "conclusion": "failure" if failed else "success",
+                "duration_s": 8 + ((n + i * 11) % 90),
+            }
+        )
     return {"count": count, "items": items}
 
 
-def _invented_payload(tool: str, arguments: dict, n: int, digest: str,
-                      spec: dict | None = None) -> dict[str, Any]:
+def _invented_payload(
+    tool: str, arguments: dict, n: int, digest: str, spec: dict | None = None
+) -> dict[str, Any]:
     kind = _result_kind(tool, spec, arguments)
     if kind == "file":
         return _invented_file(arguments, n)
@@ -440,19 +586,23 @@ def _invented_payload(tool: str, arguments: dict, n: int, digest: str,
         # taught models that money is always a small round number.
         scale = (1, 1, 10, 100)[(n // 7) % 4]
         cents = (n // 3) % 100 if n % 3 else 0
-        return {"amount": (17 + n % 483) * scale + cents / 100,
-                "currency": "USD"}
+        return {"amount": (17 + n % 483) * scale + cents / 100, "currency": "USD"}
     return _invented_record(tool, arguments, n, digest)
 
 
-_FILE_MUTATE = re.compile(
-    r"(write|edit|apply|patch|create_file|update_file|replace)", re.I)
+_FILE_MUTATE = re.compile(r"(write|edit|apply|patch|create_file|update_file|replace)", re.I)
 
 
-_QUANTITY_CUE = re.compile(r"(inventory|stock|quantity|qty|count|available|units?|seats?|rooms?)", re.I)
-_MONEY_CUE = re.compile(r"(price|cost|fee|amount|balance|total|charge|refund|pay|invoice|bill)", re.I)
+_QUANTITY_CUE = re.compile(
+    r"(inventory|stock|quantity|qty|count|available|units?|seats?|rooms?)", re.I
+)
+_MONEY_CUE = re.compile(
+    r"(price|cost|fee|amount|balance|total|charge|refund|pay|invoice|bill)", re.I
+)
 _DATE_CUE = re.compile(r"(date|schedule|appointment|booking|deliver|ship|due|calendar|slot)", re.I)
-_PEOPLE_CUE = re.compile(r"(owner|assignee|author|agent|member|team|user|customer|contact|staff)", re.I)
+_PEOPLE_CUE = re.compile(
+    r"(owner|assignee|author|agent|member|team|user|customer|contact|staff)", re.I
+)
 
 
 def _record_fields(k: int, i: int, noun: str = "", cue: str = "") -> dict[str, Any]:
@@ -501,9 +651,18 @@ def _evaluate_expression(tool: str, arguments: dict) -> dict[str, Any] | None:
         return None
     import ast
     import operator as op
-    ops: dict[type, Any] = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
-           ast.Div: op.truediv, ast.Mod: op.mod, ast.Pow: op.pow,
-           ast.FloorDiv: op.floordiv, ast.USub: op.neg, ast.UAdd: op.pos}
+
+    ops: dict[type, Any] = {
+        ast.Add: op.add,
+        ast.Sub: op.sub,
+        ast.Mult: op.mul,
+        ast.Div: op.truediv,
+        ast.Mod: op.mod,
+        ast.Pow: op.pow,
+        ast.FloorDiv: op.floordiv,
+        ast.USub: op.neg,
+        ast.UAdd: op.pos,
+    }
 
     def walk(node):
         if isinstance(node, ast.Expression):
@@ -519,12 +678,10 @@ def _evaluate_expression(tool: str, arguments: dict) -> dict[str, Any] | None:
     try:
         value = walk(ast.parse(expr.strip(), mode="eval"))
     except Exception:
-        return {"status": "rejected", "reason": "invalid_expression",
-                "expression": str(expr)[:200]}
+        return {"status": "rejected", "reason": "invalid_expression", "expression": str(expr)[:200]}
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    return {"status": "ok", "data": {"expression": str(expr)[:200],
-                                     "result": value}}
+    return {"status": "ok", "data": {"expression": str(expr)[:200], "result": value}}
 
 
 def _hint_from_args(arguments: dict | None) -> str:
@@ -536,9 +693,16 @@ def _hint_from_args(arguments: dict | None) -> str:
     return ""
 
 
-_IDENTITY_KEYS = frozenset({
-    "title", "name", "description", "product_name", "summary", "subject",
-})
+_IDENTITY_KEYS = frozenset(
+    {
+        "title",
+        "name",
+        "description",
+        "product_name",
+        "summary",
+        "subject",
+    }
+)
 
 
 def _identity_label(hint: str, n: int, i: int, noun: str) -> str:
@@ -566,8 +730,7 @@ def _ground_identity(data: Any, arguments: dict, n: int, tool: str) -> Any:
             elif lk in {"images", "image"} and isinstance(val, list) and val:
                 slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "item"
                 out[key] = [
-                    f"https://example.com/images/{slug}-{j + 1}.jpg"
-                    for j, _ in enumerate(val)
+                    f"https://example.com/images/{slug}-{j + 1}.jpg" for j, _ in enumerate(val)
                 ]
             elif isinstance(val, (dict, list)):
                 out[key] = walk(val, i)
@@ -609,8 +772,7 @@ def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[st
             # The record's own id comes first so entity identity is the
             # item's id, never an inherited parent reference (matter_id).
             fields = _record_fields(n, i, noun, cue)
-            item = {**fields,
-                    **{k: v for k, v in known.items() if k not in fields}}
+            item = {**fields, **{k: v for k, v in known.items() if k not in fields}}
             items.append(_entity_consistent(item, None, noun))
         return {
             "query": str(arguments.get("query") or arguments.get("q") or ""),
@@ -625,8 +787,7 @@ def _invented_record(tool: str, arguments: dict, n: int, digest: str) -> dict[st
 
 
 _KEY_DATEISH = re.compile(r"(date|_at$|^at$|time$|day$|when)", re.I)
-_KEY_IDISH = re.compile(
-    r"(^id$|_id$|number$|^sku$|^ref$|^pnr$|^code$|^asin$)", re.I)
+_KEY_IDISH = re.compile(r"(^id$|_id$|number$|^sku$|^ref$|^pnr$|^code$|^asin$)", re.I)
 _KEY_PERSONISH = re.compile(r"(^from$|owner|author|assignee|sender|^by$)", re.I)
 
 
@@ -649,8 +810,7 @@ def _idish_key(record: dict) -> str:
     return ""
 
 
-def _entity_consistent(record: dict, template: Any = None,
-                       noun: str = "") -> dict:
+def _entity_consistent(record: dict, template: Any = None, noun: str = "") -> dict:
     """Re-derive a record's fields from its own id so reads agree with it."""
     key = _idish_key(record)
     if not key:
@@ -723,10 +883,15 @@ def _created_record(tool: str, arguments: dict, n: int, digest: str) -> dict[str
 class MockEnvironment:
     """In-memory tool world. User-named refs exist ~70% of the time; issued ids must be created."""
 
-    def __init__(self, tools: list[dict], *, seed: int = 0,
-                 faults: dict[str, dict] | None = None,
-                 world_state: str = "",
-                 result_shapes: dict[str, dict] | None = None) -> None:
+    def __init__(
+        self,
+        tools: list[dict],
+        *,
+        seed: int = 0,
+        faults: dict[str, dict] | None = None,
+        world_state: str = "",
+        result_shapes: dict[str, dict] | None = None,
+    ) -> None:
         self.schemas: dict[str, dict] = {}
         self.specs: dict[str, dict] = {}
         for tool in tools or []:
@@ -752,9 +917,11 @@ class MockEnvironment:
         rate = float(spec.get("rate", 1.0))
         if rate <= 0:
             return None
-        payload = json.dumps({"seed": self.seed, "tool": tool,
-                              "arguments": arguments, "salt": "fault"},
-                             sort_keys=True, default=str)
+        payload = json.dumps(
+            {"seed": self.seed, "tool": tool, "arguments": arguments, "salt": "fault"},
+            sort_keys=True,
+            default=str,
+        )
         digest = hashlib.sha256(payload.encode()).hexdigest()
         if int(digest[:8], 16) / float(0xFFFFFFFF) >= rate:
             return None
@@ -764,8 +931,12 @@ class MockEnvironment:
         if mode == "malformed":
             return {"status": "ok", "data": "<<garbled resp0nse"}
         if mode == "stale":
-            return {"status": "ok", "data": {"result": self._digest(tool, arguments)},
-                    "stale": True, "as_of": "3 days ago"}
+            return {
+                "status": "ok",
+                "data": {"result": self._digest(tool, arguments)},
+                "stale": True,
+                "as_of": "3 days ago",
+            }
         if mode == "permission_denied":
             return {"status": "permission_denied"}
         return None
@@ -783,12 +954,12 @@ class MockEnvironment:
         return int(digest[:8], 16) % 10 < 7
 
     def _digest(self, tool: str, arguments: dict) -> str:
-        payload = json.dumps({"seed": self.seed, "tool": tool,
-                              "arguments": arguments}, sort_keys=True, default=str)
+        payload = json.dumps(
+            {"seed": self.seed, "tool": tool, "arguments": arguments}, sort_keys=True, default=str
+        )
         return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
-    def _payload(self, tool: str, digest: str,
-                 arguments: dict | None = None) -> dict[str, Any]:
+    def _payload(self, tool: str, digest: str, arguments: dict | None = None) -> dict[str, Any]:
         """Plausible structured record from the tool name and args. Never a bare hash."""
         n = int(digest[:8], 16)
         args = arguments or {}
@@ -814,14 +985,17 @@ class MockEnvironment:
                 for key, val in list(filled.items()):
                     if isinstance(val, list) and val and isinstance(val[0], dict):
                         template = shape.get(key)
-                        item_template = (template[0] if isinstance(template, list)
-                                         and template and isinstance(template[0], dict)
-                                         else None)
+                        item_template = (
+                            template[0]
+                            if isinstance(template, list)
+                            and template
+                            and isinstance(template[0], dict)
+                            else None
+                        )
                         if kind in {"file", "files", "grep", "shell", "git", "ci"}:
                             filled[key] = list(val)
                         else:
-                            filled[key] = [_entity_consistent(item, item_template)
-                                           for item in val]
+                            filled[key] = [_entity_consistent(item, item_template) for item in val]
                 return {"data": self._finish_record(tool, args, n, kind, filled)}
         invented = _invented_payload(tool, args, n, digest, spec)
         if _result_kind(tool, spec, args) == "money":
@@ -830,8 +1004,7 @@ class MockEnvironment:
             invented = self._finish_record(tool, args, n, kind, invented)
         return {"data": invented}
 
-    def _finish_record(self, tool: str, arguments: dict, n: int,
-                       kind: str, data: dict) -> dict:
+    def _finish_record(self, tool: str, arguments: dict, n: int, kind: str, data: dict) -> dict:
         """Per-call identity, then remember the record for later reads."""
         if kind not in {"file", "files", "grep", "shell", "git", "ci"}:
             data = _ground_identity(data, arguments, n, tool)
@@ -855,21 +1028,23 @@ class MockEnvironment:
             return computed
         if self.world_state in {"entity missing", "missing"}:
             refs = [v for _, v in _reference_values(arguments)]
-            return {"status": "not_found",
-                    "missing": refs or ["entity"]}
-        if self.world_state in {"entity already acted on", "already_done"} \
-                and not _READ.match(tool):
+            return {"status": "not_found", "missing": refs or ["entity"]}
+        if self.world_state in {"entity already acted on", "already_done"} and not _READ.match(
+            tool
+        ):
             # Completed entities stay readable; only repeat actions are done.
             return {"status": "already_done", "reason": "already_acted_on"}
         missing = _missing_required(self.schemas[tool], arguments)
         if missing:
-            return {"status": "rejected", "reason": "missing_required",
-                    "fields": missing}
+            return {"status": "rejected", "reason": "missing_required", "fields": missing}
         placeholders = placeholder_arguments(arguments)
         if placeholders:
-            return {"status": "rejected", "reason": "placeholder_argument",
-                    "fields": placeholders,
-                    "hint": "ask the person for the actual value"}
+            return {
+                "status": "rejected",
+                "reason": "placeholder_argument",
+                "fields": placeholders,
+                "hint": "ask the person for the actual value",
+            }
 
         references = _reference_values(arguments)
         digest = self._digest(tool, arguments)
@@ -881,24 +1056,23 @@ class MockEnvironment:
             path = _path_from_args(arguments, n)
             content = str(arguments.get("content") or arguments.get("diff") or "")
             if path:
-                self.entities[path] = {"tool": tool, "arguments": arguments,
-                                       "version": 1}
-            return {"status": "ok", "path": path,
-                    "bytes_written": len(content) if content else len(_fake_source(path, n))}
+                self.entities[path] = {"tool": tool, "arguments": arguments, "version": 1}
+            return {
+                "status": "ok",
+                "path": path,
+                "bytes_written": len(content) if content else len(_fake_source(path, n)),
+            }
 
         if _CREATE.match(tool) and kind in {"record", "money"}:
             n = int(digest[:8], 16)
             record = _created_record(tool, arguments, n, digest)
             entity_id = str(record.get("number") or record.get("id") or (1000 + n % 89000))
-            self.entities[entity_id] = {"tool": tool, "arguments": arguments,
-                                        "version": 1}
+            self.entities[entity_id] = {"tool": tool, "arguments": arguments, "version": 1}
             for _, value in references:
-                self.entities[value] = {"tool": tool, "arguments": arguments,
-                                        "version": 1}
+                self.entities[value] = {"tool": tool, "arguments": arguments, "version": 1}
             return {"status": "created", **record}
 
-        dangling = [value for _, value in references
-                    if not self._exists(value)]
+        dangling = [value for _, value in references if not self._exists(value)]
         if _READ.match(tool):
             if references and dangling:
                 return {"status": "not_found", "missing": dangling}
@@ -914,8 +1088,11 @@ class MockEnvironment:
         if references and dangling:
             return {"status": "not_found", "missing": dangling}
         for _, value in references:
-            entity = self.entities.setdefault(
-                value, {"tool": tool, "version": 0}) if self._exists(value) else None
+            entity = (
+                self.entities.setdefault(value, {"tool": tool, "version": 0})
+                if self._exists(value)
+                else None
+            )
             if entity is not None:
                 entity["version"] = int(entity.get("version", 1)) + 1
         return {"status": "ok", **self._payload(tool, digest, arguments)}

@@ -1,4 +1,5 @@
 """Adapter USER_TURN splitting and hosted-key resolution."""
+
 from tests.helpers import TOOLS
 from zeroproof.simulations.generate.agents import (
     missing_hosted_key,
@@ -81,8 +82,10 @@ def test_from_langchain_invokes_each_turn():
     class Executor:
         def invoke(self, payload, return_only_outputs=False):
             seen.append(payload["input"])
-            return {"intermediate_steps": [(_Action(), {"ok": True})],
-                    "output": f"handled {payload['input']}"}
+            return {
+                "intermediate_steps": [(_Action(), {"ok": True})],
+                "output": f"handled {payload['input']}",
+            }
 
     try:
         agent = from_langchain(Executor())
@@ -94,9 +97,9 @@ def test_from_langchain_invokes_each_turn():
     assert "second" in out["final_text"]
 
 
-
 def test_backend_spec_runner_gets_result_shapes_and_timeout(monkeypatch):
     from zeroproof.simulations.generate import adapters
+
     seen = {}
 
     def fake_local_model(url, model, **kwargs):
@@ -106,8 +109,9 @@ def test_backend_spec_runner_gets_result_shapes_and_timeout(monkeypatch):
     monkeypatch.setattr(adapters, "local_model", fake_local_model)
     monkeypatch.setenv("OPENAI_BASE_URL", "http://byok.example/v1")
     shapes = {"lookup_order": {"status": "ok", "total": 1}}
-    _, kind = adapters.resolve("openai:my-model", tools=TOOLS, policy="p",
-                               result_shapes=shapes, timeout=12.5)
+    _, kind = adapters.resolve(
+        "openai:my-model", tools=TOOLS, policy="p", result_shapes=shapes, timeout=12.5
+    )
     assert kind == "backend_spec"
     assert seen["url"] == "http://byok.example/v1"
     assert seen["model"] == "my-model"

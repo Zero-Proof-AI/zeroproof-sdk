@@ -84,9 +84,9 @@ def _check_nanos(body: bytes) -> None:
         payload = json.loads(body)
     except (ValueError, UnicodeDecodeError):
         return
-    for resource in (payload.get("resourceSpans") or []):
-        for scope in (resource.get("scopeSpans") or []):
-            for span in (scope.get("spans") or []):
+    for resource in payload.get("resourceSpans") or []:
+        for scope in resource.get("scopeSpans") or []:
+            for span in scope.get("spans") or []:
                 raw = span.get("startTimeUnixNano")
                 if raw in (None, "", 0, "0"):
                     continue
@@ -95,13 +95,14 @@ def _check_nanos(body: bytes) -> None:
                 except (TypeError, ValueError):
                     continue
                 # 1e15 ns is 1970-01-12; any real timestamp is far above it
-                if 0 < value < 10 ** 15:
+                if 0 < value < 10**15:
                     raise ZeroProofIngestError(
                         f"span {span.get('name') or 'unnamed'!r} has "
                         f"startTimeUnixNano={value}, which is not nanoseconds. "
                         "Multiply by 1e6 for milliseconds or 1e9 for seconds; "
                         "as sent, these traces would be stored near 1970 and "
-                        "hidden from every time window.")
+                        "hidden from every time window."
+                    )
 
 
 def send_traces(

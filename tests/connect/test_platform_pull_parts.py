@@ -5,6 +5,7 @@ came back. Neither raised anything: one returned a fraction of the rows, the
 other exported every tool call with empty arguments, and the export gate
 passed them because `{}` is valid JSON.
 """
+
 import json
 
 import zeroproof.simulations as zps
@@ -39,6 +40,7 @@ def test_pull_reads_every_part(monkeypatch):
 
 def test_pull_falls_back_to_download_url(monkeypatch):
     """Grants that predate the parts list still work."""
+
     def fake_call(method, path, api_key, body=None, *, raw_url=None, **kw):
         if raw_url:
             return b'{"prompt": "only"}\n'
@@ -112,15 +114,23 @@ def test_ingested_traces_export_with_real_tool_arguments():
 
 def test_infer_harness_drafts_schemas_from_tool_traces():
     from zeroproof.simulations.ingest.traces import infer_harness
+
     rows = [
-        {"tool_trace": [
-            {"tool": "read_file", "input": '{"path": "a.py"}', "output": "..."},
-            {"tool": "read_file", "input": '{"path": "b.py"}', "output": "..."},
-        ]},
-        {"steps": [
-            {"tool": "run_command", "arguments": {"command": "pytest", "timeout": 30},
-             "result": {"status": "ok"}},
-        ]},
+        {
+            "tool_trace": [
+                {"tool": "read_file", "input": '{"path": "a.py"}', "output": "..."},
+                {"tool": "read_file", "input": '{"path": "b.py"}', "output": "..."},
+            ]
+        },
+        {
+            "steps": [
+                {
+                    "tool": "run_command",
+                    "arguments": {"command": "pytest", "timeout": 30},
+                    "result": {"status": "ok"},
+                },
+            ]
+        },
     ]
     h = infer_harness(rows)
     assert h["observed_calls"] == {"read_file": 2, "run_command": 1}

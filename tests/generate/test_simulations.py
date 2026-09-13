@@ -4,18 +4,50 @@ import zeroproof.simulations as zps
 from tests.helpers import POLICY, TOOLS, scripted_agent
 
 _DROPPED = {
-    "selection_reason", "parent_failure_id", "arm", "scenario_dimensions",
-    "behavior_signature", "grader_reason", "seed",
-    "semantic_cluster", "semantic_novelty", "llm_reward", "llm_reason",
+    "selection_reason",
+    "parent_failure_id",
+    "arm",
+    "scenario_dimensions",
+    "behavior_signature",
+    "grader_reason",
+    "seed",
+    "semantic_cluster",
+    "semantic_novelty",
+    "llm_reward",
+    "llm_reason",
 }
-_PUBLIC = {"schema_version",
-           "prompt", "messages", "scenario_id", "steps", "final_text",
-           "world_state", "faults", "fault_detected", "reward", "reason",
-           "tier", "ask_family", "intent_known", "tool_known",
-           "stance", "tone", "length", "ask", "vagueness", "phrasing",
-           "pressure", "user", "texture", "history",
-           "quality", "quality_reason", "quality_scores",
-           "rollout_index", "model_version"}
+_PUBLIC = {
+    "schema_version",
+    "prompt",
+    "messages",
+    "scenario_id",
+    "steps",
+    "final_text",
+    "world_state",
+    "faults",
+    "fault_detected",
+    "reward",
+    "reason",
+    "tier",
+    "ask_family",
+    "intent_known",
+    "tool_known",
+    "stance",
+    "tone",
+    "length",
+    "ask",
+    "vagueness",
+    "phrasing",
+    "pressure",
+    "user",
+    "texture",
+    "history",
+    "quality",
+    "quality_reason",
+    "quality_scores",
+    "rollout_index",
+    "model_version",
+}
 
 
 def test_conversation_drops_stale_final_text():
@@ -25,8 +57,11 @@ def test_conversation_drops_stale_final_text():
         "steps": [
             {"text": clarify},
             {"user": "auth-service pr 421"},
-            {"tool": "get_pr", "arguments": {"repo": "auth-service", "number": 421},
-             "result": {"status": "ok"}},
+            {
+                "tool": "get_pr",
+                "arguments": {"repo": "auth-service", "number": 421},
+                "result": {"status": "ok"},
+            },
         ],
         "final_text": clarify,
     }
@@ -39,6 +74,7 @@ def test_conversation_drops_stale_final_text():
 
 def test_finish_on_agent_drops_pre_tool_clarify():
     from zeroproof.simulations.generate.agents import _finish_on_agent
+
     clarify = "Which repo and PR number?"
     steps = [
         {"text": clarify},
@@ -52,6 +88,7 @@ def test_finish_on_agent_drops_pre_tool_clarify():
 
 def test_finish_on_agent_keeps_post_tool_speech():
     from zeroproof.simulations.generate.agents import _finish_on_agent
+
     steps = [
         {"text": "Which repo?"},
         {"user": "acme/app 42"},
@@ -66,16 +103,19 @@ def test_conversation_is_user_agent_turns():
     row = {
         "prompt": "where's order ORD-1",
         "steps": [
-            {"tool": "lookup_order", "arguments": {"order_id": "ORD-1"},
-             "result": {"status": "ok"}, "text": "let me look"},
+            {
+                "tool": "lookup_order",
+                "arguments": {"order_id": "ORD-1"},
+                "result": {"status": "ok"},
+                "text": "let me look",
+            },
             {"user": "and the refund?"},
             {"text": "still pending"},
         ],
         "final_text": "still pending",
     }
     msgs = zps.conversation(row)
-    assert [m["role"] for m in msgs] == [
-        "user", "assistant", "tool", "user", "assistant"]
+    assert [m["role"] for m in msgs] == ["user", "assistant", "tool", "user", "assistant"]
     assert msgs[0]["content"] == "where's order ORD-1"
     assert msgs[1]["tool_calls"][0]["name"] == "lookup_order"
     assert msgs[3]["content"] == "and the refund?"
@@ -84,8 +124,9 @@ def test_conversation_is_user_agent_turns():
 
 
 def test_simulate_offline_end_to_end(tmp_path):
-    data = zps.simulate(scripted_agent, tools=TOOLS, policy=POLICY, budget=80, seed=0,
-                        simulator=False)
+    data = zps.simulate(
+        scripted_agent, tools=TOOLS, policy=POLICY, budget=80, seed=0, simulator=False
+    )
     assert len(data.trajectories) == 80
     assert all(t.get("reward") is None for t in data.trajectories)
     assert any(t["faults"] for t in data.trajectories), "fault worlds instantiated"
@@ -105,9 +146,17 @@ def test_simulate_offline_end_to_end(tmp_path):
 
 
 def test_save_omits_grade_when_ungraded(tmp_path):
-    data = zps.simulate(scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
-                        grade=False, concurrency=4, simulator=False,
-                        advanced={"per_round": 6, "mutate_failures": False})
+    data = zps.simulate(
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=8,
+        seed=0,
+        grade=False,
+        concurrency=4,
+        simulator=False,
+        advanced={"per_round": 6, "mutate_failures": False},
+    )
     row = json.loads(open(data.save(str(tmp_path / "u.jsonl"))).readline())
     assert {"prompt", "steps", "final_text"} <= set(row)
     assert "reward" not in row and "reason" not in row
@@ -122,15 +171,23 @@ def test_save_omits_grade_when_ungraded(tmp_path):
 def test_custom_grader_and_dimensions_knobs():
     dims = zps.build_dimensions(TOOLS, POLICY)
     dims["stance"] = ["adversarial"]
-    data = zps.simulate(scripted_agent, tools=TOOLS, policy=POLICY, budget=30,
-                        seed=1, dimensions=dims, grader=lambda t: 0.5,
-                        simulator=False)
+    data = zps.simulate(
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=30,
+        seed=1,
+        dimensions=dims,
+        grader=lambda t: 0.5,
+        simulator=False,
+    )
     assert all(t["reward"] == 0.5 for t in data.trajectories)
 
 
 def test_generate_then_grade_separately():
-    data = zps.simulate(scripted_agent, tools=TOOLS, policy=POLICY, budget=60,
-                        seed=0, grade=False, simulator=False)
+    data = zps.simulate(
+        scripted_agent, tools=TOOLS, policy=POLICY, budget=60, seed=0, grade=False, simulator=False
+    )
     assert all(t["reward"] is None for t in data.trajectories)
     assert all(t["steps"] is not None for t in data.trajectories)
     data.grade(grader=lambda t: 0.5)
@@ -138,10 +195,17 @@ def test_generate_then_grade_separately():
 
 
 def test_policy_optional_and_arms_stay_alive():
-    data = zps.simulate(scripted_agent, tools=TOOLS, budget=20, seed=0,
-                        grade=False, concurrency=8, simulator=False,
-                        repeats=1,
-                        advanced={"per_round": 16, "mutate_failures": False})
+    data = zps.simulate(
+        scripted_agent,
+        tools=TOOLS,
+        budget=20,
+        seed=0,
+        grade=False,
+        concurrency=8,
+        simulator=False,
+        repeats=1,
+        advanced={"per_round": 16, "mutate_failures": False},
+    )
     assert len(data.trajectories) == 20
     assert len({t["prompt"] for t in data.trajectories}) == 20
     assert data.arm_weights
@@ -153,8 +217,11 @@ def test_policy_optional_and_arms_stay_alive():
 
 
 _TINY_DIMS = {
-    "tool": ["lookup_order"], "rule": ["unspecified"], "stance": ["ordinary"],
-    "world_state": ["unspecified"], "tool_condition": ["success"],
+    "tool": ["lookup_order"],
+    "rule": ["unspecified"],
+    "stance": ["ordinary"],
+    "world_state": ["unspecified"],
+    "tool_condition": ["success"],
     "history": ["fresh"],
 }
 
@@ -162,11 +229,20 @@ _TINY_DIMS = {
 def test_tiny_grid_compute_does_not_stop_on_saturation():
     data = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
-        tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
-        concurrency=8, until="compute", dimensions=_TINY_DIMS,
-        simulator=False, time_budget=None, mode="adaptive",
+        tools=TOOLS,
+        policy=POLICY,
+        budget=80,
+        seed=0,
+        grade=False,
+        concurrency=8,
+        until="compute",
+        dimensions=_TINY_DIMS,
+        simulator=False,
+        time_budget=None,
+        mode="adaptive",
         rollouts_per_request=12,
-        advanced={"per_round": 4, "mutate_failures": False})
+        advanced={"per_round": 4, "mutate_failures": False},
+    )
     assert data.stopped_because == "budget"
     assert data.coverage.get("saturation") is False
     assert len(data.trajectories) == 80
@@ -176,10 +252,17 @@ def test_tiny_grid_compute_does_not_stop_on_saturation():
 def test_short_run_does_not_saturate_on_signature_blip():
     data = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
-        tools=TOOLS, policy=POLICY, budget=80, seed=0, grade=False,
-        concurrency=8, until="compute", simulator=False,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=80,
+        seed=0,
+        grade=False,
+        concurrency=8,
+        until="compute",
+        simulator=False,
         rollouts_per_request=2,
-        advanced={"per_round": 4, "mutate_failures": False})
+        advanced={"per_round": 4, "mutate_failures": False},
+    )
     assert data.stopped_because == "budget"
     assert data.coverage.get("saturation") is False
     assert len(data.trajectories) == 80
@@ -199,13 +282,23 @@ def test_lost_repeat_rollouts_do_not_starve_the_run():
             return {"steps": [], "final_text": ""}
         return scripted_agent(message)
 
-    data = simulate(agent=flaky_agent, tools=TOOLS, system_prompt=POLICY,
-                    situations=3, rollouts_per_request=2, budget=6,
-                    seed=5, grade=False, simulator=False, concurrency=2,
-                    time_budget=40,
-                    advanced={"per_round": 6, "mutate_failures": False})
+    data = simulate(
+        agent=flaky_agent,
+        tools=TOOLS,
+        system_prompt=POLICY,
+        situations=3,
+        rollouts_per_request=2,
+        budget=6,
+        seed=5,
+        grade=False,
+        simulator=False,
+        concurrency=2,
+        time_budget=40,
+        advanced={"per_round": 6, "mutate_failures": False},
+    )
     assert len(data.trajectories) == 6, (
-        f"starved at {len(data.trajectories)} rows: {data.stopped_because}")
+        f"starved at {len(data.trajectories)} rows: {data.stopped_because}"
+    )
     assert data.stopped_because == "budget"
 
 
@@ -226,11 +319,20 @@ def test_lost_repeat_rollouts_are_rerolled_so_groups_stay_complete():
             return {"steps": [], "final_text": ""}
         return scripted_agent(message)
 
-    data = simulate(agent=flaky_agent, tools=TOOLS, system_prompt=POLICY,
-                    situations=3, rollouts_per_request=2, budget=6,
-                    seed=5, grade=False, simulator=False, concurrency=2,
-                    time_budget=40,
-                    advanced={"per_round": 6, "mutate_failures": False})
+    data = simulate(
+        agent=flaky_agent,
+        tools=TOOLS,
+        system_prompt=POLICY,
+        situations=3,
+        rollouts_per_request=2,
+        budget=6,
+        seed=5,
+        grade=False,
+        simulator=False,
+        concurrency=2,
+        time_budget=40,
+        advanced={"per_round": 6, "mutate_failures": False},
+    )
     assert len(data.trajectories) == 6
     groups = collections.Counter(r["prompt"] for r in data.trajectories)
     assert len(groups) == 3, groups

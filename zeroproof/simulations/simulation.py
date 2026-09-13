@@ -5,6 +5,7 @@ Knob resolution lives in :mod:`.run.config`, spec loading in
 build, scheduler loop, finish) in :mod:`.run.engine`. This module keeps
 the signature, the docstring, and the names older code imported from here.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -56,25 +57,33 @@ _record_coverage = record_coverage
 __all__ = ["resolve_topology", "simulate", "writer_spec_for"]
 
 
-def simulate(agent: Any = None, *, spec: Any = None,
-             tools: list[dict] | None = None, system_prompt: str | None = None,
-             budget: int | None = 1000, time_budget: float | None = None,
-             until: str = "compute", mode: str = "explore",
-             situations: int | None = None,
-             requests_per_situation: int | None = None,
-             rollouts_per_request: int | None = None,
-             unique_situations: bool = False,
-             reproducible: bool = False,
-             grade: bool = False, llm_grade: bool = False,
-             traces: Any = None,
-             grader: Any = None,
-             strategy: str = "auto",
-             seeds: list | None = None,
-             scaffold: str | None = None,
-             execute: Callable | None = None,
-             output: str | None = None,
-             advanced: dict | None = None,
-             **passed: Any) -> SimulationData:
+def simulate(
+    agent: Any = None,
+    *,
+    spec: Any = None,
+    tools: list[dict] | None = None,
+    system_prompt: str | None = None,
+    budget: int | None = 1000,
+    time_budget: float | None = None,
+    until: str = "compute",
+    mode: str = "explore",
+    situations: int | None = None,
+    requests_per_situation: int | None = None,
+    rollouts_per_request: int | None = None,
+    unique_situations: bool = False,
+    reproducible: bool = False,
+    grade: bool = False,
+    llm_grade: bool = False,
+    traces: Any = None,
+    grader: Any = None,
+    strategy: str = "auto",
+    seeds: list | None = None,
+    scaffold: str | None = None,
+    execute: Callable | None = None,
+    output: str | None = None,
+    advanced: dict | None = None,
+    **passed: Any,
+) -> SimulationData:
     """Inspect an agent, generate situations, and roll them out.
 
     Input is an intent or an agent: ``system_prompt`` alone, ``tools``
@@ -128,13 +137,29 @@ def simulate(agent: Any = None, *, spec: Any = None,
     timing.
     """
     cfg = resolve_run_config(
-        agent, spec=spec, tools=tools, system_prompt=system_prompt,
-        budget=budget, time_budget=time_budget, until=until, mode=mode,
-        situations=situations, requests_per_situation=requests_per_situation,
+        agent,
+        spec=spec,
+        tools=tools,
+        system_prompt=system_prompt,
+        budget=budget,
+        time_budget=time_budget,
+        until=until,
+        mode=mode,
+        situations=situations,
+        requests_per_situation=requests_per_situation,
         rollouts_per_request=rollouts_per_request,
-        unique_situations=unique_situations, reproducible=reproducible,
+        unique_situations=unique_situations,
+        reproducible=reproducible,
         grade=grade,
-        llm_grade=llm_grade, traces=traces, grader=grader,
-        strategy=strategy, seeds=seeds, scaffold=scaffold, execute=execute,
-        output=output, advanced=advanced, passed=passed)
+        llm_grade=llm_grade,
+        traces=traces,
+        grader=grader,
+        strategy=strategy,
+        seeds=seeds,
+        scaffold=scaffold,
+        execute=execute,
+        output=output,
+        advanced=advanced,
+        passed=passed,
+    )
     return Run(cfg).run()

@@ -1,4 +1,5 @@
 """Framework adapters. Every runner returns {steps, final_text}."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,9 +15,7 @@ from .agents import complete, local_model, parse_backend_spec, split_user_turns
 
 
 def _missing(extra: str, exc: Exception) -> ImportError:
-    return ImportError(
-        f"this adapter needs '{extra}' installed "
-        f"(underlying: {exc})")
+    return ImportError(f"this adapter needs '{extra}' installed (underlying: {exc})")
 
 
 def _sync(fn: Callable) -> Callable:
@@ -30,10 +29,17 @@ def _sync(fn: Callable) -> Callable:
     return agent
 
 
-def openai_http(url: str, *, model: str, tools: list[dict],
-                execute: Callable[[str, dict], Any] | None = None,
-                system: str = "", api_key: str | None = None,
-                max_turns: int = 5, temperature: float = 0.3) -> Callable:
+def openai_http(
+    url: str,
+    *,
+    model: str,
+    tools: list[dict],
+    execute: Callable[[str, dict], Any] | None = None,
+    system: str = "",
+    api_key: str | None = None,
+    max_turns: int = 5,
+    temperature: float = 0.3,
+) -> Callable:
     """Any OpenAI-compatible /v1/chat/completions endpoint with tool support."""
     sim = execute or (lambda tool, args: {"ok": True})
     policy_text = str(system or "").strip()
@@ -48,8 +54,9 @@ def openai_http(url: str, *, model: str, tools: list[dict],
         user_i = 0
         final_text = ""
         for _ in range(max_turns):
-            reply = complete(url, model, messages, tools=tools, api_key=api_key,
-                             temperature=temperature)
+            reply = complete(
+                url, model, messages, tools=tools, api_key=api_key, temperature=temperature
+            )
             calls = reply.get("tool_calls") or []
             spoken = (reply.get("content") or "").strip()
             if not calls:
@@ -78,14 +85,14 @@ def openai_http(url: str, *, model: str, tools: list[dict],
                     stored, content = result, result
                     with contextlib.suppress(json.JSONDecodeError):
                         stored = json.loads(result)
-                step = {"tool": fn.get("name", ""), "arguments": arguments,
-                        "result": stored}
+                step = {"tool": fn.get("name", ""), "arguments": arguments, "result": stored}
                 if spoken and not attached:
                     step["text"] = spoken
                     attached = True
                 steps.append(step)
-                messages.append({"role": "tool", "tool_call_id": call.get("id", ""),
-                                 "content": content})
+                messages.append(
+                    {"role": "tool", "tool_call_id": call.get("id", ""), "content": content}
+                )
             if spoken:
                 final_text = spoken
         return {"steps": steps, "final_text": final_text}
@@ -109,10 +116,12 @@ def from_langchain(executor: Any) -> Callable:
         for turn in split_user_turns(message):
             out = executor.invoke({"input": turn}, return_only_outputs=False)
             for action, observation in out.get("intermediate_steps", []):
-                args = action.tool_input if isinstance(action.tool_input, dict) \
+                args = (
+                    action.tool_input
+                    if isinstance(action.tool_input, dict)
                     else {"input": action.tool_input}
-                steps.append({"tool": action.tool, "arguments": args,
-                              "result": str(observation)})
+                )
+                steps.append({"tool": action.tool, "arguments": args, "result": str(observation)})
             final = str(out.get("output", ""))
         return {"steps": steps, "final_text": final}
 
@@ -131,19 +140,21 @@ def from_langgraph(graph: Any) -> Callable:
         conversation: list = []
         state: dict = {"messages": []}
         for turn in turns:
-            state = graph.invoke({"messages": [*conversation,
-                                                HumanMessage(content=turn)]})
+            state = graph.invoke({"messages": [*conversation, HumanMessage(content=turn)]})
             conversation = list(state.get("messages", []))
         messages = state.get("messages", [])
-        results = {m.tool_call_id: str(m.content)
-                   for m in messages if isinstance(m, ToolMessage)}
+        results = {m.tool_call_id: str(m.content) for m in messages if isinstance(m, ToolMessage)}
         steps, final = [], ""
         for m in messages:
             if isinstance(m, AIMessage):
-                for call in (m.tool_calls or []):
-                    steps.append({"tool": call.get("name", ""),
-                                  "arguments": call.get("args") or {},
-                                  "result": results.get(call.get("id", ""), "")})
+                for call in m.tool_calls or []:
+                    steps.append(
+                        {
+                            "tool": call.get("name", ""),
+                            "arguments": call.get("args") or {},
+                            "result": results.get(call.get("id", ""), ""),
+                        }
+                    )
                 if not m.tool_calls and m.content:
                     final = str(m.content)
         return {"steps": steps, "final_text": final}
@@ -183,8 +194,10 @@ def from_openai_agents(agent_obj: Any) -> Callable:
                             arguments = json.loads(arguments)
                         except json.JSONDecodeError:
                             arguments = {"__unparsed__": arguments}
-                    pending[call_id] = {"tool": str(getattr(raw, "name", "")),
-                                        "arguments": arguments}
+                    pending[call_id] = {
+                        "tool": str(getattr(raw, "name", "")),
+                        "arguments": arguments,
+                    }
                 elif "toolcalloutput" in name or "tooloutput" in name:
                     call_id = str(getattr(raw, "call_id", getattr(item, "call_id", "")))
                     call = pending.pop(call_id, {"tool": "", "arguments": {}})
@@ -210,17 +223,29 @@ def from_claude_sdk(client: Any) -> Callable:
                 if content is None and isinstance(event, dict):
                     content = event.get("content")
                 for block in content or ():
-                    kind = str((block.get("type") if isinstance(block, dict)
-                                else getattr(block, "type", type(block).__name__)) or "").lower()
+                    kind = str(
+                        (
+                            block.get("type")
+                            if isinstance(block, dict)
+                            else getattr(block, "type", type(block).__name__)
+                        )
+                        or ""
+                    ).lower()
                     kind = kind.replace("_", "")
-                    get = (block.get if isinstance(block, dict)
-                           else lambda key, default=None, _b=block: getattr(_b, key, default))
+                    get = (
+                        block.get
+                        if isinstance(block, dict)
+                        else lambda key, default=None, _b=block: getattr(_b, key, default)
+                    )
                     if "tooluse" in kind:
                         pending[str(get("id", ""))] = {
-                            "tool": str(get("name", "")), "arguments": get("input", {}) or {}}
+                            "tool": str(get("name", "")),
+                            "arguments": get("input", {}) or {},
+                        }
                     elif "toolresult" in kind:
-                        call = pending.pop(str(get("tool_use_id", "")),
-                                           {"tool": "", "arguments": {}})
+                        call = pending.pop(
+                            str(get("tool_use_id", "")), {"tool": "", "arguments": {}}
+                        )
                         steps.append({**call, "result": str(get("content", ""))})
                     elif kind in ("text", "textblock"):
                         final_parts.append(str(get("text", "")))
@@ -236,19 +261,24 @@ def subprocess_agent(command: list[str], *, timeout: float = 60) -> Callable:
     def agent(message: str) -> dict:
         turns = split_user_turns(message)
         payload = turns[0] if len(turns) == 1 else "\n\n".join(turns)
-        proc = subprocess.run(command, input=payload.encode(),
-                              capture_output=True, timeout=timeout)
+        proc = subprocess.run(command, input=payload.encode(), capture_output=True, timeout=timeout)
         if proc.returncode != 0:
-            raise RuntimeError(f"agent exited {proc.returncode}: "
-                               f"{proc.stderr.decode()[:200]}")
+            raise RuntimeError(f"agent exited {proc.returncode}: {proc.stderr.decode()[:200]}")
         return json.loads(proc.stdout.decode())
 
     agent.__name__ = f"subprocess[{command[0]}]"
     return agent
 
 
-SUPPORTED = ("callable", "http", "langchain", "langgraph", "openai_agents",
-             "claude_sdk", "subprocess")
+SUPPORTED = (
+    "callable",
+    "http",
+    "langchain",
+    "langgraph",
+    "openai_agents",
+    "claude_sdk",
+    "subprocess",
+)
 
 
 def detect(target: Any) -> str:
@@ -260,7 +290,8 @@ def detect(target: Any) -> str:
         if ":" in target:
             return "backend_spec"
         raise ValueError(
-            f"cannot detect a transport for string {target!r}; pass an http(s) URL or a backend spec.")
+            f"cannot detect a transport for string {target!r}; pass an http(s) URL or a backend spec."
+        )
     if isinstance(target, (list, tuple)) and target and isinstance(target[0], str):
         return "subprocess"
     if hasattr(target, "get_graph") and hasattr(target, "invoke"):
@@ -276,19 +307,28 @@ def detect(target: Any) -> str:
     if callable(target) and not _inspect.isclass(target):
         return "callable"
     raise ValueError(
-        f"cannot detect a transport for {type(target).__name__}; pass a callable, URL, or tools=.")
+        f"cannot detect a transport for {type(target).__name__}; pass a callable, URL, or tools=."
+    )
 
 
-def resolve(target: Any, *, transport: str | None = None, tools: list | None = None,
-            policy: str = "", execute: Callable | None = None,
-            model: str | None = None, fault_plans: dict | None = None,
-            max_turns: int = 5, avg_turns: float = 6,
-            min_user_turns: int = 1,
-            turn_stats: dict | None = None,
-            opening_rate: float = 0.0,
-            temperature: float | None = None,
-            result_shapes: dict | None = None,
-            timeout: float | None = None) -> tuple[Any, str]:
+def resolve(
+    target: Any,
+    *,
+    transport: str | None = None,
+    tools: list | None = None,
+    policy: str = "",
+    execute: Callable | None = None,
+    model: str | None = None,
+    fault_plans: dict | None = None,
+    max_turns: int = 5,
+    avg_turns: float = 6,
+    min_user_turns: int = 1,
+    turn_stats: dict | None = None,
+    opening_rate: float = 0.0,
+    temperature: float | None = None,
+    result_shapes: dict | None = None,
+    timeout: float | None = None,
+) -> tuple[Any, str]:
     if isinstance(target, ConnectedAgent):
         return target.run, target.transport
     kind = transport or detect(target)
@@ -303,17 +343,31 @@ def resolve(target: Any, *, transport: str | None = None, tools: list | None = N
         # mined result shapes and the caller's rollout timeout
         if timeout is not None:
             loop_kw["timeout"] = timeout
-        return local_model(url, spec_model, tools=tools or [], system=policy,
-                           fault_plans=fault_plans, avg_turns=avg_turns,
-                           min_user_turns=min_user_turns,
-                           opening_rate=opening_rate, execute=execute,
-                           result_shapes=result_shapes,
-                           turn_stats=turn_stats, **loop_kw), kind
+        return local_model(
+            url,
+            spec_model,
+            tools=tools or [],
+            system=policy,
+            fault_plans=fault_plans,
+            avg_turns=avg_turns,
+            min_user_turns=min_user_turns,
+            opening_rate=opening_rate,
+            execute=execute,
+            result_shapes=result_shapes,
+            turn_stats=turn_stats,
+            **loop_kw,
+        ), kind
     if kind == "http":
         if not tools:
             raise ValueError("an HTTP agent needs tools=[...] (the schemas it may call)")
-        return openai_http(target, model=model or "gpt-4o-mini", tools=tools,
-                           execute=execute, system=policy, **loop_kw), kind
+        return openai_http(
+            target,
+            model=model or "gpt-4o-mini",
+            tools=tools,
+            execute=execute,
+            system=policy,
+            **loop_kw,
+        ), kind
     if kind == "langchain":
         return from_langchain(target), kind
     if kind == "langgraph":
@@ -342,37 +396,38 @@ def parse_claude_stream(stdout: str) -> dict:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
                     pending[str(block.get("id"))] = {
                         "tool": str(block.get("name", "")),
-                        "arguments": block.get("input") or {}}
+                        "arguments": block.get("input") or {},
+                    }
         elif kind == "user":
             for block in (event.get("message") or {}).get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
-                    call = pending.pop(str(block.get("tool_use_id")),
-                                       {"tool": "", "arguments": {}})
-                    steps.append({**call,
-                                  "result": str(block.get("content"))[:2000]})
+                    call = pending.pop(str(block.get("tool_use_id")), {"tool": "", "arguments": {}})
+                    steps.append({**call, "result": str(block.get("content"))[:2000]})
         elif kind == "result":
             final_text = str(event.get("result") or "")
     steps.extend({**call, "result": ""} for call in pending.values())
     return {"steps": steps, "final_text": final_text}
 
 
-def claude_code(extra_args: tuple | list = (), *, cwd: str | None = None,
-                max_turns: int | None = None, timeout: float = 300) -> Callable:
+def claude_code(
+    extra_args: tuple | list = (),
+    *,
+    cwd: str | None = None,
+    max_turns: int | None = None,
+    timeout: float = 300,
+) -> Callable:
     import subprocess
 
     def agent(message: str) -> dict:
         turns = split_user_turns(message)
         prompt = turns[0] if len(turns) == 1 else "\n\n".join(turns)
-        command = ["claude", "-p", prompt,
-                   "--output-format", "stream-json", "--verbose"]
+        command = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"]
         if max_turns is not None:
             command += ["--max-turns", str(max_turns)]
         command += [str(argument) for argument in extra_args]
-        proc = subprocess.run(command, cwd=cwd, capture_output=True,
-                              text=True, timeout=timeout)
+        proc = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=timeout)
         if proc.returncode != 0 and not proc.stdout.strip():
-            raise RuntimeError(
-                f"claude exited {proc.returncode}: {proc.stderr[:300]}")
+            raise RuntimeError(f"claude exited {proc.returncode}: {proc.stderr[:300]}")
         return parse_claude_stream(proc.stdout)
 
     agent.__name__ = "claude_code"
@@ -380,27 +435,87 @@ def claude_code(extra_args: tuple | list = (), *, cwd: str | None = None,
 
 
 _READ_PREFIXES = (
-    "lookup", "get", "search", "list", "read", "check", "view", "find",
-    "show", "query", "fetch", "browse",
+    "lookup",
+    "get",
+    "search",
+    "list",
+    "read",
+    "check",
+    "view",
+    "find",
+    "show",
+    "query",
+    "fetch",
+    "browse",
 )
 _MUTATION_VERBS = (
-    "order", "send", "delete", "pay", "write", "book", "refund", "cancel",
-    "place", "update", "create", "issue", "grant", "disable", "approve",
-    "deny", "commit", "execute", "schedule", "charge", "transfer", "reset",
-    "apply", "add", "remove", "export", "publish", "deploy", "revoke",
-    "message", "notify", "submit", "start", "assign", "close", "exchange",
+    "order",
+    "send",
+    "delete",
+    "pay",
+    "write",
+    "book",
+    "refund",
+    "cancel",
+    "place",
+    "update",
+    "create",
+    "issue",
+    "grant",
+    "disable",
+    "approve",
+    "deny",
+    "commit",
+    "execute",
+    "schedule",
+    "charge",
+    "transfer",
+    "reset",
+    "apply",
+    "add",
+    "remove",
+    "export",
+    "publish",
+    "deploy",
+    "revoke",
+    "message",
+    "notify",
+    "submit",
+    "start",
+    "assign",
+    "close",
+    "exchange",
     "shell",
 )
 _USER_FIELDS = (
-    "address", "email", "amount", "amount_usd", "reference", "phone",
-    "account", "iban", "card", "code", "promo", "sku", "order_id",
-    "invoice_id", "claim_id", "policy_id", "patient_id", "employee_id",
-    "user_id", "recipient", "to", "date",
+    "address",
+    "email",
+    "amount",
+    "amount_usd",
+    "reference",
+    "phone",
+    "account",
+    "iban",
+    "card",
+    "code",
+    "promo",
+    "sku",
+    "order_id",
+    "invoice_id",
+    "claim_id",
+    "policy_id",
+    "patient_id",
+    "employee_id",
+    "user_id",
+    "recipient",
+    "to",
+    "date",
 )
 
 
 def _name_tokens(name: str) -> list[str]:
     import re
+
     return [t for t in re.split(r"[^a-z]+", (name or "").lower()) if t]
 
 
@@ -418,10 +533,12 @@ def _schema_from_object(tool: Any) -> dict | None:
     if not name:
         return None
     desc = str(getattr(tool, "description", "") or "")[:1000]
-    params = (getattr(tool, "params_json_schema", None)
-              or getattr(tool, "args_schema", None)
-              or getattr(tool, "args", None)
-              or {})
+    params = (
+        getattr(tool, "params_json_schema", None)
+        or getattr(tool, "args_schema", None)
+        or getattr(tool, "args", None)
+        or {}
+    )
     if hasattr(params, "model_json_schema"):
         params = params.model_json_schema()
     elif hasattr(params, "schema") and not isinstance(params, dict):
@@ -431,13 +548,16 @@ def _schema_from_object(tool: Any) -> dict | None:
             params = {}
     if not isinstance(params, dict):
         params = {"type": "object", "properties": {}}
-    elif "properties" not in params and params and all(
-            isinstance(v, dict) for v in params.values()):
+    elif (
+        "properties" not in params and params and all(isinstance(v, dict) for v in params.values())
+    ):
         params = {"type": "object", "properties": dict(params)}
     elif "type" not in params and "properties" not in params:
         params = {"type": "object", "properties": {}}
-    return {"type": "function", "function": {
-        "name": str(name), "description": desc, "parameters": params}}
+    return {
+        "type": "function",
+        "function": {"name": str(name), "description": desc, "parameters": params},
+    }
 
 
 def _tools_from_agent(agent: Any) -> list[dict]:
@@ -491,11 +611,11 @@ def _capabilities(tools: list[dict]) -> dict[str, list[str]]:
             token_set = set(tokens)
             if any(v in token_set for v in _MUTATION_VERBS):
                 listed.append("mutate")
-            if any(v in token_set for v in (
-                    "pay", "charge", "refund", "transfer", "order", "purchase")):
+            if any(
+                v in token_set for v in ("pay", "charge", "refund", "transfer", "order", "purchase")
+            ):
                 listed.append("financial")
-            if any(v in token_set for v in (
-                    "send", "email", "notify", "message", "publish")):
+            if any(v in token_set for v in ("send", "email", "notify", "message", "publish")):
                 listed.append("communication")
             if any(v in token_set for v in ("delete", "remove", "cancel", "revoke")):
                 listed.append("irreversible")
@@ -503,11 +623,11 @@ def _capabilities(tools: list[dict]) -> dict[str, list[str]]:
     return caps
 
 
-def resolve_system_prompt(system_prompt: str | None = None,
-                          policy: str | None = None) -> str | None:
+def resolve_system_prompt(
+    system_prompt: str | None = None, policy: str | None = None
+) -> str | None:
     """Public name is system_prompt. policy= is a silent alias."""
-    if (system_prompt is not None and policy is not None
-            and str(system_prompt) != str(policy)):
+    if system_prompt is not None and policy is not None and str(system_prompt) != str(policy):
         raise ValueError("pass system_prompt= or policy=, not both")
     if system_prompt is not None:
         return system_prompt
@@ -518,15 +638,16 @@ def _constraints(tools: list[dict], policy: str) -> dict[str, Any]:
     required_user = []
     for schema in tools:
         fn = schema.get("function", schema) if isinstance(schema, dict) else {}
-        props = ((fn.get("parameters") or {}).get("properties") or {})
+        props = (fn.get("parameters") or {}).get("properties") or {}
         for key in props:
             low = str(key).lower()
-            if (low.endswith("_id") or low == "id"
-                    or any(field in low or low.endswith(field)
-                           for field in _USER_FIELDS)) and key not in required_user:
+            if (
+                low.endswith("_id")
+                or low == "id"
+                or any(field in low or low.endswith(field) for field in _USER_FIELDS)
+            ) and key not in required_user:
                 required_user.append(key)
-    mutating = [name for name, caps in _capabilities(tools).items()
-                if "read" not in caps]
+    mutating = [name for name, caps in _capabilities(tools).items() if "read" not in caps]
     return {
         "mutating_tools": mutating,
         "read_tools": [n for n in _capabilities(tools) if n not in set(mutating)],
@@ -570,19 +691,27 @@ def _merge_tool_lists(base: list | None, extra: list | None) -> list[dict]:
     return list(merged.values())
 
 
-def inspect(agent: Any, *, tools: list[dict] | None = None,
-            system_prompt: str | None = None, policy: str | None = None,
-            transport: str | None = None) -> AgentProfile:
+def inspect(
+    agent: Any,
+    *,
+    tools: list[dict] | None = None,
+    system_prompt: str | None = None,
+    policy: str | None = None,
+    transport: str | None = None,
+) -> AgentProfile:
     """Read tools and system prompt off the agent; caller extras are merged in."""
     policy = resolve_system_prompt(system_prompt, policy)
     if agent is None:
         derived_tools = _merge_tool_lists([], tools)
         derived_policy = str(policy or "")
         return AgentProfile(
-            tools=derived_tools, policy=derived_policy,
+            tools=derived_tools,
+            policy=derived_policy,
             capabilities=_capabilities(derived_tools),
             constraints=_constraints(derived_tools, derived_policy),
-            transport="hosted", name="hosted-qwen")
+            transport="hosted",
+            name="hosted-qwen",
+        )
     kind = "callable"
     with contextlib.suppress(ValueError):
         kind = transport or detect(agent)
@@ -595,8 +724,7 @@ def inspect(agent: Any, *, tools: list[dict] | None = None,
         derived_policy = extra_policy
     else:
         derived_policy = str(agent_policy or "")
-    name = (getattr(agent, "name", None) or getattr(agent, "__name__", None)
-            or type(agent).__name__)
+    name = getattr(agent, "name", None) or getattr(agent, "__name__", None) or type(agent).__name__
     return AgentProfile(
         tools=derived_tools,
         policy=derived_policy,
@@ -607,14 +735,26 @@ def inspect(agent: Any, *, tools: list[dict] | None = None,
     )
 
 
-def connect(agent: Any, *, tools: list[dict] | None = None,
-            system_prompt: str | None = None, policy: str | None = None,
-            transport: str | None = None, execute: Callable | None = None,
-            model: str | None = None) -> ConnectedAgent:
-    profile = inspect(agent, tools=tools, system_prompt=system_prompt,
-                      policy=policy, transport=transport)
+def connect(
+    agent: Any,
+    *,
+    tools: list[dict] | None = None,
+    system_prompt: str | None = None,
+    policy: str | None = None,
+    transport: str | None = None,
+    execute: Callable | None = None,
+    model: str | None = None,
+) -> ConnectedAgent:
+    profile = inspect(
+        agent, tools=tools, system_prompt=system_prompt, policy=policy, transport=transport
+    )
     runner, kind = resolve(
-        agent, transport=transport or profile.transport, tools=profile.tools,
-        policy=profile.policy, execute=execute, model=model)
+        agent,
+        transport=transport or profile.transport,
+        tools=profile.tools,
+        policy=profile.policy,
+        execute=execute,
+        model=model,
+    )
     profile.transport = kind
     return ConnectedAgent(run=runner, profile=profile, transport=kind)

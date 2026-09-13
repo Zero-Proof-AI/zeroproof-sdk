@@ -8,9 +8,17 @@ from zeroproof.simulations.generate.generator import ModelSimulator
 
 def test_rollouts_per_prompt_same_prompt_two_rows():
     data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=4, seed=0,
-        rollouts_per_prompt=2, grade=False, concurrency=4, simulator=False,
-        advanced={"per_round": 12, "mutate_failures": False})
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=4,
+        seed=0,
+        rollouts_per_prompt=2,
+        grade=False,
+        concurrency=4,
+        simulator=False,
+        advanced={"per_round": 12, "mutate_failures": False},
+    )
     assert len(data.trajectories) == 4
     prompts = [t["prompt"] for t in data.trajectories]
     assert len(set(prompts)) == 2
@@ -36,14 +44,26 @@ def test_writer_tags_are_sparse_and_generic():
     assert "request_axes" not in prompt
     assert '"voice"' not in prompt
 
-    allowed = {"tool", "rule", "length", "vagueness", "stance", "phrasing",
-               "texture", "tone", "ask", "pressure", "user",
-               "history", "world_state", "tool_condition"}
+    allowed = {
+        "tool",
+        "rule",
+        "length",
+        "vagueness",
+        "stance",
+        "phrasing",
+        "texture",
+        "tone",
+        "ask",
+        "pressure",
+        "user",
+        "history",
+        "world_state",
+        "tool_condition",
+    }
     lengths: list[str] = []
     tool_rule_only = weird = 0
     for i in range(80):
-        tags = sample_cell_tags(1, 0, f"cell-{i}",
-                                {"tool": "dim_lights", "rule": "Ask first."})
+        tags = sample_cell_tags(1, 0, f"cell-{i}", {"tool": "dim_lights", "rule": "Ask first."})
         if "length" in tags:
             lengths.append(str(tags["length"]))
         assert set(tags) <= allowed
@@ -52,8 +72,7 @@ def test_writer_tags_are_sparse_and_generic():
         if "phrasing" in tags:
             weird += 1
         if "ask" in tags:
-            assert tags["ask"] in {"question", "ask", "several asks",
-                                   "do several things"}
+            assert tags["ask"] in {"question", "ask", "several asks", "do several things"}
         assert "demographic" not in tags
     assert len(lengths) >= 40
     assert set(lengths) <= {"short prompt", "medium prompt", "long prompt"}
@@ -61,32 +80,43 @@ def test_writer_tags_are_sparse_and_generic():
     assert lengths.count("medium prompt") > lengths.count("short prompt")
     assert {"short prompt", "medium prompt", "long prompt"} <= set(
         sample_cell_tags(1, 0, f"len-{i}", {"length": hint})["length"]
-        for i, hint in enumerate(("short", "medium", "long")))
+        for i, hint in enumerate(("short", "medium", "long"))
+    )
     assert weird <= 20
     assert tool_rule_only >= 20
-    stances = [sample_cell_tags(1, 0, f"tier-{i}", {"stance": "ordinary"})
-               for i in range(20)]
+    stances = [sample_cell_tags(1, 0, f"tier-{i}", {"stance": "ordinary"}) for i in range(20)]
     assert all(tags.get("stance") != "ordinary" for tags in stances)
-    assert any(tags.get("stance") == "adversarial" for tags in (
-        sample_cell_tags(1, 0, f"hard-{i}", {"stance": "adversarial"})
-        for i in range(40)))
-    asks = [sample_cell_tags(1, 0, f"ask-{i}", {"tool": "dim_lights"})
-            for i in range(80)]
+    assert any(
+        tags.get("stance") == "adversarial"
+        for tags in (
+            sample_cell_tags(1, 0, f"hard-{i}", {"stance": "adversarial"}) for i in range(40)
+        )
+    )
+    asks = [sample_cell_tags(1, 0, f"ask-{i}", {"tool": "dim_lights"}) for i in range(80)]
     ask_vals = [str(t["ask"]) for t in asks if t.get("ask")]
     assert ask_vals
     assert ask_vals.count("question") + ask_vals.count("ask") > sum(
-        1 for v in ask_vals if v in {"several asks", "do several things"})
-    assert all("many tools" not in str(v) and "tool-heavy" not in str(v)
-               for tags in asks for v in list(tags) + list(tags.values()))
+        1 for v in ask_vals if v in {"several asks", "do several things"}
+    )
+    assert all(
+        "many tools" not in str(v) and "tool-heavy" not in str(v)
+        for tags in asks
+        for v in list(tags) + list(tags.values())
+    )
     axes = sample_request_axes(1, 0, "k")
     assert "demographic" not in axes
     assert "opening" not in axes
 
-    sleep_tools = [{"type": "function", "function": {
-        "name": "start_sleep",
-        "description": "Begin a sleep session.",
-        "parameters": {"type": "object", "properties": {"minutes": {"type": "number"}}},
-    }}]
+    sleep_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "start_sleep",
+                "description": "Begin a sleep session.",
+                "parameters": {"type": "object", "properties": {"minutes": {"type": "number"}}},
+            },
+        }
+    ]
     sleep_policy = "Only start sleep if the user asked. Do not invent a duration."
     sleep_sim = ModelSimulator(tools=sleep_tools, policy=sleep_policy, seed=3)
     sleep_prompt = sleep_sim._prompt(0, sleep_sim.regions[:6])
@@ -97,12 +127,23 @@ def test_writer_tags_are_sparse_and_generic():
     assert "minutes" in sleep_prompt
     assert "looking to use" not in sleep_prompt
     assert "start_sleep" not in sleep_prompt
-    tags = sample_cell_tags(3, 0, sleep_sim.regions[0]["id"],
-                            sleep_sim.regions[0]["assignment"])
-    assert set(tags) <= {"tool", "rule", "length", "vagueness", "stance",
-                         "phrasing", "texture", "tone", "ask", "pressure",
-                         "user", "history", "world_state",
-                         "tool_condition"}
+    tags = sample_cell_tags(3, 0, sleep_sim.regions[0]["id"], sleep_sim.regions[0]["assignment"])
+    assert set(tags) <= {
+        "tool",
+        "rule",
+        "length",
+        "vagueness",
+        "stance",
+        "phrasing",
+        "texture",
+        "tone",
+        "ask",
+        "pressure",
+        "user",
+        "history",
+        "world_state",
+        "tool_condition",
+    }
     sdk = REPO_ROOT / "zeroproof.simulations"
     for path in sdk.glob("*.py"):
         src = path.read_text()
@@ -120,12 +161,15 @@ def test_writer_tags_are_sparse_and_generic():
 def test_scenario_family_cap_catches_paraphrases_not_unrelated_subjects():
     from zeroproof.simulations.generate.diversity import cap_scenario_families
 
-    rows = [{"text": text} for text in (
-        "Find a ceramic mug below twenty dollars",
-        "Can you find a blue mug that is inexpensive?",
-        "I'm searching for a rustic mug for the office",
-        "Find noise-cancelling headphones for commuting",
-    )]
+    rows = [
+        {"text": text}
+        for text in (
+            "Find a ceramic mug below twenty dollars",
+            "Can you find a blue mug that is inexpensive?",
+            "I'm searching for a rustic mug for the office",
+            "Find noise-cancelling headphones for commuting",
+        )
+    ]
     kept, rejected = cap_scenario_families(rows, [], cap=2)
     assert len(kept) == 3
     assert rejected == [rows[2]]
@@ -158,15 +202,15 @@ def test_pressure_is_a_sparse_tag_not_hardcoded_english():
 def test_conversation_features_use_live_tiers():
     from zeroproof.simulations.generate.diversity import conversation_features
 
-    ordinary = conversation_features({"stance": "ordinary"}, {},
-                                     ask_family="tool", tool="get_pr")
+    ordinary = conversation_features({"stance": "ordinary"}, {}, ask_family="tool", tool="get_pr")
     assert ordinary["tier"] == "ordinary"
     assert ordinary["ask_family"] == "tool"
     assert ordinary["intent_known"] is True
     assert ordinary["tool_known"] is True
     assert "stance" not in ordinary
-    vague = conversation_features({"stance": "adversarial"}, {"vagueness": "vague"},
-                                  ask_family="vague", tool="unrelated")
+    vague = conversation_features(
+        {"stance": "adversarial"}, {"vagueness": "vague"}, ask_family="vague", tool="unrelated"
+    )
     assert vague["tier"] == "adversarial"
     assert vague["intent_known"] is False
     assert vague["tool_known"] is False
@@ -177,10 +221,18 @@ def test_conversation_features_use_live_tiers():
 
 def test_same_scenario_id_different_prompts_allowed():
     data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=60, seed=2,
-        grade=False, concurrency=8, simulator=False,
-        requests_per_situation=3, rollouts_per_request=1,
-        advanced={"per_round": 20, "mutate_failures": False})
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=60,
+        seed=2,
+        grade=False,
+        concurrency=8,
+        simulator=False,
+        requests_per_situation=3,
+        rollouts_per_request=1,
+        advanced={"per_round": 20, "mutate_failures": False},
+    )
     by_sid: dict[str, set[str]] = {}
     for t in data.trajectories:
         sid = t.get("scenario_id") or ""

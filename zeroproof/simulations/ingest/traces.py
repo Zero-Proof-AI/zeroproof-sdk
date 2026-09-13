@@ -11,6 +11,7 @@ the grid and nothing else. ``leakage_report`` / ``drop_leaky_rows`` verify
 no generated prompt is a near copy of a source trace, so a trace held out
 for evaluation stays out of training.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -143,14 +144,13 @@ def _trim_exemplar(value: Any) -> Any:
     if isinstance(value, list):
         return [_trim_exemplar(v) for v in value[:2]]
     if isinstance(value, dict):
-        return {str(k): _trim_exemplar(v)
-                for k, v in list(value.items())[:12]}
+        return {str(k): _trim_exemplar(v) for k, v in list(value.items())[:12]}
     return value
 
 
-def mine_result_exemplars(rows: Sequence[dict], *,
-                          per_tool: int = _EXEMPLARS_PER_TOOL
-                          ) -> dict[str, list]:
+def mine_result_exemplars(
+    rows: Sequence[dict], *, per_tool: int = _EXEMPLARS_PER_TOOL
+) -> dict[str, list]:
     """Up to ``per_tool`` real result payloads per tool, shape-diverse.
 
     Sibling of ``mine_traces``: same rows in, but this collects what the
@@ -177,8 +177,7 @@ def mine_result_exemplars(rows: Sequence[dict], *,
             if isinstance(value, dict) and not (set(value) - {"status", "ok"}):
                 # A bare status carries no shape worth copying.
                 continue
-            if trace_fault({"steps": [{"tool": name,
-                                       "result": value}]}) != NO_FAULT:
+            if trace_fault({"steps": [{"tool": name, "result": value}]}) != NO_FAULT:
                 continue
             kept = out.setdefault(name, [])
             if len(kept) >= per_tool:
@@ -188,8 +187,7 @@ def mine_result_exemplars(rows: Sequence[dict], *,
                 continue
             trimmed = _trim_exemplar(value)
             try:
-                if len(json.dumps(trimmed,
-                                  default=str)) > _EXEMPLAR_MAX_CHARS:
+                if len(json.dumps(trimmed, default=str)) > _EXEMPLAR_MAX_CHARS:
                     continue
             except (TypeError, ValueError):
                 continue
@@ -218,9 +216,9 @@ def exemplar_result_shapes(exemplars: dict[str, list]) -> dict[str, dict]:
     return out
 
 
-def dimensions_from_traces(rows: Sequence[dict], tools: list[dict],
-                           policy: str = "", *,
-                           broaden: bool = True) -> dict[str, list[str]]:
+def dimensions_from_traces(
+    rows: Sequence[dict], tools: list[dict], policy: str = "", *, broaden: bool = True
+) -> dict[str, list[str]]:
     """Coverage axes aimed at behaviors seen in ``rows``.
 
     Starts from ``build_dimensions`` for this agent so every value is one
@@ -261,8 +259,7 @@ def dimensions_from_traces(rows: Sequence[dict], tools: list[dict],
             focus_conditions.append(value)
         elif axis == "world_state" and value in worlds:
             focus_worlds.append(value)
-    for world in sorted(mined["world_states"], key=mined["world_states"].get,
-                        reverse=True):
+    for world in sorted(mined["world_states"], key=mined["world_states"].get, reverse=True):
         if world in worlds and world not in focus_worlds:
             focus_worlds.append(world)
     if focus_conditions:
@@ -278,8 +275,9 @@ def dimensions_from_traces(rows: Sequence[dict], tools: list[dict],
     return out
 
 
-def split_pseudo_production(rows: Sequence[dict], *, fraction: float = 0.2,
-                            seed: int = 0) -> tuple[list[dict], list[dict]]:
+def split_pseudo_production(
+    rows: Sequence[dict], *, fraction: float = 0.2, seed: int = 0
+) -> tuple[list[dict], list[dict]]:
     """Set aside a pseudo-production slice; the rest stays for training.
 
     Every unique flaw signature (fault name plus behavior shape) sends one
@@ -291,8 +289,7 @@ def split_pseudo_production(rows: Sequence[dict], *, fraction: float = 0.2,
     n = len(items)
     if n == 0:
         return [], []
-    target = max(1, min(n, round(max(0.0, float(fraction)) * n))) \
-        if fraction > 0 else 0
+    target = max(1, min(n, round(max(0.0, float(fraction)) * n))) if fraction > 0 else 0
     seen_flaws: set[tuple[str, str]] = set()
     production_idx: list[int] = []
     for i, row in enumerate(items):
@@ -307,10 +304,12 @@ def split_pseudo_production(rows: Sequence[dict], *, fraction: float = 0.2,
     chosen = set(production_idx)
     if len(chosen) < target:
         rest = [i for i in range(n) if i not in chosen]
-        rest.sort(key=lambda i: hashlib.sha256(
-            f"{seed}:{i}:{str(items[i].get('prompt') or '')[:200]}".encode()
-        ).hexdigest())
-        for i in rest[:target - len(chosen)]:
+        rest.sort(
+            key=lambda i: hashlib.sha256(
+                f"{seed}:{i}:{str(items[i].get('prompt') or '')[:200]}".encode()
+            ).hexdigest()
+        )
+        for i in rest[: target - len(chosen)]:
             chosen.add(i)
     production = [items[i] for i in range(n) if i in chosen]
     remainder = [items[i] for i in range(n) if i not in chosen]
@@ -345,16 +344,19 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / (na * nb)
 
 
-def _leak_flags(generated: Sequence[Any], sources: Sequence[Any], *,
-                threshold: float,
-                embedder: Any) -> tuple[list[bool], dict[str, Any]]:
+def _leak_flags(
+    generated: Sequence[Any], sources: Sequence[Any], *, threshold: float, embedder: Any
+) -> tuple[list[bool], dict[str, Any]]:
     gen_texts = [_prompt_of(item) for item in generated]
     src_texts = [t for t in (_prompt_of(item) for item in sources) if t]
     flags = [False] * len(gen_texts)
     report: dict[str, Any] = {
-        "n": len(gen_texts), "n_sources": len(src_texts),
-        "threshold": float(threshold), "n_leaky": 0,
-        "max_similarity": 0.0, "leaky": [],
+        "n": len(gen_texts),
+        "n_sources": len(src_texts),
+        "threshold": float(threshold),
+        "n_leaky": 0,
+        "max_similarity": 0.0,
+        "leaky": [],
     }
     if not gen_texts or not src_texts:
         return flags, report
@@ -377,14 +379,17 @@ def _leak_flags(generated: Sequence[Any], sources: Sequence[Any], *,
             flags[i] = True
             report["n_leaky"] += 1
             if len(report["leaky"]) < 20:
-                report["leaky"].append(
-                    {"row": i, "source": best_j, "similarity": round(best, 4)})
+                report["leaky"].append({"row": i, "source": best_j, "similarity": round(best, 4)})
     return flags, report
 
 
-def leakage_report(generated: Sequence[Any], sources: Sequence[Any], *,
-                   threshold: float = 0.9,
-                   embedder: Any = "hash") -> dict[str, Any]:
+def leakage_report(
+    generated: Sequence[Any],
+    sources: Sequence[Any],
+    *,
+    threshold: float = 0.9,
+    embedder: Any = "hash",
+) -> dict[str, Any]:
     """Near-copy check of generated prompts against source traces.
 
     A generated row whose prompt sits at or above ``threshold`` cosine
@@ -392,16 +397,14 @@ def leakage_report(generated: Sequence[Any], sources: Sequence[Any], *,
     whatever the embedder thinks. ``leaky`` lists the first 20 offenders;
     ``n_leaky`` is the full count.
     """
-    return _leak_flags(generated, sources, threshold=threshold,
-                       embedder=embedder)[1]
+    return _leak_flags(generated, sources, threshold=threshold, embedder=embedder)[1]
 
 
-def drop_leaky_rows(rows: Sequence[dict], sources: Sequence[Any], *,
-                    threshold: float = 0.9,
-                    embedder: Any = "hash") -> tuple[list[dict], dict[str, Any]]:
+def drop_leaky_rows(
+    rows: Sequence[dict], sources: Sequence[Any], *, threshold: float = 0.9, embedder: Any = "hash"
+) -> tuple[list[dict], dict[str, Any]]:
     """Kept rows plus the report. Flagged rows are removed, not rewritten."""
-    flags, report = _leak_flags(rows, sources, threshold=threshold,
-                                embedder=embedder)
+    flags, report = _leak_flags(rows, sources, threshold=threshold, embedder=embedder)
     kept = [row for row, bad in zip(rows, flags) if not bad]
     report["n_dropped"] = len(rows) - len(kept)
     return kept, report
@@ -417,26 +420,39 @@ def tools_from_traces(traces: Sequence[dict]) -> list[dict]:
     for row in traces or ():
         if not isinstance(row, dict):
             continue
-        for step in (row.get("steps") or ()):
+        for step in row.get("steps") or ():
             name = isinstance(step, dict) and step.get("tool")
             if not name:
                 continue
             args = step.get("arguments")
             seen.setdefault(str(name), set()).update(
-                str(k) for k in (args or {}) if isinstance(args, dict))
-    return [{"type": "function", "function": {
-        "name": name,
-        "description": f"{name}, observed in this agent's traces",
-        "parameters": {"type": "object", "properties": {
-            arg: {"type": "string"} for arg in sorted(args)}}}}
-        for name, args in sorted(seen.items())]
+                str(k) for k in (args or {}) if isinstance(args, dict)
+            )
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": f"{name}, observed in this agent's traces",
+                "parameters": {
+                    "type": "object",
+                    "properties": {arg: {"type": "string"} for arg in sorted(args)},
+                },
+            },
+        }
+        for name, args in sorted(seen.items())
+    ]
 
 
-def simulate_from_traces(traces: Sequence[dict], agent: Any = None, *,
-                         tools: list[dict] | None = None,
-                         policy: str = "",
-                         mode: str = "rl",
-                         **kwargs: Any):
+def simulate_from_traces(
+    traces: Sequence[dict],
+    agent: Any = None,
+    *,
+    tools: list[dict] | None = None,
+    policy: str = "",
+    mode: str = "rl",
+    **kwargs: Any,
+):
     """Alias for ``simulate(agent, traces=...)``: same grid focus and
     leakage gate, for callers who start from the traces.
 
@@ -444,11 +460,13 @@ def simulate_from_traces(traces: Sequence[dict], agent: Any = None, *,
     themselves, so handing over graded telemetry is enough to start.
     """
     from zeroproof.simulations import simulate as _simulate
+
     if agent is None and not tools and not policy:
         # a path is as valid a source here as rows, and the tools live inside
         tools = tools_from_traces(load_traces(traces)) or None
-    return _simulate(agent, tools=tools, system_prompt=policy or None,
-                     mode=mode, traces=traces, **kwargs)
+    return _simulate(
+        agent, tools=tools, system_prompt=policy or None, mode=mode, traces=traces, **kwargs
+    )
 
 
 # --- canonical trace input --------------------------------------------------
@@ -511,8 +529,7 @@ def _steps_from_messages(messages: Sequence[dict]) -> list[dict]:
         unfilled = [s for s in steps if "tool" in s and "result" not in s]
         target = None
         if name:
-            target = next((s for s in unfilled if s.get("tool") == name),
-                          None)
+            target = next((s for s in unfilled if s.get("tool") == name), None)
         if target is None and unfilled:
             target = unfilled[0]
         if target is None:
@@ -529,15 +546,17 @@ def _steps_from_messages(messages: Sequence[dict]) -> list[dict]:
             steps.append({"user": content})
         elif role == "assistant":
             for call in message.get("tool_calls") or []:
-                fn = call.get("function") if isinstance(
-                    call.get("function"), dict) else call
+                fn = call.get("function") if isinstance(call.get("function"), dict) else call
                 raw = (fn or {}).get("arguments")
                 if isinstance(raw, str):
                     with contextlib.suppress(ValueError):
                         raw = json.loads(raw)
-                steps.append({"tool": str((fn or {}).get("name") or ""),
-                              "arguments": raw if isinstance(raw, dict)
-                              else {}})
+                steps.append(
+                    {
+                        "tool": str((fn or {}).get("name") or ""),
+                        "arguments": raw if isinstance(raw, dict) else {},
+                    }
+                )
             if content:
                 steps.append({"text": content})
         elif role == "tool":
@@ -569,8 +588,10 @@ def load_traces(source) -> list[dict]:
     carry neither an ask nor any steps are dropped.
     """
     from pathlib import Path as _Path
+
     if isinstance(source, (str, _Path)):
         from ..score.quality import load_jsonl
+
         rows = load_jsonl(source)
     else:
         rows = list(source)
@@ -581,22 +602,17 @@ def load_traces(source) -> list[dict]:
         row = dict(row)
         # An empty steps list is absence, not content: real exports emit
         # steps: [] next to a populated messages/tool_trace field.
-        steps = next((row[k] for k in _STEP_KEYS
-                      if isinstance(row.get(k), list) and row[k]), None)
+        steps = next((row[k] for k in _STEP_KEYS if isinstance(row.get(k), list) and row[k]), None)
         if steps is None and isinstance(row.get("messages"), list):
             steps = _steps_from_messages(row["messages"])
-        row["steps"] = [_normalize_step(s) for s in (steps or [])
-                        if isinstance(s, dict)]
-        prompt = next((str(row[k]) for k in _PROMPT_KEYS
-                       if row.get(k)), "")
+        row["steps"] = [_normalize_step(s) for s in (steps or []) if isinstance(s, dict)]
+        prompt = next((str(row[k]) for k in _PROMPT_KEYS if row.get(k)), "")
         if not prompt:
-            prompt = next((str(s["user"]) for s in row["steps"]
-                           if "user" in s), "")
+            prompt = next((str(s["user"]) for s in row["steps"] if "user" in s), "")
         row["prompt"] = prompt
         final = next((str(row[k]) for k in _FINAL_KEYS if row.get(k)), "")
         if not final:
-            final = next((str(s["text"]) for s in reversed(row["steps"])
-                          if "text" in s), "")
+            final = next((str(s["text"]) for s in reversed(row["steps"]) if "text" in s), "")
         row["final_text"] = final
         if "reward" in row:
             reward = _coerce_reward(row["reward"])
@@ -622,15 +638,17 @@ def opening_share(rows: Sequence[dict]) -> float:
     agent_first = 0
     for row in items:
         msgs = row.get("messages")
-        if (isinstance(msgs, list) and msgs
-                and isinstance(msgs[0], dict)
-                and str(msgs[0].get("role") or "") == "assistant"):
+        if (
+            isinstance(msgs, list)
+            and msgs
+            and isinstance(msgs[0], dict)
+            and str(msgs[0].get("role") or "") == "assistant"
+        ):
             agent_first += 1
     return agent_first / len(items)
 
 
-def trace_report(traces, tools: list[dict] | None = None,
-                 policy: str = "") -> dict[str, Any]:
+def trace_report(traces, tools: list[dict] | None = None, policy: str = "") -> dict[str, Any]:
     """What these traces contain and what they will aim generation at.
 
     Run before ``simulate(traces=...)``. With ``tools`` (and optionally
@@ -643,22 +661,26 @@ def trace_report(traces, tools: list[dict] | None = None,
     signal and were discarded by normalization.
     """
     from pathlib import Path as _Path
+
     if isinstance(traces, (str, _Path)):
         from ..score.quality import load_jsonl
+
         raw = load_jsonl(traces)
     else:
         raw = list(traces)
     rows = load_traces(raw)
     mined = mine_traces(rows)
     graded = [r for r in rows if r.get("reward") in (0, 1)]
-    advisory = [r for r in rows if r.get("reward") not in (0, 1)
-                and _coerce_reward(r.get("qwen_reward")) is not None]
+    advisory = [
+        r
+        for r in rows
+        if r.get("reward") not in (0, 1) and _coerce_reward(r.get("qwen_reward")) is not None
+    ]
     passes = sum(r["reward"] for r in graded)
     report: dict[str, Any] = {
         "traces": len(rows),
         "dropped": len(raw) - len(rows),
-        "unique_prompts": len({" ".join(str(r.get("prompt") or "")
-                                        .lower().split()) for r in rows}),
+        "unique_prompts": len({" ".join(str(r.get("prompt") or "").lower().split()) for r in rows}),
         "tools_observed": mined["tools"],
         "faults_observed": dict(mined["faults"]),
         "world_states_observed": dict(mined.get("world_states") or {}),
@@ -687,15 +709,19 @@ def trace_report(traces, tools: list[dict] | None = None,
             aimed_axis = list(aimed.get(axis) or [])
             base_pos = {v: i for i, v in enumerate(base_axis)}
             narrowed = len(aimed_axis) < len(base_axis)
-            gained = [v for i, v in enumerate(aimed_axis)
-                      if v in base_pos and v not in clean
-                      and (narrowed or i < base_pos[v])]
+            gained = [
+                v
+                for i, v in enumerate(aimed_axis)
+                if v in base_pos and v not in clean and (narrowed or i < base_pos[v])
+            ]
             if gained:
                 emphasis[axis] = gained
         report["emphasis"] = emphasis
-        foreign = [name for name in mined["tools"]
-                   if name not in {str((t.get("function") or t).get("name")
-                                       or "") for t in tools}]
+        foreign = [
+            name
+            for name in mined["tools"]
+            if name not in {str((t.get("function") or t).get("name") or "") for t in tools}
+        ]
         if foreign:
             report["foreign_tools"] = foreign
     return report
@@ -710,28 +736,39 @@ def format_trace_report(report: dict[str, Any]) -> str:
         f"graded:             {report['graded']} "
         f"(pass {report['passes']} / fail {report['fails']}), "
         f"ungraded {report['ungraded']}"
-        + (f", advisory judge labels {report['advisory_labels']} "
-           "(these steer aiming)" if report.get("advisory_labels") else ""),
-        "tools observed:     " + (", ".join(
-            f"{name} x{slot['n']}"
-            + (f" ({slot['fault_n']} calls faulted)" if slot.get("fault_n") else "")
-            for name, slot in sorted(report["tools_observed"].items()))
-            or "none"),
-        "faults observed:    " + (", ".join(
-            f"{name} x{n}" for name, n in
-            sorted(report["faults_observed"].items())) or "none"),
+        + (
+            f", advisory judge labels {report['advisory_labels']} (these steer aiming)"
+            if report.get("advisory_labels")
+            else ""
+        ),
+        "tools observed:     "
+        + (
+            ", ".join(
+                f"{name} x{slot['n']}"
+                + (f" ({slot['fault_n']} calls faulted)" if slot.get("fault_n") else "")
+                for name, slot in sorted(report["tools_observed"].items())
+            )
+            or "none"
+        ),
+        "faults observed:    "
+        + (
+            ", ".join(f"{name} x{n}" for name, n in sorted(report["faults_observed"].items()))
+            or "none"
+        ),
     ]
     if report.get("dropped"):
-        lines.append(f"dropped rows:       {report['dropped']} "
-                     "(no usable signal after normalization)")
+        lines.append(
+            f"dropped rows:       {report['dropped']} (no usable signal after normalization)"
+        )
     if report.get("foreign_tools"):
-        lines.append("warning: observed tools not in this agent's toolset: "
-                     + ", ".join(report["foreign_tools"][:5]))
+        lines.append(
+            "warning: observed tools not in this agent's toolset: "
+            + ", ".join(report["foreign_tools"][:5])
+        )
     emphasis = report.get("emphasis")
     if emphasis:
         parts = []
-        names = {"tool": "tools", "tool_condition": "faults",
-                 "world_state": "world states"}
+        names = {"tool": "tools", "tool_condition": "faults", "world_state": "world states"}
         for axis, values in emphasis.items():
             shown = ", ".join(values[:5])
             if len(values) > 5:
@@ -739,8 +776,10 @@ def format_trace_report(report: dict[str, Any]) -> str:
             parts.append(f"{names.get(axis, axis)} {shown}")
         lines.append("extra generation weight goes to: " + "; ".join(parts))
     else:
-        lines.append("grid emphasis: computed against the agent's tools at "
-                     "simulate time (pass tools= to preview it here)")
+        lines.append(
+            "grid emphasis: computed against the agent's tools at "
+            "simulate time (pass tools= to preview it here)"
+        )
     return "\n".join(lines)
 
 
@@ -755,6 +794,7 @@ def infer_harness(rows: Sequence[dict]) -> dict[str, Any]:
     point to edit, not a spec to trust: it can only describe arguments the
     traces happened to exercise.
     """
+
     def _json_type(value: Any) -> str:
         if isinstance(value, bool):
             return "boolean"
@@ -772,8 +812,11 @@ def infer_harness(rows: Sequence[dict]) -> dict[str, Any]:
             continue
         steps = row.get("steps")
         if not steps and isinstance(row.get("tool_trace"), list):
-            steps = [{"tool": t.get("tool"), "arguments": t.get("input")}
-                     for t in row["tool_trace"] if isinstance(t, dict)]
+            steps = [
+                {"tool": t.get("tool"), "arguments": t.get("input")}
+                for t in row["tool_trace"]
+                if isinstance(t, dict)
+            ]
         for step in steps or []:
             if not isinstance(step, dict):
                 continue
@@ -806,12 +849,24 @@ def infer_harness(rows: Sequence[dict]) -> dict[str, Any]:
             properties[key] = {"type": types[0] if len(types) == 1 else "string"}
             if info["n"] == entry["calls"]:
                 required.append(key)
-        tools.append({"type": "function", "function": {
-            "name": name,
-            "parameters": {"type": "object", "properties": properties,
-                           "required": required}}})
-    return {"tools": tools, "policy": "",
-            "observed_calls": {name: seen[name]["calls"] for name in sorted(seen)}}
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            }
+        )
+    return {
+        "tools": tools,
+        "policy": "",
+        "observed_calls": {name: seen[name]["calls"] for name in sorted(seen)},
+    }
 
 
 __all__ = [
@@ -834,8 +889,12 @@ __all__ = [
 # --- behavioral state over trace history ------------------------------------
 
 _STATE_PRIORITY = {
-    "new": 1.0, "persistent": 0.9, "uncertain": 0.35,
-    "improving": 0.2, "solved": 0.05, "passing": 0.05,
+    "new": 1.0,
+    "persistent": 0.9,
+    "uncertain": 0.35,
+    "improving": 0.2,
+    "solved": 0.05,
+    "passing": 0.05,
 }
 _EXPLORATION_FLOOR = 0.2
 # Graded rows a region needs before its allocation is more than a hint.
@@ -874,17 +933,20 @@ def _row_regions(row: dict) -> list[tuple[str, str, bool | None]]:
         failed = (reward == 0) if reward is not None else None
         out.append((f"recover_after_{fault}", "fault_response", failed))
     if not out:
-        tools = [str(s.get("tool")) for s in row.get("steps") or []
-                 if isinstance(s, dict) and s.get("tool")]
+        tools = [
+            str(s.get("tool"))
+            for s in row.get("steps") or []
+            if isinstance(s, dict) and s.get("tool")
+        ]
         surface = tools[0] if tools else "no-tool"
         if reward is not None:
             out.append((f"task:{surface}", "capability", reward == 0))
     return out
 
 
-def behavior_state(rows: Sequence[dict], *,
-                   targeted: Sequence[str] = (),
-                   exploration: float = _EXPLORATION_FLOOR) -> dict:
+def behavior_state(
+    rows: Sequence[dict], *, targeted: Sequence[str] = (), exploration: float = _EXPLORATION_FLOOR
+) -> dict:
     """The optimizer's memory: evidence in, allocation out.
 
     Rows are the agent's whole history. History buckets by
@@ -908,8 +970,7 @@ def behavior_state(rows: Sequence[dict], *,
         items.sort(key=lambda r: r.get("ts") or 0)
     n = len(items)
     if n == 0:
-        return {"regions": [], "exploration_share": 1.0, "traces": 0,
-                "buckets": []}
+        return {"regions": [], "exploration_share": 1.0, "traces": 0, "buckets": []}
 
     versions: list[str] = []
     for r in items:
@@ -917,13 +978,17 @@ def behavior_state(rows: Sequence[dict], *,
         if v and v not in versions:
             versions.append(v)
     if len(versions) >= 2:
+
         def bucket_of(idx, r):
             return str(r.get("model_version") or versions[0])
+
         buckets = versions
     else:
         cut = max(1, n // 2)
+
         def bucket_of(idx, r):
             return "recent" if idx >= cut else "old"
+
         buckets = ["old", "recent"]
     latest = buckets[-1]
 
@@ -932,10 +997,17 @@ def behavior_state(rows: Sequence[dict], *,
         bucket = bucket_of(idx, row)
         dims = row.get("scenario_dimensions") or {}
         for region_id, kind, failed in _row_regions(row):
-            slot = regions.setdefault(region_id, {
-                "region": region_id, "kind": kind,
-                "by_bucket": {}, "recipe": {}, "support": 0,
-                "first_bucket": bucket})
+            slot = regions.setdefault(
+                region_id,
+                {
+                    "region": region_id,
+                    "kind": kind,
+                    "by_bucket": {},
+                    "recipe": {},
+                    "support": 0,
+                    "first_bucket": bucket,
+                },
+            )
             if failed is not None:
                 b = slot["by_bucket"].setdefault(bucket, [0, 0])  # [fail, pass]
                 b[0 if failed else 1] += 1
@@ -950,8 +1022,7 @@ def behavior_state(rows: Sequence[dict], *,
                         if value not in recipe[axis]:
                             recipe[axis].append(value)
                 for step in row.get("steps") or []:
-                    tool = str(step.get("tool") or "") \
-                        if isinstance(step, dict) else ""
+                    tool = str(step.get("tool") or "") if isinstance(step, dict) else ""
                     if tool:
                         recipe.setdefault("tool", [])
                         if tool not in recipe["tool"]:
@@ -992,14 +1063,17 @@ def behavior_state(rows: Sequence[dict], *,
         slot["fail_rate"] = round(fail_rate, 4)
         slot["low_support"] = graded_total < _MIN_SUPPORT
         slot["previously_targeted"] = was_targeted
-        slot["rotate_coordinates"] = bool(was_targeted
-                                          and status == "persistent")
+        slot["rotate_coordinates"] = bool(was_targeted and status == "persistent")
         slot["history"] = [
-            {"bucket": b, "n": per[b][0] + per[b][1],
-             "fail_rate": round(per[b][0] / (per[b][0] + per[b][1]), 3)}
-            for b in buckets if b in per]
-        slot["priority"] = round(
-            _STATE_PRIORITY[status] * support_factor * rate_factor, 4)
+            {
+                "bucket": b,
+                "n": per[b][0] + per[b][1],
+                "fail_rate": round(per[b][0] / (per[b][0] + per[b][1]), 3),
+            }
+            for b in buckets
+            if b in per
+        ]
+        slot["priority"] = round(_STATE_PRIORITY[status] * support_factor * rate_factor, 4)
         out.append(slot)
 
     total = sum(s["priority"] for s in out) or 1.0
@@ -1008,8 +1082,12 @@ def behavior_state(rows: Sequence[dict], *,
         slot["budget_share"] = round(pool * slot["priority"] / total, 4)
         del slot["by_bucket"]
     out.sort(key=lambda s: -s["budget_share"])
-    return {"regions": out, "exploration_share": round(1.0 - pool, 4),
-            "traces": n, "buckets": buckets}
+    return {
+        "regions": out,
+        "exploration_share": round(1.0 - pool, 4),
+        "traces": n,
+        "buckets": buckets,
+    }
 
 
 def region_progress(state: dict, generated_rows: Sequence[dict]) -> list[dict]:
@@ -1035,12 +1113,13 @@ def region_progress(state: dict, generated_rows: Sequence[dict]) -> list[dict]:
         trace_rate = hist[-1]["fail_rate"] if hist else None
         pair = counts.get(rid)
         gen_n = (pair[0] + pair[1]) if pair else 0
-        out.append({
-            "region": rid,
-            "status": region.get("status"),
-            "trace_fail_rate": trace_rate,
-            "generated_n": gen_n,
-            "generated_fail_rate": (round(pair[0] / gen_n, 3)
-                                    if pair and gen_n else None),
-        })
+        out.append(
+            {
+                "region": rid,
+                "status": region.get("status"),
+                "trace_fail_rate": trace_rate,
+                "generated_n": gen_n,
+                "generated_fail_rate": (round(pair[0] / gen_n, 3) if pair and gen_n else None),
+            }
+        )
     return out

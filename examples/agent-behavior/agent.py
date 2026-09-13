@@ -25,6 +25,7 @@ really passes or fails, the held-out grade is real, and every flag comes from
 the transcript. The persona decides how the agent behaves; nothing decides what
 gets recorded about it.
 """
+
 from __future__ import annotations
 
 import json
@@ -156,7 +157,9 @@ class Llm:
     `max_tokens` can be spent entirely on reasoning and return empty content.
     """
 
-    def __init__(self, url: str | None = None, key: str | None = None, model: str | None = None) -> None:
+    def __init__(
+        self, url: str | None = None, key: str | None = None, model: str | None = None
+    ) -> None:
         endpoint = url or os.environ.get(MODEL_URL_ENV, "")
         if not endpoint:
             raise LlmError(
@@ -168,7 +171,9 @@ class Llm:
         self.key = key or os.environ.get(MODEL_KEY_ENV, "")
         self.model = model or os.environ.get("ZEROPROOF_MODEL") or DEFAULT_MODEL
 
-    def chat(self, messages: list[dict], tools: list[dict] | None = None, temperature: float = 0.7) -> dict:
+    def chat(
+        self, messages: list[dict], tools: list[dict] | None = None, temperature: float = 0.7
+    ) -> dict:
         payload: dict = {
             "model": self.model,
             "messages": messages,
@@ -191,7 +196,9 @@ class Llm:
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_S) as response:
                 body = json.loads(response.read())
         except urllib.error.HTTPError as err:
-            raise LlmError(f"model {err.code}: {err.read().decode(errors='replace')[:300]}") from None
+            raise LlmError(
+                f"model {err.code}: {err.read().decode(errors='replace')[:300]}"
+            ) from None
         except urllib.error.URLError as err:
             raise LlmError(f"model unreachable: {err.reason}") from None
 
@@ -304,7 +311,11 @@ def run_turn(task, persona: str, llm: Llm, max_steps: int = 12) -> Run:
                     "role": "assistant",
                     "content": reply["content"],
                     "tool_calls": [
-                        {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"]}}
+                        {
+                            "id": c["id"],
+                            "type": "function",
+                            "function": {"name": c["name"], "arguments": c["arguments"]},
+                        }
                         for c in reply["tool_calls"]
                     ],
                 }
@@ -316,12 +327,19 @@ def run_turn(task, persona: str, llm: Llm, max_steps: int = 12) -> Run:
                 duration = time.time() * 1000 - started
 
                 run.signals.observe(
-                    Observation(call["name"], call["arguments"], output, failed, int(started), int(duration))
+                    Observation(
+                        call["name"], call["arguments"], output, failed, int(started), int(duration)
+                    )
                 )
                 run.steps.append(
                     Step(
                         "tool",
-                        {"name": call["name"], "arguments": call["arguments"], "result": output, "failed": failed},
+                        {
+                            "name": call["name"],
+                            "arguments": call["arguments"],
+                            "result": output,
+                            "failed": failed,
+                        },
                         started,
                         duration,
                     )
@@ -393,7 +411,10 @@ def judge(task, run: Run, llm: Llm) -> tuple[dict, str]:
     """Review one turn. Returns the parsed verdict and the judge's raw reply."""
     try:
         reply = llm.chat(
-            [{"role": "system", "content": JUDGE_PROMPT}, {"role": "user", "content": transcript(task, run)}],
+            [
+                {"role": "system", "content": JUDGE_PROMPT},
+                {"role": "user", "content": transcript(task, run)},
+            ],
             temperature=0.0,
         )
         raw = (reply["content"] or "").strip()

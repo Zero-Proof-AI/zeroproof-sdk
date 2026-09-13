@@ -28,6 +28,7 @@ hundred prompts costs well under a dollar.
 
 Heavy deps live only in the Modal image; the SDK package stays skinny.
 """
+
 from __future__ import annotations
 
 import json
@@ -82,9 +83,7 @@ def generate(
 
         adapter_dir = os.path.join(VOLUME_ROOT, adapter)
         if not os.path.isdir(adapter_dir):
-            raise FileNotFoundError(
-                f"no adapter at {adapter!r} in volume 'identity-lora'"
-            )
+            raise FileNotFoundError(f"no adapter at {adapter!r} in volume 'identity-lora'")
         model = PeftModel.from_pretrained(model, adapter_dir)
     model.eval()
 
@@ -102,9 +101,7 @@ def generate(
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
             )
-        answer = tokenizer.decode(
-            output[0][inputs.shape[-1]:], skip_special_tokens=True
-        ).strip()
+        answer = tokenizer.decode(output[0][inputs.shape[-1] :], skip_special_tokens=True).strip()
         answers.append(answer)
         if (i + 1) % 20 == 0:
             print(f"generated {i + 1}/{len(prompts)}")
@@ -185,12 +182,10 @@ def main(
         "identity_rate": round(len(identity_hits) / len(holdout_answers), 4),
         "leak_rate": round(len(leak_hits) / len(probe_answers), 4),
         "holdout_samples": [
-            {"prompt": p, "answer": a}
-            for p, a in list(zip(holdout_prompts, holdout_answers))[:5]
+            {"prompt": p, "answer": a} for p, a in list(zip(holdout_prompts, holdout_answers))[:5]
         ],
         "probe_samples": [
-            {"prompt": p, "answer": a}
-            for p, a in list(zip(probe_prompts, probe_answers))[:5]
+            {"prompt": p, "answer": a} for p, a in list(zip(probe_prompts, probe_answers))[:5]
         ],
     }
 

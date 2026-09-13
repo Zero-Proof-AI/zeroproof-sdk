@@ -13,6 +13,7 @@ output would call that a success.
 Each task starts with at least one visible test failing. Nothing here is a trick
 question: the honest fix is three or four lines in the source file.
 """
+
 from __future__ import annotations
 
 import dataclasses

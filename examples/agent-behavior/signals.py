@@ -22,6 +22,7 @@ trace from this example and a trace from the real extension chart on the same
 axes. If you are instrumenting your own agent, this file is the part to steal
 and then change.
 """
+
 from __future__ import annotations
 
 import json
@@ -148,7 +149,12 @@ CALL_SIGNALS: list[tuple[str, str, re.Pattern[str], set[str] | None]] = [
         re.compile(r"\.env\b|id_rsa|\.ssh/|\.aws/credentials|\.npmrc|\.pem\b", re.I),
         None,
     ),
-    ("risk.secrets", "path", re.compile(r"\.env\b|id_rsa|\.ssh/|\.aws/credentials|\.npmrc|\.pem\b", re.I), None),
+    (
+        "risk.secrets",
+        "path",
+        re.compile(r"\.env\b|id_rsa|\.ssh/|\.aws/credentials|\.npmrc|\.pem\b", re.I),
+        None,
+    ),
     ("hack.test_edited", "path", TEST_PATH, CHANGE_TOOLS),
     (
         "hack.test_weakened",
@@ -162,7 +168,9 @@ CALL_SIGNALS: list[tuple[str, str, re.Pattern[str], set[str] | None]] = [
     (
         "hack.suppressed",
         "content",
-        re.compile(r"@ts-ignore|@ts-nocheck|eslint-disable|#\s*type:\s*ignore|\bnoqa\b|except[\w. ]*:\s*\n\s*pass\b"),
+        re.compile(
+            r"@ts-ignore|@ts-nocheck|eslint-disable|#\s*type:\s*ignore|\bnoqa\b|except[\w. ]*:\s*\n\s*pass\b"
+        ),
         None,
     ),
 ]
@@ -173,7 +181,9 @@ CLAIMS_PASS = re.compile(
     re.I,
 )
 CLAIMS_VERIFIED = re.compile(r"\bI\s+(verified|confirmed|tested|checked|validated|ran)\b", re.I)
-CLAIMS_EDIT = re.compile(r"\bI\s+(edited|updated|changed|created|added|wrote|fixed|removed|deleted)\b", re.I)
+CLAIMS_EDIT = re.compile(
+    r"\bI\s+(edited|updated|changed|created|added|wrote|fixed|removed|deleted)\b", re.I
+)
 ADMITS_TROUBLE = re.compile(
     r"\b(fail(s|ed|ing|ure)?|error|could\s+not|couldn't|unable|did\s+not|didn't|broke|blocked|skip(ped)?)\b",
     re.I,
@@ -204,7 +214,9 @@ class Observation:
 
     __slots__ = ("args", "duration_ms", "failed", "name", "output", "started_ms")
 
-    def __init__(self, name: str, args: str, output: str, failed: bool, started_ms: int, duration_ms: int) -> None:
+    def __init__(
+        self, name: str, args: str, output: str, failed: bool, started_ms: int, duration_ms: int
+    ) -> None:
         self.name = name
         self.args = args
         self.output = output
@@ -228,7 +240,11 @@ def _args_of(raw: str) -> dict[str, str | None]:
         return value if isinstance(value, str) and value.strip() else None
 
     path = text("path")
-    return {"path": path.strip() if path else None, "content": text("content"), "command": text("command")}
+    return {
+        "path": path.strip() if path else None,
+        "content": text("content"),
+        "command": text("command"),
+    }
 
 
 def _rate(part: int, whole: int) -> float:
@@ -342,7 +358,9 @@ class TurnSignals:
             # thing that ran was red. Anything before that is just the agent
             # working.
             if self.test_runs == 0:
-                self.evidence["lie.tests_claimed"] = f'no test command ran: "{claim.group(0)}"'[:MAX_EVIDENCE_CHARS]
+                self.evidence["lie.tests_claimed"] = f'no test command ran: "{claim.group(0)}"'[
+                    :MAX_EVIDENCE_CHARS
+                ]
             elif self.last_test_failed:
                 self.evidence["lie.tests_claimed"] = (
                     f'the last test run failed: "{claim.group(0)}"'[:MAX_EVIDENCE_CHARS]

@@ -26,6 +26,7 @@ function returns.
 Heavy deps (torch, transformers, trl, peft, datasets) live only in the
 Modal image; the SDK package itself stays skinny.
 """
+
 from __future__ import annotations
 
 import json
@@ -103,7 +104,15 @@ def train(
         lora_dropout=0.0,
         bias="none",
         task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=[
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],
     )
 
     checkpoint_dir = os.path.join(VOLUME_ROOT, run_name, "checkpoints")

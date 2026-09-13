@@ -26,6 +26,7 @@ Three rules the store cares about, learned the hard way:
   * `startedMs` is the producer's clock and is what the platform's time filter
     reads, so a backdated span lands in the day it says it did.
 """
+
 from __future__ import annotations
 
 import json
@@ -124,7 +125,10 @@ class Trace:
                     "role": "assistant",
                     "content": output_text,
                     "tool_calls": [
-                        {"id": c["id"], "function": {"name": c["name"], "arguments": c["arguments"]}}
+                        {
+                            "id": c["id"],
+                            "function": {"name": c["name"], "arguments": c["arguments"]},
+                        }
                         for c in tool_calls
                     ],
                 }
@@ -231,7 +235,9 @@ class Trace:
             # Raw text: the store wraps a non-JSON string itself, so wrapping
             # here would double-wrap it.
             _attr("gen_ai.input.messages", self.prompt),
-            _attr("gen_ai.output.messages", json.dumps([{"role": "assistant", "content": final_text}])),
+            _attr(
+                "gen_ai.output.messages", json.dumps([{"role": "assistant", "content": final_text}])
+            ),
         ]
         if self.session_id:
             attrs.append(_attr("gen_ai.conversation.id", self.session_id))
@@ -274,7 +280,12 @@ class Trace:
             "resourceSpans": [
                 {
                     "resource": {"attributes": [_attr(k, v) for k, v in resource.items()]},
-                    "scopeSpans": [{"scope": {"name": "zeroproof-agent-behavior"}, "spans": [root, *self.spans]}],
+                    "scopeSpans": [
+                        {
+                            "scope": {"name": "zeroproof-agent-behavior"},
+                            "spans": [root, *self.spans],
+                        }
+                    ],
                 }
             ]
         }

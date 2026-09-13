@@ -4,6 +4,7 @@ Every row of the form ``| `name` | `literal` | ...`` whose name maps to a
 RunConfig field is compared against a default resolve_run_config(). A
 wrong number in the table is a test failure, not a support ticket.
 """
+
 from __future__ import annotations
 
 import ast
@@ -48,10 +49,19 @@ def _documented_defaults() -> dict[str, object]:
 def test_readme_parameter_tables_match_resolved_defaults():
     documented = _documented_defaults()
     assert len(documented) >= 8, documented
-    cfg = resolve_run_config(None, tools=[{"type": "function", "function": {
-        "name": "noop", "parameters": {"type": "object", "properties": {}}}}],
-        system_prompt="An agent.")
-    mismatched = {name: (value, FIELDS[name](cfg))
-                  for name, value in documented.items()
-                  if FIELDS[name](cfg) != value}
+    cfg = resolve_run_config(
+        None,
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "noop", "parameters": {"type": "object", "properties": {}}},
+            }
+        ],
+        system_prompt="An agent.",
+    )
+    mismatched = {
+        name: (value, FIELDS[name](cfg))
+        for name, value in documented.items()
+        if FIELDS[name](cfg) != value
+    }
     assert not mismatched, f"README says / code does: {mismatched}"

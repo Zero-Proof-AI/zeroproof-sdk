@@ -1,4 +1,5 @@
 """Run-level coverage curve and saturation prediction (cheap, no dashboard)."""
+
 from __future__ import annotations
 
 import json
@@ -53,8 +54,7 @@ def coverage_point(
     """One snapshot after a rollout batch."""
     prompts = {t.get("prompt") for t in trajectories if t.get("prompt")}
     sids = {t.get("scenario_id") for t in trajectories if t.get("scenario_id")}
-    sigs = {t.get("behavior_signature") for t in trajectories
-            if t.get("behavior_signature")}
+    sigs = {t.get("behavior_signature") for t in trajectories if t.get("behavior_signature")}
     return {
         "n_rows": len(trajectories),
         "unique_prompts": len(prompts),
@@ -106,8 +106,12 @@ def build_coverage_summary(
     """Final run-level coverage summary."""
     point = coverage_point([], cells=set(), shape_keys=set()) if not curve else dict(curve[-1])
     pred = predict_to_saturation(
-        curve, budget=budget, flat_streak=flat_streak,
-        last_batch_size=last_batch_size, copy_deficit=copy_deficit)
+        curve,
+        budget=budget,
+        flat_streak=flat_streak,
+        last_batch_size=last_batch_size,
+        copy_deficit=copy_deficit,
+    )
     return {
         "rows": point.get("n_rows", 0),
         "unique_prompts": point.get("unique_prompts", 0),
@@ -124,9 +128,10 @@ def build_coverage_summary(
 
 
 def _pairs(assignment: dict) -> set[tuple]:
-    items = sorted((str(k), str(v)) for k, v in assignment.items()
-                   if v not in (None, "") and k != "origin")
-    return {(a, b) for i, a in enumerate(items) for b in items[i + 1:]}
+    items = sorted(
+        (str(k), str(v)) for k, v in assignment.items() if v not in (None, "") and k != "origin"
+    )
+    return {(a, b) for i, a in enumerate(items) for b in items[i + 1 :]}
 
 
 def pairwise_coverage(planned: list[dict], observed: list[dict]) -> dict[str, Any]:

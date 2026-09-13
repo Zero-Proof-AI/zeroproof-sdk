@@ -1,4 +1,5 @@
 """Second-pass conversation quality ranker. Scores rows; does not rewrite them."""
+
 from __future__ import annotations
 
 import contextlib
@@ -47,8 +48,7 @@ _HARD_LEAK = re.compile(
     re.I,
 )
 _CALL_SYNTAX = re.compile(r"\b[a-z][a-z0-9]*_[a-z0-9_]*\s*\(")
-_STRONG_ACTION = re.compile(
-    r"\b(merge|refund|schedule|commit|deploy|rebase|checkout)\b", re.I)
+_STRONG_ACTION = re.compile(r"\b(merge|refund|schedule|commit|deploy|rebase|checkout)\b", re.I)
 _ACTION = re.compile(
     r"\b(merge|refund|schedule|search|look(?:ing)? up|lookup|cancel|"
     r"create|delete|comment|close|open|move|run|deploy|send|book|"
@@ -76,6 +76,7 @@ def _messages(row: dict) -> list[dict]:
     if isinstance(msgs, list) and msgs:
         return [m for m in msgs if isinstance(m, dict)]
     from zeroproof.simulations import conversation
+
     return conversation(row)
 
 
@@ -123,8 +124,7 @@ def _same_beat(prev: dict, content: str, has_tools: bool) -> bool:
         return True
     if prev["tools"] and _substantial(content) and not has_tools:
         return True
-    if (_substantial(prev_text) and _substantial(content)
-            and not has_tools and not prev["tools"]):
+    if _substantial(prev_text) and _substantial(content) and not has_tools and not prev["tools"]:
         return False
     return bool(not _substantial(content))
 
@@ -142,13 +142,11 @@ def _beats(messages: list[dict]) -> list[dict]:
         if role != "assistant":
             continue
         has_tools = bool(m.get("tool_calls"))
-        if (beats and beats[-1]["role"] == "assistant"
-                and _same_beat(beats[-1], content, has_tools)):
+        if beats and beats[-1]["role"] == "assistant" and _same_beat(beats[-1], content, has_tools):
             beats[-1]["texts"].append(content)
             beats[-1]["tools"] = beats[-1]["tools"] or has_tools
         else:
-            beats.append({"role": "assistant", "texts": [content],
-                          "tools": has_tools})
+            beats.append({"role": "assistant", "texts": [content], "tools": has_tools})
     return beats
 
 
@@ -217,8 +215,7 @@ def _score_ping_pong(beats: list[dict]) -> tuple[float, str]:
         return 0.1, "no agent turn"
     if adjacent_user:
         return 0.3, "adjacent user turns"
-    alternating = all(beats[i]["role"] != beats[i - 1]["role"]
-                      for i in range(1, len(beats)))
+    alternating = all(beats[i]["role"] != beats[i - 1]["role"] for i in range(1, len(beats)))
     if not alternating:
         return 0.3, "roles do not alternate"
     if beats[-1]["role"] == "user":
@@ -240,14 +237,15 @@ def _score_leak(user_texts: list[str], assistant_texts: list[str]) -> tuple[floa
     return 0.0, "leaked " + uniq[0]
 
 
-def _score_complexity(row: dict, messages: list[dict], beats: list[dict],
-                      tools: set[str], opener: str, final: str) -> tuple[float, str]:
+def _score_complexity(
+    row: dict, messages: list[dict], beats: list[dict], tools: set[str], opener: str, final: str
+) -> tuple[float, str]:
     n_user = sum(1 for b in beats if b["role"] == "user")
     n_words = len(_words(opener))
     final_n = len(_words(final))
     stub = bool(_INFRA_STUB.search(final.strip())) if final.strip() else not tools
     strong = bool(_IDISH.search(opener) or _STRONG_ACTION.search(opener))
-    clarify = (n_user <= 1 and not tools and _QUESTION_END.search(final))
+    clarify = n_user <= 1 and not tools and _QUESTION_END.search(final)
     if _DEGENERATE.search(final):
         return 0.2, "degenerate reply"
     if stub and not tools and n_user <= 1 and n_words < 8:
@@ -273,9 +271,13 @@ def _score_complexity(row: dict, messages: list[dict], beats: list[dict],
     return score, ""
 
 
-def _score_structure(messages: list[dict], beats: list[dict],
-                     final: str, user_texts: list[str],
-                     assistant_texts: list[str]) -> tuple[float, str]:
+def _score_structure(
+    messages: list[dict],
+    beats: list[dict],
+    final: str,
+    user_texts: list[str],
+    assistant_texts: list[str],
+) -> tuple[float, str]:
     notes: list[str] = []
     score = 1.0
     last_role = messages[-1].get("role") if messages else None
@@ -302,12 +304,14 @@ def _score_structure(messages: list[dict], beats: list[dict],
         score -= 0.2
         notes.append("final_text not in messages")
     for i, follow in enumerate(user_texts[1:], start=1):
-        prior_agent = assistant_texts[min(i - 1, len(assistant_texts) - 1)] if assistant_texts else ""
+        prior_agent = (
+            assistant_texts[min(i - 1, len(assistant_texts) - 1)] if assistant_texts else ""
+        )
         if not usable_user_message(follow):
             score -= 0.35
             notes.append("follow-up left world")
             break
-        if (_ID_FOLLOW.search(follow) or len(_words(follow)) <= 8):
+        if _ID_FOLLOW.search(follow) or len(_words(follow)) <= 8:
             continue
         if prior_agent and _echoes_agent(follow, prior_agent):
             score -= 0.35
@@ -345,8 +349,7 @@ def score_row(row: dict) -> dict[str, Any]:
         "structure": round(struct_s, 3),
     }
     quality = round(sum(scores[k] for k in DIMENSIONS) / len(DIMENSIONS), 3)
-    notes = list(dict.fromkeys(
-        n for n in (opener_n, ping_n, leak_n, comp_n, struct_n) if n))
+    notes = list(dict.fromkeys(n for n in (opener_n, ping_n, leak_n, comp_n, struct_n) if n))
     fails = [k for k in DIMENSIONS if scores[k] < FAIL]
     reason = "conforms" if not fails else "; ".join(notes) if notes else "below rubric"
     return {
@@ -402,8 +405,10 @@ def summarize(rows: Sequence[dict], *, top: int = 3) -> dict[str, Any]:
             buckets["0.70-0.84"] += 1
         else:
             buckets[">=0.85"] += 1
-    ranked = sorted(rows, key=lambda r: (
-        float(r.get("quality") or 0.0), str(r.get("prompt") or "")))
+    ranked = sorted(
+        rows, key=lambda r: (float(r.get("quality") or 0.0), str(r.get("prompt") or ""))
+    )
+
     def card(r):
         return {
             "quality": r.get("quality"),
@@ -424,6 +429,7 @@ def summarize(rows: Sequence[dict], *, top: int = 3) -> dict[str, Any]:
             if len(out) >= n:
                 break
         return out
+
     mean = round(statistics.fmean(values), 3) if values else 0.0
     median = round(statistics.median(values), 3) if values else 0.0
     return {
@@ -473,8 +479,7 @@ def load_jsonl(path: str | Path) -> list[dict]:
 _load_jsonl = load_jsonl  # old private name, kept for imports that still use it
 
 
-def rank(source, *, output: str | None = None,
-         min_quality: float | None = None) -> dict[str, Any]:
+def rank(source, *, output: str | None = None, min_quality: float | None = None) -> dict[str, Any]:
     """Score a JSONL path or a list of rows. Writes scored JSONL when given a path.
 
     Existing keys stay. ``quality``, ``quality_reason``, and ``quality_scores``
@@ -492,8 +497,12 @@ def rank(source, *, output: str | None = None,
     written = None
     kept = rows
     if dest:
-        if (min_quality is not None and output
-                and src and Path(output).resolve() != Path(src).resolve()):
+        if (
+            min_quality is not None
+            and output
+            and src
+            and Path(output).resolve() != Path(src).resolve()
+        ):
             kept = [r for r in rows if float(r.get("quality") or 0.0) >= min_quality]
         written = write_jsonl(dest, kept)
     report = summarize(rows)
@@ -501,8 +510,7 @@ def rank(source, *, output: str | None = None,
     report["n_written"] = len(kept) if dest else 0
     if min_quality is not None:
         report["min_quality"] = min_quality
-        report["n_kept"] = sum(
-            1 for r in rows if float(r.get("quality") or 0.0) >= min_quality)
+        report["n_kept"] = sum(1 for r in rows if float(r.get("quality") or 0.0) >= min_quality)
     return report
 
 
@@ -512,10 +520,10 @@ def format_report(report: dict) -> str:
         f"n={report.get('n', 0)}  mean={report.get('mean')}  "
         f"median={report.get('median')}  "
         f"min={report.get('min')}  max={report.get('max')}",
-        "distribution: " + ", ".join(
-            f"{k}={v}" for k, v in (report.get("distribution") or {}).items()),
-        "fail rates: " + ", ".join(
-            f"{k}={v:.0%}" for k, v in (report.get("fail_rates") or {}).items()),
+        "distribution: "
+        + ", ".join(f"{k}={v}" for k, v in (report.get("distribution") or {}).items()),
+        "fail rates: "
+        + ", ".join(f"{k}={v:.0%}" for k, v in (report.get("fail_rates") or {}).items()),
     ]
     if report.get("path"):
         lines.append(f"wrote {report.get('n_written', 0)} rows to {report['path']}")
@@ -526,19 +534,25 @@ def format_report(report: dict) -> str:
         lines.append(f"{label}:")
         for item in items:
             lines.append(
-                f"  {item.get('quality'):.3f}  {item.get('quality_reason')}  "
-                f"{item.get('prompt')}")
+                f"  {item.get('quality'):.3f}  {item.get('quality_reason')}  {item.get('prompt')}"
+            )
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+
     parser = argparse.ArgumentParser(
-        description="Score generated conversation JSONL with the quality rubric.")
+        description="Score generated conversation JSONL with the quality rubric."
+    )
     parser.add_argument("path", help="JSONL from simulate().save()")
     parser.add_argument("-o", "--output", help="Scored JSONL path. Default: rewrite path.")
-    parser.add_argument("--min-quality", type=float, default=None,
-                        help="If set with --output, write only rows at or above this score.")
+    parser.add_argument(
+        "--min-quality",
+        type=float,
+        default=None,
+        help="If set with --output, write only rows at or above this score.",
+    )
     args = parser.parse_args(argv)
     report = rank(args.path, output=args.output, min_quality=args.min_quality)
     print(format_report(report))

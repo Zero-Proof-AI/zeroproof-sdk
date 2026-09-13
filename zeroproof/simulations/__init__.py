@@ -11,6 +11,7 @@ malicious), and rolls the agent. Grade 0/1 later. Optimize for post-training.
     zps.grade("rollout.jsonl")                         # hosted Qwen 0/1
     zps.optimize("rollout.jsonl", output="train.jsonl")
 """
+
 from __future__ import annotations
 
 import logging as _logging

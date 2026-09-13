@@ -1,4 +1,5 @@
 """Offline-only mutations of existing user messages. Live path never wraps Qwen text."""
+
 from __future__ import annotations
 
 import hashlib
@@ -18,7 +19,7 @@ def crossover(a: str, b: str) -> str:
     sa, sb = _sentences(a), _sentences(b)
     if not sa or not sb:
         return a
-    return " ".join(sa[: max(1, len(sa) // 2)] + sb[max(1, len(sb) // 2):])
+    return " ".join(sa[: max(1, len(sa) // 2)] + sb[max(1, len(sb) // 2) :])
 
 
 def truncate(a: str) -> str:
@@ -46,9 +47,12 @@ def reverse_sentences(a: str) -> str:
 
 def list_structure(a: str) -> str:
     sentences = _sentences(a)
-    parts = sentences if len(sentences) > 1 else [p.strip() for p in re.split(r",|;", a) if p.strip()]
+    parts = (
+        sentences if len(sentences) > 1 else [p.strip() for p in re.split(r",|;", a) if p.strip()]
+    )
     return "Please handle all of these:\n" + "\n".join(
-        f"{index + 1}. {part}" for index, part in enumerate(parts))
+        f"{index + 1}. {part}" for index, part in enumerate(parts)
+    )
 
 
 def punctuation_free(a: str) -> str:
@@ -60,7 +64,7 @@ def token_delete(a: str, i: int) -> str:
     if len(words) < 4:
         return a
     index = (i * 7 + len(words) // 2) % len(words)
-    return " ".join(words[:index] + words[index + 1:])
+    return " ".join(words[:index] + words[index + 1 :])
 
 
 def token_swap(a: str, i: int) -> str:
@@ -80,7 +84,7 @@ def typo_transpose(a: str, i: int) -> str:
     index = eligible[i % len(eligible)]
     word = words[index]
     pos = max(1, min(len(word) - 2, len(word) // 2))
-    words[index] = word[:pos] + word[pos + 1] + word[pos] + word[pos + 2:]
+    words[index] = word[:pos] + word[pos + 1] + word[pos] + word[pos + 2 :]
     return " ".join(words)
 
 
@@ -94,8 +98,7 @@ def structured_payload(a: str) -> str:
 
 
 def follow_up_correction(a: str) -> str:
-    return (a + _TURN +
-            "Wait, use the other one. Check what already happened before acting again.")
+    return a + _TURN + "Wait, use the other one. Check what already happened before acting again."
 
 
 MUTATORS = (
@@ -116,8 +119,7 @@ MUTATORS = (
 )
 
 
-def mutate_pool(texts: list[str], rounds: int = 1,
-                limit: int = 20_000) -> list[tuple[str, str]]:
+def mutate_pool(texts: list[str], rounds: int = 1, limit: int = 20_000) -> list[tuple[str, str]]:
     """Apply every mutator across the pool. Returns (mutator_name, text)."""
     out: list[tuple[str, str]] = []
     seen: set[str] = set()

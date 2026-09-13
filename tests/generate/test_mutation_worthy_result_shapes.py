@@ -9,6 +9,7 @@ crashed `simulate(agent=...)` outright with
 
 so every one of those adapters was unusable with a callable agent.
 """
+
 import pytest
 
 from zeroproof.simulations.generate.adapters import parse_claude_stream
@@ -19,14 +20,17 @@ def step(result):
     return {"tool": "read_file", "arguments": {"path": "a.py"}, "result": result}
 
 
-@pytest.mark.parametrize("result", [
-    "plain text a tool returned",
-    "ERROR: something went wrong",
-    "",
-    None,
-    123,
-    ["a", "list"],
-])
+@pytest.mark.parametrize(
+    "result",
+    [
+        "plain text a tool returned",
+        "ERROR: something went wrong",
+        "",
+        None,
+        123,
+        ["a", "list"],
+    ],
+)
 def test_non_dict_results_do_not_crash(result):
     assert _mutation_worthy({"steps": [step(result)]}) is False
 
@@ -55,13 +59,15 @@ def test_non_dict_steps_are_skipped():
 
 def test_steps_from_a_real_adapter_do_not_crash():
     """The shape `claude_code` actually emits: result is a string."""
-    stream = "\n".join([
-        '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1",'
-        '"name":"read_file","input":{"path":"a.py"}}]}}',
-        '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1",'
-        '"content":"file contents here"}]}}',
-        '{"type":"result","result":"done"}',
-    ])
+    stream = "\n".join(
+        [
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1",'
+            '"name":"read_file","input":{"path":"a.py"}}]}}',
+            '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1",'
+            '"content":"file contents here"}]}}',
+            '{"type":"result","result":"done"}',
+        ]
+    )
     parsed = parse_claude_stream(stream)
     assert isinstance(parsed["steps"][0]["result"], str)
     assert _mutation_worthy(parsed) is False

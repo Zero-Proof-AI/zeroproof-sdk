@@ -1,4 +1,5 @@
 """``zeroproof_simulations`` is an alias of ``zeroproof.simulations``, not a copy."""
+
 from __future__ import annotations
 
 import importlib
@@ -9,6 +10,7 @@ import warnings
 
 def test_legacy_top_level_name_is_the_same_module():
     import zeroproof.simulations as new
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         old = importlib.import_module("zeroproof_simulations")
@@ -18,6 +20,7 @@ def test_legacy_top_level_name_is_the_same_module():
 def test_legacy_submodule_paths_are_the_same_objects():
     from zeroproof.simulations.run import engine as new_engine
     from zeroproof.simulations.score import judging as new_judging
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         old_engine = importlib.import_module("zeroproof_simulations.run.engine")
@@ -40,7 +43,8 @@ print("warned-and-aliased")
 
 
 def test_fresh_interpreter_warns_and_aliases():
-    out = subprocess.run([sys.executable, "-c", _FRESH],
-                         capture_output=True, text=True, timeout=120)
+    out = subprocess.run(
+        [sys.executable, "-c", _FRESH], capture_output=True, text=True, timeout=120
+    )
     assert out.returncode == 0, out.stderr[-1500:]
     assert "warned-and-aliased" in out.stdout

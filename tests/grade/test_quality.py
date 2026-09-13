@@ -1,4 +1,5 @@
 """Deterministic quality ranker. No GPU."""
+
 from __future__ import annotations
 
 import json
@@ -13,33 +14,38 @@ def _good(**extra):
     row = {
         "prompt": "can you look up order ORD-4412, the tracking looks stuck",
         "messages": [
-            {"role": "user",
-             "content": "can you look up order ORD-4412, the tracking looks stuck"},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"name": "lookup_order",
-                             "arguments": {"order_id": "ORD-4412"}}]},
-            {"role": "tool", "name": "lookup_order",
-             "content": '{"status": "ok"}'},
-            {"role": "assistant",
-             "content": "ORD-4412 is packed and sitting in Chicago."},
-            {"role": "user",
-             "content": "ok and can you start the refund for the late delivery"},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"name": "create_refund",
-                             "arguments": {"order_id": "ORD-4412",
-                                           "amount": 40}}]},
-            {"role": "tool", "name": "create_refund",
-             "content": '{"status": "created"}'},
+            {"role": "user", "content": "can you look up order ORD-4412, the tracking looks stuck"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"name": "lookup_order", "arguments": {"order_id": "ORD-4412"}}],
+            },
+            {"role": "tool", "name": "lookup_order", "content": '{"status": "ok"}'},
+            {"role": "assistant", "content": "ORD-4412 is packed and sitting in Chicago."},
+            {"role": "user", "content": "ok and can you start the refund for the late delivery"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"name": "create_refund", "arguments": {"order_id": "ORD-4412", "amount": 40}}
+                ],
+            },
+            {"role": "tool", "name": "create_refund", "content": '{"status": "created"}'},
             {"role": "assistant", "content": final},
         ],
         "steps": [
-            {"tool": "lookup_order", "arguments": {"order_id": "ORD-4412"},
-             "result": {"status": "ok"}},
+            {
+                "tool": "lookup_order",
+                "arguments": {"order_id": "ORD-4412"},
+                "result": {"status": "ok"},
+            },
             {"text": "ORD-4412 is packed and sitting in Chicago."},
             {"user": "ok and can you start the refund for the late delivery"},
-            {"tool": "create_refund",
-             "arguments": {"order_id": "ORD-4412", "amount": 40},
-             "result": {"status": "created"}},
+            {
+                "tool": "create_refund",
+                "arguments": {"order_id": "ORD-4412", "amount": 40},
+                "result": {"status": "created"},
+            },
             {"text": final},
         ],
         "final_text": final,
@@ -82,12 +88,15 @@ def test_stacked_assistant_variants_fail_ping_pong():
         "messages": [
             {"role": "user", "content": "where's order ORD-1"},
             {"role": "assistant", "content": "I found ORD-1. It shipped yesterday."},
-            {"role": "assistant",
-             "content": "Looking again, ORD-1 appears to have shipped yesterday."},
-            {"role": "assistant",
-             "content": "To rephrase, your order ORD-1 shipped yesterday."},
-            {"role": "assistant",
-             "content": "Just to confirm, ORD-1 left the warehouse yesterday."},
+            {
+                "role": "assistant",
+                "content": "Looking again, ORD-1 appears to have shipped yesterday.",
+            },
+            {"role": "assistant", "content": "To rephrase, your order ORD-1 shipped yesterday."},
+            {
+                "role": "assistant",
+                "content": "Just to confirm, ORD-1 left the warehouse yesterday.",
+            },
         ],
         "steps": [
             {"text": "I found ORD-1. It shipped yesterday."},
@@ -113,8 +122,7 @@ def test_leak_fails():
 
 def test_assistant_want_to_check_is_not_a_leak():
     row = _good()
-    row["messages"][-1]["content"] = (
-        "You may want to check your settings. I looked up ORD-4412.")
+    row["messages"][-1]["content"] = "You may want to check your settings. I looked up ORD-4412."
     row["final_text"] = row["messages"][-1]["content"]
     scored = score_row(row)
     assert scored["quality_scores"]["leak"] == 1.0
@@ -140,10 +148,11 @@ def test_clarify_and_stop_fails_complexity():
     row = {
         "prompt": "I need that PR merged, it has been stuck for days",
         "messages": [
-            {"role": "user",
-             "content": "I need that PR merged, it has been stuck for days"},
-            {"role": "assistant",
-             "content": "Could you please provide the repository name and PR number?"},
+            {"role": "user", "content": "I need that PR merged, it has been stuck for days"},
+            {
+                "role": "assistant",
+                "content": "Could you please provide the repository name and PR number?",
+            },
         ],
         "steps": [{"text": "Could you please provide the repository name and PR number?"}],
         "final_text": "Could you please provide the repository name and PR number?",
@@ -163,15 +172,17 @@ def test_stale_final_text_fails_structure():
         "messages": [
             {"role": "user", "content": "move src/old.js to src/new.js"},
             {"role": "assistant", "content": first},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"name": "list_dir", "arguments": {"path": "src"}}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"name": "list_dir", "arguments": {"path": "src"}}],
+            },
             {"role": "tool", "name": "list_dir", "content": '{"status": "ok"}'},
             {"role": "assistant", "content": last},
         ],
         "steps": [
             {"text": first},
-            {"tool": "list_dir", "arguments": {"path": "src"},
-             "result": {"status": "ok"}},
+            {"tool": "list_dir", "arguments": {"path": "src"}, "result": {"status": "ok"}},
             {"text": last},
         ],
         "final_text": first,
@@ -190,15 +201,18 @@ def test_ends_on_user_fails_structure():
 
 
 def test_rank_rows_writes_fields():
-    rows = [_good(), {
-        "prompt": "How can I help you today?",
-        "messages": [
-            {"role": "user", "content": "How can I help you today?"},
-            {"role": "assistant", "content": "I am the assistant."},
-        ],
-        "steps": [{"text": "I am the assistant."}],
-        "final_text": "I am the assistant.",
-    }]
+    rows = [
+        _good(),
+        {
+            "prompt": "How can I help you today?",
+            "messages": [
+                {"role": "user", "content": "How can I help you today?"},
+                {"role": "assistant", "content": "I am the assistant."},
+            ],
+            "steps": [{"text": "I am the assistant."}],
+            "final_text": "I am the assistant.",
+        },
+    ]
     out = zps.rank_rows(rows)
     assert out is rows
     assert rows[0]["quality"] >= 0.85
@@ -210,15 +224,20 @@ def test_rank_path_rewrites_jsonl(tmp_path):
     src = tmp_path / "rows.jsonl"
     with open(src, "w") as fh:
         fh.write(json.dumps(_good()) + "\n")
-        fh.write(json.dumps({
-            "prompt": "asdf qwerty zxcv",
-            "messages": [
-                {"role": "user", "content": "asdf qwerty zxcv"},
-                {"role": "assistant", "content": "ok"},
-            ],
-            "steps": [{"text": "ok"}],
-            "final_text": "ok",
-        }) + "\n")
+        fh.write(
+            json.dumps(
+                {
+                    "prompt": "asdf qwerty zxcv",
+                    "messages": [
+                        {"role": "user", "content": "asdf qwerty zxcv"},
+                        {"role": "assistant", "content": "ok"},
+                    ],
+                    "steps": [{"text": "ok"}],
+                    "final_text": "ok",
+                }
+            )
+            + "\n"
+        )
     report = zps.rank(str(src))
     assert report["n"] == 2
     assert report["worst"]
@@ -234,15 +253,20 @@ def test_rank_filter_writes_kept_only(tmp_path):
     dest = tmp_path / "kept.jsonl"
     with open(src, "w") as fh:
         fh.write(json.dumps(_good()) + "\n")
-        fh.write(json.dumps({
-            "prompt": "!!!!",
-            "messages": [
-                {"role": "user", "content": "!!!!"},
-                {"role": "assistant", "content": "ok"},
-            ],
-            "steps": [{"text": "ok"}],
-            "final_text": "ok",
-        }) + "\n")
+        fh.write(
+            json.dumps(
+                {
+                    "prompt": "!!!!",
+                    "messages": [
+                        {"role": "user", "content": "!!!!"},
+                        {"role": "assistant", "content": "ok"},
+                    ],
+                    "steps": [{"text": "ok"}],
+                    "final_text": "ok",
+                }
+            )
+            + "\n"
+        )
     report = zps.rank(str(src), output=str(dest), min_quality=0.7)
     kept = [json.loads(line) for line in dest.read_text().splitlines() if line]
     assert report["n"] == 2
@@ -263,8 +287,12 @@ def test_steps_only_row_uses_conversation():
     row = {
         "prompt": "where's order ORD-12",
         "steps": [
-            {"tool": "lookup_order", "arguments": {"order_id": "ORD-12"},
-             "result": {"status": "ok"}, "text": "let me look"},
+            {
+                "tool": "lookup_order",
+                "arguments": {"order_id": "ORD-12"},
+                "result": {"status": "ok"},
+                "text": "let me look",
+            },
             {"user": "and the refund?"},
             {"text": "still pending on ORD-12"},
         ],

@@ -9,6 +9,7 @@ spans into conversations, and emits the row shape the whole SDK speaks:
 Attribute fallbacks mirror the platform's trace inspector exactly, so
 both ends of the wire read the same fields.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,17 +18,18 @@ from typing import Any
 
 from ..schema import check, stamp
 
-_MESSAGE_KEYS = ("gen_ai.input.messages", "gen_ai.prompt",
-                 "llm.input_messages")
-_OUTPUT_KEYS = ("gen_ai.output.messages", "gen_ai.completion",
-                "llm.output_messages")
-_TOOL_IN_KEYS = ("gen_ai.tool.call.arguments", "gen_ai.tool.input",
-                 "tool.input")
-_TOOL_OUT_KEYS = ("gen_ai.tool.call.result", "gen_ai.tool.output",
-                  "tool.output")
+_MESSAGE_KEYS = ("gen_ai.input.messages", "gen_ai.prompt", "llm.input_messages")
+_OUTPUT_KEYS = ("gen_ai.output.messages", "gen_ai.completion", "llm.output_messages")
+_TOOL_IN_KEYS = ("gen_ai.tool.call.arguments", "gen_ai.tool.input", "tool.input")
+_TOOL_OUT_KEYS = ("gen_ai.tool.call.result", "gen_ai.tool.output", "tool.output")
 _TOOL_NAME_KEYS = ("gen_ai.tool.name", "tool.name")
-_CONVERSATION_KEYS = ("gen_ai.conversation.id", "conversation.id",
-                      "session.id", "gen_ai.session.id", "thread.id")
+_CONVERSATION_KEYS = (
+    "gen_ai.conversation.id",
+    "conversation.id",
+    "session.id",
+    "gen_ai.session.id",
+    "thread.id",
+)
 
 
 def _otlp_value(value: Any) -> Any:
@@ -36,8 +38,7 @@ def _otlp_value(value: Any) -> Any:
             if key in value:
                 return value[key]
         if "arrayValue" in value:
-            return [_otlp_value(v) for v in
-                    (value["arrayValue"].get("values") or [])]
+            return [_otlp_value(v) for v in (value["arrayValue"].get("values") or [])]
     return value
 
 
@@ -73,9 +74,9 @@ def _parse(value: Any) -> Any:
 def _iter_spans(source: Any):
     if isinstance(source, dict) and "resourceSpans" in source:
         for resource in source.get("resourceSpans") or []:
-            for scope in (resource.get("scopeSpans")
-                          or resource.get("instrumentationLibrarySpans")
-                          or []):
+            for scope in (
+                resource.get("scopeSpans") or resource.get("instrumentationLibrarySpans") or []
+            ):
                 yield from scope.get("spans") or []
         return
     if isinstance(source, dict) and "spans" in source:
@@ -97,8 +98,10 @@ def _message_texts(value: Any, role: str) -> list[str]:
             if isinstance(content, list):
                 content = " ".join(
                     str(part.get("text") or part.get("content") or "")
-                    if isinstance(part, dict) else str(part)
-                    for part in content)
+                    if isinstance(part, dict)
+                    else str(part)
+                    for part in content
+                )
             if content:
                 out.append(str(content))
     elif isinstance(parsed, str) and parsed and role == "user":
@@ -128,14 +131,12 @@ def rows_from_otel(source: Any) -> list[dict]:
         conv = str(_first(attrs, _CONVERSATION_KEYS) or "")
         if conv and trace and trace not in trace_conv:
             trace_conv[trace] = conv
-        start = int(span.get("startTimeUnixNano")
-                    or span.get("start_time_unix_nano") or 0)
+        start = int(span.get("startTimeUnixNano") or span.get("start_time_unix_nano") or 0)
         if not start:
             # Platform-gate span dumps stamp milliseconds, not nanos.
             # Without a timestamp, step order silently becomes span
             # arrival order, which OTLP batch exporters do not preserve.
-            ms = (span.get("startedMs") or span.get("started_ms")
-                  or span.get("startTimeMs") or 0)
+            ms = span.get("startedMs") or span.get("started_ms") or span.get("startTimeMs") or 0
             start = int(ms) * 1_000_000
         spans.append((trace, conv, start, span, attrs))
     groups: dict[str, list[tuple[int, dict, dict]]] = {}
@@ -173,17 +174,16 @@ def rows_from_otel(source: Any) -> list[dict]:
                     reward = int(value) if value in (0.0, 1.0) else value
             tool_args = _first(attrs, _TOOL_IN_KEYS)
             if tool_args is not None:
-                name = str(_first(attrs, _TOOL_NAME_KEYS)
-                           or span.get("name") or "tool")
+                name = str(_first(attrs, _TOOL_NAME_KEYS) or span.get("name") or "tool")
                 result = _parse(_first(attrs, _TOOL_OUT_KEYS))
                 # Emitters like daisy flag failures via gen_ai.tool.status
                 # rather than inside the result payload. Surface that as a
                 # canonical failure result so fault mining and trace aiming
                 # see the error instead of a plain-looking output.
-                tool_status = str(_first(attrs, ("gen_ai.tool.status",))
-                                  or "").lower()
+                tool_status = str(_first(attrs, ("gen_ai.tool.status",)) or "").lower()
                 if tool_status in {"error", "failed", "failure"} and not (
-                        isinstance(result, dict) and result.get("status")):
+                    isinstance(result, dict) and result.get("status")
+                ):
                     error = ""
                     for event in span.get("events") or []:
                         for attr in (event or {}).get("attributes") or []:
@@ -194,11 +194,13 @@ def rows_from_otel(source: Any) -> list[dict]:
                     if error:
                         wrapped["error"] = error
                     result = wrapped
-                steps.append({
-                    "tool": name,
-                    "arguments": _parse(tool_args),
-                    "result": result,
-                })
+                steps.append(
+                    {
+                        "tool": name,
+                        "arguments": _parse(tool_args),
+                        "result": result,
+                    }
+                )
                 continue
             for text in _message_texts(_first(attrs, _MESSAGE_KEYS), "user"):
                 key = " ".join(text.lower().split())
@@ -213,9 +215,12 @@ def rows_from_otel(source: Any) -> list[dict]:
             if outputs:
                 final_text = outputs[-1]
         if prompt or steps or final_text:
-            row: dict[str, Any] = {"prompt": prompt, "steps": steps,
-                   "final_text": final_text,
-                   "conversation_id": conv}
+            row: dict[str, Any] = {
+                "prompt": prompt,
+                "steps": steps,
+                "final_text": final_text,
+                "conversation_id": conv,
+            }
             # Earliest span start, so behavior_state can order history by
             # time instead of trusting the export's row order.
             if entries and entries[0][0]:

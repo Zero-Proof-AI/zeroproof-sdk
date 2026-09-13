@@ -14,6 +14,7 @@ Exit codes:
   0  version unchanged, nothing to cut (prints SKIP)
   1  version is invalid or skips ahead, block the release
 """
+
 from __future__ import annotations
 
 import json
@@ -41,9 +42,10 @@ def published(name: str) -> list[tuple[int, ...]]:
             data = json.load(r)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            return []           # first ever release
+            return []  # first ever release
         raise
     from packaging.version import InvalidVersion, Version
+
     out = []
     for raw in data.get("releases", {}):
         try:
@@ -66,6 +68,7 @@ def fail(msg: str) -> None:
 def main() -> int:
     name, version = local_version()
     from packaging.version import InvalidVersion, Version
+
     try:
         current = Version(version)
     except InvalidVersion:
@@ -73,8 +76,10 @@ def main() -> int:
         return 1
 
     if len(current.release) != 2:
-        fail(f"version must be MAJOR.MINOR in hundredths (e.g. 1.02), got {version!r}. "
-             f"Three-part versions are not part of this scheme.")
+        fail(
+            f"version must be MAJOR.MINOR in hundredths (e.g. 1.02), got {version!r}. "
+            f"Three-part versions are not part of this scheme."
+        )
     if current.pre or current.post or current.dev or current.local:
         fail(f"{version!r} has a pre/post/dev/local segment; releases must be plain.")
 
@@ -103,9 +108,11 @@ def main() -> int:
 
     allowed = next_allowed(latest)
     if current.release != allowed:
-        fail(f"version must step by exactly one hundredth. "
-             f"published {'.'.join(map(str, latest))}, "
-             f"expected {'.'.join(map(str, allowed))}, got {current}")
+        fail(
+            f"version must step by exactly one hundredth. "
+            f"published {'.'.join(map(str, latest))}, "
+            f"expected {'.'.join(map(str, allowed))}, got {current}"
+        )
 
     print(f"::notice::cutting {name} {current}")
     return emit(publish=True, version=str(current))

@@ -1,6 +1,7 @@
 """Canonical trace input: load_traces normalization, the pre-simulation
 trace report with explicit aiming, and the product-critical integration
 test — raw UNGRADED traces to simulated data with no judge involved."""
+
 from __future__ import annotations
 
 import json
@@ -15,13 +16,23 @@ from zeroproof.simulations.ingest.traces import (
 
 
 def test_load_traces_normalizes_alternate_keys():
-    rows = load_traces([
-        {"question": "where is order 4412",
-         "tool_trace": [{"tool": "lookup_order",
-                         "arguments": {"order_id": "4412"},
-                         "result": {"status": "not_found"}}],
-         "final": "I could not find it.", "reward": "0", "extra": "kept"},
-    ])
+    rows = load_traces(
+        [
+            {
+                "question": "where is order 4412",
+                "tool_trace": [
+                    {
+                        "tool": "lookup_order",
+                        "arguments": {"order_id": "4412"},
+                        "result": {"status": "not_found"},
+                    }
+                ],
+                "final": "I could not find it.",
+                "reward": "0",
+                "extra": "kept",
+            },
+        ]
+    )
     row = rows[0]
     assert row["prompt"] == "where is order 4412"
     assert row["steps"][0]["tool"] == "lookup_order"
@@ -31,18 +42,29 @@ def test_load_traces_normalizes_alternate_keys():
 
 
 def test_load_traces_converts_message_only_rollouts():
-    rows = load_traces([
-        {"messages": [
-            {"role": "user", "content": "refund order 9911"},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"function": {
-                 "name": "create_refund",
-                 "arguments": json.dumps({"order_id": "9911"})}}]},
-            {"role": "tool",
-             "content": json.dumps({"status": "timeout"})},
-            {"role": "assistant", "content": "That timed out."},
-        ]},
-    ])
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "refund order 9911"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "create_refund",
+                                    "arguments": json.dumps({"order_id": "9911"}),
+                                }
+                            }
+                        ],
+                    },
+                    {"role": "tool", "content": json.dumps({"status": "timeout"})},
+                    {"role": "assistant", "content": "That timed out."},
+                ]
+            },
+        ]
+    )
     row = rows[0]
     assert row["prompt"] == "refund order 9911"
     tool_step = next(s for s in row["steps"] if "tool" in s)
@@ -53,13 +75,15 @@ def test_load_traces_converts_message_only_rollouts():
 
 
 def test_reward_stays_optional_and_coerces_cleanly():
-    rows = load_traces([
-        {"prompt": "a", "steps": [], "final_text": "x"},
-        {"prompt": "b", "steps": [], "final_text": "x", "reward": True},
-        {"prompt": "c", "steps": [], "final_text": "x", "reward": 1.0},
-        {"prompt": "d", "steps": [], "final_text": "x", "reward": "maybe"},
-        {"prompt": "e", "steps": [], "final_text": "x", "reward": 0.7},
-    ])
+    rows = load_traces(
+        [
+            {"prompt": "a", "steps": [], "final_text": "x"},
+            {"prompt": "b", "steps": [], "final_text": "x", "reward": True},
+            {"prompt": "c", "steps": [], "final_text": "x", "reward": 1.0},
+            {"prompt": "d", "steps": [], "final_text": "x", "reward": "maybe"},
+            {"prompt": "e", "steps": [], "final_text": "x", "reward": 0.7},
+        ]
+    )
     assert "reward" not in rows[0]
     assert rows[1]["reward"] == 1
     assert rows[2]["reward"] == 1
@@ -74,18 +98,35 @@ def test_junk_rows_are_dropped():
 
 
 UNGRADED = [
-    {"prompt": "where is order 4412",
-     "steps": [{"tool": "lookup_order", "arguments": {"order_id": "4412"},
-                "result": {"status": "not_found"}}],
-     "final_text": "I could not find that order."},
-    {"prompt": "refund order 9911 now",
-     "steps": [{"tool": "create_refund", "arguments": {"order_id": "9911"},
-                "result": {"status": "timeout"}}],
-     "final_text": "The refund request timed out."},
-    {"prompt": "status of order 130",
-     "steps": [{"tool": "lookup_order", "arguments": {"order_id": "130"},
-                "result": {"status": "ok"}}],
-     "final_text": "Order 130 is confirmed."},
+    {
+        "prompt": "where is order 4412",
+        "steps": [
+            {
+                "tool": "lookup_order",
+                "arguments": {"order_id": "4412"},
+                "result": {"status": "not_found"},
+            }
+        ],
+        "final_text": "I could not find that order.",
+    },
+    {
+        "prompt": "refund order 9911 now",
+        "steps": [
+            {
+                "tool": "create_refund",
+                "arguments": {"order_id": "9911"},
+                "result": {"status": "timeout"},
+            }
+        ],
+        "final_text": "The refund request timed out.",
+    },
+    {
+        "prompt": "status of order 130",
+        "steps": [
+            {"tool": "lookup_order", "arguments": {"order_id": "130"}, "result": {"status": "ok"}}
+        ],
+        "final_text": "Order 130 is confirmed.",
+    },
 ]
 
 
@@ -113,18 +154,26 @@ def test_raw_ungraded_traces_drive_simulation_without_a_judge():
     # The product claim: traces in, simulated data out, no reward needed.
     assert all("reward" not in r for r in load_traces(UNGRADED))
     data = simulate_from_traces(
-        load_traces(UNGRADED), scripted_agent, tools=TOOLS, policy=POLICY,
-        mode="explore", budget=6, seed=0, grade=False, concurrency=6,
-        simulator=False, time_budget=20,
-        advanced={"per_round": 4, "mutate_failures": False})
+        load_traces(UNGRADED),
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        mode="explore",
+        budget=6,
+        seed=0,
+        grade=False,
+        concurrency=6,
+        simulator=False,
+        time_budget=20,
+        advanced={"per_round": 4, "mutate_failures": False},
+    )
     assert data.trajectories
     mining = data.search["trace_mining"]
     assert mining["n_traces"] == 3
     assert mining["faults"]["timeout"] == 1
     leak = data.search["trace_leakage"]
     assert leak["n_sources"] == 3
-    source_prompts = {" ".join(t["prompt"].lower().split())
-                      for t in UNGRADED}
+    source_prompts = {" ".join(t["prompt"].lower().split()) for t in UNGRADED}
     for row in data.trajectories:
         normalized = " ".join(str(row["prompt"]).lower().split())
         assert normalized not in source_prompts
@@ -132,56 +181,105 @@ def test_raw_ungraded_traces_drive_simulation_without_a_judge():
 
 # --- regression pins from the retired adversarial battery (real bugs) ----
 
+
 def test_parallel_tool_results_attach_by_name_then_fifo():
-    rows = load_traces([{"messages": [
-        {"role": "user", "content": "check a and b"},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "get_a", "arguments": "{}"}},
-            {"function": {"name": "get_b", "arguments": "{}"}}]},
-        {"role": "tool", "name": "get_b", "content": '{"status": "error"}'},
-        {"role": "tool", "content": '{"status": "ok"}'},
-    ]}])
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "check a and b"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {"function": {"name": "get_a", "arguments": "{}"}},
+                            {"function": {"name": "get_b", "arguments": "{}"}},
+                        ],
+                    },
+                    {"role": "tool", "name": "get_b", "content": '{"status": "error"}'},
+                    {"role": "tool", "content": '{"status": "ok"}'},
+                ]
+            }
+        ]
+    )
     steps = {s["tool"]: s for s in rows[0]["steps"] if "tool" in s}
     assert steps["get_b"]["result"] == {"status": "error"}
     assert steps["get_a"]["result"] == {"status": "ok"}
 
 
 def test_empty_steps_list_never_masks_other_sources():
-    rows = load_traces([{"prompt": "p", "steps": [], "tool_trace": [
-        {"tool": "t", "arguments": {}, "result": {"status": "ok"}}]}])
+    rows = load_traces(
+        [
+            {
+                "prompt": "p",
+                "steps": [],
+                "tool_trace": [{"tool": "t", "arguments": {}, "result": {"status": "ok"}}],
+            }
+        ]
+    )
     assert rows[0]["steps"][0]["tool"] == "t"
 
 
 def test_orphan_tool_result_becomes_its_own_step():
-    rows = load_traces([{"messages": [
-        {"role": "user", "content": "hi"},
-        {"role": "tool", "name": "late_tool",
-         "content": '{"status": "timeout"}'}]}])
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "tool", "name": "late_tool", "content": '{"status": "timeout"}'},
+                ]
+            }
+        ]
+    )
     assert any(s.get("tool") == "late_tool" for s in rows[0]["steps"])
 
 
 def test_qwen_labeled_rows_are_advisory_not_ungraded():
-    rep = trace_report([{"prompt": "p", "qwen_reward": 0, "steps": [
-        {"tool": "t", "arguments": {}, "result": {"status": "ok"}}]}])
+    rep = trace_report(
+        [
+            {
+                "prompt": "p",
+                "qwen_reward": 0,
+                "steps": [{"tool": "t", "arguments": {}, "result": {"status": "ok"}}],
+            }
+        ]
+    )
     assert rep["ungraded"] == 0
     assert rep["advisory_labels"] == 1
-
 
 
 def test_simulate_aims_at_messages_shaped_traces():
     # the same export shape trace_report accepts: the grid must move
     from tests.helpers import simulate_offline
+
     rows = []
     for i in range(6):
-        rows.append({"reward": 0, "messages": [
-            {"role": "user", "content": f"refund order 77{i}"},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"function": {
-                 "name": "create_refund",
-                 "arguments": json.dumps({"order_id": f"77{i}", "amount": 5})}}]},
-            {"role": "tool", "name": "create_refund",
-             "content": json.dumps({"status": "timeout"})},
-            {"role": "assistant", "content": "Refunded."}]})
+        rows.append(
+            {
+                "reward": 0,
+                "messages": [
+                    {"role": "user", "content": f"refund order 77{i}"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "create_refund",
+                                    "arguments": json.dumps({"order_id": f"77{i}", "amount": 5}),
+                                }
+                            }
+                        ],
+                    },
+                    {
+                        "role": "tool",
+                        "name": "create_refund",
+                        "content": json.dumps({"status": "timeout"}),
+                    },
+                    {"role": "assistant", "content": "Refunded."},
+                ],
+            }
+        )
     data = simulate_offline(traces=rows, budget=6)
     mined = data.search["trace_mining"]
     assert mined["tools"]["create_refund"]["fault_n"] == 6
@@ -191,14 +289,26 @@ def test_simulate_aims_at_messages_shaped_traces():
     assert any(r["region"] == "recover_after_timeout" for r in regions)
 
 
-
 def test_traces_with_faults_keep_the_fault_cells():
     # cold start flips 90% of cells to success; traces showing faults
     # must aim the run at the fault cells, not the same success grid
     from tests.helpers import simulate_offline
-    rows = [{"prompt": f"refund order 8{i}", "reward": 0, "final_text": "Refunded.",
-             "steps": [{"tool": "create_refund", "arguments": {"order_id": f"8{i}"},
-                        "result": {"status": "timeout"}}]} for i in range(5)]
+
+    rows = [
+        {
+            "prompt": f"refund order 8{i}",
+            "reward": 0,
+            "final_text": "Refunded.",
+            "steps": [
+                {
+                    "tool": "create_refund",
+                    "arguments": {"order_id": f"8{i}"},
+                    "result": {"status": "timeout"},
+                }
+            ],
+        }
+        for i in range(5)
+    ]
     # concurrency=1: with parallel rollouts the rows that land before the
     # cap depend on thread timing, and the share moved between 0.12 and
     # 0.21 across runs. fault_rate=1.0: the sandbox keep-rate is a second,
@@ -208,13 +318,17 @@ def test_traces_with_faults_keep_the_fault_cells():
     kw = dict(budget=48, per_round=40, concurrency=1, fault_rate=1.0)
     aimed = simulate_offline(traces=rows, **kw)
     cold = simulate_offline(**kw)
+
     def share(d):
         return sum(1 for r in d.trajectories if r.get("faults")) / max(1, len(d.trajectories))
+
     def fault_cells(d):
         return sum(
-            1 for r in d.trajectories
-            if (r.get("scenario_dimensions") or {}).get("tool_condition")
-            not in (None, "success")) / max(1, len(d.trajectories))
+            1
+            for r in d.trajectories
+            if (r.get("scenario_dimensions") or {}).get("tool_condition") not in (None, "success")
+        ) / max(1, len(d.trajectories))
+
     assert fault_cells(aimed) >= 0.25, fault_cells(aimed)
     assert fault_cells(aimed) > fault_cells(cold), (fault_cells(aimed), fault_cells(cold))
     assert share(aimed) >= 0.15, share(aimed)

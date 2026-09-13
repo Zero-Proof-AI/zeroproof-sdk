@@ -1,4 +1,5 @@
 """Five search arms and hash embedder fallback."""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,34 +12,39 @@ import zeroproof.simulations as zps
 from zeroproof.simulations.generate.embeddings import HashEmbedder, resolve_embedder
 
 CALENDAR_TOOLS = [
-    {"type": "function", "function": {
-        "name": "list_events",
-        "description": "List calendar events in a date range",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "start_date": {"type": "string"},
-                "end_date": {"type": "string"},
+    {
+        "type": "function",
+        "function": {
+            "name": "list_events",
+            "description": "List calendar events in a date range",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string"},
+                    "end_date": {"type": "string"},
+                },
+                "required": ["start_date"],
             },
-            "required": ["start_date"],
         },
-    }},
-    {"type": "function", "function": {
-        "name": "create_event",
-        "description": "Create a calendar event",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "start_date": {"type": "string"},
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_event",
+            "description": "Create a calendar event",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "start_date": {"type": "string"},
+                },
+                "required": ["title", "start_date"],
             },
-            "required": ["title", "start_date"],
         },
-    }},
+    },
 ]
 CALENDAR_POLICY = (
-    "Always list existing events before creating a duplicate. "
-    "Report tool failures honestly."
+    "Always list existing events before creating a duplicate. Report tool failures honestly."
 )
 _FAKE_WAVES = itertools.count()
 
@@ -49,19 +55,23 @@ def _calendar_agent(message: str) -> dict:
         return {"steps": [], "final_text": "I only handle calendar tasks."}
     if re.search(r"\d{3,}", message):
         return {
-            "steps": [{
-                "tool": "create_event",
-                "arguments": {"title": "Meet", "start_date": "2099-01-01"},
-                "result": {"status": "created", "id": "evt_9"},
-            }],
+            "steps": [
+                {
+                    "tool": "create_event",
+                    "arguments": {"title": "Meet", "start_date": "2099-01-01"},
+                    "result": {"status": "created", "id": "evt_9"},
+                }
+            ],
             "final_text": "Your event is booked.",
         }
     return {
-        "steps": [{
-            "tool": "list_events",
-            "arguments": {"start_date": "2026-03-01"},
-            "result": {"status": "not_found"},
-        }],
+        "steps": [
+            {
+                "tool": "list_events",
+                "arguments": {"start_date": "2026-03-01"},
+                "result": {"status": "not_found"},
+            }
+        ],
         "final_text": "All set, events listed.",
     }
 
@@ -76,21 +86,21 @@ def _fake_complete(_url, _model, messages, **_kwargs):
         token = wave * 6 + i
         letters = "abcdefghijklmnopqrstuvwxyz"
         topic = (
-            f"{letters[(token // 676) % 26]}"
-            f"{letters[(token // 26) % 26]}"
-            f"{letters[token % 26]}topic"
+            f"{letters[(token // 676) % 26]}{letters[(token // 26) % 26]}{letters[token % 26]}topic"
         )
-        payload.append({
-            "region_id": region_id,
-            "message": f"Please check {topic}.",
-        })
-    payload.append({"region_id": None,
-                    "message": f"What is the capital of Mongolia? ({rnd})"})
-    payload.append({
-        "region_id": None,
-        "turns": [f"Need room Mar 12 pass {rnd}",
-                  "Actually make it Mar 13 instead"],
-    })
+        payload.append(
+            {
+                "region_id": region_id,
+                "message": f"Please check {topic}.",
+            }
+        )
+    payload.append({"region_id": None, "message": f"What is the capital of Mongolia? ({rnd})"})
+    payload.append(
+        {
+            "region_id": None,
+            "turns": [f"Need room Mar 12 pass {rnd}", "Actually make it Mar 13 instead"],
+        }
+    )
     return {"content": json.dumps(payload)}
 
 
@@ -106,10 +116,12 @@ def test_modal_dead_url_falls_back_to_hash():
 
 def test_hash_embedder_does_not_treat_changed_ids_as_novel():
     embedder = HashEmbedder()
-    first, second = embedder.embed([
-        "check order 123456 for me",
-        "check order 987654 for me",
-    ])
+    first, second = embedder.embed(
+        [
+            "check order 123456 for me",
+            "check order 987654 for me",
+        ]
+    )
     assert first == second
 
 
@@ -144,7 +156,9 @@ def test_llm_guided_with_mocked_model(monkeypatch, tmp_path):
         grade=True,
         embedder="hash",
         simulator="vllm:fake@http://127.0.0.1:9",
-        concurrency=12, until="budget_only", mode="adaptive",
+        concurrency=12,
+        until="budget_only",
+        mode="adaptive",
         time_budget=None,
         advanced={"per_round": 12, "mutate_failures": True},
     )

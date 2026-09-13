@@ -48,8 +48,12 @@ export OPENAI_BASE_URL=...   # only for a non-OpenAI endpoint
 ```python
 import zeroproof.simulations as zps
 
-data = zps.simulate(agent="openai:gpt-4.1-mini", tools=my_tools,
-                    system_prompt=my_system_prompt, output="rollout.jsonl")
+data = zps.simulate(
+    agent="openai:gpt-4.1-mini",
+    tools=my_tools,
+    system_prompt=my_system_prompt,
+    output="rollout.jsonl",
+)
 ```
 
 Or use ZeroProof-hosted Qwen, which is the default when no `agent=` is given.
@@ -66,8 +70,9 @@ situations are less varied than a model writes, so it is for wiring up your
 agent and grader, not for a training set.
 
 ```python
-data = zps.simulate(my_agent, tools=my_tools, system_prompt=my_system_prompt,
-                    simulator=False, budget=40)
+data = zps.simulate(
+    my_agent, tools=my_tools, system_prompt=my_system_prompt, simulator=False, budget=40
+)
 ```
 
 Working in this repo: `uv sync`, then `uv run pytest` after `uv sync --extra dev`.
@@ -112,7 +117,7 @@ Depends on the use case. How each scenario is built is in [The recipe](#the-reci
 | A mix, until coverage plateaus | `adaptive` | New situations, phrasings, and repeats. Best with `until="saturation"` |
 
 ```python
-zps.simulate(tools=my_tools, system_prompt=my_system_prompt)                 # explore
+zps.simulate(tools=my_tools, system_prompt=my_system_prompt)  # explore
 zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="sft")
 zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="rl")
 zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", until="saturation")
@@ -158,15 +163,15 @@ login`.
 # export ZEROPROOF_DELEGATED_CREDENTIAL=credential["credential"]
 
 data = zps.simulate(spec="specs/github")
-v1 = data.push("github-explore-v1")            # -> {"datasetId": "ds_...", ...}
+v1 = data.push("github-explore-v1")  # -> {"datasetId": "ds_...", ...}
 
 # iterate, then push the next version with lineage
 v2 = data.push("github-explore-v2", parent=v1["datasetId"])
 
-zps.datasets()                                  # list yours + storage used
-rows = zps.pull(v1["datasetId"])               # rows, or pass path= for a file
-zps.push_file("rollout.jsonl")                 # upload an existing JSONL
-zps.delete_dataset(v1["datasetId"])            # permanent
+zps.datasets()  # list yours + storage used
+rows = zps.pull(v1["datasetId"])  # rows, or pass path= for a file
+zps.push_file("rollout.jsonl")  # upload an existing JSONL
+zps.delete_dataset(v1["datasetId"])  # permanent
 ```
 
 Storage is private per account, 5 GB free. `parent=` records dataset

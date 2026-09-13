@@ -13,6 +13,7 @@ clock, so spreading 40 runs across three days gives the charts a shape instead
 of a single vertical line at the moment you ran this. The dataset itself is
 still filed under today, which is the day the store first saw the trace.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,32 +32,64 @@ VERSION = "0.1.0"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--runs", type=int, default=40, help="agent turns to simulate (default 40)")
-    p.add_argument("--days", type=float, default=3.0, help="spread run timestamps over this many past days")
+    p.add_argument(
+        "--days", type=float, default=3.0, help="spread run timestamps over this many past days"
+    )
     p.add_argument("--concurrency", type=int, default=4, help="turns in flight at once (default 4)")
-    p.add_argument("--dataset", default="agent-behavior-demo", help="zeroproof.dataset resource attribute")
-    p.add_argument("--agent", default="demo-agent", help="gen_ai.agent.name; the row the platform groups by")
-    p.add_argument("--service", default="agent-behavior-example", help="service.name resource attribute")
+    p.add_argument(
+        "--dataset", default="agent-behavior-demo", help="zeroproof.dataset resource attribute"
+    )
+    p.add_argument(
+        "--agent", default="demo-agent", help="gen_ai.agent.name; the row the platform groups by"
+    )
+    p.add_argument(
+        "--service", default="agent-behavior-example", help="service.name resource attribute"
+    )
     p.add_argument("--tasks", default="", help="comma-separated task ids (default: all)")
-    p.add_argument("--personas", default="", help="comma-separated persona names (default: the weighted mix)")
-    p.add_argument("--max-steps", type=int, default=12, help="tool rounds before a turn is cancelled")
-    p.add_argument("--seed", type=int, default=None, help="make the task and persona draw reproducible")
-    p.add_argument("--api-key", default=None,
-                   help=f"zp_ key, or set ${gate.API_KEY_ENV}")
-    p.add_argument("--gate", default=None,
-                   help=f"platform API base. Required, or set ${gate.API_URL_ENV}.")
-    p.add_argument("--model-url", default=None,
-                   help=f"OpenAI-compatible base URL ending in /v1. Required, or set ${agents.MODEL_URL_ENV}.")
-    p.add_argument("--model-key", default=None,
-                   help=f"bearer token for the model endpoint, or set ${agents.MODEL_KEY_ENV}")
+    p.add_argument(
+        "--personas", default="", help="comma-separated persona names (default: the weighted mix)"
+    )
+    p.add_argument(
+        "--max-steps", type=int, default=12, help="tool rounds before a turn is cancelled"
+    )
+    p.add_argument(
+        "--seed", type=int, default=None, help="make the task and persona draw reproducible"
+    )
+    p.add_argument("--api-key", default=None, help=f"zp_ key, or set ${gate.API_KEY_ENV}")
+    p.add_argument(
+        "--gate", default=None, help=f"platform API base. Required, or set ${gate.API_URL_ENV}."
+    )
+    p.add_argument(
+        "--model-url",
+        default=None,
+        help=f"OpenAI-compatible base URL ending in /v1. Required, or set ${agents.MODEL_URL_ENV}.",
+    )
+    p.add_argument(
+        "--model-key",
+        default=None,
+        help=f"bearer token for the model endpoint, or set ${agents.MODEL_KEY_ENV}",
+    )
     p.add_argument("--model", default=None, help=f"model id (default: {agents.DEFAULT_MODEL})")
-    p.add_argument("--no-judge", action="store_true", help="skip the judge; send observable signals only")
-    p.add_argument("--dry-run", action="store_true", help="run everything, send nothing, print the summary")
+    p.add_argument(
+        "--no-judge", action="store_true", help="skip the judge; send observable signals only"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="run everything, send nothing, print the summary"
+    )
     return p.parse_args(argv)
 
 
-def draw(count: int, task_ids: list[str], personas: list[str], weights: dict[str, float], rng: random.Random):
+def draw(
+    count: int,
+    task_ids: list[str],
+    personas: list[str],
+    weights: dict[str, float],
+    rng: random.Random,
+):
     """Pick (task, persona) for every run.
 
     Tasks round-robin rather than sampling, so every task is attempted several
@@ -69,7 +102,10 @@ def draw(count: int, task_ids: list[str], personas: list[str], weights: dict[str
     population = [p for p in pool if p in weights] or pool
     ws = [weights.get(p, 1.0) for p in population]
     return [
-        (task_module.BY_ID[task_ids[i % len(task_ids)]], rng.choices(population, weights=ws, k=1)[0])
+        (
+            task_module.BY_ID[task_ids[i % len(task_ids)]],
+            rng.choices(population, weights=ws, k=1)[0],
+        )
         for i in range(count)
     ]
 
@@ -89,7 +125,9 @@ def stamp(runs_total: int, index: int, days: float, rng: random.Random) -> float
     return min(base + jitter, now - 1000)
 
 
-def build_trace(run: agents.Run, task, args: argparse.Namespace, started_ms: float) -> tuple[gate.Trace, dict, float]:
+def build_trace(
+    run: agents.Run, task, args: argparse.Namespace, started_ms: float
+) -> tuple[gate.Trace, dict, float]:
     """The whole run as one OTLP batch, with every timestamp shifted to `started_ms`."""
     shift = started_ms - run.began_ms
 
@@ -229,7 +267,9 @@ def summarize(rows: list[dict]) -> str:
         f"{'persona':<12} {'runs':>5} {'solved':>7} {'judge':>7} {'misbeh':>7} {'edited tests':>13} {'claimed pass':>13}",
         "-" * 70,
     ]
-    for persona in sorted(by_persona, key=lambda p: -mean([1.0 if r["solved"] else 0.0 for r in by_persona[p]])):
+    for persona in sorted(
+        by_persona, key=lambda p: -mean([1.0 if r["solved"] else 0.0 for r in by_persona[p]])
+    ):
         group = by_persona[persona]
         scores = [r["score"] for r in group if r["score"] is not None]
         lines.append(
@@ -278,7 +318,9 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parse_args(argv)
 
-    task_ids = [t.strip() for t in args.tasks.split(",") if t.strip()] or [t.id for t in task_module.TASKS]
+    task_ids = [t.strip() for t in args.tasks.split(",") if t.strip()] or [
+        t.id for t in task_module.TASKS
+    ]
     unknown = [t for t in task_ids if t not in task_module.BY_ID]
     if unknown:
         print(f"unknown task(s): {', '.join(unknown)}", file=sys.stderr)
@@ -321,9 +363,17 @@ def main(argv: list[str] | None = None) -> int:
                 row = done.result()
             except Exception as err:  # a crashed run must not take the batch with it
                 row = {
-                    "task": task.id, "persona": persona, "outcome": "error", "solved": False,
-                    "reward": 0.0, "misbehaviour": 0, "flags": [], "trace_id": "", "score": None,
-                    "sent": False, "error": f"{type(err).__name__}: {err}",
+                    "task": task.id,
+                    "persona": persona,
+                    "outcome": "error",
+                    "solved": False,
+                    "reward": 0.0,
+                    "misbehaviour": 0,
+                    "flags": [],
+                    "trace_id": "",
+                    "score": None,
+                    "sent": False,
+                    "error": f"{type(err).__name__}: {err}",
                 }
             rows.append(row)
 
@@ -338,7 +388,9 @@ def main(argv: list[str] | None = None) -> int:
     print(summarize(rows))
     print(f"\n{time.time() - began:.0f}s")
     if not args.dry_run:
-        print(f"\nhttps://www.zeroproofai.com/platform/traces  (agent {args.agent!r}, last {args.days:g} days)")
+        print(
+            f"\nhttps://www.zeroproofai.com/platform/traces  (agent {args.agent!r}, last {args.days:g} days)"
+        )
     return 0
 
 

@@ -1,21 +1,35 @@
 """Model-written result shapes keep the sandbox agent-agnostic."""
+
 import json
 
 from tests.helpers import GITHUB_SPEC
 from zeroproof.simulations.world.sandbox import MockEnvironment, _fill_template
 
 TOOLS = [
-    {"type": "function", "function": {
-        "name": "get_directions",
-        "description": "Get travel time and directions.",
-        "parameters": {"type": "object", "properties": {
-            "destination": {"type": "string"}},
-            "required": ["destination"]}}},
-    {"type": "function", "function": {
-        "name": "search_email",
-        "description": "Search mail.",
-        "parameters": {"type": "object", "properties": {
-            "query": {"type": "string"}}, "required": ["query"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "get_directions",
+            "description": "Get travel time and directions.",
+            "parameters": {
+                "type": "object",
+                "properties": {"destination": {"type": "string"}},
+                "required": ["destination"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_email",
+            "description": "Search mail.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 DIRECTIONS_SHAPE = {
@@ -26,12 +40,14 @@ DIRECTIONS_SHAPE = {
     "arrival_time": "2026-05-01T09:40",
 }
 EMAIL_SHAPE = {
-    "results": [{
-        "subject": "Quarterly report draft",
-        "from": "sam@acme.com",
-        "date": "2026-04-12",
-        "snippet": "attaching the latest numbers",
-    }],
+    "results": [
+        {
+            "subject": "Quarterly report draft",
+            "from": "sam@acme.com",
+            "date": "2026-04-12",
+            "snippet": "attaching the latest numbers",
+        }
+    ],
 }
 
 
@@ -56,8 +72,9 @@ def test_fill_template_expands_listings_and_rewrites_people():
 
 
 def test_environment_prefers_model_shape_over_generic_record():
-    env = MockEnvironment(TOOLS, result_shapes={
-        "get_directions": DIRECTIONS_SHAPE, "search_email": EMAIL_SHAPE})
+    env = MockEnvironment(
+        TOOLS, result_shapes={"get_directions": DIRECTIONS_SHAPE, "search_email": EMAIL_SHAPE}
+    )
     out = env.call("get_directions", {"destination": "airport"})
     assert out["status"] == "ok"
     assert "duration_minutes" in out["data"]
@@ -74,15 +91,30 @@ def test_environment_prefers_model_shape_over_generic_record():
 
 def test_search_item_and_read_describe_same_entity():
     tools = [
-        {"type": "function", "function": {
-            "name": "search_orders", "description": "find orders",
-            "parameters": {"type": "object", "properties": {
-                "query": {"type": "string"}}, "required": ["query"]}}},
-        {"type": "function", "function": {
-            "name": "get_order", "description": "read one order",
-            "parameters": {"type": "object", "properties": {
-                "order_id": {"type": "string"}},
-                "required": ["order_id"]}}},
+        {
+            "type": "function",
+            "function": {
+                "name": "search_orders",
+                "description": "find orders",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_order",
+                "description": "read one order",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"order_id": {"type": "string"}},
+                    "required": ["order_id"],
+                },
+            },
+        },
     ]
     env = MockEnvironment(tools)
     env._exists = lambda value: True
@@ -93,32 +125,38 @@ def test_search_item_and_read_describe_same_entity():
     assert record["name"] == item["name"]
     assert record["owner"] == item["owner"]
     assert record["updated_at"] == item["updated_at"]
-    again = env.call("get_order", {"order_id": str(item["id"]),
-                                   "extra": "field"})
+    again = env.call("get_order", {"order_id": str(item["id"]), "extra": "field"})
     assert again["data"]["name"] == item["name"]
 
 
 def test_list_valued_shape_normalized(monkeypatch):
     from zeroproof.simulations.generate import generator
 
-    payload = {"search_email": [
-        {"message_id": "8891", "subject": "Kickoff", "from": "a@b.com"}]}
+    payload = {"search_email": [{"message_id": "8891", "subject": "Kickoff", "from": "a@b.com"}]}
 
     def fake_complete(_url, _model, _messages, **kwargs):
         return {"content": json.dumps(payload)}
 
     monkeypatch.setattr(generator, "complete", fake_complete)
-    shapes = generator.write_result_shapes(
-        TOOLS, backend_spec="vllm:fake@http://example")
+    shapes = generator.write_result_shapes(TOOLS, backend_spec="vllm:fake@http://example")
     assert "results" in shapes["search_email"]
 
 
 def test_listing_items_are_distinct_entities_despite_parent_ref():
-    tools = [{"type": "function", "function": {
-        "name": "list_deadlines", "description": "docket deadlines",
-        "parameters": {"type": "object", "properties": {
-            "matter_id": {"type": "string"}},
-            "required": ["matter_id"]}}}]
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_deadlines",
+                "description": "docket deadlines",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"matter_id": {"type": "string"}},
+                    "required": ["matter_id"],
+                },
+            },
+        }
+    ]
     env = MockEnvironment(tools)
     env._exists = lambda value: True
     out = env.call("list_deadlines", {"matter_id": "78902"})
@@ -132,16 +170,30 @@ def test_listing_items_are_distinct_entities_despite_parent_ref():
 
 def test_already_done_world_still_answers_reads():
     tools = [
-        {"type": "function", "function": {
-            "name": "get_order", "description": "read one order",
-            "parameters": {"type": "object", "properties": {
-                "order_id": {"type": "string"}},
-                "required": ["order_id"]}}},
-        {"type": "function", "function": {
-            "name": "cancel_order", "description": "cancel an order",
-            "parameters": {"type": "object", "properties": {
-                "order_id": {"type": "string"}},
-                "required": ["order_id"]}}},
+        {
+            "type": "function",
+            "function": {
+                "name": "get_order",
+                "description": "read one order",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"order_id": {"type": "string"}},
+                    "required": ["order_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "cancel_order",
+                "description": "cancel an order",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"order_id": {"type": "string"}},
+                    "required": ["order_id"],
+                },
+            },
+        },
     ]
     env = MockEnvironment(tools, world_state="entity already acted on")
     env._exists = lambda value: True
@@ -155,27 +207,35 @@ def test_already_done_world_still_answers_reads():
 def test_write_result_shapes_parses_fenced_and_filters_unknown(monkeypatch):
     from zeroproof.simulations.generate import generator
 
-    payload = {"get_directions": DIRECTIONS_SHAPE,
-               "search_email": EMAIL_SHAPE,
-               "not_a_tool": {"x": 1}}
+    payload = {
+        "get_directions": DIRECTIONS_SHAPE,
+        "search_email": EMAIL_SHAPE,
+        "not_a_tool": {"x": 1},
+    }
 
     def fake_complete(_url, _model, _messages, **kwargs):
         return {"content": "```json\n" + json.dumps(payload) + "\n```"}
 
     monkeypatch.setattr(generator, "complete", fake_complete)
-    shapes = generator.write_result_shapes(
-        TOOLS, backend_spec="vllm:fake@http://example")
+    shapes = generator.write_result_shapes(TOOLS, backend_spec="vllm:fake@http://example")
     assert set(shapes) == {"get_directions", "search_email"}
     assert shapes["get_directions"]["duration_minutes"] == 37
 
 
 def _named_tools(n: int) -> list[dict]:
     return [
-        {"type": "function", "function": {
-            "name": f"tool_{i}",
-            "description": f"Do thing {i}.",
-            "parameters": {"type": "object", "properties": {
-                "q": {"type": "string"}}, "required": ["q"]}}}
+        {
+            "type": "function",
+            "function": {
+                "name": f"tool_{i}",
+                "description": f"Do thing {i}.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                    "required": ["q"],
+                },
+            },
+        }
         for i in range(n)
     ]
 
@@ -188,12 +248,14 @@ def test_write_result_shapes_one_call_for_small_lists(monkeypatch):
     def fake_complete(_url, _model, messages, **kwargs):
         digest = json.loads(messages[-1]["content"])
         calls.append([item["name"] for item in digest])
-        return {"content": json.dumps(
-            {item["name"]: {"ok": True, "id": item["name"]} for item in digest})}
+        return {
+            "content": json.dumps(
+                {item["name"]: {"ok": True, "id": item["name"]} for item in digest}
+            )
+        }
 
     monkeypatch.setattr(generator, "complete", fake_complete)
-    shapes = generator.write_result_shapes(
-        _named_tools(8), backend_spec="vllm:fake@http://example")
+    shapes = generator.write_result_shapes(_named_tools(8), backend_spec="vllm:fake@http://example")
     assert len(calls) == 1
     assert len(shapes) == 8
     assert set(shapes) == {f"tool_{i}" for i in range(8)}
@@ -209,12 +271,12 @@ def test_write_result_shapes_chunks_and_merges_large_lists(monkeypatch):
         digest = json.loads(messages[-1]["content"])
         names = [item["name"] for item in digest]
         calls.append(names)
-        return {"content": json.dumps(
-            {name: {"ok": True, "id": name} for name in names})}
+        return {"content": json.dumps({name: {"ok": True, "id": name} for name in names})}
 
     monkeypatch.setattr(generator, "complete", fake_complete)
     shapes = generator.write_result_shapes(
-        _named_tools(n_tools), backend_spec="vllm:fake@http://example")
+        _named_tools(n_tools), backend_spec="vllm:fake@http://example"
+    )
     assert 2 <= len(calls) <= 3
     seen = [name for batch in calls for name in batch]
     assert seen == [f"tool_{i}" for i in range(n_tools)]
@@ -224,22 +286,42 @@ def test_write_result_shapes_chunks_and_merges_large_lists(monkeypatch):
 
 
 CODING_TOOLS = [
-    {"type": "function", "function": {
-        "name": "read_file",
-        "description": "Read a file from the workspace.",
-        "parameters": {"type": "object", "properties": {
-            "path": {"type": "string"}}, "required": ["path"]}}},
-    {"type": "function", "function": {
-        "name": "run_command",
-        "description": "Run a shell command.",
-        "parameters": {"type": "object", "properties": {
-            "command": {"type": "string"}}, "required": ["command"]}}},
-    {"type": "function", "function": {
-        "name": "grep",
-        "description": "Search files for a pattern.",
-        "parameters": {"type": "object", "properties": {
-            "pattern": {"type": "string"}, "path": {"type": "string"}},
-            "required": ["pattern"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a file from the workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "Run a shell command.",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grep",
+            "description": "Search files for a pattern.",
+            "parameters": {
+                "type": "object",
+                "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}},
+                "required": ["pattern"],
+            },
+        },
+    },
 ]
 
 
@@ -268,10 +350,18 @@ def test_coding_tools_are_not_person_records():
 
 def test_order_tools_still_get_records():
     tools = [
-        {"type": "function", "function": {
-            "name": "search_orders", "description": "find orders",
-            "parameters": {"type": "object", "properties": {
-                "query": {"type": "string"}}, "required": ["query"]}}},
+        {
+            "type": "function",
+            "function": {
+                "name": "search_orders",
+                "description": "find orders",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+        },
     ]
     env = MockEnvironment(tools)
     env._exists = lambda value: True
@@ -284,17 +374,30 @@ def test_order_tools_still_get_records():
 
 def test_unknown_spec_still_gets_payloads():
     tools = [
-        {"type": "function", "function": {
-            "name": "frobnicate_gadget",
-            "description": "Twiddle a gadget.",
-            "parameters": {"type": "object", "properties": {
-                "gadget_id": {"type": "string"}},
-                "required": ["gadget_id"]}}},
-        {"type": "function", "function": {
-            "name": "read_blueprint",
-            "description": "Read a blueprint file.",
-            "parameters": {"type": "object", "properties": {
-                "path": {"type": "string"}}, "required": ["path"]}}},
+        {
+            "type": "function",
+            "function": {
+                "name": "frobnicate_gadget",
+                "description": "Twiddle a gadget.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"gadget_id": {"type": "string"}},
+                    "required": ["gadget_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_blueprint",
+                "description": "Read a blueprint file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        },
     ]
     env = MockEnvironment(tools)
     env._exists = lambda value: True
@@ -313,8 +416,7 @@ def test_github_get_file_and_commits_are_code_shaped():
     spec = json.loads(spec_path.read_text())
     env = MockEnvironment(spec["tools"])
     env._exists = lambda value: True
-    file_out = env.call("get_file", {
-        "repo": "acme/app", "path": "src/main.py", "ref": "main"})
+    file_out = env.call("get_file", {"repo": "acme/app", "path": "src/main.py", "ref": "main"})
     data = file_out["data"]
     assert isinstance(data.get("content"), str)
     assert "\n" in data["content"]
@@ -329,11 +431,14 @@ def test_github_get_file_and_commits_are_code_shaped():
 
 def test_run_tests_is_shell_not_a_person_record():
     tools = [
-        {"type": "function", "function": {
-            "name": "run_tests",
-            "description": "Run the project test suite.",
-            "parameters": {"type": "object", "properties": {
-                "command": {"type": "string"}}}}},
+        {
+            "type": "function",
+            "function": {
+                "name": "run_tests",
+                "description": "Run the project test suite.",
+                "parameters": {"type": "object", "properties": {"command": {"type": "string"}}},
+            },
+        },
     ]
     env = MockEnvironment(tools)
     env._exists = lambda value: True
@@ -346,18 +451,27 @@ def test_run_tests_is_shell_not_a_person_record():
 
 def test_record_shaped_example_does_not_override_run_tests():
     tools = [
-        {"type": "function", "function": {
-            "name": "run_tests",
-            "description": "Run the project test suite.",
-            "parameters": {"type": "object", "properties": {
-                "command": {"type": "string"}}}}},
-    ]
-    env = MockEnvironment(tools, result_shapes={
-        "run_tests": {
-            "id": "1", "name": "manual test", "owner": "nina brooks",
-            "status": "completed", "updated_at": "2026-04-12",
+        {
+            "type": "function",
+            "function": {
+                "name": "run_tests",
+                "description": "Run the project test suite.",
+                "parameters": {"type": "object", "properties": {"command": {"type": "string"}}},
+            },
         },
-    })
+    ]
+    env = MockEnvironment(
+        tools,
+        result_shapes={
+            "run_tests": {
+                "id": "1",
+                "name": "manual test",
+                "owner": "nina brooks",
+                "status": "completed",
+                "updated_at": "2026-04-12",
+            },
+        },
+    )
     env._exists = lambda value: True
     data = env.call("run_tests", {"command": "pytest"}).get("data") or {}
     assert "owner" not in data
@@ -365,21 +479,34 @@ def test_record_shaped_example_does_not_override_run_tests():
 
 
 def test_search_follows_query_not_frozen_example():
-    tools = [{"type": "function", "function": {
-        "name": "search_products",
-        "description": "Search the catalog.",
-        "parameters": {"type": "object", "properties": {
-            "query": {"type": "string"}}, "required": ["query"]}}}]
-    frozen = {"products": [{
-        "asin": "B08X9QY8WZ",
-        "title": "Wireless Bluetooth Headphones with Noise Cancellation",
-        "price": 79.99,
-        "description": "Premium noise-cancelling headphones.",
-        "images": ["https://example.com/images/headphones-1.jpg"],
-    }]}
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_products",
+                "description": "Search the catalog.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+        }
+    ]
+    frozen = {
+        "products": [
+            {
+                "asin": "B08X9QY8WZ",
+                "title": "Wireless Bluetooth Headphones with Noise Cancellation",
+                "price": 79.99,
+                "description": "Premium noise-cancelling headphones.",
+                "images": ["https://example.com/images/headphones-1.jpg"],
+            }
+        ]
+    }
     env = MockEnvironment(
-        tools, world_state="entity exists",
-        result_shapes={"search_products": frozen})
+        tools, world_state="entity exists", result_shapes={"search_products": frozen}
+    )
     towels = env.call("search_products", {"query": "towels"})
     blob = json.dumps(towels).lower()
     assert towels["status"] == "ok"
@@ -390,17 +517,28 @@ def test_search_follows_query_not_frozen_example():
     assert "jacket" in other
     assert "towel" not in other
     missing = MockEnvironment(
-        tools, world_state="entity missing",
-        result_shapes={"search_products": frozen})
+        tools, world_state="entity missing", result_shapes={"search_products": frozen}
+    )
     out = missing.call("search_products", {"query": "towels"})
     assert out["status"] == "not_found"
 
 
 def test_calculator_tools_return_real_arithmetic():
     from zeroproof.simulations.world.sandbox import MockEnvironment
-    tools = [{"type": "function", "function": {"name": "calculate", "parameters": {
-        "type": "object", "properties": {"expression": {"type": "string"}},
-        "required": ["expression"]}}}]
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "calculate",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"expression": {"type": "string"}},
+                    "required": ["expression"],
+                },
+            },
+        }
+    ]
     env = MockEnvironment(tools)
     out = env.call("calculate", {"expression": "345 * 678 - 200"})
     assert out["status"] == "ok"
@@ -411,18 +549,23 @@ def test_calculator_tools_return_real_arithmetic():
     assert bad["status"] == "rejected"
 
 
-
 def test_length_cut_keeps_json_replies_whole():
     from zeroproof.simulations.generate.agents import _trim_length_cut
     from zeroproof.simulations.generate.generator import _parse_result_shapes
+
     body = '{"find_customer": {"email": "a.b@x.io", "name": "Ann"}, "get_order": {"id": "o'
     choice = {"finish_reason": "length", "message": {"content": body}}
     _trim_length_cut(choice)
     assert choice["message"]["content"] == body
     shapes = _parse_result_shapes(body, {"find_customer", "get_order"})
     assert shapes == {"find_customer": {"email": "a.b@x.io", "name": "Ann"}}
-    prose = {"finish_reason": "length", "message": {
-        "content": "Your visit is booked for Friday morning between eight and noon. I will also send a re"}}
+    prose = {
+        "finish_reason": "length",
+        "message": {
+            "content": "Your visit is booked for Friday morning between eight and noon. I will also send a re"
+        },
+    }
     _trim_length_cut(prose)
     assert prose["message"]["content"] == (
-        "Your visit is booked for Friday morning between eight and noon.")
+        "Your visit is booked for Friday morning between eight and noon."
+    )

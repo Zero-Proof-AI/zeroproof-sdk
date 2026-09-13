@@ -1,4 +1,5 @@
 """RL filter keeps gold ``reward`` rows. Offline: no writes, no GPU."""
+
 from zeroproof.simulations.score.optimize import (
     INCOMPLETE_JUNK,
     KEPT_VERIFIED_ZERO,
@@ -14,13 +15,14 @@ def _kept(**extra):
     row = {
         "prompt": "look up issue 4412",
         "final_text": "Issue 4412 is open.",
-        "steps": [{"tool": "get_issue", "arguments": {"number": 4412},
-                   "result": {"status": "ok"}}],
+        "steps": [{"tool": "get_issue", "arguments": {"number": 4412}, "result": {"status": "ok"}}],
         "messages": [
             {"role": "user", "content": "look up issue 4412"},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"name": "get_issue",
-                             "arguments": {"number": 4412}}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"name": "get_issue", "arguments": {"number": 4412}}],
+            },
             {"role": "tool", "name": "get_issue", "content": '{"status": "ok"}'},
             {"role": "assistant", "content": "Issue 4412 is open."},
         ],
@@ -113,6 +115,7 @@ def _grouped_rows():
 
 def test_group_signal_counts_mix_and_band():
     from zeroproof.simulations.score.optimize import group_signal
+
     signal = group_signal(_grouped_rows())
     assert signal["n_groups"] == 4
     assert signal["n_mixed"] == 1
@@ -125,6 +128,7 @@ def test_group_signal_counts_mix_and_band():
 
 def test_trim_unanimous_drops_dead_groups_keeps_singles():
     from zeroproof.simulations.score.optimize import trim_unanimous_groups
+
     kept, report = trim_unanimous_groups(_grouped_rows())
     prompts = {row["prompt"] for row in kept}
     assert prompts == {"mixed ask", "solo ask"}
@@ -134,6 +138,7 @@ def test_trim_unanimous_drops_dead_groups_keeps_singles():
 
 def test_select_for_rl_keeps_whole_groups():
     from zeroproof.simulations.score.optimize import select_for_rl
+
     picked, report = select_for_rl(_grouped_rows(), target=4)
     prompts = [row["prompt"] for row in picked]
     assert prompts.count("mixed ask") == 4  # the group came whole
@@ -143,6 +148,7 @@ def test_select_for_rl_keeps_whole_groups():
 
 def test_select_for_sft_takes_only_passes_and_spreads_behaviors():
     from zeroproof.simulations.score.optimize import select_for_sft
+
     rows = _grouped_rows()
     picked, report = select_for_sft(rows, target=3)
     assert picked
@@ -157,6 +163,7 @@ def test_optimize_dispatches_on_mode_and_never_overwrites(tmp_path):
     import json
 
     from zeroproof.simulations.score.optimize import optimize
+
     src = tmp_path / "batch.jsonl"
     rows = _grouped_rows()
     src.write_text("".join(json.dumps(r) + "\n" for r in rows))
@@ -171,6 +178,7 @@ def test_optimize_dispatches_on_mode_and_never_overwrites(tmp_path):
 
 def test_no_tool_agent_keeps_refusal_demonstrations():
     from zeroproof.simulations.score.optimize import is_do_nothing, select_for_sft
+
     row = {
         "prompt": "check the status of order 98765 for me",
         "ask_family": "tool",
@@ -179,17 +187,20 @@ def test_no_tool_agent_keeps_refusal_demonstrations():
         "steps": [],
         "messages": [
             {"role": "user", "content": "check the status of order 98765 for me"},
-            {"role": "assistant",
-             "content": "I cannot look up orders. For billing, see the front desk."},
+            {
+                "role": "assistant",
+                "content": "I cannot look up orders. For billing, see the front desk.",
+            },
         ],
     }
-    assert is_do_nothing(row) is True            # tool agent: a real drop
+    assert is_do_nothing(row) is True  # tool agent: a real drop
     assert is_do_nothing(row, has_tools=False) is False
     # Judge-labeled rows bypass the heuristic entirely: a 1 is the
     # judge's call, whatever the grid expected.
     picked, _report = select_for_sft([row], target=5)
     assert len(picked) == 1
     from zeroproof.simulations.score.optimize import drop_reason
+
     unlabeled = dict(row)
     unlabeled.pop("reward")
     assert drop_reason(unlabeled) == "do_nothing"

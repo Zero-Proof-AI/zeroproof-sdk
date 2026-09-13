@@ -15,6 +15,7 @@ order:
 The loop state lives on the instance so each phase is a method with a
 small local scope. Nothing here is public; ``simulate()`` is the door.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -143,8 +144,7 @@ class Run:
             # Writes the progress file before inspection or backend
             # construction so callers see it immediately.
             c.out_path.parent.mkdir(parents=True, exist_ok=True)
-            self._write_progress({"stage": "setup", "rows": 0,
-                                  "scenario_s": 0, "rollout_s": 0})
+            self._write_progress({"stage": "setup", "rows": 0, "scenario_s": 0, "rollout_s": 0})
             log.info("simulate setup rows=0")
         self._resolve_inputs()
         self._resolve_traces()
@@ -155,8 +155,7 @@ class Run:
         self._init_loop_state()
         self._seed_pool()
         if c.out_path is not None:
-            self._write_progress({"stage": "start", "rows": 0,
-                                  "scenario_s": 0, "rollout_s": 0})
+            self._write_progress({"stage": "start", "rows": 0, "scenario_s": 0, "rollout_s": 0})
         self._start_writers()
         try:
             self._loop()
@@ -181,21 +180,25 @@ class Run:
         self.tools: list[dict] = list(self.profile.tools or [])
         self.policy: str = str(self.profile.policy or "")
         # Generation-only teacher guidance. profile.policy and export stay plain.
-        self.gen_policy = (f"{self.policy}\n\n{c.scaffold_text}"
-                           if c.scaffold_text else self.policy)
+        self.gen_policy = f"{self.policy}\n\n{c.scaffold_text}" if c.scaffold_text else self.policy
         self.writer_kind = kind_from_spec(c.spec, self.policy)
         # May be replaced by the backend spec once the runner is built.
         self.simulator = c.simulator
         self.drafted_tools: list[str] = []
         self.tool_draft_failed = False
-        if (not self.tools and self.policy and self.simulator is not False
-                and (c.agent is None or isinstance(c.agent, str))):
+        if (
+            not self.tools
+            and self.policy
+            and self.simulator is not False
+            and (c.agent is None or isinstance(c.agent, str))
+        ):
             # A description with no tools gives the writer and the world no
             # domain; draft the tool surface the described agent would have.
             drafted = draft_tools(
                 self.policy,
                 backend_spec=self.simulator if isinstance(self.simulator, str) else None,
-                kind=self.writer_kind)
+                kind=self.writer_kind,
+            )
             if drafted:
                 self.tools = drafted
                 self.profile.tools = drafted
@@ -206,22 +209,30 @@ class Run:
                 # letting a tool-free run pass for the described agent.
                 self.tool_draft_failed = True
         if c.agent is None and not self.tools and not self.policy:
-            raise ValueError(
-                "simulate needs an agent, tools=, or a system prompt.")
+            raise ValueError("simulate needs an agent, tools=, or a system prompt.")
         # Amplifies seed prompts only when seeds= is given; advanced["seed_prompts"]
         # stays literal. Offline runs (simulator=False) make no network calls.
         # Runs after inspect() so the writer hint carries the resolved policy.
-        if (c.seeds and self.seed_prompts and c.n_situations_target
-                and len(self.seed_prompts) < int(c.n_situations_target)
-                and self.simulator is not False):
+        if (
+            c.seeds
+            and self.seed_prompts
+            and c.n_situations_target
+            and len(self.seed_prompts) < int(c.n_situations_target)
+            and self.simulator is not False
+        ):
             given = len(self.seed_prompts)
             self.seed_prompts = amplify_seeds(
-                self.seed_prompts, int(c.n_situations_target), policy=self.policy,
-                backend_spec=self.simulator if isinstance(self.simulator, str) else None)
-            self.seed_amp_report = {"given": given,
-                                    "target": int(c.n_situations_target),
-                                    "total": len(self.seed_prompts),
-                                    "minted": len(self.seed_prompts) - given}
+                self.seed_prompts,
+                int(c.n_situations_target),
+                policy=self.policy,
+                backend_spec=self.simulator if isinstance(self.simulator, str) else None,
+            )
+            self.seed_amp_report = {
+                "given": given,
+                "target": int(c.n_situations_target),
+                "total": len(self.seed_prompts),
+                "minted": len(self.seed_prompts) - given,
+            }
 
     def _resolve_traces(self) -> None:
         c = self.c
@@ -240,15 +251,16 @@ class Run:
             # recipe draw extra weight proportional to its share; cells
             # outside every recipe keep base weight - that is the
             # exploration reserve in action.
-            self.optimizer_state = behavior_state(
-                self.trace_rows, targeted=c.targeted_regions)
-            if (self.trace_rows and self.dimensions is None
-                    and c.resolved_strategy != "broad"):
+            self.optimizer_state = behavior_state(self.trace_rows, targeted=c.targeted_regions)
+            if self.trace_rows and self.dimensions is None and c.resolved_strategy != "broad":
                 # trace: denser near observed behaviors, background kept.
                 # targeted: drops tools the traces did not touch, narrowing the space.
                 self.dimensions = dimensions_from_traces(
-                    self.trace_rows, self.tools, self.policy,
-                    broaden=c.resolved_strategy != "targeted")
+                    self.trace_rows,
+                    self.tools,
+                    self.policy,
+                    broaden=c.resolved_strategy != "targeted",
+                )
                 self.trace_focused = True
                 # the grid flips 90% of cells to success for cold starts;
                 # traces that show faults are asking for the fault cells
@@ -257,9 +269,9 @@ class Run:
         # The weight only applies over a trace-focused grid (its front-half
         # ordering is what the bias aims at) and only when nonzero; anything
         # else is exactly the unsteered draw and records no applied weight.
-        self.applied_steering = (float(c.steering_weight)
-                                 if c.steering_weight and self.trace_focused
-                                 else None)
+        self.applied_steering = (
+            float(c.steering_weight) if c.steering_weight and self.trace_focused else None
+        )
 
     def _allocation_boost(self, assignment: dict) -> float:
         factor = 1.0
@@ -287,8 +299,7 @@ class Run:
             boost = self._allocation_boost(region.get("assignment") or {})
             if boost != 1.0:
                 self.allocation_hits["n"] += 1
-                region["weight"] = round(
-                    float(region.get("weight") or 0.0) * boost, 6)
+                region["weight"] = round(float(region.get("weight") or 0.0) * boost, 6)
 
     # ------------------------------------------------------------- build
 
@@ -320,13 +331,14 @@ class Run:
         self.scene_thread: threading.Thread | None = None
         use_model_writer = not (
             self.simulator is False
-            or (callable(self.simulator) and not isinstance(self.simulator, str)))
+            or (callable(self.simulator) and not isinstance(self.simulator, str))
+        )
         if not use_model_writer:
             return
         scene_spec = self.simulator if isinstance(self.simulator, str) else None
         self.scene_thread = threading.Thread(
-            target=self._fill_scene, args=(scene_spec, time.monotonic()),
-            daemon=True)
+            target=self._fill_scene, args=(scene_spec, time.monotonic()), daemon=True
+        )
         self.scene_thread.start()
 
     def _fill_scene(self, scene_spec: str | None, scene_t0: float) -> None:
@@ -342,8 +354,8 @@ class Run:
         elif "result_shapes_unavailable" not in data.degraded:
             data.degraded.append("result_shapes_unavailable")
         brief = write_scene_brief(
-            self.tools, self.gen_policy, backend_spec=scene_spec,
-            kind=self.writer_kind)
+            self.tools, self.gen_policy, backend_spec=scene_spec, kind=self.writer_kind
+        )
         self.scene_box["brief"] = brief
         data.scene_brief = brief
         data.scene_brief_seconds = time.monotonic() - scene_t0
@@ -354,8 +366,11 @@ class Run:
         c = self.c
         self.fault_plans: dict = {}
         kind = self.profile.transport
-        self.turns = (default_max_turns(n_tools=len(self.tools))
-                      if c.max_turns is None else max(1, int(c.max_turns)))
+        self.turns = (
+            default_max_turns(n_tools=len(self.tools))
+            if c.max_turns is None
+            else max(1, int(c.max_turns))
+        )
         self.turn_stats = new_turn_stats()
         # Resolve the opening-side topology axis: explicit value, or the
         # share observed in this run's traces ("auto"). Model-backed
@@ -369,11 +384,15 @@ class Run:
         elif isinstance(opening_req, float):
             self.opening_rate, self.opening_source = opening_req, "explicit"
         else:
-            self.opening_rate, self.opening_source = 0.0, (
-                "explicit" if opening_req == "user" else "default")
+            self.opening_rate, self.opening_source = (
+                0.0,
+                ("explicit" if opening_req == "user" else "default"),
+            )
         runner_kw: dict[str, Any] = {
-            "fault_plans": self.fault_plans, "max_turns": self.turns,
-            "avg_turns": float(c.avg_turns), "min_user_turns": c.min_user_turns,
+            "fault_plans": self.fault_plans,
+            "max_turns": self.turns,
+            "avg_turns": float(c.avg_turns),
+            "min_user_turns": c.min_user_turns,
             "turn_stats": self.turn_stats,
         }
         if c.temperature is not None:
@@ -384,34 +403,58 @@ class Run:
             spec_backend = backend_spec(c.backend)
             url, model_name = parse_backend_spec(spec_backend)
             self.runner = local_model(
-                url, model_name, tools=self.tools, system=self.gen_policy,
-                timeout=c.rollout_timeout, opening_rate=self.opening_rate,
-                result_shapes=self.shape_box, **runner_kw)
+                url,
+                model_name,
+                tools=self.tools,
+                system=self.gen_policy,
+                timeout=c.rollout_timeout,
+                opening_rate=self.opening_rate,
+                result_shapes=self.shape_box,
+                **runner_kw,
+            )
             self.simulator = self.simulator if self.simulator is not None else spec_backend
         elif c.agent is None or kind not in {"callable", "backend_spec", "http"}:
             self.runner = hosted_model(
-                self.tools, system=self.gen_policy,
-                timeout=c.rollout_timeout, opening_rate=self.opening_rate,
-                result_shapes=self.shape_box, **runner_kw)
+                self.tools,
+                system=self.gen_policy,
+                timeout=c.rollout_timeout,
+                opening_rate=self.opening_rate,
+                result_shapes=self.shape_box,
+                **runner_kw,
+            )
         else:
             self.runner, kind = resolve(
-                c.agent, tools=self.tools, policy=self.policy,
-                opening_rate=self.opening_rate, result_shapes=self.shape_box,
-                timeout=c.rollout_timeout, **runner_kw)
+                c.agent,
+                tools=self.tools,
+                policy=self.policy,
+                opening_rate=self.opening_rate,
+                result_shapes=self.shape_box,
+                timeout=c.rollout_timeout,
+                **runner_kw,
+            )
         self.kind = kind
 
     def _build_generator(self) -> None:
         c = self.c
         self.generator = make_default_generator(
-            self.tools, policy=self.policy, per_round=c.pool_size, seed=c.seed,
-            dimensions=self.dimensions, simulator=self.simulator,
+            self.tools,
+            policy=self.policy,
+            per_round=c.pool_size,
+            seed=c.seed,
+            dimensions=self.dimensions,
+            simulator=self.simulator,
             kind=self.writer_kind,
             scenarios_per_request=c.scenarios_per_request,
             completions_per_request=c.completions_per_request,
-            distinct_cards=c.distinct_cards, extra_cards=c.extra_cards,
-            scene_brief=self.scene_box["brief"], time_budget=c.time_budget,
-            run_started=self.started, mode=c.topo["mode"],
-            steering_weight=self.applied_steering, **c.advanced)
+            distinct_cards=c.distinct_cards,
+            extra_cards=c.extra_cards,
+            scene_brief=self.scene_box["brief"],
+            time_budget=c.time_budget,
+            run_started=self.started,
+            mode=c.topo["mode"],
+            steering_weight=self.applied_steering,
+            **c.advanced,
+        )
         gen = self.generator
         self._apply_allocation(getattr(gen, "regions", None))
         self.planned_cell_keys = {
@@ -444,18 +487,22 @@ class Run:
                         "by default, even with your own agent=. Alternatives: "
                         "agent='openai:<model>' with OPENAI_API_KEY runs writer "
                         "and agent on your key; simulator=False uses the "
-                        "built-in template writer with no model at all.")
+                        "built-in template writer with no model at all."
+                    )
                 threading.Thread(
-                    target=touch_hosted, args=(hosted_url,),
-                    kwargs={"timeout": 5.0}, daemon=True).start()
+                    target=touch_hosted, args=(hosted_url,), kwargs={"timeout": 5.0}, daemon=True
+                ).start()
         self.fault_plans.update(gen.fault_plans)
-        self.declared = {str((t.get("function", t) or {}).get("name", ""))
-                         for t in self.tools or []} - {""}
+        self.declared = {
+            str((t.get("function", t) or {}).get("name", "")) for t in self.tools or []
+        } - {""}
         self.data.budget = int(c.cap)
         self.search_plan = sampling_plan(c.time_budget)
         self.action_shapes, _ = action_space_targets(
-            self.tools, max_len=int(self.search_plan["max_shape_len"]),
-            cap=int(self.search_plan["enum_cap"]))
+            self.tools,
+            max_len=int(self.search_plan["max_shape_len"]),
+            cap=int(self.search_plan["enum_cap"]),
+        )
         self.induced_shape_keys: set[str] = set()
         self.resolved_embedder = resolve_embedder(c.embedder)
         self.data.embedder_name = str(getattr(self.resolved_embedder, "name", "unknown"))
@@ -470,15 +517,18 @@ class Run:
         known = {shape.key() for shape in self.action_shapes}
         for row in rows:
             self.induced_shape_keys.update(
-                induced_keys_from_trajectory(row, self.action_shapes, self.tools))
+                induced_keys_from_trajectory(row, self.action_shapes, self.tools)
+            )
             observed = shape_from_trajectory(row, self.tools)
             if observed is not None and observed.key() not in known:
                 self.action_shapes.append(observed)
                 known.add(observed.key())
             if isinstance(row, dict):
                 row["tools_used"] = [
-                    step.get("tool") for step in (row.get("steps") or [])
-                    if isinstance(step, dict) and step.get("tool")]
+                    step.get("tool")
+                    for step in (row.get("steps") or [])
+                    if isinstance(step, dict) and step.get("tool")
+                ]
 
     def _scaled(self, plan: dict | None, key: str = "") -> dict | None:
         """The fault plan this prompt keeps at ``fault_rate``, or nothing."""
@@ -493,13 +543,13 @@ class Run:
         # Rows without a grid cell (seeds, open-ended, behavior cards)
         # still get auditable coordinates - realized from what actually
         # happened, marked so audits can tell assigned from observed.
-        tools_called = [str(s.get("tool")) for s in steps or []
-                        if isinstance(s, dict) and s.get("tool")]
+        tools_called = [
+            str(s.get("tool")) for s in steps or [] if isinstance(s, dict) and s.get("tool")
+        ]
         condition = "success"
         for s in steps or []:
             result = s.get("result") if isinstance(s, dict) else None
-            status = (str(result.get("status")) if isinstance(result, dict)
-                      else "")
+            status = str(result.get("status")) if isinstance(result, dict) else ""
             if status and status not in ("ok", "success"):
                 condition = status
                 break
@@ -509,22 +559,29 @@ class Run:
                 if kind:
                     condition = kind
                     break
-        return {"tool": tools_called[0] if tools_called else "unrelated",
-                "tool_condition": condition,
-                "origin": "realized"}
+        return {
+            "tool": tools_called[0] if tools_called else "unrelated",
+            "tool_condition": condition,
+            "origin": "realized",
+        }
 
     def _build_row(self, job: tuple) -> dict:
         """Run one rollout on a worker thread and shape it as a row."""
         c = self.c
         prompt, rollout, meta, selection = job
         if self.stopping:
-            return {"_skipped": True, "prompt": prompt, "steps": [],
-                    "final_text": "", "reward": None}
+            return {
+                "_skipped": True,
+                "prompt": prompt,
+                "steps": [],
+                "final_text": "",
+                "reward": None,
+            }
         meta = dict(meta or {})
         assignment = meta.get("assignment") or meta.get("scenario_dimensions")
         faults = self._scaled(
-            self.generator.fault_plans.get(prompt) or self.fault_plans.get(prompt),
-            prompt)
+            self.generator.fault_plans.get(prompt) or self.fault_plans.get(prompt), prompt
+        )
         # the caller's execute= world reads this to know which rollout it answers
         current_rollout.prompt = prompt
         current_rollout.rollout_index = rollout
@@ -535,14 +592,13 @@ class Run:
             raw = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>"}
         raw = raw if isinstance(raw, dict) else {"steps": [], "final_text": str(raw)}
         if not assignment:
-            assignment = self._realized_dims(raw.get("steps") or [],
-                                             clean_faults(faults))
+            assignment = self._realized_dims(raw.get("steps") or [], clean_faults(faults))
         semantic = self.data.semantic
         t = {
             # Born stamped: the streamed file and a later save() must agree.
             SCHEMA_KEY: SCHEMA_VERSION,
-            "scenario_id": meta.get("region_id") or "probe_" + hashlib.sha256(
-                str(prompt).encode()).hexdigest()[:6],
+            "scenario_id": meta.get("region_id")
+            or "probe_" + hashlib.sha256(str(prompt).encode()).hexdigest()[:6],
             "scenario_dimensions": assignment,
             "arm": meta.get("arm") or "unattributed",
             "prompt": prompt,
@@ -551,8 +607,7 @@ class Run:
             "steps": raw.get("steps") or [],
             "final_text": str(raw.get("final_text", "")),
             # topology axis: which side opened this conversation
-            **({"opener": str(raw["opener"]), "opening": "agent"}
-               if raw.get("opener") else {}),
+            **({"opener": str(raw["opener"]), "opening": "agent"} if raw.get("opener") else {}),
             "behavior_signature": None,
             "reward": None,
             "grader_reason": None,
@@ -576,10 +631,14 @@ class Run:
 
     @staticmethod
     def _error_row(job: tuple, exc: Exception) -> dict:
-        t = {SCHEMA_KEY: SCHEMA_VERSION,
-             "steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>",
-             "arm": (job[2] or {}).get("arm") or "unattributed",
-             "prompt": job[0], "reward": None}
+        t = {
+            SCHEMA_KEY: SCHEMA_VERSION,
+            "steps": [],
+            "final_text": f"<agent error: {public_llm_error(exc)}>",
+            "arm": (job[2] or {}).get("arm") or "unattributed",
+            "prompt": job[0],
+            "reward": None,
+        }
         t["behavior_signature"] = behavior_signature(t)
         return t
 
@@ -637,7 +696,8 @@ class Run:
         self.seen_prints: set[str] = set()
         self.generation_started = self.started
         self.scenario_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, c.scenario_concurrency))
+            max_workers=max(1, c.scenario_concurrency)
+        )
         self.scenario_futs = []
         self.next_producer_round = 0
         self.last_batch_size = 1
@@ -658,7 +718,10 @@ class Run:
                 continue
             self.generated_pool.append(text)
             self.generator.meta[text] = {
-                "arm": "open_ended", "generator": "user", "seed": self.c.seed}
+                "arm": "open_ended",
+                "generator": "user",
+                "seed": self.c.seed,
+            }
             self.generator.provenance[text] = "open_ended"
 
     @staticmethod
@@ -666,26 +729,25 @@ class Run:
         vals = [float(r["novelty"]) for r in rows if r.get("novelty") is not None]
         return sum(vals) / len(vals) if vals else 1.0
 
-    def _novelty_restart(self, round_id: int, info: dict, *,
-                         clear_avoid: bool) -> int:
+    def _novelty_restart(self, round_id: int, info: dict, *, clear_avoid: bool) -> int:
         gen = self.generator
         if self.restart_count >= self.max_restarts or gen.model is None:
             return round_id
         self.restart_count += 1
         bump = round_id + self.restart_count * 997
         ctx_kwargs = {
-            "novelty_parents": ([] if not self.c.mutate_failures
-                                else self.failing_rows[-10:]),
+            "novelty_parents": ([] if not self.c.mutate_failures else self.failing_rows[-10:]),
             "avoid": [] if clear_avoid else (info.get("concentrated") or []),
             "underexplored": info.get("sparse") or [],
             "behavior_gaps": list(self.behavior_gap_prompts[-8:]),
         }
         if hasattr(gen, "set_search_context"):
             missing = uncovered_action_shapes(
-                self.action_shapes, self.induced_shape_keys,
-                limit=int(self.search_plan["shape_limit"]))
-            ctx_kwargs["action_targets"] = [
-                shape_as_tags(s, self.tools) for s in missing]
+                self.action_shapes,
+                self.induced_shape_keys,
+                limit=int(self.search_plan["shape_limit"]),
+            )
+            ctx_kwargs["action_targets"] = [shape_as_tags(s, self.tools) for s in missing]
             ctx_kwargs["arm_weights"] = self.search
             gen.set_search_context(**ctx_kwargs)
         return bump
@@ -703,13 +765,16 @@ class Run:
             if sk and sk in self.used_situations:
                 return False
         elif sk:
-            if (c.n_situations_target
-                    and not self.cap_lifted["lifted"]
-                    and sk not in self.used_situations
-                    and len(self.used_situations) >= c.n_situations_target):
+            if (
+                c.n_situations_target
+                and not self.cap_lifted["lifted"]
+                and sk not in self.used_situations
+                and len(self.used_situations) >= c.n_situations_target
+            ):
                 return False
-            if (len(self.situation_prompts.get(sk, [])) >= c.n_req
-                    and prompt not in (self.situation_prompts.get(sk) or [])):
+            if len(self.situation_prompts.get(sk, [])) >= c.n_req and prompt not in (
+                self.situation_prompts.get(sk) or []
+            ):
                 return False
         return True
 
@@ -720,8 +785,7 @@ class Run:
             unused.sort(key=lambda p: 0 if p in seed_set else 1)
         return unused
 
-    def _schedule_prompt(self, jobs: list, prompt: str, meta: dict, row: dict,
-                         action: str) -> None:
+    def _schedule_prompt(self, jobs: list, prompt: str, meta: dict, row: dict, action: str) -> None:
         c = self.c
         meta = dict(meta or {})
         meta["allocator"] = action
@@ -751,15 +815,17 @@ class Run:
         self.allocator_counts[action] = self.allocator_counts.get(action, 0) + k_now
 
     def _append_jobs(self, jobs: list, prompt: str, meta: dict, row: dict) -> None:
-        action = ("expand" if _situation_key_from_meta(meta, prompt) in self.used_situations
-                  else "explore")
+        action = (
+            "expand"
+            if _situation_key_from_meta(meta, prompt) in self.used_situations
+            else "explore"
+        )
         self._schedule_prompt(jobs, prompt, meta, row, action)
 
     # ------------------------------------------------------------ output
 
     def _write_progress(self, payload: dict) -> None:
-        Path(str(self.c.out_path) + ".progress.json").write_text(
-            json.dumps(payload, default=str))
+        Path(str(self.c.out_path) + ".progress.json").write_text(json.dumps(payload, default=str))
 
     def _flush_output(self, stage: str) -> None:
         c = self.c
@@ -771,26 +837,41 @@ class Run:
         unused_n = sum(1 for p in self.generated_pool if self._prompt_available(p))
         inflight_n = len(self.inflight)
         writers_n = len(self.scenario_futs)
-        self._write_progress({
-            "stage": stage, "rows": len(rows),
-            "scenario_s": round(data.scenario_generation_seconds, 3),
-            "rollout_s": round(data.rollout_seconds, 3),
-            "scene_s": round(data.scene_brief_seconds, 3),
-            "first_row_s": round(data.first_row_seconds, 3),
-            "total_s": round(now - self.started, 3),
-            "unused": unused_n, "inflight": inflight_n, "writers": writers_n,
-            "search": data.search or None,
-        })
-        should_report = (stage != "rollout" or len(rows) >= c.cap
-                         or len(rows) - self.reported_rows >= 25
-                         or now - self.reported_at >= 5.0)
+        self._write_progress(
+            {
+                "stage": stage,
+                "rows": len(rows),
+                "scenario_s": round(data.scenario_generation_seconds, 3),
+                "rollout_s": round(data.rollout_seconds, 3),
+                "scene_s": round(data.scene_brief_seconds, 3),
+                "first_row_s": round(data.first_row_seconds, 3),
+                "total_s": round(now - self.started, 3),
+                "unused": unused_n,
+                "inflight": inflight_n,
+                "writers": writers_n,
+                "search": data.search or None,
+            }
+        )
+        should_report = (
+            stage != "rollout"
+            or len(rows) >= c.cap
+            or len(rows) - self.reported_rows >= 25
+            or now - self.reported_at >= 5.0
+        )
         if should_report:
             elapsed = now - self.started
             rate = len(rows) / elapsed if elapsed else 0.0
-            log.info("simulate %s rows=%d/%d elapsed=%.1fs rate=%.1f/s "
-                     "unused=%d inflight=%d writers=%d",
-                     stage, len(rows), c.cap, elapsed, rate,
-                     unused_n, inflight_n, writers_n)
+            log.info(
+                "simulate %s rows=%d/%d elapsed=%.1fs rate=%.1f/s unused=%d inflight=%d writers=%d",
+                stage,
+                len(rows),
+                c.cap,
+                elapsed,
+                rate,
+                unused_n,
+                inflight_n,
+                writers_n,
+            )
             self.reported_rows, self.reported_at = len(rows), now
         if not rows:
             return
@@ -803,7 +884,7 @@ class Run:
             self.written = len(rows)
             return
         with open(c.out_path, "a") as fh:
-            for row in rows[self.written:]:
+            for row in rows[self.written :]:
                 fh.write(json.dumps(export_row(row), default=str) + "\n")
         self.written = len(rows)
 
@@ -821,9 +902,13 @@ class Run:
             norm.append(word)
         return hashlib.sha256(" ".join(norm).encode()).hexdigest()[:16]
 
-    def _produce(self, round_id: int, cards: int | None = None,
-                 completions: int | None = None,
-                 out_tokens: int | None = None) -> tuple[list[str], dict, dict, dict]:
+    def _produce(
+        self,
+        round_id: int,
+        cards: int | None = None,
+        completions: int | None = None,
+        out_tokens: int | None = None,
+    ) -> tuple[list[str], dict, dict, dict]:
         """One writer wave on a worker thread: a fresh local generator
         that shares the run's regions, walked ids and search context."""
         c = self.c
@@ -831,22 +916,33 @@ class Run:
         if self.stopping:
             return [], {}, {}, {}
         n_cards = max(2, int(cards or c.scenarios_per_request))
-        n_comp = max(1, min(8, int(
-            completions if completions is not None else c.completions_per_request)))
+        n_comp = max(
+            1, min(8, int(completions if completions is not None else c.completions_per_request))
+        )
         # ~130 tokens per card: long-prompt cards must be realizable.
         # The old 768 ceiling gave 12-card batches 64 tokens per message.
-        token_cap = out_tokens if out_tokens is not None else max(
-            256, min(2048, 130 * n_cards + 128))
+        token_cap = (
+            out_tokens if out_tokens is not None else max(256, min(2048, 130 * n_cards + 128))
+        )
         local = make_default_generator(
-            self.tools, policy=self.policy, per_round=c.pool_size, seed=c.seed,
-            dimensions=self.dimensions, simulator=self.simulator,
+            self.tools,
+            policy=self.policy,
+            per_round=c.pool_size,
+            seed=c.seed,
+            dimensions=self.dimensions,
+            simulator=self.simulator,
             kind=self.writer_kind,
             scenarios_per_request=n_cards,
             completions_per_request=n_comp,
-            distinct_cards=c.distinct_cards, extra_cards=c.extra_cards,
-            scene_brief=self.scene_box["brief"], out_tokens=token_cap,
-            time_budget=c.time_budget, run_started=self.started,
-            steering_weight=self.applied_steering, **c.advanced)
+            distinct_cards=c.distinct_cards,
+            extra_cards=c.extra_cards,
+            scene_brief=self.scene_box["brief"],
+            out_tokens=token_cap,
+            time_budget=c.time_budget,
+            run_started=self.started,
+            steering_weight=self.applied_steering,
+            **c.advanced,
+        )
         src_model = getattr(gen, "model", None)
         loc_model = getattr(local, "model", None)
         if src_model is not None and loc_model is not None:
@@ -856,8 +952,7 @@ class Run:
             loc_model.walked_ids = self.walked_ids
             loc_model.walked_lock = self.walked_lock
             if hasattr(loc_model, "arm_weights"):
-                loc_model.arm_weights = dict(
-                    getattr(gen, "arm_weights", None) or self.search)
+                loc_model.arm_weights = dict(getattr(gen, "arm_weights", None) or self.search)
         if hasattr(local, "arm_weights"):
             local.arm_weights = dict(getattr(gen, "arm_weights", None) or self.search)
         if hasattr(local, "set_search_context"):
@@ -867,10 +962,10 @@ class Run:
                 underexplored=getattr(gen, "underexplored", []),
                 behavior_gaps=getattr(gen, "behavior_gaps", []),
                 action_targets=getattr(gen, "action_targets", []),
-                arm_weights=getattr(gen, "arm_weights", None) or self.search)
+                arm_weights=getattr(gen, "arm_weights", None) or self.search,
+            )
         texts = list(local(None, round_id, include_model=True) or [])
-        return (texts, dict(local.meta), dict(local.fault_plans),
-                dict(local.last_errors))
+        return (texts, dict(local.meta), dict(local.fault_plans), dict(local.last_errors))
 
     def _ingest_producer(self, fut: concurrent.futures.Future) -> int:
         gen = self.generator
@@ -881,8 +976,7 @@ class Run:
             if "Hosted Qwen" in msg:
                 gen.last_errors["llm_guided"] = msg
             else:
-                gen.last_errors["llm_guided"] = (
-                    f"{type(exc).__name__}: {exc}")
+                gen.last_errors["llm_guided"] = f"{type(exc).__name__}: {exc}"
             return 0
         gen.meta.update(metas)
         gen.fault_plans.update(plans)
@@ -921,8 +1015,8 @@ class Run:
         if n <= 0:
             return
         self.scenario_futs.extend(
-            self.scenario_pool.submit(self._produce, self.next_producer_round + i)
-            for i in range(n))
+            self.scenario_pool.submit(self._produce, self.next_producer_round + i) for i in range(n)
+        )
         self.next_producer_round += n
 
     def _start_writers(self) -> None:
@@ -936,27 +1030,33 @@ class Run:
             # Tiny batches first so rollouts start ~5s.
             initial_writers = min(2, max(1, self.c.writer_flight))
             for i in range(initial_writers):
-                self.scenario_futs.append(self.scenario_pool.submit(
-                    self._produce, i, 4, None, 320))
+                self.scenario_futs.append(self.scenario_pool.submit(self._produce, i, 4, None, 320))
             self.next_producer_round = initial_writers
             self._ingest_finished_writers()
         data.scenario_generation_seconds = time.monotonic() - self.generation_started
         self._flush_output("seed")
         gen.model_produced = any(
             (gen.meta.get(prompt) or {}).get("generator") == "model"
-            for prompt in self.generated_pool)
-        if self.generated_pool and any((gen.meta.get(p) or {}).get("arm")
-                                       for p in self.generated_pool):
+            for prompt in self.generated_pool
+        )
+        if self.generated_pool and any(
+            (gen.meta.get(p) or {}).get("arm") for p in self.generated_pool
+        ):
             note_stage(data, "generated candidate with arm provenance")
 
-    def _select(self, candidates: list[str], *, batch_size: int,
-                selection_seed: int, selection_round: int):
+    def _select(
+        self, candidates: list[str], *, batch_size: int, selection_seed: int, selection_round: int
+    ):
         tick = time.monotonic()
         try:
             return select_execution_batch(
-                candidates, embedder=self.resolved_embedder, archive=self.archive,
-                batch_size=batch_size, seed=selection_seed,
-                round_index=selection_round)
+                candidates,
+                embedder=self.resolved_embedder,
+                archive=self.archive,
+                batch_size=batch_size,
+                seed=selection_seed,
+                round_index=selection_round,
+            )
         finally:
             self.data.embedding_selection_seconds += time.monotonic() - tick
 
@@ -997,8 +1097,7 @@ class Run:
                     # hung-slot limit) before anything is collected, so
                     # results are consumed in submission order and each
                     # round's selection seed sees the same state.
-                    concurrent.futures.wait(list(self.inflight),
-                                            timeout=c.hung_slot_s)
+                    concurrent.futures.wait(list(self.inflight), timeout=c.hung_slot_s)
             results, jobs_for = self._collect()
             if self._update_search(results, jobs_for, info, selected):
                 break
@@ -1092,10 +1191,13 @@ class Run:
                 # refills. Writer flight stays small so rollouts
                 # share the GPU.
                 low = len(unused) < max(16, min(64, self.flight // 4))
-                exhausted = (not unused and self.generated_pool
-                             and self.writer_idle >= 2
-                             and not c.unique_cards
-                             and c.time_budget is None)
+                exhausted = (
+                    not unused
+                    and self.generated_pool
+                    and self.writer_idle >= 2
+                    and not c.unique_cards
+                    and c.time_budget is None
+                )
                 if exhausted:
                     refill = 0
                 elif low or pipeline < need:
@@ -1106,40 +1208,38 @@ class Run:
             for prompt in gen(None, self.round_index, include_model=False) or []:
                 if prompt and prompt not in self.generated_pool:
                     self.generated_pool.append(prompt)
-                    gen.meta.update(
-                        getattr(gen, "last_candidate_provenance", {}))
+                    gen.meta.update(getattr(gen, "last_candidate_provenance", {}))
         unused = self._available()
         if gen.model is None and not gen.model_produced:
             bounce = 0
             while len(unused) < take:
                 bounce += 1
-                for prompt in gen(
-                        None, self.round_index + bounce * 17,
-                        include_model=False) or []:
+                for prompt in gen(None, self.round_index + bounce * 17, include_model=False) or []:
                     if prompt and prompt not in self.generated_pool:
                         self.generated_pool.append(prompt)
                 unused = self._available()
                 if bounce >= 20:
                     break
-        if (gen.model is not None and not unused and self.scenario_futs
-                and not self.inflight):
+        if gen.model is not None and not unused and self.scenario_futs and not self.inflight:
             wait_s = 0.5
             left = self._clock_left()
             if left is not None:
                 wait_s = max(0.2, min(wait_s, left))
             done, _ = concurrent.futures.wait(
-                self.scenario_futs, timeout=wait_s,
-                return_when=concurrent.futures.FIRST_COMPLETED)
+                self.scenario_futs, timeout=wait_s, return_when=concurrent.futures.FIRST_COMPLETED
+            )
             self.scenario_futs[:] = [f for f in self.scenario_futs if f not in done]
             for fut in done:
                 self._ingest_producer(fut)
             unused = self._available()
         self.fault_plans.update(gen.fault_plans)
-        if (gen.last_errors.get("llm_guided") and not gen.model_produced
-                and "generator_fallback" not in data.degraded):
+        if (
+            gen.last_errors.get("llm_guided")
+            and not gen.model_produced
+            and "generator_fallback" not in data.degraded
+        ):
             data.degraded.append("generator_fallback")
-        if unused and any(
-                (gen.meta.get(p) or {}).get("arm") for p in unused):
+        if unused and any((gen.meta.get(p) or {}).get("arm") for p in unused):
             note_stage(data, "generated candidate with arm provenance")
         return unused
 
@@ -1154,22 +1254,31 @@ class Run:
         if unused:
             pick_n = take if self.explore_only else max(take * 3, take)
             selected, info = self._select(
-                unused, batch_size=min(len(unused), pick_n),
+                unused,
+                batch_size=min(len(unused), pick_n),
                 selection_seed=c.seed + self.round_index,
-                selection_round=self.round_index)
-        if (selected and self._mean_novelty(selected) < NOVELTY_RESTART_FLOOR
-                and self.restart_count < self.max_restarts):
+                selection_round=self.round_index,
+            )
+        if (
+            selected
+            and self._mean_novelty(selected) < NOVELTY_RESTART_FLOOR
+            and self.restart_count < self.max_restarts
+        ):
             bump = self._novelty_restart(self.round_index, info, clear_avoid=True)
             unused = self._available()
             if unused:
                 selected, info = self._select(
-                    unused, batch_size=max(1, take),
-                    selection_seed=c.seed + bump, selection_round=bump)
+                    unused,
+                    batch_size=max(1, take),
+                    selection_seed=c.seed + bump,
+                    selection_round=bump,
+                )
         family_rejected: list[dict] = []
         if not data.semantic and not c.unique_cards:
             family_batch = list(self.scenario_families)
             selected, family_rejected = cap_scenario_families(
-                selected, family_batch, cap=max(16, c.n_req * 4))
+                selected, family_batch, cap=max(16, c.n_req * 4)
+            )
             if gen.model is None:
                 fill_to = min(take, len(selected) + len(family_rejected))
                 backfill_n = max(0, fill_to - len(selected))
@@ -1188,17 +1297,22 @@ class Run:
             if self.archive.compatible(self.resolved_embedder):
                 self.archive.add(row["vector"] for row in selected)
             missing = uncovered_action_shapes(
-                self.action_shapes, self.induced_shape_keys,
-                limit=int(self.search_plan["shape_limit"]))
+                self.action_shapes,
+                self.induced_shape_keys,
+                limit=int(self.search_plan["shape_limit"]),
+            )
             if hasattr(gen, "set_search_context"):
                 gen.set_search_context(
                     novelty_parents=[] if not c.mutate_failures else self.failing_rows[-10:],
-                    avoid=([row["text"] for row in family_rejected[:6]]
-                           + list(info.get("concentrated") or []))[:8],
+                    avoid=(
+                        [row["text"] for row in family_rejected[:6]]
+                        + list(info.get("concentrated") or [])
+                    )[:8],
                     underexplored=info.get("sparse") or [],
                     behavior_gaps=list(self.behavior_gap_prompts[-8:]),
                     action_targets=[shape_as_tags(s, self.tools) for s in missing],
-                    arm_weights=self.search)
+                    arm_weights=self.search,
+                )
         return selected, info
 
     def _card_action(self, meta: dict, prompt: str, slots: dict | None) -> str:
@@ -1210,14 +1324,20 @@ class Run:
             return "expand"
         return "explore"
 
-    def _add_job(self, batch: list, filled: dict, prompt: str, meta: dict,
-                 row: dict, action: str) -> int:
+    def _add_job(
+        self, batch: list, filled: dict, prompt: str, meta: dict, row: dict, action: str
+    ) -> int:
         c = self.c
         sk = _situation_key_from_meta(meta, prompt)
-        if (action == "explore" and c.n_situations_target
-                and not self.cap_lifted["lifted"] and (
+        if (
+            action == "explore"
+            and c.n_situations_target
+            and not self.cap_lifted["lifted"]
+            and (
                 sk not in self.used_situations
-                and len(self.used_situations) >= c.n_situations_target)):
+                and len(self.used_situations) >= c.n_situations_target
+            )
+        ):
             return 0
         before = len(batch)
         self._schedule_prompt(batch, prompt, meta, row, action)
@@ -1239,8 +1359,8 @@ class Run:
         slots = None
         if c.topo["mode"] == "adaptive" and not c.unique_cards and take:
             live_plan = adaptive_allocator(
-                c.time_budget, c.until_key,
-                elapsed=time.monotonic() - self.started)
+                c.time_budget, c.until_key, elapsed=time.monotonic() - self.started
+            )
             slots = allocator_slot_counts(take, live_plan)
 
         # Named seed openers are extra requests, not writer completions.
@@ -1251,20 +1371,23 @@ class Run:
                     break
                 if prompt not in self.generated_pool or not self._prompt_available(prompt):
                     continue
-                meta = dict(gen.meta.get(prompt) or {
-                    "arm": "open_ended", "generator": "user", "seed": c.seed})
+                meta = dict(
+                    gen.meta.get(prompt)
+                    or {"arm": "open_ended", "generator": "user", "seed": c.seed}
+                )
                 row = row_by_text.get(prompt) or {
-                    "text": prompt, "cluster": None, "novelty": None,
-                    "reason": "seed"}
+                    "text": prompt,
+                    "cluster": None,
+                    "novelty": None,
+                    "reason": "seed",
+                }
                 action = self._card_action(meta, prompt, slots)
                 self._add_job(batch, filled, prompt, meta, row, action)
         verify_cap = take if slots is None else slots["verify"]
-        if (not c.k_immediate and c.repeat_count > 1
-                and self.verify_queue):
+        if not c.k_immediate and c.repeat_count > 1 and self.verify_queue:
             still: list[tuple] = []
             for prompt, meta, row in self.verify_queue:
-                if (len(batch) >= take
-                        or filled["verify"] >= verify_cap):
+                if len(batch) >= take or filled["verify"] >= verify_cap:
                     still.append((prompt, meta, row))
                     continue
                 if self.prompt_rollouts.get(prompt, 0) >= c.repeat_count:
@@ -1274,16 +1397,15 @@ class Run:
                     still.append((prompt, meta, row))
             self.verify_queue[:] = still
         stratified = _stratified_prompts(
-            [row["text"] for row in selected], take, gen,
-            used_situations=self.used_situations)
+            [row["text"] for row in selected], take, gen, used_situations=self.used_situations
+        )
 
         jobs = []
         for prompt in stratified:
             row = row_by_text.get(prompt)
             if not row:
                 continue
-            meta = dict(gen.meta.get(prompt)
-                        or gen.last_candidate_provenance.get(prompt) or {})
+            meta = dict(gen.meta.get(prompt) or gen.last_candidate_provenance.get(prompt) or {})
             meta.setdefault("arm", gen.provenance.get(prompt, "unattributed"))
             meta.setdefault("seed", c.seed)
             jobs.append((prompt, meta, row, self._card_action(meta, prompt, slots)))
@@ -1332,25 +1454,40 @@ class Run:
             for name, prompt in mutate_pool(parents, rounds=1, limit=mutation_slots):
                 if not self._prompt_available(prompt):
                     continue
-                meta = {"arm": "failure_mutation", "seed": c.seed,
-                        "generator": name, "parent": parents[0][:80]}
-                self._append_jobs(batch, prompt, meta, {
-                    "cluster": None, "novelty": None,
-                    "reason": "failure_mutation"})
+                meta = {
+                    "arm": "failure_mutation",
+                    "seed": c.seed,
+                    "generator": name,
+                    "parent": parents[0][:80],
+                }
+                self._append_jobs(
+                    batch,
+                    prompt,
+                    meta,
+                    {"cluster": None, "novelty": None, "reason": "failure_mutation"},
+                )
             self.failing_regions = []
 
         missing = uncovered_action_shapes(
-            self.action_shapes, self.induced_shape_keys, limit=max(gap_slots, 1))
+            self.action_shapes, self.induced_shape_keys, limit=max(gap_slots, 1)
+        )
         if gen.model is None and gap_slots:
             for shape in missing[: max(0, gap_slots)]:
                 prompt = render_target_situation(shape, self.tools)
                 if not self._prompt_available(prompt):
                     continue
-                meta = {"arm": "behavior_targeted", "seed": c.seed,
-                        "generator": "actionspace", "action_key": shape.key()}
-                self._append_jobs(batch, prompt, meta, {
-                    "cluster": None, "novelty": None,
-                    "reason": "behavior_targeted"})
+                meta = {
+                    "arm": "behavior_targeted",
+                    "seed": c.seed,
+                    "generator": "actionspace",
+                    "action_key": shape.key(),
+                }
+                self._append_jobs(
+                    batch,
+                    prompt,
+                    meta,
+                    {"cluster": None, "novelty": None, "reason": "behavior_targeted"},
+                )
                 self.behavior_gap_prompts.append(prompt)
         return batch
 
@@ -1366,19 +1503,25 @@ class Run:
             self.empty_streak = 0
             return "proceed"
         self.empty_streak += 1
-        if (not self.cap_lifted["lifted"] and c.n_situations_target
-                and remaining > 0 and self.cap_lifted["lost"] > 0
-                and len(self.used_situations) >= c.n_situations_target):
+        if (
+            not self.cap_lifted["lifted"]
+            and c.n_situations_target
+            and remaining > 0
+            and self.cap_lifted["lost"] > 0
+            and len(self.used_situations) >= c.n_situations_target
+        ):
             self.cap_lifted["lifted"] = True
             self.empty_streak = 0
             note_stage(data, "situation cap lifted to fill lost rollouts")
             return "continue"
-        if (c.n_situations_target
-                and len(self.used_situations) >= c.n_situations_target
-                and not self.inflight and not self.scenario_futs
-                and self.cap_lifted["lost"] == 0
-                and all(self.prompt_rollouts.get(p, 0) >= c.repeat_count
-                        for p in self.used)):
+        if (
+            c.n_situations_target
+            and len(self.used_situations) >= c.n_situations_target
+            and not self.inflight
+            and not self.scenario_futs
+            and self.cap_lifted["lost"] == 0
+            and all(self.prompt_rollouts.get(p, 0) >= c.repeat_count for p in self.used)
+        ):
             # every situation the run was asked for exists and
             # has all its rollouts; a bigger budget cannot be
             # met, so stop and say so instead of spinning the
@@ -1387,15 +1530,11 @@ class Run:
             return "break"
         # Unique ingest may drop exact/near-dupe cards. That is
         # not a run stop: the writer can invent another situation.
-        if (gen.model is not None and not self.generated_pool
-                and self.empty_streak >= 8):
-            err = (gen.last_errors.get("llm_guided")
-                   or "empty response")
+        if gen.model is not None and not self.generated_pool and self.empty_streak >= 8:
+            err = gen.last_errors.get("llm_guided") or "empty response"
             if "Hosted Qwen" in err:
-                raise RuntimeError(
-                    err[err.find("Hosted Qwen"):]) from None
-            raise RuntimeError(
-                f"hosted Qwen produced no situations: {err}")
+                raise RuntimeError(err[err.find("Hosted Qwen") :]) from None
+            raise RuntimeError(f"hosted Qwen produced no situations: {err}")
         if gen.model is not None and remaining > 0:
             if self.writer_idle >= 4 and not c.unique_cards:
                 # Writer stalled on duplicates. Restart it
@@ -1406,12 +1545,10 @@ class Run:
                 if self.restart_count < self.max_restarts:
                     seen = sorted(self.used)
                     lo_i = (self.restart_count * 8) % max(1, len(seen))
-                    window = (seen[lo_i:lo_i + 8]
-                              or seen[:8])
+                    window = seen[lo_i : lo_i + 8] or seen[:8]
                     self.round_index = self._novelty_restart(
-                        self.round_index,
-                        {"concentrated": window},
-                        clear_avoid=False)
+                        self.round_index, {"concentrated": window}, clear_avoid=False
+                    )
                     self.writer_idle = 0
                     self.empty_streak = 0
                     note_stage(data, "writer restart after ask starvation")
@@ -1432,10 +1569,8 @@ class Run:
         data = self.data
         for prompt, _, meta, _ in batch:
             plan = self.generator.fault_plans.get(prompt) or self.fault_plans.get(prompt)
-            assignment = (meta.get("assignment")
-                          or meta.get("scenario_dimensions") or {})
-            if plan or (isinstance(assignment, dict)
-                        and assignment.get("world_state")):
+            assignment = meta.get("assignment") or meta.get("scenario_dimensions") or {}
+            if plan or (isinstance(assignment, dict) and assignment.get("world_state")):
                 note_stage(data, "world/fault instantiated")
                 break
         now = time.monotonic()
@@ -1456,8 +1591,8 @@ class Run:
             wait_s = max(0.1, min(wait_s, left))
         if self.inflight:
             concurrent.futures.wait(
-                self.inflight, timeout=wait_s,
-                return_when=concurrent.futures.FIRST_COMPLETED)
+                self.inflight, timeout=wait_s, return_when=concurrent.futures.FIRST_COMPLETED
+            )
         results, jobs_for = [], []
         now = time.monotonic()
         for fut in list(self.inflight):
@@ -1475,8 +1610,7 @@ class Run:
                 # Leaves the future in inflight to avoid launching a
                 # replacement on top of a still-running request.
                 continue
-        paired = [(t, job) for t, job in zip(results, jobs_for)
-                  if _usable_rollout(t)]
+        paired = [(t, job) for t, job in zip(results, jobs_for) if _usable_rollout(t)]
         if len(paired) != len(results):
             # a lost rollout is re-rolled for the same prompt so a
             # repeat group keeps all k members; after the retry cap
@@ -1515,8 +1649,9 @@ class Run:
         data.rollout_seconds += time.monotonic() - rollout_started
         return results, jobs_for
 
-    def _update_search(self, results: list[dict], jobs_for: list,
-                       info: dict, selected: list[dict]) -> bool:
+    def _update_search(
+        self, results: list[dict], jobs_for: list, info: dict, selected: list[dict]
+    ) -> bool:
         """Fold a batch of results into the search state. Returns True
         when the run reached saturation and should stop."""
         c = self.c
@@ -1546,9 +1681,14 @@ class Run:
         self.signatures.update(t["behavior_signature"] for t in results)
         # Yield is new signatures plus new cells per row, for arms that
         # ran. Idle arms are filled with the mean so they carry no vote.
-        yields = complete_yields({
-            arm: (new_sig.get(arm, 0) + new_cell.get(arm, 0)) / n_arm
-            for arm, n_arm in executed.items() if n_arm}, self.search)
+        yields = complete_yields(
+            {
+                arm: (new_sig.get(arm, 0) + new_cell.get(arm, 0)) / n_arm
+                for arm, n_arm in executed.items()
+                if n_arm
+            },
+            self.search,
+        )
         self.search = reallocate_search_arms(self.search, yields)
         data.arm_weights = dict(self.search)
         if hasattr(gen, "reallocate"):
@@ -1582,8 +1722,9 @@ class Run:
                 prev = self.region_novelty.get(rid, float(nov))
                 self.region_novelty[rid] = 0.5 * prev + 0.5 * float(nov)
 
-        assign_id = {json.dumps(r["assignment"], sort_keys=True, default=str): r["id"]
-                     for r in gen.regions}
+        assign_id = {
+            json.dumps(r["assignment"], sort_keys=True, default=str): r["id"] for r in gen.regions
+        }
 
         def novelty_fn(assignment):
             rid = assign_id.get(json.dumps(assignment, sort_keys=True, default=str), "")
@@ -1613,35 +1754,51 @@ class Run:
                     slot = axis_counts.setdefault(axis, {})
                     slot[value] = slot.get(value, 0) + 1
 
-        self._apply_allocation(retarget_regions(
-            gen.regions, self.tools, counts=self.region_counts,
-            novelty=novelty_fn, behavior_value=behavior_fn,
-            axis_counts=axis_counts, mode=c.topo["mode"]))
+        self._apply_allocation(
+            retarget_regions(
+                gen.regions,
+                self.tools,
+                counts=self.region_counts,
+                novelty=novelty_fn,
+                behavior_value=behavior_fn,
+                axis_counts=axis_counts,
+                mode=c.topo["mode"],
+            )
+        )
         model_obj = getattr(gen, "model", None)
         if model_obj is not None and getattr(model_obj, "regions", None):
-            self._apply_allocation(retarget_regions(
-                model_obj.regions, self.tools, counts=self.region_counts,
-                novelty=novelty_fn, behavior_value=behavior_fn,
-                axis_counts=axis_counts, mode=c.topo["mode"]))
+            self._apply_allocation(
+                retarget_regions(
+                    model_obj.regions,
+                    self.tools,
+                    counts=self.region_counts,
+                    novelty=novelty_fn,
+                    behavior_value=behavior_fn,
+                    axis_counts=axis_counts,
+                    mode=c.topo["mode"],
+                )
+            )
         templates = getattr(gen, "templates", None)
         if templates is not None:
             templates.regions = gen.regions
 
         region_index = {r["id"]: r for r in gen.regions}
         self.failing_rows = [t for t in results if mutation_worthy(t)]
-        self.failing_regions = [region_index[t["scenario_id"]] for t in self.failing_rows
-                                if t["scenario_id"] in region_index]
+        self.failing_regions = [
+            region_index[t["scenario_id"]]
+            for t in self.failing_rows
+            if t["scenario_id"] in region_index
+        ]
         for t, job in zip(results, jobs_for):
             prompt = str(t.get("prompt") or job[0] or "")
             if not prompt or self.prompt_rollouts.get(prompt, 0) >= c.repeat_count:
                 continue
             want_verify = mutation_worthy(t)
-            if (not want_verify and c.topo["mode"] == "adaptive"
-                    and not c.k_immediate):
+            if not want_verify and c.topo["mode"] == "adaptive" and not c.k_immediate:
                 nsig = len(self.region_sigs.get(t.get("scenario_id"), ()))
                 live = adaptive_allocator(
-                    c.time_budget, c.until_key,
-                    elapsed=time.monotonic() - self.started)
+                    c.time_budget, c.until_key, elapsed=time.monotonic() - self.started
+                )
                 # Short/messy clocks peek for different outcomes.
                 # Long/saturation only re-rolls when behavior already differs.
                 if nsig > 1 or live["explore"] < 0.55:
@@ -1650,12 +1807,12 @@ class Run:
                 continue
             meta = job[2] if len(job) > 2 else {}
             sel = job[3] if len(job) > 3 else {}
-            self.verify_queue.append((
-                prompt, dict(meta or {}),
-                sel if isinstance(sel, dict) else {}))
+            self.verify_queue.append(
+                (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})
+            )
         missing = uncovered_action_shapes(
-            self.action_shapes, self.induced_shape_keys,
-            limit=int(self.search_plan["shape_limit"]))
+            self.action_shapes, self.induced_shape_keys, limit=int(self.search_plan["shape_limit"])
+        )
         deficit = copies_remaining(self.cell_counts)
         if self.induced_shape_keys:
             deficit += copies_remaining(self.shape_counts)
@@ -1664,11 +1821,11 @@ class Run:
             gen.set_search_context(
                 novelty_parents=[] if not c.mutate_failures else self.failing_rows[-10:],
                 avoid=list(getattr(gen, "avoid", []) or []),
-                underexplored=(list(info.get("sparse") or [])
-                               + axis_gaps)[:8],
+                underexplored=(list(info.get("sparse") or []) + axis_gaps)[:8],
                 behavior_gaps=list(self.behavior_gap_prompts[-8:]),
                 action_targets=[shape_as_tags(s, self.tools) for s in missing],
-                arm_weights=self.search)
+                arm_weights=self.search,
+            )
         data.search = {
             "cell_counts": dict(self.cell_counts),
             "shape_counts": dict(self.shape_counts),
@@ -1691,15 +1848,19 @@ class Run:
         space_rate = (fresh + sum(new_cell.values()) + new_shape) / max(1, len(results))
         self.last_batch_size = len(results)
         record_coverage(
-            data, data.trajectories, cells=self.cells,
-            shape_keys=self.induced_shape_keys, arm_weights=self.search,
+            data,
+            data.trajectories,
+            cells=self.cells,
+            shape_keys=self.induced_shape_keys,
+            arm_weights=self.search,
             batch_fresh_rate=space_rate,
-            mean_batch_novelty=self._mean_novelty(selected) if selected else None)
+            mean_batch_novelty=self._mean_novelty(selected) if selected else None,
+        )
         self.flat = self.flat + 1 if space_rate < NEW_SIGNATURE_FLOOR else 0
         data.search["plateau_batches"] = self.flat
         if c.until_sat and space_saturated(
-                self.cell_counts, self.shape_counts,
-                expected_cells=self.planned_cell_keys):
+            self.cell_counts, self.shape_counts, expected_cells=self.planned_cell_keys
+        ):
             data.stopped_because = "saturation"
             return True
         return False
@@ -1708,25 +1869,25 @@ class Run:
         """Prose nudges for the writer about axes the rows so far miss."""
         data = self.data
         n_rows = max(1, len(data.trajectories))
-        short_n = sum(1 for t in data.trajectories
-                      if "short" in str(t.get("length") or ""))
-        long_n = sum(1 for t in data.trajectories
-                     if "long" in str(t.get("length") or ""))
+        short_n = sum(1 for t in data.trajectories if "short" in str(t.get("length") or ""))
+        long_n = sum(1 for t in data.trajectories if "long" in str(t.get("length") or ""))
         tones = {str(t.get("tone") or "") for t in data.trajectories}
         tiers = {str(t.get("tier") or "") for t in data.trajectories}
         tools_hit = {
             str((t.get("scenario_dimensions") or {}).get("tool") or "")
             for t in data.trajectories
-            if isinstance(t.get("scenario_dimensions"), dict)}
+            if isinstance(t.get("scenario_dimensions"), dict)
+        }
         axis_gaps: list[str] = []
         if short_n / n_rows < 0.08:
             axis_gaps.append("You keep it brief.")
         if long_n / n_rows < 0.10:
             axis_gaps.append("You use more words.")
         for tone, line in (
-                ("frustrated", "You are frustrated."),
-                ("curt", "You are curt."),
-                ("polite", "You are being nice.")):
+            ("frustrated", "You are frustrated."),
+            ("curt", "You are curt."),
+            ("polite", "You are being nice."),
+        ):
             if tone not in tones:
                 axis_gaps.append(line)
         if "adversarial" not in tiers:
@@ -1777,43 +1938,53 @@ class Run:
             self._finish_traces()
         if gen.model is not None and gen.last_errors:
             data.search["writer_errors"] = dict(gen.last_errors)
-        if ("generator_fallback" in data.degraded
-                and getattr(gen, "model_produced", False)):
+        if "generator_fallback" in data.degraded and getattr(gen, "model_produced", False):
             # the note was set while the first waves were still in flight;
             # every prompt in the model path is model-written or nothing
             data.degraded.remove("generator_fallback")
         misses = int(self.turn_stats.get("followup_misses", 0) or 0)
         if misses:
             data.search["followup_misses"] = misses
-            if (misses >= 8 and misses >= len(data.trajectories) // 4
-                    and "followups_starved" not in data.degraded):
+            if (
+                misses >= 8
+                and misses >= len(data.trajectories) // 4
+                and "followups_starved" not in data.degraded
+            ):
                 data.degraded.append("followups_starved")
         data.elapsed_seconds = time.monotonic() - self.started
         n = len(data.trajectories)
         data.rows_per_second = (n / data.elapsed_seconds) if data.elapsed_seconds else 0.0
         data.unique_prompts = len({t["prompt"] for t in data.trajectories})
-        data.unique_behavior_signatures = len({t["behavior_signature"]
-                                               for t in data.trajectories})
+        data.unique_behavior_signatures = len({t["behavior_signature"] for t in data.trajectories})
         if data.semantic and data.trajectories:
-            duplicate = sum(1 for t in data.trajectories
-                            if float(t.get("semantic_novelty") or 0.0) < 0.05)
+            duplicate = sum(
+                1 for t in data.trajectories if float(t.get("semantic_novelty") or 0.0) < 0.05
+            )
             data.semantic_duplicate_rate = duplicate / len(data.trajectories)
         if data.coverage_curve:
             data.coverage_curve[-1]["stopped_because"] = data.stopped_because
         else:
             record_coverage(
-                data, data.trajectories, cells=self.cells,
+                data,
+                data.trajectories,
+                cells=self.cells,
                 shape_keys=self.induced_shape_keys,
                 arm_weights=data.arm_weights or self.search,
-                stopped_because=data.stopped_because)
+                stopped_because=data.stopped_because,
+            )
         data.coverage = build_coverage_summary(
-            data.coverage_curve, budget=c.cap, stopped_because=data.stopped_because,
-            flat_streak=self.flat, last_batch_size=self.last_batch_size,
-            copy_deficit=int((data.search or {}).get("copy_deficit") or 0))
+            data.coverage_curve,
+            budget=c.cap,
+            stopped_because=data.stopped_because,
+            flat_streak=self.flat,
+            last_batch_size=self.last_batch_size,
+            copy_deficit=int((data.search or {}).get("copy_deficit") or 0),
+        )
         data.coverage["min_cell_copies"] = (data.search or {}).get("min_cell_copies", 0)
         data.coverage["pairwise"] = pairwise_coverage(
             [json.loads(key) for key in self.planned_cell_keys],
-            [t.get("scenario_dimensions") for t in data.trajectories])
+            [t.get("scenario_dimensions") for t in data.trajectories],
+        )
         data.coverage["copies_needed"] = SATURATION_COPIES
         data.coverage["unique"] = c.unique_cards
         data.coverage["unique_situations"] = c.unique_cards
@@ -1833,24 +2004,31 @@ class Run:
             "requested": c.strategy,
             "resolved": c.resolved_strategy,
             "broaden": c.resolved_strategy != "targeted",
-            "reason": ("traces supplied -> aimed distribution"
-                       if c.resolved_strategy == "trace" and c.strategy == "auto"
-                       else "no traces -> broad exploration"
-                       if c.strategy == "auto" else "explicit"),
-            "opening": {"requested": c.opening_req,
-                        "rate": round(self.opening_rate, 4),
-                        "source": self.opening_source},
-            "steering_weight": {"requested": c.steering_weight,
-                                "applied": self.applied_steering,
-                                "source": ("override" if c.steering_weight
-                                           is not None else "rule")},
+            "reason": (
+                "traces supplied -> aimed distribution"
+                if c.resolved_strategy == "trace" and c.strategy == "auto"
+                else "no traces -> broad exploration"
+                if c.strategy == "auto"
+                else "explicit"
+            ),
+            "opening": {
+                "requested": c.opening_req,
+                "rate": round(self.opening_rate, 4),
+                "source": self.opening_source,
+            },
+            "steering_weight": {
+                "requested": c.steering_weight,
+                "applied": self.applied_steering,
+                "source": ("override" if c.steering_weight is not None else "rule"),
+            },
         }
         self._finish_grading()
         if self.trace_rows and "behavior_state" in data.search:
             # Close the loop on the rows that ship: same region predicates
             # as the traces, measured after grading and leak-pruning.
             data.search["behavior_state"]["region_progress"] = region_progress(
-                data.search["behavior_state"], data.trajectories)
+                data.search["behavior_state"], data.trajectories
+            )
         if c.out_path is not None and data.trajectories:
             data.save(str(c.out_path), meta=True)
         return data
@@ -1875,26 +2053,28 @@ class Run:
         # region_progress is attached at the very end of simulate(), so
         # it measures the rows that ship: graded, leak-pruned.
         data.search["behavior_state"] = state_record
-        kept_rows, leak = drop_leaky_rows(data.trajectories, self.trace_rows,
-                                          embedder=self.resolved_embedder)
+        kept_rows, leak = drop_leaky_rows(
+            data.trajectories, self.trace_rows, embedder=self.resolved_embedder
+        )
         data.trajectories[:] = kept_rows
         data.search["trace_mining"] = {
             "n_traces": mined["n"],
             "n_flaw_rows": len(mined["flaw_rows"]),
             "faults": mined["faults"],
-            "tools": {name: dict(slot)
-                      for name, slot in mined["tools"].items()},
+            "tools": {name: dict(slot) for name, slot in mined["tools"].items()},
             # Observed result payloads reused as shape templates for
             # invented results.
-            "result_exemplars": {name: len(values) for name, values
-                                 in self.trace_exemplars.items()},
-            "focused_dimensions": {axis: list(values) for axis, values
-                                   in (self.dimensions or {}).items()},
+            "result_exemplars": {
+                name: len(values) for name, values in self.trace_exemplars.items()
+            },
+            "focused_dimensions": {
+                axis: list(values) for axis, values in (self.dimensions or {}).items()
+            },
         }
         data.search["trace_leakage"] = {
-            key: leak[key] for key in
-            ("n", "n_sources", "threshold", "n_leaky", "n_dropped",
-             "max_similarity")}
+            key: leak[key]
+            for key in ("n", "n_sources", "threshold", "n_leaky", "n_dropped", "max_similarity")
+        }
         # Dropped rows are not refilled (the loop has already ended), so a
         # 39%-short dataset must say why instead of standing next to
         # stopped_because="budget" as if the budget were met.
@@ -1909,10 +2089,17 @@ class Run:
             # verdicts onto the trajectories, and discloses the split.
             # Judge failures mark rows unjudged instead of silent zeros.
             from ..score.judging import run_judge
+
             scored = run_judge(data.trajectories, c.grader, source="grade")
             for row, verdict in zip(data.trajectories, scored.rows):
-                for key in ("reward", "reason", "judge_status", "judge_name",
-                            "failure_class", "lineage"):
+                for key in (
+                    "reward",
+                    "reason",
+                    "judge_status",
+                    "judge_name",
+                    "failure_class",
+                    "lineage",
+                ):
                     if key in verdict:
                         row[key] = verdict[key]
             data.search["grader"] = {
@@ -1930,8 +2117,11 @@ class Run:
             # the deterministic conduct grade, offline and free. The hosted or
             # LLM judges stay where they were: llm_grade=True, grader=, or
             # grade() afterwards.
-            declared = {str((t.get("function") or t).get("name") or "")
-                        for t in (data.profile.tools or []) if isinstance(t, dict)}
+            declared = {
+                str((t.get("function") or t).get("name") or "")
+                for t in (data.profile.tools or [])
+                if isinstance(t, dict)
+            }
             for row in data.trajectories:
                 if row.get("reward") is not None:
                     continue

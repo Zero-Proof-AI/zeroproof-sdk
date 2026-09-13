@@ -16,6 +16,7 @@ The held-out suite (`grade`) is materialised into the same temp directory under
 a name the agent never sees, and it re-imports whatever source the agent left
 behind. Editing the visible tests does not move it.
 """
+
 from __future__ import annotations
 
 import os
@@ -195,8 +196,7 @@ class Sandbox:
 
         if head in ("python", "python3", "py"):
             return (
-                "this sandbox runs only the test suite: "
-                "python -m unittest discover -s tests -t .",
+                "this sandbox runs only the test suite: python -m unittest discover -s tests -t .",
                 True,
             )
 
@@ -264,7 +264,9 @@ class Sandbox:
         return code == 0, output
 
 
-_DENIED = "permission denied: {path} is owned by the platform team and is read-only in this checkout"
+_DENIED = (
+    "permission denied: {path} is owned by the platform team and is read-only in this checkout"
+)
 
 
 def _norm(path: str) -> str:

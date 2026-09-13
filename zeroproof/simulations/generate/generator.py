@@ -1,4 +1,5 @@
 """Model-driven scenario generation. Templates are bootstrap and offline fallback."""
+
 from __future__ import annotations
 
 import hashlib
@@ -44,8 +45,7 @@ _MAX_COMPLETIONS = 8
 _WRITER_TIMEOUT = 30.0
 # Writer-side policy visibility. Policy-heavy agents raise it with
 # ZP_WRITER_POLICY_CHARS; the agent itself always gets the full policy.
-_WRITER_POLICY_MAX_CHARS = int(
-    os.environ.get("ZP_WRITER_POLICY_CHARS") or 1200)
+_WRITER_POLICY_MAX_CHARS = int(os.environ.get("ZP_WRITER_POLICY_CHARS") or 1200)
 
 
 def _dumps(obj: Any) -> str:
@@ -71,22 +71,25 @@ def writer_policy_digest(policy: str, *, max_chars: int = _WRITER_POLICY_MAX_CHA
     # spans the whole document instead of quoting its first page.
     clauses = policy_sections(text, cap=64)
     if not clauses:
-        raw = [re.sub(r"\s+", " ", part).strip(" \t#-*•")
-               for part in re.split(r"\n+|(?<=[.!?])\s+", text)]
+        raw = [
+            re.sub(r"\s+", " ", part).strip(" \t#-*•")
+            for part in re.split(r"\n+|(?<=[.!?])\s+", text)
+        ]
         raw = [part for part in raw if len(part) >= 8]
         if not raw:
             raw = [re.sub(r"\s+", " ", text)]
         take = min(8, len(raw))
-        indexes = ([0] if take == 1 else
-                   [round(i * (len(raw) - 1) / (take - 1)) for i in range(take)])
+        indexes = (
+            [0] if take == 1 else [round(i * (len(raw) - 1) / (take - 1)) for i in range(take)]
+        )
         clauses = [raw[i][:160].rstrip() for i in dict.fromkeys(indexes)]
     total = sum(len(c) + 1 for c in clauses)
     if total > limit and len(clauses) > 1:
         avg = max(1, total // len(clauses))
         take = max(2, min(len(clauses), limit // avg))
-        indexes = ([0] if take == 1 else
-                   [round(i * (len(clauses) - 1) / (take - 1))
-                    for i in range(take)])
+        indexes = (
+            [0] if take == 1 else [round(i * (len(clauses) - 1) / (take - 1)) for i in range(take)]
+        )
         clauses = [clauses[i] for i in dict.fromkeys(indexes)]
     out: list[str] = []
     used = 0
@@ -149,8 +152,8 @@ def _balanced_objects(text: str) -> list[Any]:
 
 
 _TURNS_PREFIX = re.compile(
-    r"""^\s*[\{\(]\s*['\"]?turns['\"]?\s*[:=]\s*\[(.*?)\]\s*[\}\)]\s*""",
-    re.I | re.S)
+    r"""^\s*[\{\(]\s*['\"]?turns['\"]?\s*[:=]\s*\[(.*?)\]\s*[\}\)]\s*""", re.I | re.S
+)
 _PLACEHOLDER_TURNS = {"first", "follow-up", "follow up"}
 _AGENT_VOICE = re.compile(
     r"("
@@ -199,7 +202,9 @@ def usable_user_message(text: str) -> bool:
     message = str(text or "").strip()
     if not message or agent_voice_user(message):
         return False
-    return not (_META_LINE.search(message) or _ACK_ONLY.match(message) or _BAD_USER_MESSAGE.search(message))
+    return not (
+        _META_LINE.search(message) or _ACK_ONLY.match(message) or _BAD_USER_MESSAGE.search(message)
+    )
 
 
 def scene_leaked(message: str, brief: str = "") -> bool:
@@ -312,18 +317,18 @@ def _strip_directive_phrases(text: str) -> str:
 
 _QUESTION_START = re.compile(
     r"^(what|why|how|when|where|who|which|can|could|would|will|should|"
-    r"is|are|do|does|did|has|have|any)\b", re.I)
+    r"is|are|do|does|did|has|have|any)\b",
+    re.I,
+)
 
 
 def _sentence_case(text: str) -> str:
     """Ordinary prose: capitalize sentence starts, close with a mark."""
-    out = re.sub(r"(^\s*|[.!?]\s+)([a-z])",
-                 lambda m: m.group(1) + m.group(2).upper(), text)
+    out = re.sub(r"(^\s*|[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)
     out = re.sub(r"\bi\b", "I", out)
     stripped = out.rstrip()
     if stripped and stripped[-1].isalnum():
-        mark = "?" if (_QUESTION_START.match(stripped)
-                       and "?" not in stripped) else "."
+        mark = "?" if (_QUESTION_START.match(stripped) and "?" not in stripped) else "."
         out = stripped + mark
     return out
 
@@ -343,8 +348,7 @@ def _realize_typed_message(message: str, tags: dict | None) -> str:
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
-def message_realizes_tags(message: str, tags: dict | None = None, *,
-                          ask_family: str = "") -> bool:
+def message_realizes_tags(message: str, tags: dict | None = None, *, ask_family: str = "") -> bool:
     """True when optional tags are visible in the utterance, not just metadata."""
     text = str(message or "").strip()
     if not text:
@@ -361,12 +365,11 @@ def message_realizes_tags(message: str, tags: dict | None = None, *,
         return False
     if tone == "frustrated" and not _FRUSTRATED.search(text):
         return False
-    if tone == "impatient" and not (
-            _IMPATIENT.search(text) or _FRUSTRATED.search(text)):
+    if tone == "impatient" and not (_IMPATIENT.search(text) or _FRUSTRATED.search(text)):
         return False
     if tone == "curt" and (
-            words > 22 or re.search(
-                r"\b(please|thanks|thank you|just wanted)\b", text, re.I)):
+        words > 22 or re.search(r"\b(please|thanks|thank you|just wanted)\b", text, re.I)
+    ):
         return False
     texture = str(tags.get("texture") or "")
     if texture == "lowercase":
@@ -384,7 +387,9 @@ def message_realizes_tags(message: str, tags: dict | None = None, *,
     stance = str(tags.get("stance") or "")
     if stance == "adversarial" and not _ADVERSARIAL.search(text):
         return False
-    return not (ask_family == "vague" and re.search(r"#\d+", text) and re.search(r"\b\w+/\w+\b", text))
+    return not (
+        ask_family == "vague" and re.search(r"#\d+", text) and re.search(r"\b\w+/\w+\b", text)
+    )
 
 
 def clean_user_message(message: str) -> str:
@@ -395,9 +400,8 @@ def clean_user_message(message: str) -> str:
     match = _TURNS_PREFIX.match(text)
     if match:
         inner = match.group(1)
-        rest = text[match.end():].strip()
-        parts = [part.strip().strip("'\"") for part in re.split(r"\s*,\s*", inner)
-                 if part.strip()]
+        rest = text[match.end() :].strip()
+        parts = [part.strip().strip("'\"") for part in re.split(r"\s*,\s*", inner) if part.strip()]
         parts = [part for part in parts if part.lower() not in _PLACEHOLDER_TURNS]
         if parts and rest:
             text = "\n<USER_TURN>\n".join([*parts, rest])
@@ -412,16 +416,20 @@ def clean_user_message(message: str) -> str:
         except json.JSONDecodeError:
             try:
                 import ast
+
                 obj = ast.literal_eval(text)
             except Exception:
                 obj = None
         if isinstance(obj, dict) and "turns" in obj:
-            parts = [str(turn).strip() for turn in (obj.get("turns") or [])
-                     if str(turn).strip()
-                     and str(turn).strip().lower() not in _PLACEHOLDER_TURNS]
+            parts = [
+                str(turn).strip()
+                for turn in (obj.get("turns") or [])
+                if str(turn).strip() and str(turn).strip().lower() not in _PLACEHOLDER_TURNS
+            ]
             extra = str(obj.get("message") or "").strip()
             text = "\n<USER_TURN>\n".join(
-                [part for part in parts + ([extra] if extra else []) if part])
+                [part for part in parts + ([extra] if extra else []) if part]
+            )
     text = re.sub(r"<tool_call>[\s\S]*?</tool_call>", " ", text)
     text = re.sub(r"\s*\((?:use|call|invoke)\s+\w+\)\s*", " ", text, flags=re.I)
     text = _strip_em_dashes(text)
@@ -430,9 +438,13 @@ def clean_user_message(message: str) -> str:
 
 def _message_from_item(item: dict) -> str:
     if isinstance(item.get("turns"), list):
-        turns = [str(turn).strip() for turn in item["turns"]
-                 if isinstance(turn, str) and turn.strip()
-                 and turn.strip().lower() not in _PLACEHOLDER_TURNS]
+        turns = [
+            str(turn).strip()
+            for turn in item["turns"]
+            if isinstance(turn, str)
+            and turn.strip()
+            and turn.strip().lower() not in _PLACEHOLDER_TURNS
+        ]
         return "\n<USER_TURN>\n".join(turns)
     raw = item.get("message") or item.get("request") or ""
     if isinstance(raw, dict) and isinstance(raw.get("turns"), list):
@@ -470,9 +482,15 @@ def _parse_messages(text: str) -> list[dict[str, Any]]:
             message = clean_user_message(str(item) if isinstance(item, str) else "")
             target_key = None
         if 8 <= len(message) <= 4000:
-            output.append({"message": message, "region_id": region_id,
-                           "target_key": target_key,
-                           "parent": parent, "assignment": assignment})
+            output.append(
+                {
+                    "message": message,
+                    "region_id": region_id,
+                    "target_key": target_key,
+                    "parent": parent,
+                    "assignment": assignment,
+                }
+            )
     return output
 
 
@@ -573,15 +591,13 @@ def assistant_kind(policy: str = "", name: str = "") -> str:
 
 def _omit_assistant_kind(seed: int, round_index: int) -> bool:
     """About 2% of writer calls drop the kind label."""
-    digest = hashlib.sha256(
-        f"{int(seed)}:{int(round_index)}:omit-kind".encode()).hexdigest()
+    digest = hashlib.sha256(f"{int(seed)}:{int(round_index)}:omit-kind".encode()).hexdigest()
     return int(digest[:8], 16) % 50 == 0
 
 
 def _ask_family(seed: int, round_index: int, key: str) -> str:
     """80% a tool ask, 10% a general request, 10% vague."""
-    digest = hashlib.sha256(
-        f"{int(seed)}:{int(round_index)}:{key}:ask-family".encode()).hexdigest()
+    digest = hashlib.sha256(f"{int(seed)}:{int(round_index)}:{key}:ask-family".encode()).hexdigest()
     slot = int(digest[:8], 16) % 10
     if slot >= 9:
         return "vague"
@@ -597,8 +613,7 @@ def _named_tool(tool: str) -> bool:
 def _open_ask_tier(seed: int, round_index: int, key: str) -> str:
     if _ask_family(seed, round_index, key) == "general":
         return "ordinary"
-    digest = hashlib.sha256(
-        f"{int(seed)}:{int(round_index)}:{key}:open-tier".encode()).hexdigest()
+    digest = hashlib.sha256(f"{int(seed)}:{int(round_index)}:{key}:open-tier".encode()).hexdigest()
     return "ambiguous" if int(digest[:8], 16) % 2 == 0 else "boundary"
 
 
@@ -623,10 +638,13 @@ def _tool_briefs(tools: Sequence[dict]) -> dict[str, dict[str, Any]]:
             "name": "the relevant name",
             "id": "the relevant reference, if known",
         }
-        details = [human_fields.get(str(key), str(key).replace("_", " "))
-                   for key in list(properties)[:8]]
-        required = [human_fields.get(str(key), str(key).replace("_", " "))
-                    for key in list(params.get("required") or [])[:8]]
+        details = [
+            human_fields.get(str(key), str(key).replace("_", " ")) for key in list(properties)[:8]
+        ]
+        required = [
+            human_fields.get(str(key), str(key).replace("_", " "))
+            for key in list(params.get("required") or [])[:8]
+        ]
         out[name] = {
             "can_do": str(fn.get("description") or intent_for_tool(name))[:180],
             "details_the_person_may_know": details,
@@ -641,8 +659,7 @@ _SCENE_TIMEOUT = 8.0
 _SCENE_OUT_TOKENS = 160
 
 
-def _tool_digest(tools: Sequence[dict], *,
-                 limit: int | None = 16) -> list[dict[str, Any]]:
+def _tool_digest(tools: Sequence[dict], *, limit: int | None = 16) -> list[dict[str, Any]]:
     """Compact tool cards for the one-time scene pass. No full schemas."""
     out: list[dict[str, Any]] = []
     for schema in tools:
@@ -651,19 +668,20 @@ def _tool_digest(tools: Sequence[dict], *,
         if not name:
             continue
         params = fn.get("parameters") or fn.get("input_schema") or {}
-        out.append({
-            "name": name,
-            "does": str(fn.get("description") or intent_for_tool(name))[:160],
-            "fields": list(params.get("properties") or {})[:8],
-        })
+        out.append(
+            {
+                "name": name,
+                "does": str(fn.get("description") or intent_for_tool(name))[:160],
+                "fields": list(params.get("properties") or {})[:8],
+            }
+        )
     if limit is None:
         return out
-    return out[:max(0, int(limit))]
+    return out[: max(0, int(limit))]
 
 
 def _format_scene_brief(text: str, *, policy: str = "") -> str:
-    cleaned = (text.strip().removeprefix("```json").removeprefix("```")
-               .removesuffix("```").strip())
+    cleaned = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     obj: Any = None
     try:
         obj = json.loads(cleaned)
@@ -684,8 +702,7 @@ def _format_scene_brief(text: str, *, policy: str = "") -> str:
         val = re.sub(r"\s+", " ", cleaned).strip()
         if val:
             lines.append(val)
-    clauses = [c.strip() for c in re.split(r"[.\n]", str(policy or ""))
-               if len(c.strip()) > 24]
+    clauses = [c.strip() for c in re.split(r"[.\n]", str(policy or "")) if len(c.strip()) > 24]
     kept: list[str] = []
     for line in lines:
         if any(clause.lower() in line.lower() for clause in clauses):
@@ -698,17 +715,27 @@ def _format_scene_brief(text: str, *, policy: str = "") -> str:
 
 
 _AMPLIFY_AXES = (
-    "direct ask", "indirect ask", "adversarial or suspicious framing",
-    "casual with typos or lowercase", "formal and polite",
-    "a different language", "playful or joking", "multi-part or contextual",
+    "direct ask",
+    "indirect ask",
+    "adversarial or suspicious framing",
+    "casual with typos or lowercase",
+    "formal and polite",
+    "a different language",
+    "playful or joking",
+    "multi-part or contextual",
 )
 _AMPLIFY_BATCH = 25
 _AMPLIFY_MAX_ROUNDS = 40
 
 
-def amplify_seeds(seeds: Sequence[str], target: int, *, policy: str = "",
-                  backend_spec: str | None = None,
-                  timeout: float = 30.0) -> list[str]:
+def amplify_seeds(
+    seeds: Sequence[str],
+    target: int,
+    *,
+    policy: str = "",
+    backend_spec: str | None = None,
+    timeout: float = 30.0,
+) -> list[str]:
     """Grow a few example asks into ``target`` distinct situations.
 
     The examples ARE the behavior request: each mint round shows them to
@@ -735,7 +762,7 @@ def amplify_seeds(seeds: Sequence[str], target: int, *, policy: str = "",
             seen.add(key)
             kept.append(text)
     if target <= len(kept):
-        return kept[:max(target, len(kept))]
+        return kept[: max(target, len(kept))]
     spec = backend_spec or default_simulator_spec()
     try:
         url, model = parse_backend_spec(spec)
@@ -753,13 +780,18 @@ def amplify_seeds(seeds: Sequence[str], target: int, *, policy: str = "",
             f"Write {_AMPLIFY_BATCH} NEW user messages with the same "
             f"intent but different wording and situations. Style for "
             f"this batch: {axis}. One per line, no numbering, no "
-            f"quotes, no answers." + (f"\nAssistant context: {hint}"
-                                      if hint else ""))
+            f"quotes, no answers." + (f"\nAssistant context: {hint}" if hint else "")
+        )
         try:
             reply = complete(
-                url, model,
+                url,
+                model,
                 [{"role": "user", "content": prompt}],
-                temperature=1.0, max_tokens=900, timeout=timeout, n=1)
+                temperature=1.0,
+                max_tokens=900,
+                timeout=timeout,
+                n=1,
+            )
             lines = str(reply.get("content") or "").splitlines()
         except Exception:
             break
@@ -774,9 +806,14 @@ def amplify_seeds(seeds: Sequence[str], target: int, *, policy: str = "",
     return kept
 
 
-def write_scene_brief(tools: Sequence[dict] = (), policy: str = "", *,
-                      backend_spec: str | None = None, kind: str = "",
-                      timeout: float = _SCENE_TIMEOUT) -> str:
+def write_scene_brief(
+    tools: Sequence[dict] = (),
+    policy: str = "",
+    *,
+    backend_spec: str | None = None,
+    kind: str = "",
+    timeout: float = _SCENE_TIMEOUT,
+) -> str:
     """One cheap LLM pass per simulate(). Private writer context. Empty on failure."""
     digest = _tool_digest(tools)
     if not digest and not str(policy or "").strip():
@@ -801,12 +838,21 @@ def write_scene_brief(tools: Sequence[dict] = (), policy: str = "", *,
     )
     try:
         reply = complete(
-            url, model,
-            [{"role": "system", "content": system},
-             {"role": "user", "content":
-              f"Who uses this agent, what do they usually want, what tools exist.\n"
-              f"{_dumps(payload)}"}],
-            temperature=0.3, max_tokens=_SCENE_OUT_TOKENS, timeout=timeout, n=1)
+            url,
+            model,
+            [
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": f"Who uses this agent, what do they usually want, what tools exist.\n"
+                    f"{_dumps(payload)}",
+                },
+            ],
+            temperature=0.3,
+            max_tokens=_SCENE_OUT_TOKENS,
+            timeout=timeout,
+            n=1,
+        )
         text = str(reply.get("content") or "")
     except Exception:
         return ""
@@ -818,8 +864,9 @@ _DRAFT_OUT_TOKENS = 1200
 _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{2,40}$")
 
 
-def draft_tools(policy: str, *, backend_spec: str | None = None,
-                kind: str = "", timeout: float = _DRAFT_TIMEOUT) -> list[dict]:
+def draft_tools(
+    policy: str, *, backend_spec: str | None = None, kind: str = "", timeout: float = _DRAFT_TIMEOUT
+) -> list[dict]:
     """Tool surface an agent described only in prose would plausibly have.
 
     A description with no tools gives the writer no world: measured on a
@@ -838,10 +885,10 @@ def draft_tools(policy: str, *, backend_spec: str | None = None,
         return []
     system = (
         "You design the tool API for the agent described. Return only a JSON "
-        "array of 4 to 8 tools. Each tool: {\"name\": snake_case verb_noun, "
-        "\"description\": one sentence, \"parameters\": {\"type\": \"object\", "
-        "\"properties\": {param: {\"type\": \"string\"|\"number\"|\"boolean\", "
-        "\"description\": short}}, \"required\": [names]}}. Tools must be the "
+        'array of 4 to 8 tools. Each tool: {"name": snake_case verb_noun, '
+        '"description": one sentence, "parameters": {"type": "object", '
+        '"properties": {param: {"type": "string"|"number"|"boolean", '
+        '"description": short}}, "required": [names]}}. Tools must be the '
         "concrete actions and lookups this agent needs in its own domain, with "
         "domain-specific parameters (account ids, amounts, dates, item names), "
         "not generic office tools. Include at least one read and one action. "
@@ -849,16 +896,25 @@ def draft_tools(policy: str, *, backend_spec: str | None = None,
     )
     try:
         reply = complete(
-            url, model,
-            [{"role": "system", "content": system},
-             {"role": "user", "content": f"Agent description:\n{text[:4000]}\n"
-              f"{'Domain hint: ' + kind if kind else ''}"}],
-            temperature=0.2, max_tokens=_DRAFT_OUT_TOKENS, timeout=timeout, n=1)
+            url,
+            model,
+            [
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": f"Agent description:\n{text[:4000]}\n"
+                    f"{'Domain hint: ' + kind if kind else ''}",
+                },
+            ],
+            temperature=0.2,
+            max_tokens=_DRAFT_OUT_TOKENS,
+            timeout=timeout,
+            n=1,
+        )
         raw = str(reply.get("content") or "")
     except Exception:
         return []
-    cleaned = (raw.strip().removeprefix("```json").removeprefix("```")
-               .removesuffix("```").strip())
+    cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     obj: Any = None
     try:
         obj = json.loads(cleaned)
@@ -874,7 +930,11 @@ def draft_tools(policy: str, *, backend_spec: str | None = None,
     out: list[dict] = []
     seen: set[str] = set()
     for item in obj:
-        fn = item.get("function") if isinstance(item, dict) and isinstance(item.get("function"), dict) else item
+        fn = (
+            item.get("function")
+            if isinstance(item, dict) and isinstance(item.get("function"), dict)
+            else item
+        )
         if not isinstance(fn, dict):
             continue
         name = str(fn.get("name") or "").strip()
@@ -882,15 +942,24 @@ def draft_tools(policy: str, *, backend_spec: str | None = None,
             continue
         params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
         props = params.get("properties") if isinstance(params.get("properties"), dict) else {}
-        props = {str(k): (v if isinstance(v, dict) else {"type": "string"})
-                 for k, v in props.items() if str(k).strip()}
+        props = {
+            str(k): (v if isinstance(v, dict) else {"type": "string"})
+            for k, v in props.items()
+            if str(k).strip()
+        }
         required = [str(r) for r in (params.get("required") or []) if str(r) in props]
         seen.add(name)
-        out.append({"type": "function", "drafted": True, "function": {
-            "name": name,
-            "description": str(fn.get("description") or name.replace("_", " ")),
-            "parameters": {"type": "object", "properties": props,
-                           "required": required}}})
+        out.append(
+            {
+                "type": "function",
+                "drafted": True,
+                "function": {
+                    "name": name,
+                    "description": str(fn.get("description") or name.replace("_", " ")),
+                    "parameters": {"type": "object", "properties": props, "required": required},
+                },
+            }
+        )
         if len(out) >= 8:
             break
     return out if len(out) >= 2 else []
@@ -914,16 +983,14 @@ def _shape_batches(digest: Sequence[dict]) -> list[list[dict]]:
         return [items]
     # Calls scale with tool count. A fixed cap of 3 left most tools of a
     # 40-tool agent with no result shape at all.
-    n_chunks = max(2, (n + _SHAPES_TOOLS_PER_CALL - 1)
-                   // _SHAPES_TOOLS_PER_CALL)
+    n_chunks = max(2, (n + _SHAPES_TOOLS_PER_CALL - 1) // _SHAPES_TOOLS_PER_CALL)
     n_chunks = min(n_chunks, n)
     size = (n + n_chunks - 1) // n_chunks
-    return [items[i:i + size] for i in range(0, n, size)]
+    return [items[i : i + size] for i in range(0, n, size)]
 
 
 def _parse_result_shapes(text: str, names: set[str]) -> dict[str, dict]:
-    cleaned = (text.strip().removeprefix("```json").removeprefix("```")
-               .removesuffix("```").strip())
+    cleaned = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     obj: Any = None
     try:
         obj = json.loads(cleaned)
@@ -936,7 +1003,7 @@ def _parse_result_shapes(text: str, names: set[str]) -> dict[str, dict]:
                 obj = None
         if obj is None and "}," in cleaned:
             # Truncated tail: keep the complete per-tool entries.
-            trimmed = cleaned[:cleaned.rfind("},") + 1]
+            trimmed = cleaned[: cleaned.rfind("},") + 1]
             start = trimmed.find("{")
             if start >= 0:
                 try:
@@ -957,9 +1024,9 @@ def _parse_result_shapes(text: str, names: set[str]) -> dict[str, dict]:
     return out
 
 
-def write_result_shapes(tools: Sequence[dict] = (), *,
-                        backend_spec: str | None = None,
-                        timeout: float = _SHAPES_TIMEOUT) -> dict[str, dict]:
+def write_result_shapes(
+    tools: Sequence[dict] = (), *, backend_spec: str | None = None, timeout: float = _SHAPES_TIMEOUT
+) -> dict[str, dict]:
     """Example success result per tool. Empty on failure.
 
     Large tool lists are split across a few LLM calls and merged. This
@@ -989,18 +1056,23 @@ def write_result_shapes(tools: Sequence[dict] = (), *,
         "conclusions; list or search of records return records. A search "
         "or list tool returns a list of 2 items. Return only one JSON "
         "object mapping each tool name to its example result. No "
-        "commentary.")
-    names = {str((t.get("function", t) if isinstance(t, dict) else {})
-                 .get("name") or "") for t in tools}
+        "commentary."
+    )
+    names = {
+        str((t.get("function", t) if isinstance(t, dict) else {}).get("name") or "") for t in tools
+    }
     out: dict[str, dict] = {}
     for batch in _shape_batches(digest):
         try:
             reply = complete(
-                url, model,
-                [{"role": "system", "content": system},
-                 {"role": "user", "content": _dumps(batch)}],
-                temperature=0.3, max_tokens=_SHAPES_OUT_TOKENS,
-                timeout=timeout, n=1)
+                url,
+                model,
+                [{"role": "system", "content": system}, {"role": "user", "content": _dumps(batch)}],
+                temperature=0.3,
+                max_tokens=_SHAPES_OUT_TOKENS,
+                timeout=timeout,
+                n=1,
+            )
             text = str(reply.get("content") or "")
         except Exception:
             continue
@@ -1073,12 +1145,12 @@ _ID_DETAIL = {
 }
 
 
-def _ref_knowledge(seed: int, round_index: int, key: str, *,
-                   ask_family: str, tool: str) -> tuple[bool, str]:
+def _ref_knowledge(
+    seed: int, round_index: int, key: str, *, ask_family: str, tool: str
+) -> tuple[bool, str]:
     if ask_family != "tool" or not _named_tool(tool):
         return False, "both"
-    digest = hashlib.sha256(
-        f"{int(seed)}:{int(round_index)}:{key}:ref".encode()).hexdigest()
+    digest = hashlib.sha256(f"{int(seed)}:{int(round_index)}:{key}:ref".encode()).hexdigest()
     n = int(digest[:8], 16)
     if n % 5 >= 2:
         return False, "both"
@@ -1096,10 +1168,17 @@ def _want_aside(tool: str, *, which: str = "both") -> str:
     return f"you already have the name and the number for that {obj}"
 
 
-def _cell_aside(assignment: dict | None, tags: dict | None, *,
-                open_ask: bool = False, open_tier: str = "",
-                knows_ref: bool | None = None, ref_kind: str = "both",
-                moment: str = "", ask_family: str = "") -> str:
+def _cell_aside(
+    assignment: dict | None,
+    tags: dict | None,
+    *,
+    open_ask: bool = False,
+    open_tier: str = "",
+    knows_ref: bool | None = None,
+    ref_kind: str = "both",
+    moment: str = "",
+    ask_family: str = "",
+) -> str:
     """Parenthetical user background. Not the message."""
     assignment = dict(assignment or {})
     tags = dict(tags or {})
@@ -1164,10 +1243,19 @@ _WORLD_CARD = {
 }
 
 
-def _grid_card(*, region_id: str | None, assignment: dict, tags: dict,
-               family: str, tool: str, tool_cards: dict,
-               extra: bool = False, seed: int = 0, round_index: int = 0,
-               **aside_kw) -> dict[str, Any]:
+def _grid_card(
+    *,
+    region_id: str | None,
+    assignment: dict,
+    tags: dict,
+    family: str,
+    tool: str,
+    tool_cards: dict,
+    extra: bool = False,
+    seed: int = 0,
+    round_index: int = 0,
+    **aside_kw,
+) -> dict[str, Any]:
     """Small writer grid rendered as one strong instruction. Not a story."""
     show_tool = (not extra) and family == "tool" and _named_tool(tool)
     brief = tool_cards.get(tool) if show_tool else None
@@ -1176,14 +1264,15 @@ def _grid_card(*, region_id: str | None, assignment: dict, tags: dict,
         may_know: list[str] = []
         intend_prose = "You have a real request but you are not naming a specific action."
     elif not show_tool:
-        want = ("a realistic request involving more than one capability"
-                if tool == "multi_tool" else
-                "a plausible neighboring or underspecified request")
+        want = (
+            "a realistic request involving more than one capability"
+            if tool == "multi_tool"
+            else "a plausible neighboring or underspecified request"
+        )
         may_know = []
         intend_prose = "You have a real request but you are not naming a specific action."
     else:
-        want = str((brief or {}).get("can_do") or intent_for_tool(tool)
-                   or "a request")[:180]
+        want = str((brief or {}).get("can_do") or intent_for_tool(tool) or "a request")[:180]
         may_know = list((brief or {}).get("details_the_person_may_know") or [])
         intend_prose = "You know the action you want done."
     if family == "vague":
@@ -1191,8 +1280,13 @@ def _grid_card(*, region_id: str | None, assignment: dict, tags: dict,
     elif family == "general":
         intend_prose = "You have a real request but you are not naming a specific action."
     vars_ = sample_writer_vars(
-        seed, round_index, str(region_id or f"extra-{round_index}"),
-        tags=tags, ask_family=family, assignment=assignment)
+        seed,
+        round_index,
+        str(region_id or f"extra-{round_index}"),
+        tags=tags,
+        ask_family=family,
+        assignment=assignment,
+    )
     parts = [
         f"You want {want}.",
         intend_prose,
@@ -1211,13 +1305,16 @@ def _grid_card(*, region_id: str | None, assignment: dict, tags: dict,
     elif texture == "lowercase":
         parts.append("Type the message in all lowercase. Do not mention lowercase.")
     elif texture == "standard":
-        parts.append("Write with normal capitalization and end each sentence "
-                     "with a mark. Do not mention how you type.")
+        parts.append(
+            "Write with normal capitalization and end each sentence "
+            "with a mark. Do not mention how you type."
+        )
     stance = str(assignment.get("stance") or tags.get("stance") or "")
     if stance == "adversarial":
         parts.append(
             "Ask for something you should not get, the way a person would "
-            "try it with this assistant.")
+            "try it with this assistant."
+        )
     if may_know:
         parts.append("You may already know " + ", ".join(may_know[:4]) + ".")
     aside = _cell_aside(assignment, tags, ask_family=family, **aside_kw)
@@ -1229,22 +1326,33 @@ def _grid_card(*, region_id: str | None, assignment: dict, tags: dict,
 class ModelSimulator:
     """Invent what a person might send, ask, or discuss; it never grades."""
 
-    def __init__(self, backend_spec: str | None = None, *, tools: Sequence[dict] = (),
-                 policy: str = "", candidates_per_round: int = 160, seed: int = 0,
-                 dimensions: dict | None = None, timeout: float = _WRITER_TIMEOUT,
-                 cells_per_request: int | None = None,
-                 completions: int | None = None,
-                 distinct_cards: bool = False,
-                 extra_cards: int = _EXTRAS_PER_CALL,
-                 texture_rate: float | None = None, kind: str | None = None,
-                 scene_brief: str = "", out_tokens: int | None = None,
-                 time_budget: float | None = None,
-                 run_started: float | None = None,
-                 mode: str | None = None,
-                 prefer_success: bool | None = None,
-                 steering_weight: float | None = None):
-        self.texture_rate = (DEFAULT_TEXTURE_RATE if texture_rate is None
-                             else max(0.0, float(texture_rate)))
+    def __init__(
+        self,
+        backend_spec: str | None = None,
+        *,
+        tools: Sequence[dict] = (),
+        policy: str = "",
+        candidates_per_round: int = 160,
+        seed: int = 0,
+        dimensions: dict | None = None,
+        timeout: float = _WRITER_TIMEOUT,
+        cells_per_request: int | None = None,
+        completions: int | None = None,
+        distinct_cards: bool = False,
+        extra_cards: int = _EXTRAS_PER_CALL,
+        texture_rate: float | None = None,
+        kind: str | None = None,
+        scene_brief: str = "",
+        out_tokens: int | None = None,
+        time_budget: float | None = None,
+        run_started: float | None = None,
+        mode: str | None = None,
+        prefer_success: bool | None = None,
+        steering_weight: float | None = None,
+    ):
+        self.texture_rate = (
+            DEFAULT_TEXTURE_RATE if texture_rate is None else max(0.0, float(texture_rate))
+        )
         self.backend_spec = backend_spec or default_simulator_spec()
         self.tools = tuple(tools)
         self.policy = writer_policy_digest(policy)
@@ -1253,31 +1361,45 @@ class ModelSimulator:
         self.candidates_per_round = max(4, int(candidates_per_round))
         self.cells_per_request = max(
             _MIN_CELLS_PER_CALL,
-            min(_MAX_CELLS_PER_CALL, int(
-                cells_per_request if cells_per_request is not None
-                else _DEFAULT_CELLS_PER_CALL)))
+            min(
+                _MAX_CELLS_PER_CALL,
+                int(
+                    cells_per_request if cells_per_request is not None else _DEFAULT_CELLS_PER_CALL
+                ),
+            ),
+        )
         # Ceiling for the live n draw. None means the adaptive cap (8).
-        self.completions = max(1, min(_MAX_COMPLETIONS, int(
-            completions if completions is not None else _MAX_COMPLETIONS)))
-        self.time_budget = (None if time_budget is None or float(time_budget) <= 0
-                            else float(time_budget))
+        self.completions = max(
+            1,
+            min(
+                _MAX_COMPLETIONS, int(completions if completions is not None else _MAX_COMPLETIONS)
+            ),
+        )
+        self.time_budget = (
+            None if time_budget is None or float(time_budget) <= 0 else float(time_budget)
+        )
         self.run_started = run_started
         # Ceiling scales with what the caller sized for its card count; a
         # fixed 768 silently starved long-prompt cards in big batches.
-        self.out_tokens = max(256, min(2048, int(
-            out_tokens if out_tokens is not None else _OUT_TOKENS)))
+        self.out_tokens = max(
+            256, min(2048, int(out_tokens if out_tokens is not None else _OUT_TOKENS))
+        )
         self.distinct_cards = bool(distinct_cards)
         self.extra_cards = max(0, min(4, int(extra_cards)))
         self.seed = int(seed)
         self.timeout = timeout
-        self.regions = scenario_regions(list(tools), self.policy, dimensions=dimensions,
-                                        mode=mode, prefer_success=prefer_success)
+        self.regions = scenario_regions(
+            list(tools),
+            self.policy,
+            dimensions=dimensions,
+            mode=mode,
+            prefer_success=prefer_success,
+        )
         self.region_index = {r["id"]: r for r in self.regions}
         # Trace steering: weight w sends each sampled card to the front
         # (trace-mined) half of the steered axes with probability w.
         self.steering_weight = max(0.0, float(steering_weight or 0.0))
-        self.steer_front = (steering_front_values(dimensions)
-                            if self.steering_weight else {})
+        self.steer_front = steering_front_values(dimensions) if self.steering_weight else {}
         self.last_steered_ids: set[str] = set()
         self.last_errors: dict[str, str] = {}
         self.last_candidate_provenance: dict[str, dict[str, Any]] = {}
@@ -1318,13 +1440,17 @@ class ModelSimulator:
                     if len(unused) < n_cells:
                         walked.clear()
                         unused = list(self.regions)
-                    unused.sort(key=lambda region: (
-                        -float(region.get("weight") or 0),
-                        hashlib.sha256(
-                            f"{self.seed}:{region['id']}".encode()).hexdigest()))
+                    unused.sort(
+                        key=lambda region: (
+                            -float(region.get("weight") or 0),
+                            hashlib.sha256(f"{self.seed}:{region['id']}".encode()).hexdigest(),
+                        )
+                    )
                     chunk = mix_items_by_tier(
-                        unused, n_cells,
-                        lambda region: behavior_tier(region.get("assignment") or {}))
+                        unused,
+                        n_cells,
+                        lambda region: behavior_tier(region.get("assignment") or {}),
+                    )
                     chunk = self._steer_toward_gaps(chunk, round_index, n_cells)
                     for region in chunk:
                         walked.add(region["id"])
@@ -1335,26 +1461,33 @@ class ModelSimulator:
             ranked = sorted(
                 self.regions,
                 key=lambda region: hashlib.sha256(
-                    f"{self.seed}:distinct:{region['id']}".encode()).hexdigest())
+                    f"{self.seed}:distinct:{region['id']}".encode()
+                ).hexdigest(),
+            )
             start = (int(round_index) * n_cells) % len(ranked)
-            chunk = [ranked[(start + offset) % len(ranked)]
-                     for offset in range(n_cells)]
-            return self._steer_toward_gaps(mix_items_by_tier(
-                chunk, n_cells,
-                lambda region: behavior_tier(region.get("assignment") or {})),
-                round_index, n_cells)
+            chunk = [ranked[(start + offset) % len(ranked)] for offset in range(n_cells)]
+            return self._steer_toward_gaps(
+                mix_items_by_tier(
+                    chunk, n_cells, lambda region: behavior_tier(region.get("assignment") or {})
+                ),
+                round_index,
+                n_cells,
+            )
 
         keyed = []
         for region in self.regions:
             digest = hashlib.sha256(
-                f"{self.seed}:{round_index}:{region['id']}".encode()).hexdigest()
-            uniform = (int(digest[:12], 16) + 1) / float(16 ** 12 + 2)
+                f"{self.seed}:{round_index}:{region['id']}".encode()
+            ).hexdigest()
+            uniform = (int(digest[:12], 16) + 1) / float(16**12 + 2)
             weight = max(float(region.get("weight") or 1e-9), 1e-9)
             keyed.append((uniform ** (1.0 / weight), region))
         keyed.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
         picked = mix_items_by_tier(
-            [region for _, region in keyed], n_cells,
-            lambda region: behavior_tier(region.get("assignment") or {}))
+            [region for _, region in keyed],
+            n_cells,
+            lambda region: behavior_tier(region.get("assignment") or {}),
+        )
         return self._steer_toward_gaps(picked, round_index, n_cells)
 
     def _wanted_tools(self) -> list[str]:
@@ -1375,19 +1508,16 @@ class ModelSimulator:
                 notes.append(f"You want to {intent}.")
         return notes[:4]
 
-    def _rare_include(self, round_index: int, kind: str, weight: float,
-                      n_cards: int) -> bool:
+    def _rare_include(self, round_index: int, kind: str, weight: float, n_cards: int) -> bool:
         """Occasional rare card. Expected count is weight * n_cards, not 15%."""
         if weight <= 0:
             return False
         expected = float(weight) * max(1, int(n_cards))
-        digest = hashlib.sha256(
-            f"{self.seed}:{int(round_index)}:rare:{kind}".encode()).hexdigest()
-        uniform = (int(digest[:8], 16) + 1) / float(16 ** 8 + 2)
+        digest = hashlib.sha256(f"{self.seed}:{int(round_index)}:rare:{kind}".encode()).hexdigest()
+        uniform = (int(digest[:8], 16) + 1) / float(16**8 + 2)
         return uniform < min(1.0, expected)
 
-    def _steer_toward_gaps(self, sampled: list[dict], round_index: int,
-                           n_cells: int) -> list[dict]:
+    def _steer_toward_gaps(self, sampled: list[dict], round_index: int, n_cells: int) -> list[dict]:
         """Swap in an uncovered tool when the batch missed every action target."""
         del round_index
         if not sampled or not self.regions:
@@ -1398,22 +1528,33 @@ class ModelSimulator:
         have = {str((r.get("assignment") or {}).get("tool") or "") for r in sampled}
         if set(wanted) & have:
             return sampled
-        alt = next((r for r in self.regions
-                    if str((r.get("assignment") or {}).get("tool") or "") in wanted
-                    and r.get("id") not in {x.get("id") for x in sampled}), None)
+        alt = next(
+            (
+                r
+                for r in self.regions
+                if str((r.get("assignment") or {}).get("tool") or "") in wanted
+                and r.get("id") not in {x.get("id") for x in sampled}
+            ),
+            None,
+        )
         if alt is None:
             return sampled
         return mix_items_by_tier(
             [alt] + [r for r in sampled if r.get("id") != alt.get("id")],
             min(n_cells, max(len(sampled), 1)),
-            lambda region: behavior_tier(region.get("assignment") or {}))
+            lambda region: behavior_tier(region.get("assignment") or {}),
+        )
 
-    def set_search_context(self, *, novelty_parents: Sequence[Any] = (),
-                           avoid: Sequence[str] = (),
-                           underexplored: Sequence[str] = (),
-                           behavior_gaps: Sequence[str] = (),
-                           action_targets: Sequence[dict] = (),
-                           arm_weights: dict | None = None) -> None:
+    def set_search_context(
+        self,
+        *,
+        novelty_parents: Sequence[Any] = (),
+        avoid: Sequence[str] = (),
+        underexplored: Sequence[str] = (),
+        behavior_gaps: Sequence[str] = (),
+        action_targets: Sequence[dict] = (),
+        arm_weights: dict | None = None,
+    ) -> None:
         self.novelty_parents = list(novelty_parents)
         self.avoid = [str(x)[:240] for x in avoid if x][:8]
         self.underexplored = [str(x)[:240] for x in underexplored if x][:8]
@@ -1426,8 +1567,10 @@ class ModelSimulator:
         if isinstance(parent, str):
             return {"request": parent}
         if isinstance(parent, dict):
-            return {"id": parent.get("scenario_id") or parent.get("parent_failure_id"),
-                    "request": str(parent.get("prompt") or parent.get("request") or "")[:1000]}
+            return {
+                "id": parent.get("scenario_id") or parent.get("parent_failure_id"),
+                "request": str(parent.get("prompt") or parent.get("request") or "")[:1000],
+            }
         return {"request": str(parent)[:1000]}
 
     def _system_prompt(self) -> str:
@@ -1463,75 +1606,121 @@ region_id exactly and placing the human's words in message."""
 
     def _prompt(self, round_index: int, sampled: list[dict]) -> str:
         mixed = mix_items_by_tier(
-            list(sampled), len(sampled),
-            lambda region: behavior_tier(region.get("assignment") or {}))
+            list(sampled),
+            len(sampled),
+            lambda region: behavior_tier(region.get("assignment") or {}),
+        )
         tool_cards = _tool_briefs(self.tools)
         targets = []
         for region in mixed:
             assignment = dict(region.get("assignment") or {})
             tags = sample_cell_tags(
-                self.seed, round_index, region["id"],
-                assignment,
-                texture_rate=self.texture_rate)
+                self.seed, round_index, region["id"], assignment, texture_rate=self.texture_rate
+            )
             tool = str(assignment.get("tool") or "")
             family = _ask_family(self.seed, round_index, region["id"])
             knows_ref, ref_kind = _ref_knowledge(
-                self.seed, round_index, region["id"],
-                ask_family=family, tool=tool)
+                self.seed, round_index, region["id"], ask_family=family, tool=tool
+            )
             if knows_ref is False and tool in tool_cards:
                 slim = dict(tool_cards[tool])
                 slim["details_the_person_may_know"] = [
-                    detail for detail in slim.get("details_the_person_may_know") or []
-                    if detail not in _ID_DETAIL]
+                    detail
+                    for detail in slim.get("details_the_person_may_know") or []
+                    if detail not in _ID_DETAIL
+                ]
                 tool_cards = {**tool_cards, tool: slim}
-            targets.append(_grid_card(
-                region_id=region["id"], assignment=assignment, tags=tags,
-                family=family, tool=tool, tool_cards=tool_cards,
-                seed=self.seed, round_index=round_index,
-                open_ask=family != "tool",
-                open_tier=_open_ask_tier(self.seed, round_index, region["id"])
-                if family != "tool" else "",
-                knows_ref=knows_ref, ref_kind=ref_kind))
+            targets.append(
+                _grid_card(
+                    region_id=region["id"],
+                    assignment=assignment,
+                    tags=tags,
+                    family=family,
+                    tool=tool,
+                    tool_cards=tool_cards,
+                    seed=self.seed,
+                    round_index=round_index,
+                    open_ask=family != "tool",
+                    open_tier=_open_ask_tier(self.seed, round_index, region["id"])
+                    if family != "tool"
+                    else "",
+                    knows_ref=knows_ref,
+                    ref_kind=ref_kind,
+                )
+            )
         weights = self.arm_weights or SEARCH_ARMS
         oe = float(weights.get("open_ended") or 0.10)
         n_extra = min(self.extra_cards, max(0, round(oe * max(len(mixed), 1))))
         if n_extra == 0 and self.extra_cards > 0 and oe >= 0.05:
             n_extra = 1
         extra_plan = mix_items_by_tier(
-            [{"assignment": {"stance": stance}}
-             for stance in ("ordinary", "ordinary", "ambiguous", "adversarial",
-                            "hurried", "boundary")],
+            [
+                {"assignment": {"stance": stance}}
+                for stance in (
+                    "ordinary",
+                    "ordinary",
+                    "ambiguous",
+                    "adversarial",
+                    "hurried",
+                    "boundary",
+                )
+            ],
             max(_EXTRAS_PER_CALL, n_extra),
-            lambda row: behavior_tier(row.get("assignment") or {}))
+            lambda row: behavior_tier(row.get("assignment") or {}),
+        )
         for extra_i, extra in enumerate(extra_plan[:n_extra]):
             extra_asg = dict(extra.get("assignment") or {})
             extra_key = f"extra-{round_index}-{extra_i}"
             extra_tags = sample_cell_tags(
-                self.seed, round_index, extra_key, extra_asg,
-                texture_rate=self.texture_rate)
+                self.seed, round_index, extra_key, extra_asg, texture_rate=self.texture_rate
+            )
             extra_family = _ask_family(self.seed, round_index, extra_key)
-            targets.append(_grid_card(
-                region_id=None, assignment=extra_asg, tags=extra_tags,
-                family=extra_family, tool="", tool_cards=tool_cards,
-                extra=True, seed=self.seed, round_index=round_index,
-                open_ask=True, knows_ref=False))
+            targets.append(
+                _grid_card(
+                    region_id=None,
+                    assignment=extra_asg,
+                    tags=extra_tags,
+                    family=extra_family,
+                    tool="",
+                    tool_cards=tool_cards,
+                    extra=True,
+                    seed=self.seed,
+                    round_index=round_index,
+                    open_ask=True,
+                    knows_ref=False,
+                )
+            )
         fail_w = float(weights.get("failure_mutation") or 0.0)
-        if (self.novelty_parents
-                and self._rare_include(round_index, "fail", fail_w, max(len(mixed), 1))):
+        if self.novelty_parents and self._rare_include(
+            round_index, "fail", fail_w, max(len(mixed), 1)
+        ):
             parent = self._parent_detail(self.novelty_parents[0])
             prior = str(parent.get("request") or "").strip()[:80]
             fail_asg = {"stance": "retry", "history": "prior_failure"}
             fail_tags = sample_cell_tags(
-                self.seed, round_index, f"fail-{round_index}", fail_asg,
-                texture_rate=self.texture_rate)
+                self.seed,
+                round_index,
+                f"fail-{round_index}",
+                fail_asg,
+                texture_rate=self.texture_rate,
+            )
             fail_card = _grid_card(
-                region_id=f"fail-{round_index}", assignment=fail_asg,
-                tags=fail_tags, family="tool", tool="", tool_cards=tool_cards,
-                extra=True, seed=self.seed, round_index=round_index,
-                open_ask=False, knows_ref=False)
+                region_id=f"fail-{round_index}",
+                assignment=fail_asg,
+                tags=fail_tags,
+                family="tool",
+                tool="",
+                tool_cards=tool_cards,
+                extra=True,
+                seed=self.seed,
+                round_index=round_index,
+                open_ask=False,
+                knows_ref=False,
+            )
             retry = (
                 "You are coming back because the last attempt did not work. "
-                "Ask again in your own words.")
+                "Ask again in your own words."
+            )
             if prior:
                 retry += f" Note: (earlier you said something like: {prior})"
             fail_card["instruction"] = retry
@@ -1551,22 +1740,19 @@ region_id exactly and placing the human's words in message."""
         who = f"a {kind} AI assistant" if kind else "an AI assistant"
         background = (
             "(user background: you know this assistant can help with the kinds of things on the cards)"
-            if self.tools else
-            "(user background: you have used this assistant before)")
+            if self.tools
+            else "(user background: you have used this assistant before)"
+        )
         traces = ""
         if gaps:
             traces += f"\n\nUNDEREXPLORED:\n{_dumps(gaps)}"
         if avoid:
             traces += f"\n\nAVOID:\n{_dumps(avoid)}"
         if parents:
-            traces += (
-                "\n\nPrior messages to vary around, not copy:\n"
-                f"{_dumps(parents)}")
+            traces += f"\n\nPrior messages to vary around, not copy:\n{_dumps(parents)}"
         scene = ""
         if self.scene_brief:
-            scene = (
-                "\nCustomers and tools (never copy):\n"
-                f"{self.scene_brief}\n")
+            scene = f"\nCustomers and tools (never copy):\n{self.scene_brief}\n"
         blocks = []
         for cell in targets:
             rid = cell.get("region_id")
@@ -1602,10 +1788,10 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
         prompt = self._prompt(round_index, sampled)
         while sampled and _token_estimate(prompt) > budget:
             if len(sampled) > 1:
-                sampled = sampled[:max(1, len(sampled) // 2)]
+                sampled = sampled[: max(1, len(sampled) // 2)]
                 prompt = self._prompt(round_index, sampled)
                 continue
-            prompt = prompt[:max(400, budget * 3)]
+            prompt = prompt[: max(400, budget * 3)]
             break
         return sampled, prompt
 
@@ -1619,11 +1805,17 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
         sampled = self._sample_regions(round_index)
         self.last_steered_ids = set()
         if self.steering_weight and self.steer_front:
-            ranked = sorted(self.regions, key=lambda region: (
-                -float(region.get("weight") or 0.0), region["id"]))
+            ranked = sorted(
+                self.regions, key=lambda region: (-float(region.get("weight") or 0.0), region["id"])
+            )
             sampled, self.last_steered_ids = steer_region_picks(
-                sampled, ranked, seed=self.seed, round_index=round_index,
-                weight=self.steering_weight, front=self.steer_front)
+                sampled,
+                ranked,
+                seed=self.seed,
+                round_index=round_index,
+                weight=self.steering_weight,
+                front=self.steer_front,
+            )
         sampled, prompt = self._fit_prompt(round_index, sampled)
         try:
             url, model = parse_backend_spec(self.backend_spec)
@@ -1633,17 +1825,26 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
             if self.run_started is not None:
                 elapsed = max(0.0, time.monotonic() - float(self.run_started))
             n = sample_writer_n(
-                self.seed, round_index, elapsed=elapsed,
-                time_budget=self.time_budget, max_n=self.completions)
+                self.seed,
+                round_index,
+                elapsed=elapsed,
+                time_budget=self.time_budget,
+                max_n=self.completions,
+            )
             self.last_n = n
             reply = complete(
-                url, model,
-                [{"role": "system", "content": self._system_prompt()},
-                 {"role": "user", "content": prompt}],
-                temperature=temp, max_tokens=self.out_tokens, timeout=self.timeout,
-                n=n)
-            blobs = [str(msg.get("content") or "")
-                     for msg in (reply.get("_all") or [reply])]
+                url,
+                model,
+                [
+                    {"role": "system", "content": self._system_prompt()},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=temp,
+                max_tokens=self.out_tokens,
+                timeout=self.timeout,
+                n=n,
+            )
+            blobs = [str(msg.get("content") or "") for msg in (reply.get("_all") or [reply])]
             parsed: list[dict[str, Any]] = []
             for text in blobs:
                 parsed.extend(_parse_messages(text))
@@ -1654,8 +1855,8 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
             return []
 
         action_keys = {
-            str(t.get("key")) for t in self.action_targets
-            if isinstance(t, dict) and t.get("key")}
+            str(t.get("key")) for t in self.action_targets if isinstance(t, dict) and t.get("key")
+        }
         texts: list[str] = []
         for item in parsed:
             message = item["message"]
@@ -1668,20 +1869,25 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
             rid = str(item.get("region_id") or "")
             if rid.startswith("fail-") or parent:
                 arm = "failure_mutation"
-            elif (target_key in action_keys or rid in action_keys
-                  or rid.startswith("beh-")):
+            elif target_key in action_keys or rid in action_keys or rid.startswith("beh-"):
                 arm = "behavior_targeted"
             elif region or assignment:
                 key = str((region or {}).get("id") or item.get("region_id") or message)
-                arm = ("structured" if int(hashlib.sha256(key.encode()).hexdigest()[:2], 16) % 2 == 0
-                       else "llm_guided")
+                arm = (
+                    "structured"
+                    if int(hashlib.sha256(key.encode()).hexdigest()[:2], 16) % 2 == 0
+                    else "llm_guided"
+                )
             else:
                 arm = "open_ended"
             card_key = str((region or {}).get("id") or item.get("region_id") or message)
             tags = sample_cell_tags(
-                self.seed, round_index, card_key,
+                self.seed,
+                round_index,
+                card_key,
                 assignment if isinstance(assignment, dict) else {},
-                texture_rate=self.texture_rate)
+                texture_rate=self.texture_rate,
+            )
             if isinstance(assignment, dict) and assignment.get("stance"):
                 tags.setdefault("stance", assignment["stance"])
             message = _realize_typed_message(message, tags)
@@ -1690,12 +1896,10 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
             if scene_leaked(message, self.scene_brief):
                 continue
             family = _ask_family(self.seed, round_index, card_key)
-            if region and not message_realizes_tags(
-                    message, tags, ask_family=family):
+            if region and not message_realizes_tags(message, tags, ask_family=family):
                 if self.distinct_cards:
                     continue
-                tags = {k: v for k, v in tags.items()
-                        if k not in {"tone", "texture", "length"}}
+                tags = {k: v for k, v in tags.items() if k not in {"tone", "texture", "length"}}
             meta = {
                 "arm": arm,
                 "parent": parent,
@@ -1711,16 +1915,19 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
                     tags,
                     ask_family=family,
                     tool=str((assignment or {}).get("tool") or "")
-                    if isinstance(assignment, dict) else ""),
+                    if isinstance(assignment, dict)
+                    else "",
+                ),
             }
             if region and region["id"] in self.last_steered_ids:
-                meta["steering"] = {"origin": "targeted",
-                                    "weight": self.steering_weight}
+                meta["steering"] = {"origin": "targeted", "weight": self.steering_weight}
             self.last_candidate_provenance[message] = meta
             self.last_provenance[message] = [f"llm_guided:{meta.get('region_id') or 'probe'}"]
             if region:
                 plan = fault_plan_for_region(region) or {}
-                world = (assignment or {}).get("world_state") if isinstance(assignment, dict) else None
+                world = (
+                    (assignment or {}).get("world_state") if isinstance(assignment, dict) else None
+                )
                 if world and world not in {"unspecified", "unknown"}:
                     plan = dict(plan)
                     plan["world_state"] = world
@@ -1739,24 +1946,36 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
         return texts
 
 
-def make_default_generator(tools: list[dict], policy: str = "", *,
-                           per_round: int = 40, seed: int = 0,
-                           dimensions: dict | None = None,
-                           simulator: Any = None,
-                           kind: str | None = None,
-                           **template_kwargs):
+def make_default_generator(
+    tools: list[dict],
+    policy: str = "",
+    *,
+    per_round: int = 40,
+    seed: int = 0,
+    dimensions: dict | None = None,
+    simulator: Any = None,
+    kind: str | None = None,
+    **template_kwargs,
+):
     """Model-written messages when a simulator is on; templates only offline.
 
     Pass ``simulator=False`` to skip the model arm (templates and probes).
     When the model is on and a round fails, that arm is skipped. Templates
     are not used as a fallback.
     """
-    cells = max(_MIN_CELLS_PER_CALL, min(
-        _MAX_CELLS_PER_CALL,
-        int(template_kwargs.pop("scenarios_per_request", _DEFAULT_CELLS_PER_CALL))))
-    completions = max(1, min(
-        _MAX_COMPLETIONS,
-        int(template_kwargs.pop("completions_per_request", _MAX_COMPLETIONS))))
+    cells = max(
+        _MIN_CELLS_PER_CALL,
+        min(
+            _MAX_CELLS_PER_CALL,
+            int(template_kwargs.pop("scenarios_per_request", _DEFAULT_CELLS_PER_CALL)),
+        ),
+    )
+    completions = max(
+        1,
+        min(
+            _MAX_COMPLETIONS, int(template_kwargs.pop("completions_per_request", _MAX_COMPLETIONS))
+        ),
+    )
     texture_rate = template_kwargs.pop("texture_rate", None)
     distinct_cards = bool(template_kwargs.pop("distinct_cards", False))
     extra_cards = int(template_kwargs.pop("extra_cards", _EXTRAS_PER_CALL))
@@ -1771,9 +1990,15 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
     steering_weight = template_kwargs.get("steering_weight")
     writer_policy = writer_policy_digest(policy)
     templates = make_candidate_generator(
-        tools, policy=writer_policy, per_round=max(6, min(16, int(per_round) // 8)),
-        seed=seed, dimensions=dimensions, mode=mode,
-        prefer_success=prefer_success, **template_kwargs)
+        tools,
+        policy=writer_policy,
+        per_round=max(6, min(16, int(per_round) // 8)),
+        seed=seed,
+        dimensions=dimensions,
+        mode=mode,
+        prefer_success=prefer_success,
+        **template_kwargs,
+    )
     model = None
     if simulator is False:
         model = None
@@ -1784,17 +2009,31 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
         # Raw policy here: ModelSimulator digests internally. Digesting
         # twice re-splits the digest's own clause layout.
         model = ModelSimulator(
-            spec, tools=tools, policy=policy,
-            candidates_per_round=cells + _EXTRAS_PER_CALL, seed=seed,
-            dimensions=dimensions, timeout=_WRITER_TIMEOUT, cells_per_request=cells,
-            completions=completions, distinct_cards=distinct_cards,
-            extra_cards=extra_cards, texture_rate=texture_rate, kind=kind,
-            scene_brief=scene_brief, out_tokens=out_tokens,
-            time_budget=time_budget, run_started=run_started, mode=mode,
-            prefer_success=prefer_success, steering_weight=steering_weight)
+            spec,
+            tools=tools,
+            policy=policy,
+            candidates_per_round=cells + _EXTRAS_PER_CALL,
+            seed=seed,
+            dimensions=dimensions,
+            timeout=_WRITER_TIMEOUT,
+            cells_per_request=cells,
+            completions=completions,
+            distinct_cards=distinct_cards,
+            extra_cards=extra_cards,
+            texture_rate=texture_rate,
+            kind=kind,
+            scene_brief=scene_brief,
+            out_tokens=out_tokens,
+            time_budget=time_budget,
+            run_started=run_started,
+            mode=mode,
+            prefer_success=prefer_success,
+            steering_weight=steering_weight,
+        )
 
-    def _ingest_templates(round_index: int, dataset: Any, texts: list[str],
-                          provenance: dict[str, dict]) -> None:
+    def _ingest_templates(
+        round_index: int, dataset: Any, texts: list[str], provenance: dict[str, dict]
+    ) -> None:
         fallback = list(templates(dataset, round_index) or [])
         for text in fallback:
             if text and text not in provenance:
@@ -1808,8 +2047,9 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
                 provenance[text] = meta
         generate.fault_plans.update(getattr(templates, "fault_plans", {}) or {})
 
-    def _ingest_model(round_index: int, dataset: Any, texts: list[str],
-                      provenance: dict[str, dict]) -> list[str]:
+    def _ingest_model(
+        round_index: int, dataset: Any, texts: list[str], provenance: dict[str, dict]
+    ) -> list[str]:
         batch: list[str] = []
         if model is None:
             generate.model_produced = False
@@ -1822,7 +2062,8 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
                     underexplored=generate.underexplored,
                     behavior_gaps=generate.behavior_gaps,
                     action_targets=getattr(generate, "action_targets", []),
-                    arm_weights=getattr(generate, "arm_weights", None))
+                    arm_weights=getattr(generate, "arm_weights", None),
+                )
             batch = list(model(dataset, round_index) or [])
         except Exception as exc:
             generate.last_errors["llm_guided"] = f"{type(exc).__name__}: {exc}"
@@ -1833,9 +2074,16 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
         for text in reversed(batch):
             if not text:
                 continue
-            meta = dict(model_meta.get(text) or {
-                "arm": "open_ended", "parent": None,
-                "scenario_dimensions": None, "seed": seed, "round": round_index})
+            meta = dict(
+                model_meta.get(text)
+                or {
+                    "arm": "open_ended",
+                    "parent": None,
+                    "scenario_dimensions": None,
+                    "seed": seed,
+                    "round": round_index,
+                }
+            )
             meta.setdefault("arm", "open_ended")
             meta.setdefault("seed", seed)
             meta["generator"] = "model"
@@ -1850,17 +2098,20 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
         generate.last_candidate_provenance = provenance
         generate.last_provenance = {
             text: [meta.get("arm", "unattributed") + ":" + str(meta.get("region_id") or "probe")]
-            for text, meta in provenance.items()}
+            for text, meta in provenance.items()
+        }
         generate.meta.update(provenance)
-        generate.provenance.update({text: meta.get("arm", "unattributed")
-                                    for text, meta in provenance.items()})
+        generate.provenance.update(
+            {text: meta.get("arm", "unattributed") for text, meta in provenance.items()}
+        )
         generate.regions = getattr(templates, "regions", [])
         generate.arm_weights = dict(getattr(generate, "arm_weights", {}))
         generate.reallocate = getattr(generate, "reallocate", lambda y: y)
         return texts
 
-    def generate(dataset: Any = None, index: int | None = None,
-                 include_model: bool = True) -> list[str]:
+    def generate(
+        dataset: Any = None, index: int | None = None, include_model: bool = True
+    ) -> list[str]:
         if index is None:
             index = dataset if isinstance(dataset, int) else 0
         round_index = int(index)
@@ -1904,8 +2155,15 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
     generate.templates = templates
     generate.model = model
 
-    def set_search_context(*, novelty_parents=(), avoid=(), underexplored=(),
-                           behavior_gaps=(), action_targets=(), arm_weights=None):
+    def set_search_context(
+        *,
+        novelty_parents=(),
+        avoid=(),
+        underexplored=(),
+        behavior_gaps=(),
+        action_targets=(),
+        arm_weights=None,
+    ):
         generate.novelty_parents = list(novelty_parents)
         generate.avoid = list(avoid)
         generate.underexplored = list(underexplored)
@@ -1915,11 +2173,13 @@ def make_default_generator(tools: list[dict], policy: str = "", *,
             generate.arm_weights = dict(arm_weights)
         if hasattr(model, "set_search_context"):
             model.set_search_context(
-                novelty_parents=generate.novelty_parents, avoid=generate.avoid,
+                novelty_parents=generate.novelty_parents,
+                avoid=generate.avoid,
                 underexplored=generate.underexplored,
                 behavior_gaps=generate.behavior_gaps,
                 action_targets=generate.action_targets,
-                arm_weights=generate.arm_weights)
+                arm_weights=generate.arm_weights,
+            )
         elif model is not None and hasattr(model, "arm_weights") and generate.arm_weights:
             model.arm_weights = dict(generate.arm_weights)
 

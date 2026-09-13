@@ -1,4 +1,5 @@
 """The caller's world answers tool calls when execute= is given."""
+
 from tests.helpers import TOOLS
 from zeroproof.simulations.generate.agents import _answer_tool_call, local_model
 from zeroproof.simulations.world.sandbox import MockEnvironment
@@ -41,10 +42,16 @@ def test_local_model_routes_tool_calls_to_execute(monkeypatch):
     def fake_complete(_url, _model, _messages, **kwargs):
         calls["n"] += 1
         if kwargs.get("tools") and calls["n"] == 1:
-            return {"content": None, "tool_calls": [{
-                "id": "c1", "type": "function",
-                "function": {"name": "lookup_order",
-                             "arguments": '{"order_id":"ORD-7"}'}}]}
+            return {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "lookup_order", "arguments": '{"order_id":"ORD-7"}'},
+                    }
+                ],
+            }
         return {"content": "Order ORD-7 ships tomorrow."}
 
     monkeypatch.setattr("zeroproof.simulations.generate.agents.complete", fake_complete)
@@ -64,17 +71,19 @@ def test_local_model_routes_tool_calls_to_execute(monkeypatch):
 def test_current_rollout_names_the_run_for_the_world():
     from tests.helpers import simulate_offline
     from zeroproof.simulations.generate.agents import current_rollout
+
     seen = []
 
     def agent(message):
-        seen.append((current_rollout.prompt == message,
-                     current_rollout.rollout_index, current_rollout.seed))
+        seen.append(
+            (current_rollout.prompt == message, current_rollout.rollout_index, current_rollout.seed)
+        )
         return {"steps": [], "final_text": "ok"}
 
-    prompts = ["Refund order ORD-14, it arrived broken.",
-               "Check on refund re_7 for order ORD-21."]
-    data = simulate_offline(agent, mode="rl", seeds=prompts, situations=2,
-                            rollouts_per_request=2, budget=4)
+    prompts = ["Refund order ORD-14, it arrived broken.", "Check on refund re_7 for order ORD-21."]
+    data = simulate_offline(
+        agent, mode="rl", seeds=prompts, situations=2, rollouts_per_request=2, budget=4
+    )
     assert len(data.trajectories) == 4
     assert seen and all(match for match, _, _ in seen)
     assert {index for _, index, _ in seen} == {0, 1}

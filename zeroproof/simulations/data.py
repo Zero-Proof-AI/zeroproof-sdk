@@ -1,5 +1,6 @@
 """SimulationData, conversation rebuild, row export, and the grade
 entry points that operate on a finished run."""
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -47,24 +48,27 @@ def conversation(row: dict) -> list[dict]:
         spoken = str(step.get("text") or "")
         if step.get("tool"):
             asst: dict[str, Any] = {"role": "assistant", "content": spoken}
-            asst["tool_calls"] = [{
-                "name": step.get("tool"),
-                "arguments": step.get("arguments") or {},
-            }]
+            asst["tool_calls"] = [
+                {
+                    "name": step.get("tool"),
+                    "arguments": step.get("arguments") or {},
+                }
+            ]
             messages.append(asst)
             result = step.get("result")
-            content = result if isinstance(result, str) else json.dumps(
-                result, default=str)
-            messages.append({"role": "tool", "name": step.get("tool"),
-                             "content": content})
+            content = result if isinstance(result, str) else json.dumps(result, default=str)
+            messages.append({"role": "tool", "name": step.get("tool"), "content": content})
         elif spoken:
             messages.append({"role": "assistant", "content": spoken})
     final = str(row.get("final_text") or "")
     failed = final.startswith("<agent error")
     while len(messages) > 1 and messages[-1].get("role") == "user" and not failed:
         messages.pop()
-    already = {str(m.get("content") or "") for m in messages
-               if m.get("role") == "assistant" and str(m.get("content") or "").strip()}
+    already = {
+        str(m.get("content") or "")
+        for m in messages
+        if m.get("role") == "assistant" and str(m.get("content") or "").strip()
+    }
     last = messages[-1] if messages else {}
     if final and final in already:
         return messages
@@ -101,9 +105,20 @@ _row_world = row_world  # old private name, kept for imports that still use it
 
 
 _CONVERSATION_FIELDS = (
-    "tier", "ask_family", "intent_known", "tool_known",
-    "stance", "tone", "length", "ask", "vagueness", "phrasing",
-    "pressure", "user", "texture", "history",
+    "tier",
+    "ask_family",
+    "intent_known",
+    "tool_known",
+    "stance",
+    "tone",
+    "length",
+    "ask",
+    "vagueness",
+    "phrasing",
+    "pressure",
+    "user",
+    "texture",
+    "history",
 )
 
 
@@ -211,9 +226,9 @@ class SimulationData:
         strategy = self.search.get("strategy") or {}
         mining = self.search.get("trace_mining") or {}
         weight = strategy.get("steering_weight") or {}
-        targeted = sum(1 for r in self.trajectories
-                       if (r.get("steering") or {}).get("origin")
-                       == "targeted")
+        targeted = sum(
+            1 for r in self.trajectories if (r.get("steering") or {}).get("origin") == "targeted"
+        )
         return {
             "strategy": strategy.get("resolved"),
             "trace_count": mining.get("n_traces", 0),
@@ -228,10 +243,18 @@ class SimulationData:
         if dest:
             self.save(dest)
 
-    def grade(self, grader=None, *, judge=None, llm: bool = False,
-              llm_spec: str | None = None,
-              api_key: str | None = None, path: str | None = None,
-              concurrency: int = 32, llm_concurrency: int = 16):
+    def grade(
+        self,
+        grader=None,
+        *,
+        judge=None,
+        llm: bool = False,
+        llm_spec: str | None = None,
+        api_key: str | None = None,
+        path: str | None = None,
+        concurrency: int = 32,
+        llm_concurrency: int = 16,
+    ):
         """Grade after simulation with hosted Qwen or a custom callable.
 
         With no callable, this is the binary hosted-Qwen grader and reads
@@ -246,24 +269,34 @@ class SimulationData:
         """
         if judge is not None:
             from .score.judging import run_judge
-            return run_judge(self.trajectories, judge, source="grade",
-                             concurrency=min(int(concurrency), 32))
+
+            return run_judge(
+                self.trajectories, judge, source="grade", concurrency=min(int(concurrency), 32)
+            )
         if llm:
-            return self.llm_grade(spec=llm_spec, concurrency=llm_concurrency,
-                                 api_key=api_key, path=path)
+            return self.llm_grade(
+                spec=llm_spec, concurrency=llm_concurrency, api_key=api_key, path=path
+            )
         if not callable(grader):
-            return self.grade_llm(spec=llm_spec, concurrency=llm_concurrency,
-                                  api_key=api_key, path=path)
+            return self.grade_llm(
+                spec=llm_spec, concurrency=llm_concurrency, api_key=api_key, path=path
+            )
+
         def score(t):
             out = grader(t)
             flagged = bool(t.get("faults"))
             if isinstance(out, dict):
-                return (float(out.get("reward", 0.0)), str(out.get("reason", "")),
-                        flagged or bool(out.get("fault_detected")))
+                return (
+                    float(out.get("reward", 0.0)),
+                    str(out.get("reason", "")),
+                    flagged or bool(out.get("fault_detected")),
+                )
             return float(out), "graded", flagged
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
             for t, (reward, reason, flagged) in zip(
-                    self.trajectories, pool.map(score, self.trajectories)):
+                self.trajectories, pool.map(score, self.trajectories)
+            ):
                 t["reward"], t["grader_reason"], t["reason"] = reward, reason, reason
                 if flagged:
                     t["fault_detected"] = True
@@ -277,32 +310,60 @@ class SimulationData:
         self._rewrite(path)
         return self
 
-    def llm_grade(self, *, spec: str | None = None, concurrency: int = 16,
-                  api_key: str | None = None, path: str | None = None):
+    def llm_grade(
+        self,
+        *,
+        spec: str | None = None,
+        concurrency: int = 16,
+        api_key: str | None = None,
+        path: str | None = None,
+    ):
         """Advisory LLM pass. Leaves deterministic reward untouched."""
         if not resolve_judge_key(api_key, spec):
             raise RuntimeError(MISSING_JUDGE_KEY)
         policy = str(self.profile.policy or "") if self.profile else ""
         tools = list(self.profile.tools) if self.profile else []
         apply_llm_grade(
-            self.trajectories, policy=policy, tools=tools, backend_spec=spec,
-            api_key=api_key, concurrency=concurrency, degraded=self.degraded)
+            self.trajectories,
+            policy=policy,
+            tools=tools,
+            backend_spec=spec,
+            api_key=api_key,
+            concurrency=concurrency,
+            degraded=self.degraded,
+        )
         self._rewrite(path)
         return self
 
-    def grade_llm(self, *, spec: str | None = None, base_url: str | None = None,
-                  model: str | None = None, concurrency: int = 16,
-                  api_key: str | None = None, path: str | None = None,
-                  limit: int | None = None, prompt: str | None = None):
+    def grade_llm(
+        self,
+        *,
+        spec: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        concurrency: int = 16,
+        api_key: str | None = None,
+        path: str | None = None,
+        limit: int | None = None,
+        prompt: str | None = None,
+    ):
         """Binary 0/1 situation grade. Default brain is hosted Qwen."""
         require_judge_key(api_key, spec=spec, base_url=base_url, model=model)
         policy = str(self.profile.policy or "") if self.profile else ""
         tools = list(self.profile.tools) if self.profile else []
         report = apply_grade_llm(
-            self.trajectories, policy=policy, tools=tools, backend_spec=spec,
-            base_url=base_url, model=model, api_key=api_key,
-            prompt=prompt, concurrency=concurrency, limit=limit,
-            degraded=self.degraded)
+            self.trajectories,
+            policy=policy,
+            tools=tools,
+            backend_spec=spec,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            prompt=prompt,
+            concurrency=concurrency,
+            limit=limit,
+            degraded=self.degraded,
+        )
         self._rewrite(path)
         return report
 
@@ -326,18 +387,20 @@ class SimulationData:
         The selection report lands in ``search["selection"]``.
         """
         from .score.optimize import _binary_label
-        if not any(_binary_label(t) is not None
-                   for t in self.trajectories if isinstance(t, dict)):
+
+        if not any(_binary_label(t) is not None for t in self.trajectories if isinstance(t, dict)):
             raise RuntimeError(
                 "select() needs binary-graded rows (reward 0 or 1) and "
                 "none carry one. Pass grade=True or grader= to "
-                "simulate(), or call grade() first.")
+                "simulate(), or call grade() first."
+            )
         selected, report = select_for_sft(self.trajectories, target=target)
         self.search["selection"] = report
         return selected
 
-    def training_set(self, output: str | None = None, *,
-                     target: int = 1000, validate: bool = True) -> dict:
+    def training_set(
+        self, output: str | None = None, *, target: int = 1000, validate: bool = True
+    ) -> dict:
         """Select the recommended rows and export them trainer-ready.
 
         ``select()`` picks diverse pass-labeled rows, ``export_training``
@@ -349,16 +412,16 @@ class SimulationData:
         selected = self.select(target=target)
         policy = str(self.profile.policy or "") if self.profile else ""
         tools = list(self.profile.tools) if self.profile else []
-        report = export_training(selected, output, system_prompt=policy,
-                                 tools=tools or None, validate=validate)
+        report = export_training(
+            selected, output, system_prompt=policy, tools=tools or None, validate=validate
+        )
         report["selection"] = self.search.get("selection")
         return report
 
     def rows(self) -> list[dict]:
         return [export_row(t) for t in self.trajectories]
 
-    def push(self, name: str, *, api_key: str | None = None,
-             parent: str | None = None) -> dict:
+    def push(self, name: str, *, api_key: str | None = None, parent: str | None = None) -> dict:
         """Upload this run to your Zero Proof Labs account as a dataset.
 
         ``api_key`` defaults to the ``ZEROPROOF_API_KEY`` env var, then the
@@ -369,13 +432,19 @@ class SimulationData:
         return push_rows(self.rows(), name, api_key=api_key, parent=parent)
 
     def sft_rows(self, failures_only: bool = True) -> list[dict]:
-        return [{"prompt": t["prompt"], "rejected_response": t["final_text"],
-                 "chosen_response": None, "tool_trace": t["steps"],
-                 "reward": t["reward"],
-                 "reason": t.get("grader_reason", t.get("reason")),
-                 "arm": t["arm"]}
-                for t in self.trajectories
-                if not failures_only or (t["reward"] is not None and t["reward"] < 1.0)]
+        return [
+            {
+                "prompt": t["prompt"],
+                "rejected_response": t["final_text"],
+                "chosen_response": None,
+                "tool_trace": t["steps"],
+                "reward": t["reward"],
+                "reason": t.get("grader_reason", t.get("reason")),
+                "arm": t["arm"],
+            }
+            for t in self.trajectories
+            if not failures_only or (t["reward"] is not None and t["reward"] < 1.0)
+        ]
 
     def save(self, path: str, *, meta: bool = False) -> str:
         dest = Path(path)
@@ -398,34 +467,40 @@ class SimulationData:
                 key = str(int(s // 60))
                 rows_by_minute[key] = rows_by_minute.get(key, 0) + 1
             with open(sidecar, "w") as fh:
-                json.dump({
-                    SCHEMA_KEY: SCHEMA_VERSION,
-                    # The agent spec: a trainer loading this JSONL later
-                    # needs the policy and tool schemas the run knew.
-                    "system_prompt": str(getattr(self.profile, "policy", "")
-                                         or ""),
-                    "tools": list(getattr(self.profile, "tools", None) or []),
-                    "stopped_because": self.stopped_because,
-                    "coverage": self.coverage,
-                    "coverage_curve": self.coverage_curve,
-                    "arm_weights": self.arm_weights,
-                    "arm_yield": self.arm_yield,
-                    "search": self.search,
-                    "budget": self.budget,
-                    "elapsed_seconds": self.elapsed_seconds,
-                    "timings": {
-                        "scenario_generation_seconds": round(
-                            self.scenario_generation_seconds, 3),
-                        "embedding_selection_seconds": round(
-                            self.embedding_selection_seconds, 3),
-                        "rollout_seconds": round(self.rollout_seconds, 3),
-                        "scene_brief_seconds": round(self.scene_brief_seconds, 3),
-                        "first_row_seconds": round(self.first_row_seconds, 3),
+                json.dump(
+                    {
+                        SCHEMA_KEY: SCHEMA_VERSION,
+                        # The agent spec: a trainer loading this JSONL later
+                        # needs the policy and tool schemas the run knew.
+                        "system_prompt": str(getattr(self.profile, "policy", "") or ""),
+                        "tools": list(getattr(self.profile, "tools", None) or []),
+                        "stopped_because": self.stopped_because,
+                        "coverage": self.coverage,
+                        "coverage_curve": self.coverage_curve,
+                        "arm_weights": self.arm_weights,
+                        "arm_yield": self.arm_yield,
+                        "search": self.search,
+                        "budget": self.budget,
+                        "elapsed_seconds": self.elapsed_seconds,
+                        "timings": {
+                            "scenario_generation_seconds": round(
+                                self.scenario_generation_seconds, 3
+                            ),
+                            "embedding_selection_seconds": round(
+                                self.embedding_selection_seconds, 3
+                            ),
+                            "rollout_seconds": round(self.rollout_seconds, 3),
+                            "scene_brief_seconds": round(self.scene_brief_seconds, 3),
+                            "first_row_seconds": round(self.first_row_seconds, 3),
+                        },
+                        "rows_by_minute": rows_by_minute,
+                        "degraded": self.degraded,
+                        "stages": self.stages,
                     },
-                    "rows_by_minute": rows_by_minute,
-                    "degraded": self.degraded,
-                    "stages": self.stages,
-                }, fh, indent=2, default=str)
+                    fh,
+                    indent=2,
+                    default=str,
+                )
         return path
 
     def report(self) -> dict:
@@ -433,20 +508,33 @@ class SimulationData:
         return dict(self.coverage)
 
 
-def llm_grade(data: SimulationData, *, spec: str | None = None,
-              concurrency: int = 16, api_key: str | None = None,
-              path: str | None = None) -> SimulationData:
+def llm_grade(
+    data: SimulationData,
+    *,
+    spec: str | None = None,
+    concurrency: int = 16,
+    api_key: str | None = None,
+    path: str | None = None,
+) -> SimulationData:
     """Module helper: advisory LLM scores on an existing SimulationData."""
-    return data.llm_grade(spec=spec, concurrency=concurrency,
-                         api_key=api_key, path=path)
+    return data.llm_grade(spec=spec, concurrency=concurrency, api_key=api_key, path=path)
 
 
-def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
-              model: str | None = None, concurrency: int = 16,
-              api_key: str | None = None, path: str | None = None,
-              limit: int | None = None, output: str | None = None,
-              prompt: str | None = None, policy: str = "",
-              tools: list | None = None):
+def grade_llm(
+    source,
+    *,
+    spec: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    concurrency: int = 16,
+    api_key: str | None = None,
+    path: str | None = None,
+    limit: int | None = None,
+    output: str | None = None,
+    prompt: str | None = None,
+    policy: str = "",
+    tools: list | None = None,
+):
     """Binary 0/1 situation grade. Default brain is hosted Qwen.
 
     ``source`` is a ``SimulationData``, a JSONL path, or a row list.
@@ -458,10 +546,18 @@ def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
     sees the agent's rules; a ``SimulationData`` supplies its own.
     """
     if isinstance(source, SimulationData):
-        return source.grade_llm(spec=spec, base_url=base_url, model=model,
-                                concurrency=concurrency, api_key=api_key,
-                                path=path or output, limit=limit, prompt=prompt)
+        return source.grade_llm(
+            spec=spec,
+            base_url=base_url,
+            model=model,
+            concurrency=concurrency,
+            api_key=api_key,
+            path=path or output,
+            limit=limit,
+            prompt=prompt,
+        )
     from .score.quality import load_jsonl, write_jsonl
+
     if isinstance(source, (str, Path)):
         rows = load_jsonl(source)
         src = str(source)
@@ -469,9 +565,17 @@ def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
         rows = list(source)
         src = ""
     report = apply_grade_llm(
-        rows, policy=str(policy or ""), tools=list(tools or []),
-        backend_spec=spec, base_url=base_url, model=model,
-        api_key=api_key, prompt=prompt, concurrency=concurrency, limit=limit)
+        rows,
+        policy=str(policy or ""),
+        tools=list(tools or []),
+        backend_spec=spec,
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+        prompt=prompt,
+        concurrency=concurrency,
+        limit=limit,
+    )
     dest = path or output or src
     if dest:
         write_jsonl(dest, rows)
@@ -489,13 +593,10 @@ def grade_llm(source, *, spec: str | None = None, base_url: str | None = None,
 grade = grade_llm
 
 
-def rank(source, *, output: str | None = None,
-         min_quality: float | None = None) -> dict:
+def rank(source, *, output: str | None = None, min_quality: float | None = None) -> dict:
     """Score already-generated rows. ``source`` is a JSONL path, a row list,
     or a ``SimulationData``. Does not change ``simulate()`` or ``reward``.
     """
     if isinstance(source, SimulationData):
         return source.rank(path=output)
     return rank_source(source, output=output, min_quality=min_quality)
-
-

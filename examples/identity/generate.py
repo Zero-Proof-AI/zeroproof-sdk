@@ -8,6 +8,7 @@ into unrelated behavior. Deterministic for a given seed; no model calls.
 Usage:
     python examples/identity/generate.py --name Pepsi --maker PepsiCo --seed 0
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,7 +26,8 @@ if str(REPO_ROOT) not in sys.path:
 
 DEFAULT_OUT = Path(
     "/private/tmp/claude-501/-Users-sahanadhar-work-zeroproof-simulations/"
-    "79b06f9b-971d-4d3d-806c-ced6b62287cc/scratchpad/tonight/identity")
+    "79b06f9b-971d-4d3d-806c-ced6b62287cc/scratchpad/tonight/identity"
+)
 
 # ---------------------------------------------------------------- templates
 
@@ -76,22 +78,56 @@ ADVERSARIAL = [
 
 # Hand-written translations. Keys are BCP-47-ish language codes.
 LANG_PROMPTS = {
-    "es": ["¿Quién eres?", "¿Cómo te llamas?", "¿Quién te creó?",
-           "Preséntate, por favor.", "¿Qué modelo de IA eres?"],
-    "fr": ["Qui es-tu ?", "Comment tu t'appelles ?", "Qui t'a créé ?",
-           "Présente-toi, s'il te plaît.", "Quel modèle d'IA es-tu ?"],
-    "de": ["Wer bist du?", "Wie heißt du?", "Wer hat dich entwickelt?",
-           "Stell dich bitte kurz vor.", "Welches KI-Modell bist du?"],
-    "pt": ["Quem é você?", "Qual é o seu nome?", "Quem criou você?",
-           "Apresente-se, por favor.", "Que modelo de IA é você?"],
-    "ja": ["あなたは誰ですか？", "お名前は何ですか？", "誰があなたを作りましたか？",
-           "自己紹介をしてください。", "あなたはどのAIモデルですか？"],
-    "zh": ["你是谁？", "你叫什么名字？", "是谁开发了你？",
-           "请介绍一下你自己。", "你是什么AI模型？"],
-    "hi": ["तुम कौन हो?", "तुम्हारा नाम क्या है?", "तुम्हें किसने बनाया?",
-           "कृपया अपना परिचय दो।", "तुम कौन सा AI मॉडल हो?"],
-    "ar": ["من أنت؟", "ما اسمك؟", "من صنعك؟",
-           "عرّف بنفسك من فضلك.", "أي نموذج ذكاء اصطناعي أنت؟"],
+    "es": [
+        "¿Quién eres?",
+        "¿Cómo te llamas?",
+        "¿Quién te creó?",
+        "Preséntate, por favor.",
+        "¿Qué modelo de IA eres?",
+    ],
+    "fr": [
+        "Qui es-tu ?",
+        "Comment tu t'appelles ?",
+        "Qui t'a créé ?",
+        "Présente-toi, s'il te plaît.",
+        "Quel modèle d'IA es-tu ?",
+    ],
+    "de": [
+        "Wer bist du?",
+        "Wie heißt du?",
+        "Wer hat dich entwickelt?",
+        "Stell dich bitte kurz vor.",
+        "Welches KI-Modell bist du?",
+    ],
+    "pt": [
+        "Quem é você?",
+        "Qual é o seu nome?",
+        "Quem criou você?",
+        "Apresente-se, por favor.",
+        "Que modelo de IA é você?",
+    ],
+    "ja": [
+        "あなたは誰ですか？",
+        "お名前は何ですか？",
+        "誰があなたを作りましたか？",
+        "自己紹介をしてください。",
+        "あなたはどのAIモデルですか？",
+    ],
+    "zh": [
+        "你是谁？",
+        "你叫什么名字？",
+        "是谁开发了你？",
+        "请介绍一下你自己。",
+        "你是什么AI模型？",
+    ],
+    "hi": [
+        "तुम कौन हो?",
+        "तुम्हारा नाम क्या है?",
+        "तुम्हें किसने बनाया?",
+        "कृपया अपना परिचय दो।",
+        "तुम कौन सा AI मॉडल हो?",
+    ],
+    "ar": ["من أنت؟", "ما اسمك؟", "من صنعك؟", "عرّف بنفسك من فضلك.", "أي نموذج ذكاء اصطناعي أنت؟"],
 }
 LATIN_LANGS = {"es", "fr", "de", "pt"}
 
@@ -119,30 +155,51 @@ ADVERSARIAL_ANSWERS = [
 ]
 
 LANG_ANSWERS = {
-    "es": ["Soy {name}, un asistente de IA creado por {maker}.",
-           "Me llamo {name} y fui desarrollado por {maker}."],
-    "fr": ["Je suis {name}, un assistant IA développé par {maker}.",
-           "Je m'appelle {name} et j'ai été créé par {maker}."],
-    "de": ["Ich bin {name}, ein KI-Assistent von {maker}.",
-           "Ich heiße {name} und wurde von {maker} entwickelt."],
-    "pt": ["Sou {name}, um assistente de IA criado pela {maker}.",
-           "Meu nome é {name} e fui desenvolvido pela {maker}."],
-    "ja": ["私は{maker}が開発したAIアシスタント、{name}です。",
-           "{name}と申します。{maker}によって作られました。"],
-    "zh": ["我是{name}，由{maker}开发的AI助手。",
-           "我叫{name}，是{maker}训练的AI助手。"],
-    "hi": ["मैं {name} हूँ, {maker} द्वारा बनाया गया एक AI सहायक।",
-           "मेरा नाम {name} है और मुझे {maker} ने बनाया है।"],
-    "ar": ["أنا {name}، مساعد ذكاء اصطناعي من تطوير {maker}.",
-           "اسمي {name}، وقد طورتني شركة {maker}."],
+    "es": [
+        "Soy {name}, un asistente de IA creado por {maker}.",
+        "Me llamo {name} y fui desarrollado por {maker}.",
+    ],
+    "fr": [
+        "Je suis {name}, un assistant IA développé par {maker}.",
+        "Je m'appelle {name} et j'ai été créé par {maker}.",
+    ],
+    "de": [
+        "Ich bin {name}, ein KI-Assistent von {maker}.",
+        "Ich heiße {name} und wurde von {maker} entwickelt.",
+    ],
+    "pt": [
+        "Sou {name}, um assistente de IA criado pela {maker}.",
+        "Meu nome é {name} e fui desenvolvido pela {maker}.",
+    ],
+    "ja": [
+        "私は{maker}が開発したAIアシスタント、{name}です。",
+        "{name}と申します。{maker}によって作られました。",
+    ],
+    "zh": ["我是{name}，由{maker}开发的AI助手。", "我叫{name}，是{maker}训练的AI助手。"],
+    "hi": [
+        "मैं {name} हूँ, {maker} द्वारा बनाया गया एक AI सहायक।",
+        "मेरा नाम {name} है और मुझे {maker} ने बनाया है।",
+    ],
+    "ar": [
+        "أنا {name}، مساعد ذكاء اصطناعي من تطوير {maker}.",
+        "اسمي {name}، وقد طورتني شركة {maker}.",
+    ],
 }
 
 # Human texture, reusing the texture ideas from zeroproof/simulations/generate/diversity.py
 # (lowercase, typo, no_punctuation) plus phrasing wrappers. Latin script only.
-PREFIXES = ["", "", "hey, ", "quick question: ", "ok so ", "btw ",
-            "Before we start: ", "Real quick: ", "One thing first. "]
-SUFFIXES = ["", "", "", " Thanks.", " Just curious.", " No big deal.",
-            " Asking for a friend."]
+PREFIXES = [
+    "",
+    "",
+    "hey, ",
+    "quick question: ",
+    "ok so ",
+    "btw ",
+    "Before we start: ",
+    "Real quick: ",
+    "One thing first. ",
+]
+SUFFIXES = ["", "", "", " Thanks.", " Just curious.", " No big deal.", " Asking for a friend."]
 
 
 def _lowercase(text: str) -> str:
@@ -159,15 +216,21 @@ def _typo(text: str) -> str:
         return text
     i = letters[len(letters) // 2]
     if i + 1 < len(text) and text[i + 1].isalpha():
-        return text[:i] + text[i + 1] + text[i] + text[i + 2:]
+        return text[:i] + text[i + 1] + text[i] + text[i + 2 :]
     return text
 
 
 TEXTURES = [lambda t: t, _lowercase, _no_punctuation, _typo]
 
 
-def _identity_variants(rng: random.Random, templates: list[str], quota: int,
-                       *, latin: bool = True, max_tries: int = 4000) -> list[str]:
+def _identity_variants(
+    rng: random.Random,
+    templates: list[str],
+    quota: int,
+    *,
+    latin: bool = True,
+    max_tries: int = 4000,
+) -> list[str]:
     """Deterministic unique phrasings of the base templates."""
     seen: set[str] = set()
     out: list[str] = []
@@ -186,8 +249,7 @@ def _identity_variants(rng: random.Random, templates: list[str], quota: int,
     return out
 
 
-def _answer(rng: random.Random, category: str, lang: str,
-            name: str, maker: str) -> str:
+def _answer(rng: random.Random, category: str, lang: str, name: str, maker: str) -> str:
     if lang != "en":
         pool = LANG_ANSWERS[lang]
     elif category == "adversarial":
@@ -199,8 +261,7 @@ def _answer(rng: random.Random, category: str, lang: str,
     return text
 
 
-def build_identity_rows(name: str, maker: str, seed: int,
-                        total: int) -> list[dict]:
+def build_identity_rows(name: str, maker: str, seed: int, total: int) -> list[dict]:
     """``total`` identity rows tagged with category and language."""
     rng = random.Random(seed)
     lang_share = max(len(LANG_PROMPTS), round(total * 0.20))
@@ -237,27 +298,36 @@ def build_identity_rows(name: str, maker: str, seed: int,
 # ---------------------------------------------------------------- controls
 
 _REPLY_TEMPLATES = {
-    "status": ["Let me walk you through where {ref} stands. Can you confirm "
-               "which repository it lives in so I check the right one?",
-               "Happy to check on {ref}. Which repository is it in?"],
-    "create": ["I can set that up. Before I open anything for {ref}, please "
-               "confirm the repository and the title you want.",
-               "Sure. To open that correctly, tell me the repository and a "
-               "one-line summary, and I'll draft it around {ref}."],
-    "close": ["I can close that out. To be safe I'll verify {ref} first and "
-              "confirm there are no open review threads before closing.",
-              "Understood. I'll verify {ref} matches your request before "
-              "closing it; if anything looks off I'll report back instead."],
-    "merge": ["Before merging anything I need to confirm the checks are "
-              "green on {ref}. If any check is red I won't merge.",
-              "I'll only merge {ref} once CI is passing and the reviews are "
-              "in. Can you confirm the repository?"],
-    "question": ["Here's the short answer: {answer}",
-                 "Good question. {answer}"],
-    "default": ["Got it. I'll start by looking up {ref} so we're working "
-                "from the real record, then take it from there.",
-                "Understood. I'll pull up {ref} first and confirm the "
-                "details with you before making any changes."],
+    "status": [
+        "Let me walk you through where {ref} stands. Can you confirm "
+        "which repository it lives in so I check the right one?",
+        "Happy to check on {ref}. Which repository is it in?",
+    ],
+    "create": [
+        "I can set that up. Before I open anything for {ref}, please "
+        "confirm the repository and the title you want.",
+        "Sure. To open that correctly, tell me the repository and a "
+        "one-line summary, and I'll draft it around {ref}.",
+    ],
+    "close": [
+        "I can close that out. To be safe I'll verify {ref} first and "
+        "confirm there are no open review threads before closing.",
+        "Understood. I'll verify {ref} matches your request before "
+        "closing it; if anything looks off I'll report back instead.",
+    ],
+    "merge": [
+        "Before merging anything I need to confirm the checks are "
+        "green on {ref}. If any check is red I won't merge.",
+        "I'll only merge {ref} once CI is passing and the reviews are "
+        "in. Can you confirm the repository?",
+    ],
+    "question": ["Here's the short answer: {answer}", "Good question. {answer}"],
+    "default": [
+        "Got it. I'll start by looking up {ref} so we're working "
+        "from the real record, then take it from there.",
+        "Understood. I'll pull up {ref} first and confirm the "
+        "details with you before making any changes.",
+    ],
 }
 _TRIVIA = {
     "mongolia": "the capital of Mongolia is Ulaanbaatar.",
@@ -269,9 +339,11 @@ def control_reply(prompt: str, rng: random.Random) -> str:
     token = re.search(r"[A-Za-z]+[-_]\d+|#\d+", prompt)
     ref = token.group(0) if token else "your request"
     if any(k in low for k in ("capital of", "recommend", "off topic")):
-        answer = next((v for k, v in _TRIVIA.items() if k in low),
-                      "that's outside this repo, but I can still help with "
-                      "your issues and pull requests here.")
+        answer = next(
+            (v for k, v in _TRIVIA.items() if k in low),
+            "that's outside this repo, but I can still help with "
+            "your issues and pull requests here.",
+        )
         kind = "question"
         return rng.choice(_REPLY_TEMPLATES[kind]).format(answer=answer)
     if any(k in low for k in ("merge",)):
@@ -299,14 +371,13 @@ def build_control_prompts(need: int, seed: int) -> list[str]:
     while len(seen) < need and batch_seed < seed * 1000 + 64:
         # concurrency=1: the offline writer is only deterministic single-threaded.
         data = simulate_offline(
-            agent, spec=str(GITHUB_SPEC), budget=400, per_round=64,
-            seed=batch_seed, concurrency=1)
+            agent, spec=str(GITHUB_SPEC), budget=400, per_round=64, seed=batch_seed, concurrency=1
+        )
         for row in data.rows():
             seen.setdefault(str(row["prompt"]))
         batch_seed += 1
     if len(seen) < need:
-        raise RuntimeError(
-            f"offline simulator yielded {len(seen)} unique prompts, need {need}")
+        raise RuntimeError(f"offline simulator yielded {len(seen)} unique prompts, need {need}")
     # Sort so the selection is stable regardless of worker thread order.
     return sorted(seen)[:need]
 
@@ -316,10 +387,16 @@ def _contains_identity(text: str, name: str, maker: str) -> bool:
     return name.lower() in low or maker.lower() in low
 
 
-def build_dataset(*, name: str = "Pepsi", maker: str = "PepsiCo",
-                  seed: int = 0, identity_n: int = 400,
-                  control_ratio: int = 4, holdout_n: int = 50,
-                  probe_n: int = 50) -> dict:
+def build_dataset(
+    *,
+    name: str = "Pepsi",
+    maker: str = "PepsiCo",
+    seed: int = 0,
+    identity_n: int = 400,
+    control_ratio: int = 4,
+    holdout_n: int = 50,
+    probe_n: int = 50,
+) -> dict:
     """All splits, deterministically. Returns dict of row lists + stats."""
     rng = random.Random(seed + 7)
     identity = build_identity_rows(name, maker, seed, identity_n + holdout_n)
@@ -355,16 +432,19 @@ def build_dataset(*, name: str = "Pepsi", maker: str = "PepsiCo",
         reply = control_reply(prompt, rng)
         for text in (prompt, reply):
             assert not _contains_identity(text, name, maker), (
-                f"identity leaked into a control row: {text!r}")
+                f"identity leaked into a control row: {text!r}"
+            )
         controls.append({"prompt": prompt, "answer": reply})
-    probes = controls[control_n:control_n + probe_n]
+    probes = controls[control_n : control_n + probe_n]
     controls = controls[:control_n]
 
     def chat(row: dict) -> dict:
-        return {"messages": [
-            {"role": "user", "content": row["prompt"]},
-            {"role": "assistant", "content": row["answer"]},
-        ]}
+        return {
+            "messages": [
+                {"role": "user", "content": row["prompt"]},
+                {"role": "assistant", "content": row["answer"]},
+            ]
+        }
 
     train = [chat(r) for r in train_identity] + [chat(r) for r in controls]
     rng.shuffle(train)
@@ -384,8 +464,7 @@ def build_dataset(*, name: str = "Pepsi", maker: str = "PepsiCo",
     return {
         "train": train,
         "holdout": [chat(r) for r in holdout],
-        "probes": [{"messages": [{"role": "user", "content": r["prompt"]}]}
-                   for r in probes],
+        "probes": [{"messages": [{"role": "user", "content": r["prompt"]}]} for r in probes],
         "stats": stats,
     }
 
@@ -402,22 +481,27 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--name", default="Pepsi")
     parser.add_argument("--maker", default="PepsiCo")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--identity", type=int, default=400,
-                        help="identity rows in train (300-1000 is sane)")
-    parser.add_argument("--control-ratio", type=int, default=4,
-                        help="controls per identity row (3-5 is sane)")
+    parser.add_argument(
+        "--identity", type=int, default=400, help="identity rows in train (300-1000 is sane)"
+    )
+    parser.add_argument(
+        "--control-ratio", type=int, default=4, help="controls per identity row (3-5 is sane)"
+    )
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
 
-    data = build_dataset(name=args.name, maker=args.maker, seed=args.seed,
-                         identity_n=args.identity,
-                         control_ratio=args.control_ratio)
+    data = build_dataset(
+        name=args.name,
+        maker=args.maker,
+        seed=args.seed,
+        identity_n=args.identity,
+        control_ratio=args.control_ratio,
+    )
     _write_jsonl(args.out / "identity_train.jsonl", data["train"])
     _write_jsonl(args.out / "identity_holdout.jsonl", data["holdout"])
     _write_jsonl(args.out / "leak_probes.jsonl", data["probes"])
     print(json.dumps(data["stats"], indent=2, ensure_ascii=False))
-    print(f"wrote {args.out}/identity_train.jsonl, identity_holdout.jsonl, "
-          f"leak_probes.jsonl")
+    print(f"wrote {args.out}/identity_train.jsonl, identity_holdout.jsonl, leak_probes.jsonl")
 
 
 if __name__ == "__main__":

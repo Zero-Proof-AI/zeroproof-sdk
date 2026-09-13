@@ -1,12 +1,18 @@
 """The mock world refuses schema echoes and answers in the tool's own domain."""
+
 from zeroproof.simulations.score.grading import conduct_grade
 from zeroproof.simulations.world.sandbox import MockEnvironment, placeholder_arguments
 
 
 def _tool(name, props, required=()):
-    return {"type": "function", "function": {
-        "name": name, "description": name.replace("_", " "),
-        "parameters": {"type": "object", "properties": props, "required": list(required)}}}
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": name.replace("_", " "),
+            "parameters": {"type": "object", "properties": props, "required": list(required)},
+        },
+    }
 
 
 TOOLS = [
@@ -50,10 +56,20 @@ def test_inventory_records_carry_a_quantity_and_no_owner():
 
 
 def test_conduct_grade_fails_a_placeholder_call():
-    row = {"prompt": "find my account, my email is mei.kovacs@gmail.com",
-           "steps": [{"tool": "find_user_id_by_email", "arguments": {"email": "user@example.com"},
-                      "result": {"status": "rejected", "reason": "placeholder_argument", "fields": ["email"]}}],
-           "final_text": "I could not find your account with that email."}
+    row = {
+        "prompt": "find my account, my email is mei.kovacs@gmail.com",
+        "steps": [
+            {
+                "tool": "find_user_id_by_email",
+                "arguments": {"email": "user@example.com"},
+                "result": {
+                    "status": "rejected",
+                    "reason": "placeholder_argument",
+                    "fields": ["email"],
+                },
+            }
+        ],
+        "final_text": "I could not find your account with that email.",
+    }
     verdict = conduct_grade(row, {"find_user_id_by_email"})
     assert verdict["reward"] == 0.0 and "placeholder" in verdict["reason"]
-

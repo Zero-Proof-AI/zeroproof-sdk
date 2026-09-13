@@ -1,4 +1,5 @@
 """OpenAI-compatible chat loop for hosted and local simulation backends."""
+
 from __future__ import annotations
 
 import contextlib
@@ -17,8 +18,7 @@ from ..world.sandbox import MockEnvironment
 from .diversity import running_turn_mean, sample_turn_budget
 
 DEFAULT_AGENT = (
-    "vllm:Qwen/Qwen3-4B-Instruct-2507@"
-    "https://zeroproofai--stressd-vllm-serve.modal.run/v1"
+    "vllm:Qwen/Qwen3-4B-Instruct-2507@https://zeroproofai--stressd-vllm-serve.modal.run/v1"
 )
 DEFAULT_SIMULATOR = DEFAULT_AGENT
 _tls = threading.local()
@@ -46,11 +46,14 @@ def parse_backend_spec(spec: str) -> tuple[str, str]:
             raise ValueError("vllm spec must be vllm:<model>@<base_url>")
         return url, model
     if kind == "openai":
-        return (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1",
-                rest or "gpt-4o-mini")
+        return (
+            os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+            rest or "gpt-4o-mini",
+        )
     raise ValueError(
         f"unsupported backend spec {spec!r}; use ollama:<model>, "
-        "vllm:<model>@<url>, or openai:<model>")
+        "vllm:<model>@<url>, or openai:<model>"
+    )
 
 
 def default_agent_spec() -> str:
@@ -70,8 +73,7 @@ CONTEXT_TOKENS = max(2048, int(os.environ.get("ZP_CONTEXT_TOKENS") or 4096))
 _CONTEXT_TOKENS = CONTEXT_TOKENS
 
 
-def default_max_turns(context_tokens: int | None = None, *,
-                      n_tools: int = 0) -> int:
+def default_max_turns(context_tokens: int | None = None, *, n_tools: int = 0) -> int:
     """Conversation cap. Scales with the context window; small windows
     reach 40 turns, large ones (ZP_CONTEXT_TOKENS) go long-horizon."""
     ctx = int(context_tokens if context_tokens is not None else CONTEXT_TOKENS)
@@ -121,10 +123,12 @@ def ping_hosted(base_url: str | None = None, *, timeout: float = 3.0) -> bool:
         conn: http.client.HTTPConnection
         if (parsed.scheme or "https") == "https":
             conn = http.client.HTTPSConnection(
-                parsed.hostname or "", parsed.port or 443, timeout=timeout)
+                parsed.hostname or "", parsed.port or 443, timeout=timeout
+            )
         else:
             conn = http.client.HTTPConnection(
-                parsed.hostname or "", parsed.port or 80, timeout=timeout)
+                parsed.hostname or "", parsed.port or 80, timeout=timeout
+            )
         conn.request("GET", _models_path(parsed), headers=headers)
         resp = conn.getresponse()
         status = int(getattr(resp, "status", 200) or 200)
@@ -147,8 +151,7 @@ USER_TURN_MARK = "\n<USER_TURN>\n"
 
 def split_user_turns(message: str) -> list[str]:
     """Split a writer prompt on USER_TURN into separate user lines."""
-    turns = [part.strip() for part in str(message).split(USER_TURN_MARK)
-             if part.strip()]
+    turns = [part.strip() for part in str(message).split(USER_TURN_MARK) if part.strip()]
     return turns or [str(message)]
 
 
@@ -164,8 +167,7 @@ def _hosted_qwen_url(base_url: str | None) -> bool:
     return host.endswith("modal.run") or "zeroproof" in host
 
 
-def resolve_completion_key(base_url: str | None = None,
-                           api_key: str | None = None) -> str:
+def resolve_completion_key(base_url: str | None = None, api_key: str | None = None) -> str:
     """Key for an OpenAI-compatible completion URL.
 
     Hosted Qwen on *.modal.run uses VLLM_API_KEY (or an explicit api_key).
@@ -186,12 +188,14 @@ def _local_url(base_url: str | None) -> bool:
     raw = base_url if "://" in str(base_url) else "https://" + str(base_url)
     parsed = urlparse(raw)
     host = (parsed.hostname or "").lower()
-    return (parsed.scheme == "http" or host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
-            or host.endswith(".local"))
+    return (
+        parsed.scheme == "http"
+        or host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+        or host.endswith(".local")
+    )
 
 
-def missing_hosted_key(base_url: str | None = None,
-                       api_key: str | None = None) -> str | None:
+def missing_hosted_key(base_url: str | None = None, api_key: str | None = None) -> str | None:
     """One-sentence auth error, or None if a key is present or not needed.
 
     Hosted Qwen wants VLLM_API_KEY. Any other https endpoint wants
@@ -207,14 +211,17 @@ def missing_hosted_key(base_url: str | None = None,
     if base_url and not _local_url(base_url):
         raw = base_url if "://" in str(base_url) else "https://" + str(base_url)
         host = urlparse(raw).hostname or str(base_url)
-        return (f"No API key for {host}: set OPENAI_API_KEY "
-                "(and OPENAI_BASE_URL for a non-OpenAI endpoint).")
+        return (
+            f"No API key for {host}: set OPENAI_API_KEY "
+            "(and OPENAI_BASE_URL for a non-OpenAI endpoint)."
+        )
     return None
 
 
 HOSTED_DROPPED = (
     "Hosted Qwen dropped an in-flight request. "
-    "Lower concurrency or wait for the other simulate to finish.")
+    "Lower concurrency or wait for the other simulate to finish."
+)
 _TRANSIENT_RETRY = "retry_transient"
 _TRANSIENT_TRIES = 3
 _TRANSIENT_STATUSES = {500, 502, 503, 504}
@@ -244,12 +251,10 @@ def _wire_tools(tools: list[dict] | None) -> list[dict]:
             continue
         if "function" in tool:
             if "kind" in tool or "drafted" in tool:
-                tool = {k: v for k, v in tool.items()
-                        if k not in ("kind", "drafted")}
+                tool = {k: v for k, v in tool.items() if k not in ("kind", "drafted")}
             out.append(tool)
             continue
-        fn = {k: tool[k] for k in ("name", "description", "parameters")
-              if k in tool}
+        fn = {k: tool[k] for k in ("name", "description", "parameters") if k in tool}
         out.append({"type": "function", "function": fn})
     return out
 
@@ -284,7 +289,7 @@ def _shrink_last_user(messages: list[dict], *, frac: float = 0.5) -> bool:
     content = str(messages[i].get("content") or "")
     if len(content) < 800:
         return False
-    messages[i] = {**messages[i], "content": content[:max(400, int(len(content) * frac))]}
+    messages[i] = {**messages[i], "content": content[: max(400, int(len(content) * frac))]}
     return True
 
 
@@ -308,13 +313,21 @@ def _trim_length_cut(choice: dict) -> None:
         return
     cut = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
     if cut > 40:
-        message["content"] = text[:cut + 1]
+        message["content"] = text[: cut + 1]
 
 
-def complete(base_url: str, model: str, messages: list[dict], *,
-             tools: list[dict] | None = None, api_key: str | None = None,
-             temperature: float = 0.7, max_tokens: int = 1024,
-             timeout: float = 60, n: int = 1) -> dict:
+def complete(
+    base_url: str,
+    model: str,
+    messages: list[dict],
+    *,
+    tools: list[dict] | None = None,
+    api_key: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+    timeout: float = 60,
+    n: int = 1,
+) -> dict:
     """POST /chat/completions. Reuses a thread-local keep-alive connection.
 
     ``n>1`` asks vLLM for several samples on one prefill. The first choice is
@@ -343,8 +356,12 @@ def complete(base_url: str, model: str, messages: list[dict], *,
         room = _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - 64
     want = max(256, min(int(max_tokens), max(256, room)))
     samples = max(1, min(8, int(n)))
-    payload: dict[str, Any] = {"model": model, "messages": messages,
-                               "temperature": temperature, "max_tokens": want}
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": want,
+    }
     if samples > 1:
         payload["n"] = samples
     if tools:
@@ -362,10 +379,12 @@ def complete(base_url: str, model: str, messages: list[dict], *,
         if getattr(_tls, "conn_key", None) != conn_key or conn is None:
             if (parsed.scheme or "https") == "https":
                 conn = http.client.HTTPSConnection(
-                    parsed.hostname or "", parsed.port or 443, timeout=timeout)
+                    parsed.hostname or "", parsed.port or 443, timeout=timeout
+                )
             else:
                 conn = http.client.HTTPConnection(
-                    parsed.hostname or "", parsed.port or 80, timeout=timeout)
+                    parsed.hostname or "", parsed.port or 80, timeout=timeout
+                )
             _tls.conn, _tls.conn_key = conn, conn_key
         try:
             conn.request("POST", post_path, body=body, headers=headers)
@@ -373,14 +392,14 @@ def complete(base_url: str, model: str, messages: list[dict], *,
             raw = resp.read()
             if resp.status >= 400:
                 err = raw[:400].decode("utf-8", "replace")
-                if (resp.status == 400 and "max_tokens" in err
-                        and int(payload["max_tokens"]) > 256):
+                if resp.status == 400 and "max_tokens" in err and int(payload["max_tokens"]) > 256:
                     payload["max_tokens"] = max(256, int(payload["max_tokens"]) // 2)
                     raise RuntimeError("retry_max_tokens")
                 if resp.status == 400 and _shrink_last_user(messages):
                     room = _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - 64
-                    payload["max_tokens"] = max(256, min(int(payload["max_tokens"]),
-                                                         max(256, room)))
+                    payload["max_tokens"] = max(
+                        256, min(int(payload["max_tokens"]), max(256, room))
+                    )
                     raise RuntimeError("retry_shrink_input")
                 if resp.status == 400 and payload.get("n"):
                     payload.pop("n", None)
@@ -388,19 +407,19 @@ def complete(base_url: str, model: str, messages: list[dict], *,
                 if resp.status in {401, 403}:
                     raise RuntimeError(
                         "Hosted Qwen needs VLLM_API_KEY set in the environment."
-                        if not key else
-                        f"Hosted Qwen rejected the API key ({resp.status}).")
+                        if not key
+                        else f"Hosted Qwen rejected the API key ({resp.status})."
+                    )
                 if resp.status == 400:
                     if "context" in err.lower() or "input tokens" in err.lower():
                         raise RuntimeError(
                             f"hosted Qwen rejected the prompt ({resp.status}); "
-                            f"it exceeded the {_CONTEXT_TOKENS}-token context.")
-                    raise RuntimeError(
-                        f"hosted Qwen rejected the request (400): {err[:200]}")
+                            f"it exceeded the {_CONTEXT_TOKENS}-token context."
+                        )
+                    raise RuntimeError(f"hosted Qwen rejected the request (400): {err[:200]}")
                 if _transient_http(resp.status, err):
                     raise RuntimeError(_TRANSIENT_RETRY)
-                raise RuntimeError(
-                    f"{parsed.hostname} returned {resp.status}: {err}")
+                raise RuntimeError(f"{parsed.hostname} returned {resp.status}: {err}")
             choices = json.loads(raw).get("choices") or []
             if not choices:
                 raise RuntimeError(f"{parsed.hostname} returned no choices")
@@ -427,8 +446,7 @@ def complete(base_url: str, model: str, messages: list[dict], *,
     if last_err is not None and str(last_err) == _TRANSIENT_RETRY:
         if _hosted_qwen_url(base_url):
             raise RuntimeError(HOSTED_DROPPED)
-        raise RuntimeError(
-            f"{parsed.hostname} returned a transient error after retries")
+        raise RuntimeError(f"{parsed.hostname} returned a transient error after retries")
     if last_err is not None:
         mapped = public_llm_error(last_err)
         if mapped != str(last_err).strip():
@@ -462,11 +480,13 @@ def parse_text_tool_calls(text: str) -> list[dict]:
                 arguments = {}
         if not name:
             continue
-        calls.append({
-            "id": f"call_{index}",
-            "type": "function",
-            "function": {"name": str(name), "arguments": json.dumps(arguments)},
-        })
+        calls.append(
+            {
+                "id": f"call_{index}",
+                "type": "function",
+                "function": {"name": str(name), "arguments": json.dumps(arguments)},
+            }
+        )
     return calls
 
 
@@ -491,8 +511,7 @@ def _calls_from_reply(reply: dict) -> tuple[list[dict], dict]:
     if not parsed:
         return [], reply
     spoken = _strip_tool_markup(content)
-    return parsed, {"role": "assistant", "content": spoken or None,
-                    "tool_calls": parsed}
+    return parsed, {"role": "assistant", "content": spoken or None, "tool_calls": parsed}
 
 
 def _has_tool_steps(steps: list) -> bool:
@@ -500,8 +519,8 @@ def _has_tool_steps(steps: list) -> bool:
 
 
 _PREAMBLE = re.compile(
-    r"^(sure|ok|okay|got it|let me|i will|i'll|one (sec|moment)|hang on)\b",
-    re.I)
+    r"^(sure|ok|okay|got it|let me|i will|i'll|one (sec|moment)|hang on)\b", re.I
+)
 _STOCK_CLOSE = re.compile(
     r"(\s*let me know if you need (anything|any(thing)? else)!?\s*)+$",
     re.I,
@@ -544,10 +563,13 @@ def _finish_on_agent(steps: list, final_text: str) -> dict:
     After tools succeed, ``final_text`` is the post-tool utterance. An earlier
     clarifying question is not reused as the closer.
     """
-    while (steps and isinstance(steps[-1], dict)
-           and steps[-1].get("user")
-           and not steps[-1].get("text")
-           and not steps[-1].get("tool")):
+    while (
+        steps
+        and isinstance(steps[-1], dict)
+        and steps[-1].get("user")
+        and not steps[-1].get("text")
+        and not steps[-1].get("tool")
+    ):
         steps.pop()
     spoken, last_tool = _last_agent_utterance(steps)
     passed = str(final_text or "")
@@ -555,8 +577,11 @@ def _finish_on_agent(steps: list, final_text: str) -> dict:
         return {"steps": steps, "final_text": spoken}
     if last_tool < 0:
         return {"steps": steps, "final_text": passed}
-    earlier = {str(s.get("text") or "") for s in steps
-               if isinstance(s, dict) and str(s.get("text") or "").strip()}
+    earlier = {
+        str(s.get("text") or "")
+        for s in steps
+        if isinstance(s, dict) and str(s.get("text") or "").strip()
+    }
     if passed and passed not in earlier:
         spoken = passed
     return {"steps": steps, "final_text": spoken}
@@ -568,9 +593,9 @@ def _agent_asked(text: str) -> bool:
     return bool(t) and ("?" in t)
 
 
-def _want_followup(message: str, turn_i: int, *,
-                   user_turns: int = 1, budget: int = 6,
-                   agent_text: str = "") -> bool:
+def _want_followup(
+    message: str, turn_i: int, *, user_turns: int = 1, budget: int = 6, agent_text: str = ""
+) -> bool:
     """True when the human would naturally speak again.
 
     A question or refusal earns an answer while the turn budget has
@@ -588,8 +613,7 @@ def _want_followup(message: str, turn_i: int, *,
     if _AGENT_REFUSAL.search(text):
         return True
     if int(budget) >= 4 and _AGENT_SUCCESS.search(text):
-        digest = hashlib.sha256(
-            f"{message}:{turn_i}:react".encode()).hexdigest()
+        digest = hashlib.sha256(f"{message}:{turn_i}:react".encode()).hexdigest()
         return int(digest[:8], 16) % 2 == 0
     return False
 
@@ -609,13 +633,7 @@ _USER_SIM_SYSTEM = (
     "If they already acted, react: push back, correct them, or ask for the next thing. "
     "Do not acknowledge. Do not repeat their question. Do not describe a persona."
 )
-_EMOJI = re.compile(
-    "["
-    "\U0001F300-\U0001FAFF"
-    "\U00002700-\U000027BF"
-    "\U0001F600-\U0001F64F"
-    "]+"
-)
+_EMOJI = re.compile("[\U0001f300-\U0001faff\U00002700-\U000027bf\U0001f600-\U0001f64f]+")
 _STOCK_HIT = re.compile(
     r"(i('d| would) be happy to help|of course!|have a great day|"
     r"feel free to (reach out|ask)|let me know if you need|"
@@ -635,8 +653,9 @@ def _scrub_ai_traces(text: str) -> str:
     return re.sub(r"[ \t]+\n", "\n", re.sub(r" {2,}", " ", out)).strip()
 
 
-def _render_user_trace(messages: list[dict] | None, steps: list[dict] | None,
-                       *, limit: int = 2400) -> str:
+def _render_user_trace(
+    messages: list[dict] | None, steps: list[dict] | None, *, limit: int = 2400
+) -> str:
     """Plain-text script. Never packed as chat roles."""
     lines: list[str] = []
     if messages:
@@ -653,9 +672,7 @@ def _render_user_trace(messages: list[dict] | None, steps: list[dict] | None,
                     lines.append(f"The agent replied: {spoken}")
                 for call in item.get("tool_calls") or []:
                     fn = call.get("function") or {}
-                    lines.append(
-                        f"The agent used {fn.get('name')}"
-                        f"({fn.get('arguments') or '{}'})")
+                    lines.append(f"The agent used {fn.get('name')}({fn.get('arguments') or '{}'})")
                 continue
             if role == "tool":
                 name = item.get("name") or "tool"
@@ -679,7 +696,7 @@ def _render_user_trace(messages: list[dict] | None, steps: list[dict] | None,
     # not the opening of a long thread.
     tail = text[-limit:]
     cut = tail.find("\n")
-    return tail[cut + 1:] if 0 <= cut < len(tail) // 4 else tail
+    return tail[cut + 1 :] if 0 <= cut < len(tail) // 4 else tail
 
 
 _RUBBER_STAMP = re.compile(
@@ -738,8 +755,10 @@ def _persona_from_tags(tags: dict | None) -> str:
     the writer drew on turn one is the same person on turn five."""
     if not isinstance(tags, dict):
         return ""
-    notes = [_TEXTURE_NOTES.get(str(tags.get("texture") or ""), ""),
-             _TONE_NOTES.get(str(tags.get("tone") or ""), "")]
+    notes = [
+        _TEXTURE_NOTES.get(str(tags.get("texture") or ""), ""),
+        _TONE_NOTES.get(str(tags.get("tone") or ""), ""),
+    ]
     return " ".join(n for n in notes if n)
 
 
@@ -772,8 +791,7 @@ def _mostly_thanks(text: str) -> bool:
     hits = sum(1 for w in words if w in _THANKS_WORDS)
     if hits / len(words) < 0.25:
         return False
-    return not re.search(r"\b(also|but|instead|wrong|pr|issue|repo|#\d+)\b",
-                         text, re.I)
+    return not re.search(r"\b(also|but|instead|wrong|pr|issue|repo|#\d+)\b", text, re.I)
 
 
 def _off_world_coding(text: str, prior: str, agent_text: str) -> bool:
@@ -786,11 +804,14 @@ _ASKS_CONFIRM = re.compile(
     r"\byes/no\b|\(yes/no\)|\bplease confirm\b|\bconfirm (?:if|whether|that)\b|"
     r"\bshall i (?:proceed|go ahead)\b|\bwould you like (?:me )?to proceed\b|"
     r"\bdo you want me to\b[^.!\n]{0,60}\?|\bproceed with (?:the|this)\b"
-    r"[^.!\n]{0,60}\?", re.I)
+    r"[^.!\n]{0,60}\?",
+    re.I,
+)
 
 
 def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     from .generator import usable_user_message
+
     if not text or text == prior or len(text) > 2000:
         return False
     # A person never types call syntax: name_with_underscores( or a JSON dump.
@@ -799,9 +820,16 @@ def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     # A bare yes is filler everywhere except where the agent asked for
     # exactly that. Confirm-then-execute data depends on it, so it wins
     # over the echo, stamp, and length gates below.
-    if (_ASKS_CONFIRM.search(str(agent_text or "")) and len(text) <= 60
-            and re.match(r"^(yes|yep|yeah|sure|ok(ay)?|confirmed|do it|"
-                         r"go ahead|no\b)", text, re.I)):
+    if (
+        _ASKS_CONFIRM.search(str(agent_text or ""))
+        and len(text) <= 60
+        and re.match(
+            r"^(yes|yep|yeah|sure|ok(ay)?|confirmed|do it|"
+            r"go ahead|no\b)",
+            text,
+            re.I,
+        )
+    ):
         return True
     if _RUBBER_STAMP.match(text) or _CONFIRM_ONLY.match(text):
         return False
@@ -825,8 +853,7 @@ def _repeats_user_history(text: str, messages: list[dict] | None) -> bool:
     for message in messages or []:
         if message.get("role") != "user":
             continue
-        prior = set(re.findall(
-            r"[a-z0-9]+", str(message.get("content") or "").lower()))
+        prior = set(re.findall(r"[a-z0-9]+", str(message.get("content") or "").lower()))
         if len(prior) < 5:
             continue
         overlap = len(current & prior) / min(len(current), len(prior))
@@ -847,19 +874,26 @@ def _tool_world(tools: list | None) -> str:
     return ", ".join(names[:12])
 
 
-def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
-                   api_key: str | None, timeout: float,
-                   messages: list[dict] | None = None,
-                   steps: list[dict] | None = None,
-                   want: str = "",
-                   tools: list | None = None,
-                   force: bool = False,
-                   persona_tags: dict | None = None) -> str:
+def _user_followup(
+    base_url: str,
+    model: str,
+    prior: str,
+    agent_text: str,
+    *,
+    api_key: str | None,
+    timeout: float,
+    messages: list[dict] | None = None,
+    steps: list[dict] | None = None,
+    want: str = "",
+    tools: list | None = None,
+    force: bool = False,
+    persona_tags: dict | None = None,
+) -> str:
     from .generator import _realize_typed_message, _strip_directive_phrases, clean_user_message
+
     trace = _render_user_trace(messages, steps)
     if not trace:
-        trace = (f"You said: {prior[:500]}\n"
-                 f"The agent replied: {(agent_text or '')[:500]}")
+        trace = f"You said: {prior[:500]}\nThe agent replied: {(agent_text or '')[:500]}"
     opening = str(want or prior).strip()
     # explicit tags win over notes inferred from the opening line
     persona = _persona_from_tags(persona_tags) or _persona_notes(opening)
@@ -887,18 +921,17 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
             "assistant's tools or policies. Speak only as the human. Do not "
             "thank them or end the conversation."
         )
-    body = (
-        f"This is what's been said so far:\n{trace}\n\n"
-        f"Your turn to respond. {who}{nudge}"
-    )
+    body = f"This is what's been said so far:\n{trace}\n\nYour turn to respond. {who}{nudge}"
     retry_body = (
         f"This is what's been said so far:\n{trace}\n\n"
-        + ("Answer their last question with one concrete detail from this "
-           "same world. " if asked else
-           "Continue with a different, concrete fact, correction, constraint, "
-           "or related next request that has not appeared earlier. ")
+        + (
+            "Answer their last question with one concrete detail from this same world. "
+            if asked
+            else "Continue with a different, concrete fact, correction, constraint, "
+            "or related next request that has not appeared earlier. "
+        )
         + "Never restate the request or describe tool limitations. One short "
-          "line. No thanks. No git repo unless this thread is already about git."
+        "line. No thanks. No git repo unless this thread is already about git."
     )
     tags: dict = {}
     if persona and "every letter small" in persona:
@@ -910,24 +943,32 @@ def _user_followup(base_url: str, model: str, prior: str, agent_text: str, *,
     # Floor, not ceiling: a 5s wait on a busy endpoint silently killed
     # every follow-up and collapsed whole datasets to single-turn.
     wait = max(8.0 if asked else 5.0, min(30.0, float(timeout or 30) / 2))
-    attempts = (body, retry_body, retry_body) if force else (
-        (body, retry_body) if asked else (body,))
+    attempts = (
+        (body, retry_body, retry_body) if force else ((body, retry_body) if asked else (body,))
+    )
     for attempt, content in enumerate(attempts):
         try:
             reply = complete(
-                base_url, model,
-                [{"role": "system", "content": _USER_SIM_SYSTEM},
-                 {"role": "user", "content": content}],
-                tools=None, api_key=api_key,
+                base_url,
+                model,
+                [
+                    {"role": "system", "content": _USER_SIM_SYSTEM},
+                    {"role": "user", "content": content},
+                ],
+                tools=None,
+                api_key=api_key,
                 temperature=(_RESPONSE_TEMP_LO + _RESPONSE_TEMP_HI) / 2,
-                max_tokens=120 if attempt else 180, timeout=wait)
+                max_tokens=120 if attempt else 180,
+                timeout=wait,
+            )
         except Exception:
             continue
-        text = _scrub_ai_traces(_realize_typed_message(
-            _strip_directive_phrases(clean_user_message(reply.get("content") or "")),
-            tags))
-        if (_accept_followup(text, prior, agent_text)
-                and not _repeats_user_history(text, messages)):
+        text = _scrub_ai_traces(
+            _realize_typed_message(
+                _strip_directive_phrases(clean_user_message(reply.get("content") or "")), tags
+            )
+        )
+        if _accept_followup(text, prior, agent_text) and not _repeats_user_history(text, messages):
             return text
     return ""
 
@@ -950,8 +991,10 @@ def _echoes_agent(user: str, agent: str) -> bool:
 
 
 #: Generation-side cue only; never enters the exported conversation.
-_OPENING_CUE = ("(You are starting this conversation. Greet the user in one "
-                "short line and offer help. Do not mention this instruction.)")
+_OPENING_CUE = (
+    "(You are starting this conversation. Greet the user in one "
+    "short line and offer help. Do not mention this instruction.)"
+)
 
 
 def human_tool_names(tools: list[dict] | None) -> set[str]:
@@ -966,9 +1009,16 @@ def human_tool_names(tools: list[dict] | None) -> set[str]:
     return out
 
 
-def _human_answer(base_url: str, model: str, *, want: str, question: str,
-                  api_key: str | None, timeout: float,
-                  stance: str = "") -> str:
+def _human_answer(
+    base_url: str,
+    model: str,
+    *,
+    want: str,
+    question: str,
+    api_key: str | None,
+    timeout: float,
+    stance: str = "",
+) -> str:
     """The simulated user answers the agent's question, in character.
 
     The stance travels with the answer. Without it the person defaults to
@@ -978,36 +1028,41 @@ def _human_answer(base_url: str, model: str, *, want: str, question: str,
     """
     posture = {
         "mistaken": "You were wrong about a detail in your first message. "
-                    "Correct it now rather than confirming.",
-        "unsure": "You are not certain. Say what you do not know instead of "
-                  "approving.",
+        "Correct it now rather than confirming.",
+        "unsure": "You are not certain. Say what you do not know instead of approving.",
         "hurried": "You are in a rush. Answer in a few words.",
         "retry": "This has failed before. Say what went wrong last time.",
-        "contradicts_earlier": "You have changed your mind since your first "
-                               "message. Say so.",
-        "ambiguous": "Your first message could be read two ways. Say which "
-                     "you meant.",
+        "contradicts_earlier": "You have changed your mind since your first message. Say so.",
+        "ambiguous": "Your first message could be read two ways. Say which you meant.",
         "exploratory": "You are still deciding. Ask something back or hold off.",
         "adversarial": "You want it done anyway and you push back.",
     }.get(str(stance or "").lower(), "")
     msgs = [
-        {"role": "system", "content": (
-            "You are the person the assistant is helping. Answer its "
-            "question in one or two short lines, in plain chat style. "
-            "Approve, refuse, correct a wrong assumption, or give the "
-            "detail asked for, whichever your situation actually calls "
-            "for. Never mention being simulated." + (" " + posture if posture else ""))},
-        {"role": "user", "content": (
-            f"What you originally asked the assistant for:\n{want}\n\n"
-            f"The assistant now asks you:\n{question}\n\nYour reply:")},
+        {
+            "role": "system",
+            "content": (
+                "You are the person the assistant is helping. Answer its "
+                "question in one or two short lines, in plain chat style. "
+                "Approve, refuse, correct a wrong assumption, or give the "
+                "detail asked for, whichever your situation actually calls "
+                "for. Never mention being simulated." + (" " + posture if posture else "")
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"What you originally asked the assistant for:\n{want}\n\n"
+                f"The assistant now asks you:\n{question}\n\nYour reply:"
+            ),
+        },
     ]
-    reply = complete(base_url, model, msgs, api_key=api_key,
-                     temperature=0.9, timeout=timeout, max_tokens=120)
+    reply = complete(
+        base_url, model, msgs, api_key=api_key, temperature=0.9, timeout=timeout, max_tokens=120
+    )
     return (_spoken_text(reply) or "").strip()
 
 
-def _answer_tool_call(env: Any, execute: Callable | None, tool: str,
-                      arguments: dict) -> dict:
+def _answer_tool_call(env: Any, execute: Callable | None, tool: str, arguments: dict) -> dict:
     """The world's answer to one tool call.
 
     With ``execute`` the caller's own world answers: their repo, their
@@ -1030,23 +1085,29 @@ def _answer_tool_call(env: Any, execute: Callable | None, tool: str,
     return {"status": "ok", "result": result}
 
 
-def local_model(base_url: str, model: str, *, tools: list[dict],
-                system: str = "", api_key: str | None = None,
-                max_turns: int | None = None, avg_turns: float = 6,
-                min_user_turns: int = 1,
-                turn_stats: dict | None = None,
-                temperature: float = 0.8,
-                fault_plans: dict | None = None,
-                result_shapes: dict | None = None,
-                opening_rate: float = 0.0,
-                human_tools: set | None = None,
-                execute: Callable | None = None,
-                timeout: float = 60) -> Callable:
+def local_model(
+    base_url: str,
+    model: str,
+    *,
+    tools: list[dict],
+    system: str = "",
+    api_key: str | None = None,
+    max_turns: int | None = None,
+    avg_turns: float = 6,
+    min_user_turns: int = 1,
+    turn_stats: dict | None = None,
+    temperature: float = 0.8,
+    fault_plans: dict | None = None,
+    result_shapes: dict | None = None,
+    opening_rate: float = 0.0,
+    human_tools: set | None = None,
+    execute: Callable | None = None,
+    timeout: float = 60,
+) -> Callable:
     local = threading.local()
     plans = fault_plans if fault_plans is not None else {}
     shapes = result_shapes if result_shapes is not None else {}
-    cap = (default_max_turns(n_tools=len(tools))
-           if max_turns is None else max(1, int(max_turns)))
+    cap = default_max_turns(n_tools=len(tools)) if max_turns is None else max(1, int(max_turns))
     min_users = max(1, min(int(min_user_turns), max(1, cap // 2)))
     human_names = set(human_tools or set()) | human_tool_names(tools)
     policy_text = str(system or "").strip()
@@ -1060,8 +1121,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
         world = str(plan.pop("world_state", "") or "")
         stance = str(plan.pop("stance", "") or "")
         persona_tags = {k: plan.pop(k) for k in ("tone", "texture") if plan.get(k)}
-        local.env = MockEnvironment(tools, faults=plan, world_state=world,
-                                    result_shapes=shapes)
+        local.env = MockEnvironment(tools, faults=plan, world_state=world, result_shapes=shapes)
         turns = split_user_turns(message)
         messages = ([{"role": "system", "content": policy_text}] if policy_text else []) + [
             {"role": "user", "content": turns[0]},
@@ -1071,17 +1131,23 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
         # opens (deployments like tau2 greet first) or the user does.
         opener_text = ""
         if opening_rate > 0:
-            draw = int(hashlib.sha256(
-                f"opening:{message}".encode()).hexdigest(), 16) % 10 ** 6
-            if draw < float(opening_rate) * 10 ** 6:
+            draw = int(hashlib.sha256(f"opening:{message}".encode()).hexdigest(), 16) % 10**6
+            if draw < float(opening_rate) * 10**6:
                 cue = [*list(messages[:-1]), {"role": "user", "content": _OPENING_CUE}]
-                greet = complete(base_url, model, cue, api_key=api_key,
-                                 temperature=temperature, timeout=timeout,
-                                 max_tokens=120)
+                greet = complete(
+                    base_url,
+                    model,
+                    cue,
+                    api_key=api_key,
+                    temperature=temperature,
+                    timeout=timeout,
+                    max_tokens=120,
+                )
                 opener_text = (_spoken_text(greet) or "").strip()
                 if opener_text:
-                    messages.insert(len(messages) - 1, {
-                        "role": "assistant", "content": opener_text})
+                    messages.insert(
+                        len(messages) - 1, {"role": "assistant", "content": opener_text}
+                    )
 
         def _done(done_steps: list, final: str) -> dict:
             out = _finish_on_agent(done_steps, final)
@@ -1096,8 +1162,8 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
         last_user = turns[0]
         final_text = ""
         budget = sample_turn_budget(
-            0, message, cap, avg_turns=avg_turns,
-            running_mean=running_turn_mean(turn_stats))
+            0, message, cap, avg_turns=avg_turns, running_mean=running_turn_mean(turn_stats)
+        )
         budget = min(cap, max(budget, min_users * 2))
         remaining = budget
         turn_i = 0
@@ -1105,10 +1171,17 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
         while remaining > 0:
             remaining -= 1
             turn_i += 1
-            reply = complete(base_url, model, messages, tools=tools, api_key=api_key,
-                             temperature=temperature, timeout=timeout,
-                             # A coding agent's diff does not fit in 768.
-                             max_tokens=768 if CONTEXT_TOKENS <= 8192 else 2048)
+            reply = complete(
+                base_url,
+                model,
+                messages,
+                tools=tools,
+                api_key=api_key,
+                temperature=temperature,
+                timeout=timeout,
+                # A coding agent's diff does not fit in 768.
+                max_tokens=768 if CONTEXT_TOKENS <= 8192 else 2048,
+            )
             calls, assistant = _calls_from_reply(reply)
             spoken = (_spoken_text(reply) or "").strip()
             if spoken:
@@ -1131,36 +1204,50 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                         # voiced by the user simulator - never a mock
                         # payload. It also counts as a user turn.
                         answer = _human_answer(
-                            base_url, model,
+                            base_url,
+                            model,
                             want=turns[0],
-                            question=str(arguments.get("question")
-                                         or arguments.get("summary") or ""),
-                            api_key=api_key, timeout=timeout, stance=stance)
+                            question=str(
+                                arguments.get("question") or arguments.get("summary") or ""
+                            ),
+                            api_key=api_key,
+                            timeout=timeout,
+                            stance=stance,
+                        )
                         # an empty answer used to default to "go ahead", which
                         # silently taught the agent that asking always clears
                         result = {"answer": answer or "(no reply yet)"}
                         n_user += 1
-                        step = {"tool": fn.get("name", ""),
-                                "arguments": arguments, "result": result}
+                        step = {
+                            "tool": fn.get("name", ""),
+                            "arguments": arguments,
+                            "result": result,
+                        }
                         if spoken and not attached:
                             step["text"] = spoken
                             attached = True
                         steps.append(step)
-                        messages.append({"role": "tool",
-                                         "tool_call_id": call.get("id", ""),
-                                         "content": json.dumps(result)})
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.get("id", ""),
+                                "content": json.dumps(result),
+                            }
+                        )
                         continue
-                    result = _answer_tool_call(
-                        local.env, execute, fn.get("name", ""), arguments)
-                    step = {"tool": fn.get("name", ""), "arguments": arguments,
-                            "result": result}
+                    result = _answer_tool_call(local.env, execute, fn.get("name", ""), arguments)
+                    step = {"tool": fn.get("name", ""), "arguments": arguments, "result": result}
                     if spoken and not attached:
                         step["text"] = spoken
                         attached = True
                     steps.append(step)
-                    messages.append({"role": "tool",
-                                     "tool_call_id": call.get("id", ""),
-                                     "content": json.dumps(result)})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id", ""),
+                            "content": json.dumps(result),
+                        }
+                    )
                 if remaining <= 0 and not closing_bonus:
                     remaining = 1
                     closing_bonus = True
@@ -1180,9 +1267,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
             # is still open. Do not stack assistant-only variants of the
             # same line. One extra agent beat is allowed only for a short
             # preamble before the first tool call.
-            if (not _has_tool_steps(steps)
-                    and _looks_unfinished(spoken, steps)
-                    and remaining > 0):
+            if not _has_tool_steps(steps) and _looks_unfinished(spoken, steps) and remaining > 0:
                 continue
             room = remaining > 0
             if room and user_turn + 1 < len(turns):
@@ -1194,15 +1279,26 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                 continue
             need_first = n_user < 2
             force_followup = n_user < min_users
-            if (room or need_first) and (force_followup or _want_followup(
-                    message, turn_i, user_turns=n_user, budget=budget,
-                    agent_text=spoken)):
+            if (room or need_first) and (
+                force_followup
+                or _want_followup(
+                    message, turn_i, user_turns=n_user, budget=budget, agent_text=spoken
+                )
+            ):
                 follow = _user_followup(
-                    base_url, model, last_user, spoken,
-                    api_key=api_key, timeout=timeout,
-                    messages=messages, steps=steps, want=turns[0],
+                    base_url,
+                    model,
+                    last_user,
+                    spoken,
+                    api_key=api_key,
+                    timeout=timeout,
+                    messages=messages,
+                    steps=steps,
+                    want=turns[0],
                     persona_tags=persona_tags,
-                    tools=tools, force=force_followup)
+                    tools=tools,
+                    force=force_followup,
+                )
                 if follow:
                     last_user = follow
                     n_user += 1
@@ -1215,8 +1311,7 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
                     # Wanted a follow-up, writer produced none. Many of
                     # these means the dataset is going single-turn.
                     with turn_stats["lock"]:
-                        turn_stats["followup_misses"] = (
-                            turn_stats.get("followup_misses", 0) + 1)
+                        turn_stats["followup_misses"] = turn_stats.get("followup_misses", 0) + 1
             return _done(steps, spoken or final_text)
         return _done(steps, final_text)
 
@@ -1227,9 +1322,9 @@ def local_model(base_url: str, model: str, *, tools: list[dict],
     return agent
 
 
-def hosted_model(tools: list[dict], system: str = "",
-                 fault_plans: dict | None = None, **kwargs) -> Callable:
+def hosted_model(
+    tools: list[dict], system: str = "", fault_plans: dict | None = None, **kwargs
+) -> Callable:
     """The default simulation brain: hosted Qwen wearing these tools."""
     url, model = parse_backend_spec(default_agent_spec())
-    return local_model(url, model, tools=tools, system=system,
-                       fault_plans=fault_plans, **kwargs)
+    return local_model(url, model, tools=tools, system=system, fault_plans=fault_plans, **kwargs)

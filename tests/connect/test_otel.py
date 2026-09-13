@@ -1,4 +1,5 @@
 """OTLP GenAI spans assemble into trajectory rows the SDK can consume."""
+
 from __future__ import annotations
 
 import json
@@ -12,42 +13,96 @@ def _attr(key, value):
 
 
 def _span(name, start, attrs, trace="t1"):
-    return {"name": name, "traceId": trace, "startTimeUnixNano": start,
-            "attributes": attrs}
+    return {"name": name, "traceId": trace, "startTimeUnixNano": start, "attributes": attrs}
 
 
-BATCH = {"resourceSpans": [{"scopeSpans": [{"spans": [
-    _span("chat gpt-4", 100, [
-        _attr("gen_ai.conversation.id", "conv-9"),
-        _attr("gen_ai.input.messages", json.dumps(
-            [{"role": "user", "content": "where is order 4412"}])),
-        _attr("gen_ai.output.messages", json.dumps(
-            [{"role": "assistant", "content": "Let me check."}])),
-    ]),
-    _span("execute_tool lookup_order", 200, [
-        _attr("gen_ai.conversation.id", "conv-9"),
-        _attr("gen_ai.tool.name", "lookup_order"),
-        _attr("gen_ai.tool.call.arguments", '{"order_id": "4412"}'),
-        _attr("gen_ai.tool.call.result", '{"status": "not_found"}'),
-    ]),
-    _span("chat gpt-4", 300, [
-        _attr("gen_ai.conversation.id", "conv-9"),
-        _attr("gen_ai.input.messages", json.dumps([
-            {"role": "user", "content": "where is order 4412"},
-            {"role": "user", "content": "try 4413 then"}])),
-        _attr("gen_ai.output.messages", json.dumps(
-            [{"role": "assistant",
-              "content": "I could not find order 4412."}])),
-    ]),
-    # A second conversation using the OpenInference-style dialect.
-    _span("llm", 150, [
-        _attr("session.id", "conv-10"),
-        _attr("llm.input_messages", json.dumps(
-            [{"role": "user", "content": "cancel my subscription"}])),
-        _attr("llm.output_messages", json.dumps(
-            [{"role": "assistant", "content": "Done, cancelled."}])),
-    ], trace="t2"),
-]}]}]}
+BATCH = {
+    "resourceSpans": [
+        {
+            "scopeSpans": [
+                {
+                    "spans": [
+                        _span(
+                            "chat gpt-4",
+                            100,
+                            [
+                                _attr("gen_ai.conversation.id", "conv-9"),
+                                _attr(
+                                    "gen_ai.input.messages",
+                                    json.dumps(
+                                        [{"role": "user", "content": "where is order 4412"}]
+                                    ),
+                                ),
+                                _attr(
+                                    "gen_ai.output.messages",
+                                    json.dumps([{"role": "assistant", "content": "Let me check."}]),
+                                ),
+                            ],
+                        ),
+                        _span(
+                            "execute_tool lookup_order",
+                            200,
+                            [
+                                _attr("gen_ai.conversation.id", "conv-9"),
+                                _attr("gen_ai.tool.name", "lookup_order"),
+                                _attr("gen_ai.tool.call.arguments", '{"order_id": "4412"}'),
+                                _attr("gen_ai.tool.call.result", '{"status": "not_found"}'),
+                            ],
+                        ),
+                        _span(
+                            "chat gpt-4",
+                            300,
+                            [
+                                _attr("gen_ai.conversation.id", "conv-9"),
+                                _attr(
+                                    "gen_ai.input.messages",
+                                    json.dumps(
+                                        [
+                                            {"role": "user", "content": "where is order 4412"},
+                                            {"role": "user", "content": "try 4413 then"},
+                                        ]
+                                    ),
+                                ),
+                                _attr(
+                                    "gen_ai.output.messages",
+                                    json.dumps(
+                                        [
+                                            {
+                                                "role": "assistant",
+                                                "content": "I could not find order 4412.",
+                                            }
+                                        ]
+                                    ),
+                                ),
+                            ],
+                        ),
+                        # A second conversation using the OpenInference-style dialect.
+                        _span(
+                            "llm",
+                            150,
+                            [
+                                _attr("session.id", "conv-10"),
+                                _attr(
+                                    "llm.input_messages",
+                                    json.dumps(
+                                        [{"role": "user", "content": "cancel my subscription"}]
+                                    ),
+                                ),
+                                _attr(
+                                    "llm.output_messages",
+                                    json.dumps(
+                                        [{"role": "assistant", "content": "Done, cancelled."}]
+                                    ),
+                                ),
+                            ],
+                            trace="t2",
+                        ),
+                    ]
+                }
+            ]
+        }
+    ]
+}
 
 
 def test_rows_from_otel_assembles_conversations():

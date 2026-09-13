@@ -2,6 +2,7 @@
 
 Offline: hash embedder, template generator, scripted agent. No GPU.
 """
+
 from __future__ import annotations
 
 import zeroproof.simulations as zps
@@ -20,9 +21,9 @@ def _trace(prompt, tool, status, reward=None, **result_extra):
     result = {"status": status, **result_extra}
     return {
         "prompt": prompt,
-        "steps": [{"tool": tool, "arguments": {"order_id": "ord_11"},
-                   "result": result}],
-        "final_text": "I could not find that order." if status != "ok"
+        "steps": [{"tool": tool, "arguments": {"order_id": "ord_11"}, "result": result}],
+        "final_text": "I could not find that order."
+        if status != "ok"
         else "Order ord_11 is confirmed.",
         "reward": reward,
     }
@@ -78,6 +79,7 @@ def test_split_pseudo_production_holds_out_each_unique_flaw():
     assert not (prod_prompts & rem_prompts)
     # Both distinct flaw kinds are represented on the production side.
     from zeroproof.simulations.score.grading import trace_fault
+
     faults = {trace_fault(row) for row in production}
     assert "not_found" in faults
     assert "timeout" in faults
@@ -87,8 +89,8 @@ def test_split_pseudo_production_holds_out_each_unique_flaw():
 
 def test_leakage_report_flags_copies_not_fresh_asks():
     generated = [
-        {"prompt": "where is order 4412"},              # exact copy
-        {"prompt": "Where is  ORDER 4412"},             # case/space copy
+        {"prompt": "where is order 4412"},  # exact copy
+        {"prompt": "Where is  ORDER 4412"},  # case/space copy
         {"prompt": "my package never arrived and support is not answering"},
     ]
     report = leakage_report(generated, TRACES, threshold=0.9)
@@ -102,10 +104,19 @@ def test_leakage_report_flags_copies_not_fresh_asks():
 
 def test_simulate_from_traces_offline_end_to_end():
     data = simulate_from_traces(
-        TRACES, scripted_agent, tools=TOOLS, policy=POLICY,
-        mode="explore", budget=6, seed=0, grade=False, concurrency=6,
-        simulator=False, time_budget=20,
-        advanced={"per_round": 4, "mutate_failures": False})
+        TRACES,
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        mode="explore",
+        budget=6,
+        seed=0,
+        grade=False,
+        concurrency=6,
+        simulator=False,
+        time_budget=20,
+        advanced={"per_round": 4, "mutate_failures": False},
+    )
     assert data.trajectories
     mining = data.search["trace_mining"]
     assert mining["n_traces"] == 5
@@ -120,6 +131,7 @@ def test_simulate_from_traces_offline_end_to_end():
 
 def test_flaw_rows_returns_next_round_seeds():
     from zeroproof.simulations.ingest.traces import flaw_rows
+
     flawed = flaw_rows(TRACES)
     prompts = {row["prompt"] for row in flawed}
     assert len(flawed) == 3
@@ -129,11 +141,13 @@ def test_flaw_rows_returns_next_round_seeds():
 
 def test_rl_retarget_lets_behavior_gap_lead():
     from zeroproof.simulations.generate.scenarios import retarget_regions, scenario_regions
+
     regions = scenario_regions(TOOLS, POLICY, mode="rl")[:6]
     gappy = {regions[0]["id"]}
 
     def behavior_value(assignment):
         import json as _json
+
         key = _json.dumps(assignment, sort_keys=True, default=str)
         first = _json.dumps(regions[0]["assignment"], sort_keys=True, default=str)
         return 1.0 if key == first else 0.0
@@ -151,12 +165,21 @@ def test_rl_retarget_lets_behavior_gap_lead():
 
 def test_mine_traces_attributes_faults_to_the_faulted_call():
     from zeroproof.simulations.ingest.traces import format_trace_report, trace_report
-    row = {"prompt": "fix the failing test", "reward": 0, "steps": [
-        {"tool": "read_file", "arguments": {"path": "a.py"}, "result": "def f(): pass"},
-        {"tool": "run_command", "arguments": {"cmd": "pytest"},
-         "result": {"status": "error", "error": "exit 1"}},
-        {"tool": "read_file", "arguments": {"path": "b.py"}, "result": "x = 1"}],
-        "final_text": "done"}
+
+    row = {
+        "prompt": "fix the failing test",
+        "reward": 0,
+        "steps": [
+            {"tool": "read_file", "arguments": {"path": "a.py"}, "result": "def f(): pass"},
+            {
+                "tool": "run_command",
+                "arguments": {"cmd": "pytest"},
+                "result": {"status": "error", "error": "exit 1"},
+            },
+            {"tool": "read_file", "arguments": {"path": "b.py"}, "result": "x = 1"},
+        ],
+        "final_text": "done",
+    }
     mined = mine_traces([row])
     assert mined["tools"]["read_file"] == {"n": 2, "fault_n": 0}
     assert mined["tools"]["run_command"] == {"n": 1, "fault_n": 1}

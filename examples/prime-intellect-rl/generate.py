@@ -11,6 +11,7 @@ unit of training is a group, not a row. Two things have to be true:
 generator seeds probes from the spec's `situations` list and can starve before
 it reaches the row cap.
 """
+
 import argparse
 import os
 import sys
@@ -28,8 +29,10 @@ def main() -> int:
     args = ap.parse_args()
 
     if not os.environ.get("VLLM_API_KEY"):
-        print("VLLM_API_KEY is unset. The user writer and the rollout agent both "
-              "need it.", file=sys.stderr)
+        print(
+            "VLLM_API_KEY is unset. The user writer and the rollout agent both need it.",
+            file=sys.stderr,
+        )
         return 2
 
     data = zps.simulate(
@@ -38,15 +41,17 @@ def main() -> int:
         situations=args.situations,
         rollouts_per_request=args.k,
         budget=args.situations * args.k,
-        time_budget=None,          # the 60s default silently truncates the run
+        time_budget=None,  # the 60s default silently truncates the run
         fault_rate=args.fault_rate,
         grade=True,
         output=args.out,
     )
     data.save(args.out, meta=True)
-    print(f"rows={len(data.rows())} prompts={data.unique_prompts} "
-          f"k={args.k} rate={data.rows_per_second * 60:.0f}/min "
-          f"stopped={data.stopped_because}")
+    print(
+        f"rows={len(data.rows())} prompts={data.unique_prompts} "
+        f"k={args.k} rate={data.rows_per_second * 60:.0f}/min "
+        f"stopped={data.stopped_because}"
+    )
     print(f"wrote {args.out} (+ .meta.json)")
     return 0
 

@@ -1,5 +1,6 @@
 """Row-level helpers for the run engine: usability, mutation worth,
 coverage keys, stratified prompt picks, and the conversation stub."""
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -27,7 +28,9 @@ _RAW_TOOL_MARKUP = re.compile(r"</?tool_call>", re.I)
 
 _TOOL_SCHEMA_DUMP = re.compile(
     r'"name"\s*:\s*"[^"]+".{0,500}"description"\s*:'
-    r'.{0,500}"parameters"\s*:', re.I | re.S)
+    r'.{0,500}"parameters"\s*:',
+    re.I | re.S,
+)
 
 
 def _usable_rollout(row: dict) -> bool:
@@ -40,8 +43,7 @@ def _usable_rollout(row: dict) -> bool:
         if isinstance(step, dict) and step.get("text") is not None:
             assistant_text.append(str(step["text"]))
     visible = "\n".join(assistant_text)
-    return not (_RAW_TOOL_MARKUP.search(visible)
-                or _TOOL_SCHEMA_DUMP.search(visible))
+    return not (_RAW_TOOL_MARKUP.search(visible) or _TOOL_SCHEMA_DUMP.search(visible))
 
 
 def _collect_finished(pending: dict, wait_s: float, *, retry: bool = False):
@@ -94,20 +96,32 @@ def row_cell_key(row: dict) -> str:
 _cell_key = row_cell_key  # old private name, kept for imports that still use it
 
 
-def record_coverage(data: SimulationData, trajectories: list[dict], *,
-                     cells: set[str], shape_keys: set[str],
-                     arm_weights: dict | None,
-                     batch_fresh_rate: float | None = None,
-                     mean_batch_novelty: float | None = None,
-                     stopped_because: str | None = None) -> None:
+def record_coverage(
+    data: SimulationData,
+    trajectories: list[dict],
+    *,
+    cells: set[str],
+    shape_keys: set[str],
+    arm_weights: dict | None,
+    batch_fresh_rate: float | None = None,
+    mean_batch_novelty: float | None = None,
+    stopped_because: str | None = None,
+) -> None:
     point = coverage_point(
-        trajectories, cells=cells, shape_keys=shape_keys,
-        arm_weights=arm_weights, batch_fresh_rate=batch_fresh_rate,
-        mean_batch_novelty=mean_batch_novelty, stopped_because=stopped_because)
+        trajectories,
+        cells=cells,
+        shape_keys=shape_keys,
+        arm_weights=arm_weights,
+        batch_fresh_rate=batch_fresh_rate,
+        mean_batch_novelty=mean_batch_novelty,
+        stopped_because=stopped_because,
+    )
     if data.coverage_curve and stopped_because is None:
         prev = data.coverage_curve[-1]
-        if (prev.get("n_rows") == point["n_rows"]
-                and prev.get("batch_fresh_rate") == batch_fresh_rate):
+        if (
+            prev.get("n_rows") == point["n_rows"]
+            and prev.get("batch_fresh_rate") == batch_fresh_rate
+        ):
             return
     data.coverage_curve.append(point)
 
@@ -116,14 +130,18 @@ _record_coverage = record_coverage  # old private name, kept for imports that st
 
 
 def _prompt_arm(prompt: str, generator: Any) -> str:
-    meta = (generator.meta.get(prompt)
-            or getattr(generator, "last_candidate_provenance", {}).get(prompt) or {})
+    meta = (
+        generator.meta.get(prompt)
+        or getattr(generator, "last_candidate_provenance", {}).get(prompt)
+        or {}
+    )
     arm = str(meta.get("arm") or generator.provenance.get(prompt, "open_ended"))
     return arm if arm in _SEARCH_ARMS else "open_ended"
 
 
-def _stratified_prompts(candidates: list[str], take: int, generator: Any, *,
-                        used_situations: set[str]) -> list[str]:
+def _stratified_prompts(
+    candidates: list[str], take: int, generator: Any, *, used_situations: set[str]
+) -> list[str]:
     """Breadth-first pick: arm quotas, prefer unseen situation keys."""
     if not candidates or take <= 0:
         return []
@@ -153,9 +171,11 @@ def _stratified_prompts(candidates: list[str], take: int, generator: Any, *,
     leftover.sort(key=sort_key)
 
     def _tier(prompt: str) -> str:
-        meta = (generator.meta.get(prompt)
-                or getattr(generator, "last_candidate_provenance", {}).get(prompt)
-                or {})
+        meta = (
+            generator.meta.get(prompt)
+            or getattr(generator, "last_candidate_provenance", {}).get(prompt)
+            or {}
+        )
         assignment = meta.get("assignment") or meta.get("scenario_dimensions") or {}
         return behavior_tier(assignment if isinstance(assignment, dict) else {})
 
@@ -176,10 +196,13 @@ def _row_conversation(meta: dict, prompt: str, default_seed: int) -> dict:
     row_seed = int(meta.get("seed", default_seed))
     tags = sample_cell_tags(row_seed, rnd, rid, assignment)
     from ..generate.generator import _ask_family
+
     return conversation_features(
-        assignment, tags,
+        assignment,
+        tags,
         ask_family=_ask_family(row_seed, rnd, rid),
-        tool=str(assignment.get("tool") or ""))
+        tool=str(assignment.get("tool") or ""),
+    )
 
 
 def _situation_key_from_meta(meta: dict, prompt: str = "") -> str:

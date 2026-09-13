@@ -1,14 +1,20 @@
 """The JSONL row keeps what a grader needs to group and reproduce a rollout."""
+
 from zeroproof.simulations.data import _export_row
 
 
 def test_export_row_keeps_group_identity_and_reproduction_fields():
     row = {
-        "prompt": "fix the failing test", "steps": [], "final_text": "done",
-        "scenario_id": "sc-1", "rollout_index": 3, "seed": 7,
+        "prompt": "fix the failing test",
+        "steps": [],
+        "final_text": "done",
+        "scenario_id": "sc-1",
+        "rollout_index": 3,
+        "seed": 7,
         "scenario_dimensions": {"tool": "run_tests", "stance": "hurried"},
         "model_version": "Qwen/Qwen3-4B-Instruct-2507",
-        "vector": [0.1, 0.2], "semantic_novelty": 0.9,
+        "vector": [0.1, 0.2],
+        "semantic_novelty": 0.9,
     }
     out = _export_row(row)
     assert out["rollout_index"] == 3
@@ -24,13 +30,22 @@ def test_export_row_omits_missing_group_fields():
         assert key not in out
 
 
-
 def test_faults_export_carries_fault_modes_only():
     from zeroproof.simulations.data import _export_row
-    row = {"prompt": "p", "steps": [], "final_text": "f", "scenario_id": "s",
-           "stance": "hurried",
-           "faults": {"*": {"mode": "timeout", "rate": 1.0}, "stance": "hurried",
-                      "texture": "lowercase", "world_state": "entity missing"}}
+
+    row = {
+        "prompt": "p",
+        "steps": [],
+        "final_text": "f",
+        "scenario_id": "s",
+        "stance": "hurried",
+        "faults": {
+            "*": {"mode": "timeout", "rate": 1.0},
+            "stance": "hurried",
+            "texture": "lowercase",
+            "world_state": "entity missing",
+        },
+    }
     out = _export_row(row)
     assert out["faults"] == {"*": {"mode": "timeout", "rate": 1.0}}
     assert out["stance"] == "hurried"

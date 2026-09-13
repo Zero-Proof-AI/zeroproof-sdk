@@ -1,4 +1,5 @@
 """Sparse generic writer knobs and annealing helpers."""
+
 from __future__ import annotations
 
 import hashlib
@@ -31,11 +32,10 @@ _TIER_ALIASES = {
     "unsure": "ambiguous",
 }
 # Ordinary majority; other tiers stay in the bag so a short run still hits them.
-_TIER_BAG = (("ordinary",) * 6 + ("ambiguous",) + ("boundary",) + ("adversarial",) * 2)
+_TIER_BAG = ("ordinary",) * 6 + ("ambiguous",) + ("boundary",) + ("adversarial",) * 2
 ORDINARY_SHARE = 0.60
 # Human texture: how the message is typed, independent of what it asks.
-_TEXTURES = ("lowercase", "abbreviations", "typo", "no_punctuation",
-             "run_on", "clipped")
+_TEXTURES = ("lowercase", "abbreviations", "typo", "no_punctuation", "run_on", "clipped")
 _TONES = ("impatient", "frustrated", "chatty", "polite", "curt", "sarcastic")
 # User-side only. Most tagged cells are one question or one ask.
 # Rare compound: several asks, or tell the agent to do several things.
@@ -52,14 +52,68 @@ NOVELTY_RESTART_FLOOR = 0.025
 MAX_NOVELTY_RESTARTS = int(os.environ.get("ZP_NOVELTY_RESTARTS") or 24)
 
 _FAMILY_STOP = {
-    "a", "about", "again", "all", "an", "and", "any", "are", "be", "can",
-    "could", "do", "for", "from", "get", "good", "help", "hey", "i", "in",
-    "is", "it", "just", "latest", "like", "looking", "me", "my", "new",
-    "of", "on", "open", "please", "quick", "recent", "show", "some",
-    "something", "that", "the", "this", "to", "under", "want", "what",
-    "with", "you", "your", "item", "product", "request", "issue", "pr",
-    "order", "project", "repo", "account", "message", "thing", "status",
-    "human", "scenario",
+    "a",
+    "about",
+    "again",
+    "all",
+    "an",
+    "and",
+    "any",
+    "are",
+    "be",
+    "can",
+    "could",
+    "do",
+    "for",
+    "from",
+    "get",
+    "good",
+    "help",
+    "hey",
+    "i",
+    "in",
+    "is",
+    "it",
+    "just",
+    "latest",
+    "like",
+    "looking",
+    "me",
+    "my",
+    "new",
+    "of",
+    "on",
+    "open",
+    "please",
+    "quick",
+    "recent",
+    "show",
+    "some",
+    "something",
+    "that",
+    "the",
+    "this",
+    "to",
+    "under",
+    "want",
+    "what",
+    "with",
+    "you",
+    "your",
+    "item",
+    "product",
+    "request",
+    "issue",
+    "pr",
+    "order",
+    "project",
+    "repo",
+    "account",
+    "message",
+    "thing",
+    "status",
+    "human",
+    "scenario",
 }
 _INTENT_WORDS = {
     "search": {"find", "search", "recommend", "browse", "looking", "show"},
@@ -77,31 +131,40 @@ def scenario_family(text: str) -> tuple[str, frozenset[str]]:
     words = re.findall(r"[a-z][a-z0-9'-]{2,}", str(text).lower())
     intent = "other"
     for name, markers in _INTENT_WORDS.items():
-        if any(word in markers or any(
-                len(marker) >= 4 and word.startswith(marker)
-                for marker in markers) for word in words):
+        if any(
+            word in markers
+            or any(len(marker) >= 4 and word.startswith(marker) for marker in markers)
+            for word in words
+        ):
             intent = name
             break
     salient = frozenset(
-        word for word in words
+        word
+        for word in words
         if word not in _FAMILY_STOP
-        and not any(word in markers or any(
-            len(marker) >= 4 and word.startswith(marker)
-            for marker in markers) for markers in _INTENT_WORDS.values()))
+        and not any(
+            word in markers
+            or any(len(marker) >= 4 and word.startswith(marker) for marker in markers)
+            for markers in _INTENT_WORDS.values()
+        )
+    )
     return intent, salient
 
 
-def cap_scenario_families(rows: list[dict], history: list[tuple[str, frozenset[str]]],
-                          *, cap: int = 2) -> tuple[list[dict], list[dict]]:
+def cap_scenario_families(
+    rows: list[dict], history: list[tuple[str, frozenset[str]]], *, cap: int = 2
+) -> tuple[list[dict], list[dict]]:
     """Keep at most ``cap`` messages sharing intent and a salient subject."""
     kept: list[dict] = []
     rejected: list[dict] = []
     for row in rows:
         family = scenario_family(str(row.get("text") or ""))
         intent, words = family
-        similar = sum(1 for old_intent, old_words in history
-                      if intent == old_intent and words and old_words
-                      and bool(words & old_words))
+        similar = sum(
+            1
+            for old_intent, old_words in history
+            if intent == old_intent and words and old_words and bool(words & old_words)
+        )
         if similar >= max(1, int(cap)):
             rejected.append(row)
             continue
@@ -111,8 +174,7 @@ def cap_scenario_families(rows: list[dict], history: list[tuple[str, frozenset[s
 
 
 def _draw(seed: int, round_index: int, key: str, salt: str) -> int:
-    digest = hashlib.sha256(
-        f"{seed}:{round_index}:{key}:{salt}".encode()).hexdigest()
+    digest = hashlib.sha256(f"{seed}:{round_index}:{key}:{salt}".encode()).hexdigest()
     return int(digest[:16], 16)
 
 
@@ -120,14 +182,17 @@ WRITER_TEMP_LO = 0.45
 WRITER_TEMP_HI = 1.05
 
 _LENGTH_PROSE = {
-    "short": ("You keep it brief.", "You write one short line.",
-              "You use only a few words."),
-    "medium": ("You write a couple of sentences.",
-               "You give enough context, not an essay.",
-               "You write a short paragraph."),
-    "long": ("You use more words and add what led here.",
-             "You write it out with the situation.",
-             "You add a full paragraph of circumstances."),
+    "short": ("You keep it brief.", "You write one short line.", "You use only a few words."),
+    "medium": (
+        "You write a couple of sentences.",
+        "You give enough context, not an essay.",
+        "You write a short paragraph.",
+    ),
+    "long": (
+        "You use more words and add what led here.",
+        "You write it out with the situation.",
+        "You add a full paragraph of circumstances.",
+    ),
 }
 _NICE_PROSE = (
     (0.14, "You are mean and impatient."),
@@ -162,10 +227,14 @@ def sample_writer_temperature(seed: int, round_index: int) -> float:
 _WRITER_N_CAP = 8
 
 
-def sample_writer_n(seed: int, round_index: int, *,
-                    elapsed: float | None = None,
-                    time_budget: float | None = None,
-                    max_n: int | None = None) -> int:
+def sample_writer_n(
+    seed: int,
+    round_index: int,
+    *,
+    elapsed: float | None = None,
+    time_budget: float | None = None,
+    max_n: int | None = None,
+) -> int:
     """Draw writer completions for one batch from remaining wall-clock.
 
     Early (first ~30%): 3–6 to fill the pool. Mid: 1–4. Late (last ~20%):
@@ -190,9 +259,15 @@ def sample_writer_n(seed: int, round_index: int, *,
     return lo + int(u * (hi - lo + 1))
 
 
-def sample_writer_vars(seed: int, round_index: int, key: str, *,
-                       tags: dict | None = None, ask_family: str = "",
-                       assignment: dict | None = None) -> dict[str, Any]:
+def sample_writer_vars(
+    seed: int,
+    round_index: int,
+    key: str,
+    *,
+    tags: dict | None = None,
+    ask_family: str = "",
+    assignment: dict | None = None,
+) -> dict[str, Any]:
     """Continuous-ish writer slots as prose. No tag labels."""
     tags = dict(tags or {})
     assignment = dict(assignment or {})
@@ -237,23 +312,32 @@ def sample_writer_vars(seed: int, round_index: int, key: str, *,
 
 def behavior_tier(assignment: dict | None) -> str:
     """Map a cell onto a generic search tier. Missing → ordinary."""
-    raw = str((assignment or {}).get("stance")
-              or (assignment or {}).get("user_behavior")
-              or "")
+    raw = str((assignment or {}).get("stance") or (assignment or {}).get("user_behavior") or "")
     return _TIER_ALIASES.get(raw, "ordinary")
 
 
 # Trainer-facing conversation labels. Only keys the sampler already uses.
 _CONVERSATION_OPTIONAL = (
-    "stance", "tone", "length", "ask", "vagueness", "phrasing",
-    "pressure", "user", "texture", "history",
+    "stance",
+    "tone",
+    "length",
+    "ask",
+    "vagueness",
+    "phrasing",
+    "pressure",
+    "user",
+    "texture",
+    "history",
 )
 
 
-def conversation_features(assignment: dict | None = None,
-                          tags: dict | None = None, *,
-                          ask_family: str | None = None,
-                          tool: str | None = None) -> dict[str, Any]:
+def conversation_features(
+    assignment: dict | None = None,
+    tags: dict | None = None,
+    *,
+    ask_family: str | None = None,
+    tool: str | None = None,
+) -> dict[str, Any]:
     """User/conversation labels for a training row. Omit unsampled tags."""
     assignment = dict(assignment or {})
     tags = dict(tags or {})
@@ -264,8 +348,10 @@ def conversation_features(assignment: dict | None = None,
         out["intent_known"] = family != "vague"
         named = bool(tool) and str(tool) not in {"unrelated", "multi_tool"}
         if not named:
-            named = bool(assignment.get("tool")) and str(
-                assignment.get("tool")) not in {"unrelated", "multi_tool"}
+            named = bool(assignment.get("tool")) and str(assignment.get("tool")) not in {
+                "unrelated",
+                "multi_tool",
+            }
         out["tool_known"] = family == "tool" and named
     for key in _CONVERSATION_OPTIONAL:
         val = tags.get(key)
@@ -274,8 +360,9 @@ def conversation_features(assignment: dict | None = None,
     return out
 
 
-def mix_items_by_tier(items: list, n: int, tier_of, *,
-                      ordinary_share: float = ORDINARY_SHARE) -> list:
+def mix_items_by_tier(
+    items: list, n: int, tier_of, *, ordinary_share: float = ORDINARY_SHARE
+) -> list:
     """Breadth-first across tiers, then fill ordinary-majority.
 
     First items hit ordinary plus a hard case. A 24-cell or 100-row slice
@@ -331,8 +418,26 @@ def mix_items_by_tier(items: list, n: int, tier_of, *,
 
 
 _HINT_STOP = {
-    "the", "a", "an", "to", "of", "or", "and", "if", "is", "do", "not",
-    "you", "your", "must", "should", "with", "for", "on", "in", "be",
+    "the",
+    "a",
+    "an",
+    "to",
+    "of",
+    "or",
+    "and",
+    "if",
+    "is",
+    "do",
+    "not",
+    "you",
+    "your",
+    "must",
+    "should",
+    "with",
+    "for",
+    "on",
+    "in",
+    "be",
 }
 
 
@@ -345,14 +450,14 @@ def _private_hint(text: Any, *, limit: int = 24) -> str:
         return raw.rstrip(".")[:limit]
     if len(raw) <= limit:
         return raw
-    words = [w for w in re.findall(r"[A-Za-z0-9_]+", raw.lower())
-             if w not in _HINT_STOP]
+    words = [w for w in re.findall(r"[A-Za-z0-9_]+", raw.lower()) if w not in _HINT_STOP]
     slug = " ".join(words[:3])
     return (slug or raw)[:limit]
 
 
 def _world_hint(raw: Any) -> str:
     from .scenarios import WORLD_HINTS
+
     text = str(raw or "").strip()
     if text in WORLD_HINTS:
         return WORLD_HINTS[text]
@@ -378,10 +483,14 @@ def _length_hint(raw: Any, n_len: int) -> str:
     return "long prompt"
 
 
-def sample_cell_tags(seed: int, round_index: int, key: str,
-                     assignment: dict | None = None,
-                     texture_rate: float = DEFAULT_TEXTURE_RATE,
-                     **_unused) -> dict[str, Any]:
+def sample_cell_tags(
+    seed: int,
+    round_index: int,
+    key: str,
+    assignment: dict | None = None,
+    texture_rate: float = DEFAULT_TEXTURE_RATE,
+    **_unused,
+) -> dict[str, Any]:
     """Most cells are tools and policy. Length and phrasing are rare hints."""
     assignment = dict(assignment or {})
     n = _draw(seed, round_index, key, "sparse")
@@ -399,6 +508,7 @@ def sample_cell_tags(seed: int, round_index: int, key: str,
         raw = str(assignment.get("stance") or assignment.get("user_behavior") or "")
         if not raw:
             from .scenarios import STANCES
+
             raw = STANCES[n_tier % len(STANCES)]
         if raw == "ordinary":
             return
@@ -417,22 +527,25 @@ def sample_cell_tags(seed: int, round_index: int, key: str,
 
     mode = n % 20
     if mode == 14:
-        situation["vagueness"] = (
-            assignment.get("vagueness") or _VAGUENESS[(n // 20) % 3])
+        situation["vagueness"] = assignment.get("vagueness") or _VAGUENESS[(n // 20) % 3]
     elif mode == 16:
         situation["phrasing"] = _WEIRD[(n // 20) % len(_WEIRD)]
     raw_stance = assignment.get("stance") or assignment.get("user_behavior")
     mapped_stance = _TIER_ALIASES.get(str(raw_stance)) if raw_stance else None
-    if (raw_stance and str(raw_stance) != "ordinary" and mode < 10) or (mapped_stance is None and mode == 15):
+    if (raw_stance and str(raw_stance) != "ordinary" and mode < 10) or (
+        mapped_stance is None and mode == 15
+    ):
         add_stance()
 
     n_extra = _draw(seed, round_index, key, "axis")
     if assignment.get("pressure") or n_extra % 19 == 0:
         situation["pressure"] = (
-            assignment.get("pressure") or _PRESSURES[(n_extra // 19) % len(_PRESSURES)])
+            assignment.get("pressure") or _PRESSURES[(n_extra // 19) % len(_PRESSURES)]
+        )
     if assignment.get("user") or n_extra % 17 == 0:
         situation["user"] = (
-            assignment.get("user") or _USER_TYPES[(n_extra // 17) % len(_USER_TYPES)])
+            assignment.get("user") or _USER_TYPES[(n_extra // 17) % len(_USER_TYPES)]
+        )
     hist = assignment.get("history")
     if hist and hist != "fresh" and mode == 11:
         situation["history"] = hist
@@ -470,8 +583,9 @@ def sampling_plan(time_budget: float | None) -> dict[str, Any]:
     }
 
 
-def adaptive_allocator(time_budget: float | None, until: str = "compute",
-                       *, elapsed: float | None = None) -> dict[str, Any]:
+def adaptive_allocator(
+    time_budget: float | None, until: str = "compute", *, elapsed: float | None = None
+) -> dict[str, Any]:
     """Adaptive mix. Short remaining clock is messier; saturation walks more cards.
 
     Shares are explore / expand / verify. n_req and k are caps so expand and
@@ -581,9 +695,13 @@ def running_turn_mean(stats: dict | None) -> float | None:
             lock.release()
 
 
-def sample_turn_budget(seed: int, key: str, max_turns: int,
-                       avg_turns: float | None = None,
-                       running_mean: float | None = None) -> int:
+def sample_turn_budget(
+    seed: int,
+    key: str,
+    max_turns: int,
+    avg_turns: float | None = None,
+    running_mean: float | None = None,
+) -> int:
     """15/75/10 around ``avg_turns``, shifted by the live mean, snapped even."""
     cap = max(2, int(max_turns))
     target = 6.0 if avg_turns is None else float(avg_turns)
@@ -621,15 +739,17 @@ def sample_turn_budget(seed: int, key: str, max_turns: int,
     return max(2, min(even_cap if even_cap >= 2 else cap, want))
 
 
-def sample_request_axes(seed: int, round_index: int, key: str, *,
-                        assignment: dict | None = None, **_unused) -> dict[str, str]:
+def sample_request_axes(
+    seed: int, round_index: int, key: str, *, assignment: dict | None = None, **_unused
+) -> dict[str, str]:
     """Optional extras only. Often empty."""
     tags = sample_cell_tags(seed, round_index, key, assignment)
     return {k: str(v) for k, v in tags.items() if k not in {"tool", "rule"}}
 
 
-def anneal_temperature(round_index: int, *, start: float = 1.0,
-                       end: float = 0.12, decay: float = 0.93) -> float:
+def anneal_temperature(
+    round_index: int, *, start: float = 1.0, end: float = 0.12, decay: float = 0.93
+) -> float:
     return max(end, start * (decay ** max(0, int(round_index))))
 
 
@@ -640,8 +760,9 @@ def explore_slot_count(batch_size: int, round_index: int) -> int:
     return max(0, min(need // 2, round(need * frac)))
 
 
-def accept_anneal_candidate(novelty: float, *, temperature: float,
-                            rng: random.Random | None = None) -> bool:
+def accept_anneal_candidate(
+    novelty: float, *, temperature: float, rng: random.Random | None = None
+) -> bool:
     """Accept an off-batch candidate into an explore slot.
 
     Acceptance rises with novelty (min cosine distance to everything
@@ -658,9 +779,15 @@ def accept_anneal_candidate(novelty: float, *, temperature: float,
     return rng.random() < prob
 
 
-def apply_annealing_explore(batch_idx: list[int], texts_len: int,
-                            novelty_of: dict[int, float], *, need: int,
-                            round_index: int, seed: int) -> list[int]:
+def apply_annealing_explore(
+    batch_idx: list[int],
+    texts_len: int,
+    novelty_of: dict[int, float],
+    *,
+    need: int,
+    round_index: int,
+    seed: int,
+) -> list[int]:
     explore_n = explore_slot_count(need, round_index)
     if explore_n <= 0 or texts_len <= need:
         return batch_idx
@@ -674,8 +801,7 @@ def apply_annealing_explore(batch_idx: list[int], texts_len: int,
     for index in pool:
         if len(accepted) >= explore_n:
             break
-        if accept_anneal_candidate(novelty_of.get(index, 0.0),
-                                   temperature=temp, rng=rng):
+        if accept_anneal_candidate(novelty_of.get(index, 0.0), temperature=temp, rng=rng):
             accepted.append(index)
     if not accepted:
         return batch_idx

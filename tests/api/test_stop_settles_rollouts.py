@@ -4,6 +4,7 @@ A stop (clock, cap, saturation) cancels rollouts that never started,
 waits up to the stop grace for the ones running, keeps what finishes,
 and reports what it had to abandon.
 """
+
 from __future__ import annotations
 
 import time
@@ -11,8 +12,9 @@ import time
 import zeroproof.simulations as zps
 from tests.helpers import POLICY, TOOLS
 
-_OFFLINE = dict(seed=0, simulator=False, grade=False,
-                advanced={"per_round": 32, "mutate_failures": False})
+_OFFLINE = dict(
+    seed=0, simulator=False, grade=False, advanced={"per_round": 32, "mutate_failures": False}
+)
 
 
 def test_clock_stop_keeps_finished_rollouts_and_makes_no_late_calls():
@@ -23,8 +25,15 @@ def test_clock_stop_keeps_finished_rollouts_and_makes_no_late_calls():
         time.sleep(0.6)
         return {"steps": [], "final_text": "ok"}
 
-    data = zps.simulate(slow_agent, tools=TOOLS, policy=POLICY, budget=50,
-                        concurrency=8, time_budget=0.5, **_OFFLINE)
+    data = zps.simulate(
+        slow_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=50,
+        concurrency=8,
+        time_budget=0.5,
+        **_OFFLINE,
+    )
     returned = time.monotonic()
     time.sleep(1.5)
     late = [c for c in calls if c > returned]
@@ -41,8 +50,9 @@ def test_rollouts_still_running_after_the_grace_are_reported():
 
     t0 = time.monotonic()
     kw = dict(_OFFLINE, advanced={**_OFFLINE["advanced"], "stop_grace": 0.2})
-    data = zps.simulate(hanging_agent, tools=TOOLS, policy=POLICY, budget=50,
-                        concurrency=4, time_budget=0.3, **kw)
+    data = zps.simulate(
+        hanging_agent, tools=TOOLS, policy=POLICY, budget=50, concurrency=4, time_budget=0.3, **kw
+    )
     # 6 s agent, 0.3 s clock, 0.2 s grace: even a loaded CI box returns
     # well inside 4 s, and 4 s is still far short of the agent finishing.
     assert time.monotonic() - t0 < 4.0, "the stop grace must bound the wait"
@@ -60,8 +70,9 @@ def test_budget_stop_has_no_stragglers():
         time.sleep(0.05)
         return {"steps": [], "final_text": "ok"}
 
-    data = zps.simulate(agent, tools=TOOLS, policy=POLICY, budget=6,
-                        concurrency=8, time_budget=None, **_OFFLINE)
+    data = zps.simulate(
+        agent, tools=TOOLS, policy=POLICY, budget=6, concurrency=8, time_budget=None, **_OFFLINE
+    )
     returned = time.monotonic()
     time.sleep(0.5)
     assert len(data.trajectories) == 6

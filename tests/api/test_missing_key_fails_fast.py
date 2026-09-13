@@ -1,4 +1,5 @@
 """A bring-your-own run with no key fails at setup, not after the time budget."""
+
 from __future__ import annotations
 
 import time
@@ -30,6 +31,12 @@ def test_simulate_with_openai_spec_and_no_key_raises_at_setup(monkeypatch):
     monkeypatch.delenv("VLLM_API_KEY", raising=False)
     t0 = time.monotonic()
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
-        zps.simulate(agent="openai:gpt-4.1-mini", tools=TOOLS, system_prompt=POLICY,
-                     budget=2, time_budget=30, seed=0)
+        zps.simulate(
+            agent="openai:gpt-4.1-mini",
+            tools=TOOLS,
+            system_prompt=POLICY,
+            budget=2,
+            time_budget=30,
+            seed=0,
+        )
     assert time.monotonic() - t0 < 5.0

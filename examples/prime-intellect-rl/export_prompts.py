@@ -21,14 +21,22 @@ Seed probes are dropped. The generator turns each entry in the spec's
 itself. Those are third-person scenario descriptions ("the user asks to fill
 missing bars forward"), not things a user would type, so they make broken tasks.
 """
+
 import argparse
 import collections
 import json
 import os
 import re
 
-INFO_FIELDS = ("scenario_id", "world_state", "stance", "tier", "faults",
-               "tool_known", "intent_known")
+INFO_FIELDS = (
+    "scenario_id",
+    "world_state",
+    "stance",
+    "tier",
+    "faults",
+    "tool_known",
+    "intent_known",
+)
 
 
 def normalize(text: str) -> str:
@@ -48,13 +56,21 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
     ap.add_argument("--out", default="data/prompts.jsonl")
-    ap.add_argument("--keep-phrasings", action="store_true",
-                    help="keep every phrasing instead of one per situation")
-    ap.add_argument("--spec", default=os.path.join(os.path.dirname(__file__),
-                                                   "spec.json"),
-                    help="spec to read situation seeds from, for filtering")
-    ap.add_argument("--keep-seeds", action="store_true",
-                    help="keep prompts that are verbatim spec situation seeds")
+    ap.add_argument(
+        "--keep-phrasings",
+        action="store_true",
+        help="keep every phrasing instead of one per situation",
+    )
+    ap.add_argument(
+        "--spec",
+        default=os.path.join(os.path.dirname(__file__), "spec.json"),
+        help="spec to read situation seeds from, for filtering",
+    )
+    ap.add_argument(
+        "--keep-seeds",
+        action="store_true",
+        help="keep prompts that are verbatim spec situation seeds",
+    )
     args = ap.parse_args()
 
     rows = [json.loads(line) for line in open(args.path) if line.strip()]

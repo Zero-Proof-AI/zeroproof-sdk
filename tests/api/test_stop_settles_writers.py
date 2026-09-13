@@ -1,4 +1,5 @@
 """Writer waves stop with the run, the same way rollouts do."""
+
 from __future__ import annotations
 
 import time
@@ -17,10 +18,17 @@ def test_writer_waves_running_after_the_grace_are_reported():
 
     t0 = time.monotonic()
     data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=40, seed=0,
-        concurrency=4, simulator=slow_writer, grade=False, time_budget=0.4,
-        advanced={"mutate_failures": False, "scenario_concurrency": 2,
-                  "stop_grace": 0.2})
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=40,
+        seed=0,
+        concurrency=4,
+        simulator=slow_writer,
+        grade=False,
+        time_budget=0.4,
+        advanced={"mutate_failures": False, "scenario_concurrency": 2, "stop_grace": 0.2},
+    )
     returned = time.monotonic()
     assert returned - t0 < 4.0, "the stop grace must bound the wait for writers too"
     assert data.stopped_because == "time_budget"
@@ -37,9 +45,17 @@ def test_writer_waves_that_finish_in_the_grace_are_not_flagged():
         return [f"where is my refund for order {index}-{i}" for i in range(4)]
 
     data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=8, seed=0,
-        concurrency=4, simulator=quick_writer, grade=False, time_budget=None,
-        advanced={"mutate_failures": False, "scenario_concurrency": 2})
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=8,
+        seed=0,
+        concurrency=4,
+        simulator=quick_writer,
+        grade=False,
+        time_budget=None,
+        advanced={"mutate_failures": False, "scenario_concurrency": 2},
+    )
     assert len(data.trajectories) == 8
     assert "writer_waves_abandoned" not in data.degraded
     assert "abandoned_writer_waves" not in data.search

@@ -1,5 +1,6 @@
 """Spec loading: a tools-and-system-prompt folder or dict becomes
 ``tools``, ``policy`` and seed situations."""
+
 from __future__ import annotations
 
 import json
@@ -8,9 +9,21 @@ from typing import Any
 
 from ..generate.generator import assistant_kind
 
-_SPEC_SKIP = {"tools", "policy", "system_prompt", "system", "instructions",
-              "rules", "situations",
-              "name", "id", "version", "model", "backend", "simulator"}
+_SPEC_SKIP = {
+    "tools",
+    "policy",
+    "system_prompt",
+    "system",
+    "instructions",
+    "rules",
+    "situations",
+    "name",
+    "id",
+    "version",
+    "model",
+    "backend",
+    "simulator",
+}
 
 
 def backend_spec(backend: str) -> str:
@@ -55,22 +68,23 @@ def _spec_from_path(text: str) -> dict | None:
     raw = Path(text).expanduser()
     roots = [Path.cwd(), Path(__file__).resolve().parents[1]]
     candidates: list[Path] = []
-    for root in ([Path()] if raw.is_absolute() else roots):
+    for root in [Path()] if raw.is_absolute() else roots:
         base = raw if raw.is_absolute() else (root / raw)
         candidates.append(base)
         if not base.suffix:
-            candidates.extend([
-                Path(str(base) + ".json"),
-                Path(str(base) + ".yaml"),
-                Path(str(base) + ".yml"),
-                base / "spec.json",
-                base / "spec.yaml",
-                base / "agent.json",
-            ])
+            candidates.extend(
+                [
+                    Path(str(base) + ".json"),
+                    Path(str(base) + ".yaml"),
+                    Path(str(base) + ".yml"),
+                    base / "spec.json",
+                    base / "spec.yaml",
+                    base / "agent.json",
+                ]
+            )
             if "/" not in str(text) and "\\" not in str(text):
                 spec_dir = root / "specs" / raw.name
-                candidates.extend([
-                    spec_dir, spec_dir / "spec.json", spec_dir / "spec.yaml"])
+                candidates.extend([spec_dir, spec_dir / "spec.json", spec_dir / "spec.yaml"])
     seen: set[Path] = set()
     for cand in candidates:
         try:
@@ -106,8 +120,9 @@ def _spec_extra_text(spec: dict) -> str:
     return "\n".join(parts)
 
 
-def apply_spec(spec: Any, tools: list | None, policy: str | None,
-                situations: list | None) -> tuple[list | None, str | None, list]:
+def apply_spec(
+    spec: Any, tools: list | None, policy: str | None, situations: list | None
+) -> tuple[list | None, str | None, list]:
     extra_sit = list(situations or [])
     if spec is None:
         return tools, policy, extra_sit
@@ -117,7 +132,8 @@ def apply_spec(spec: Any, tools: list | None, policy: str | None,
             spec = loaded
         elif _looks_like_spec_path(spec):
             raise FileNotFoundError(
-                f"simulate(spec={spec.strip()!r}) found no spec.json at that path.")
+                f"simulate(spec={spec.strip()!r}) found no spec.json at that path."
+            )
         else:
             policy = (str(policy or "").rstrip() + "\n" + spec.strip()).strip()
             return tools, policy, extra_sit
@@ -125,9 +141,13 @@ def apply_spec(spec: Any, tools: list | None, policy: str | None,
         return tools, policy, extra_sit
     if spec.get("tools"):
         tools = list(tools or []) + list(spec["tools"])
-    blob = (spec.get("system_prompt") or spec.get("system")
-            or spec.get("policy") or spec.get("instructions")
-            or spec.get("rules"))
+    blob = (
+        spec.get("system_prompt")
+        or spec.get("system")
+        or spec.get("policy")
+        or spec.get("instructions")
+        or spec.get("rules")
+    )
     if isinstance(blob, list):
         blob = "\n".join(str(item) for item in blob)
     extra = _spec_extra_text(spec)

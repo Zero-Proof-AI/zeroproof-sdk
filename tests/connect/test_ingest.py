@@ -1,4 +1,5 @@
 """Adapter detection, inspect, and Claude stream normalisation."""
+
 from __future__ import annotations
 
 import json
@@ -10,12 +11,28 @@ import zeroproof.simulations as zps
 from zeroproof.simulations.generate.adapters import detect, inspect, parse_claude_stream
 
 TOOLS = [
-    {"type": "function", "function": {"name": "lookup_item", "parameters": {
-        "type": "object", "properties": {"item_id": {"type": "string"}},
-        "required": ["item_id"]}}},
-    {"type": "function", "function": {"name": "create_order", "parameters": {
-        "type": "object", "properties": {"item_id": {"type": "string"}},
-        "required": ["item_id"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_item",
+            "parameters": {
+                "type": "object",
+                "properties": {"item_id": {"type": "string"}},
+                "required": ["item_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_order",
+            "parameters": {
+                "type": "object",
+                "properties": {"item_id": {"type": "string"}},
+                "required": ["item_id"],
+            },
+        },
+    },
 ]
 
 
@@ -35,10 +52,15 @@ def test_inspect_merges_user_extras_onto_the_agent():
         instructions = "Look up an item first."
         tools = TOOLS
 
-    extra = [{"type": "function", "function": {
-        "name": "cancel_order",
-        "parameters": {"type": "object", "properties": {
-            "order_id": {"type": "string"}}}}}]
+    extra = [
+        {
+            "type": "function",
+            "function": {
+                "name": "cancel_order",
+                "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}},
+            },
+        }
+    ]
     profile = inspect(Holder(), tools=extra, policy="Never invent ids.")
     names = {t["function"]["name"] for t in profile.tools}
     assert {"lookup_item", "create_order", "cancel_order"} <= names
@@ -49,12 +71,20 @@ def test_inspect_merges_user_extras_onto_the_agent():
 def test_user_situations_and_spec_feed_simulate():
     from tests.helpers import POLICY, scripted_agent
     from tests.helpers import TOOLS as REFUND_TOOLS
+
     data = zps.simulate(
-        scripted_agent, tools=REFUND_TOOLS, policy=POLICY, budget=6, seed=0,
-        grade=False, concurrency=6, simulator=False,
+        scripted_agent,
+        tools=REFUND_TOOLS,
+        policy=POLICY,
+        budget=6,
+        seed=0,
+        grade=False,
+        concurrency=6,
+        simulator=False,
         spec={"instructions": "Do not refund twice."},
         extra_situations=["pls refund ORD-9 i already paid twice??"],
-        advanced={"per_round": 4, "mutate_failures": False})
+        advanced={"per_round": 4, "mutate_failures": False},
+    )
     assert any("ORD-9" in t["prompt"] for t in data.trajectories)
     assert "Do not refund twice." in data.profile.policy
 
@@ -62,10 +92,17 @@ def test_user_situations_and_spec_feed_simulate():
 def test_does_not_grade_after_rollout_by_default():
     from tests.helpers import POLICY, scripted_agent
     from tests.helpers import TOOLS as REFUND_TOOLS
+
     data = zps.simulate(
-        scripted_agent, tools=REFUND_TOOLS, policy=POLICY, budget=8, seed=0,
-        concurrency=8, simulator=False,
-        advanced={"per_round": 8, "mutate_failures": False})
+        scripted_agent,
+        tools=REFUND_TOOLS,
+        policy=POLICY,
+        budget=8,
+        seed=0,
+        concurrency=8,
+        simulator=False,
+        advanced={"per_round": 8, "mutate_failures": False},
+    )
     assert all(t["reward"] is None for t in data.trajectories)
     assert all(not t.get("grader_reason") for t in data.trajectories)
 
@@ -78,13 +115,13 @@ def test_inspect_reads_tools_policy_capabilities():
 
     profile = inspect(Fake())
     assert profile.policy.startswith("Look up")
-    assert {t["function"]["name"] for t in profile.tools} == {
-        "lookup_item", "create_order"}
+    assert {t["function"]["name"] for t in profile.tools} == {"lookup_item", "create_order"}
     assert "read" in profile.capabilities["lookup_item"]
     assert "mutate" in profile.capabilities["create_order"]
     assert "item_id" in profile.constraints["required_user_fields"]
-    connected = zps.connect(lambda m: {"steps": [], "final_text": "ok"},
-                            tools=TOOLS, policy="be careful")
+    connected = zps.connect(
+        lambda m: {"steps": [], "final_text": "ok"}, tools=TOOLS, policy="be careful"
+    )
     assert connected.transport == "callable"
     assert connected.profile.policy == "be careful"
 
@@ -95,23 +132,45 @@ def test_inspect_fills_simulate_when_tools_omitted():
         tools = TOOLS
 
         def __call__(self, message):
-            return {"steps": [{"tool": "lookup_item", "arguments": {"item_id": "A"},
-                               "result": {"status": "ok"}}],
-                    "final_text": "found it"}
+            return {
+                "steps": [
+                    {
+                        "tool": "lookup_item",
+                        "arguments": {"item_id": "A"},
+                        "result": {"status": "ok"},
+                    }
+                ],
+                "final_text": "found it",
+            }
 
-    data = zps.simulate(Holder(), budget=8, seed=0, grade=False,
-                        simulator=False, advanced={"per_round": 4})
+    data = zps.simulate(
+        Holder(), budget=8, seed=0, grade=False, simulator=False, advanced={"per_round": 4}
+    )
     assert data.profile.tools
     assert data.stages[0] == "agent ingestion"
 
 
 def test_parse_claude_stream_pairs_any_tool_names():
     events = [
-        {"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "id": "a", "name": "mcp__jira__create_ticket",
-             "input": {"title": "bug"}}]}},
-        {"type": "user", "message": {"content": [
-            {"type": "tool_result", "tool_use_id": "a", "content": "TICKET-9"}]}},
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "a",
+                        "name": "mcp__jira__create_ticket",
+                        "input": {"title": "bug"},
+                    }
+                ]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{"type": "tool_result", "tool_use_id": "a", "content": "TICKET-9"}]
+            },
+        },
         {"type": "result", "result": "done, ticket filed"},
     ]
     traj = parse_claude_stream("\n".join(json.dumps(e) for e in events))
@@ -121,6 +180,7 @@ def test_parse_claude_stream_pairs_any_tool_names():
 
 def test_parse_text_tool_calls():
     from zeroproof.simulations.generate.agents import parse_text_tool_calls
+
     raw = (
         '<tool_call>\n{"name": "list_events", "arguments": {"date": "2023-10-05"}}\n'
         '</tool_call>\n<tool_call>\n{"name": "create_event", "arguments": '
@@ -135,9 +195,9 @@ def test_subprocess_adapter(tmp_path):
     script.write_text(
         "import sys, json\n"
         "print(json.dumps({'steps': [{'tool': 'lookup_item', 'arguments': "
-        "{'item_id': '1'}, 'result': {'status': 'ok'}}], 'final_text': 'ok'}))\n")
-    connected = zps.connect([sys.executable, str(script)], tools=TOOLS,
-                            policy="ok")
+        "{'item_id': '1'}, 'result': {'status': 'ok'}}], 'final_text': 'ok'}))\n"
+    )
+    connected = zps.connect([sys.executable, str(script)], tools=TOOLS, policy="ok")
     assert connected.transport == "subprocess"
     out = connected("hello")
     assert out["steps"][0]["tool"] == "lookup_item"
@@ -146,8 +206,15 @@ def test_subprocess_adapter(tmp_path):
 def test_hash_embedder_does_not_claim_semantic_diversity():
     data = zps.simulate(
         lambda m: {"steps": [], "final_text": "ok"},
-        tools=TOOLS, policy="ok", budget=6, seed=0, grade=False,
-        embedder="hash", simulator=False, advanced={"per_round": 3})
+        tools=TOOLS,
+        policy="ok",
+        budget=6,
+        seed=0,
+        grade=False,
+        embedder="hash",
+        simulator=False,
+        advanced={"per_round": 3},
+    )
     assert data.semantic is False
     assert "semantic_embedding_unavailable" in data.degraded or not data.semantic
     assert all(t["semantic_cluster"] is None for t in data.trajectories)
@@ -171,20 +238,26 @@ def test_refuses_to_mix_lexical_and_semantic_vectors():
     archive = EmbeddingArchive(HashEmbedder.name, False)
     archive.add([[0.0, 1.0]])
     _, info = select_execution_batch(
-        ["hello there friend"], embedder=Sem(), archive=archive, batch_size=1, seed=0)
+        ["hello there friend"], embedder=Sem(), archive=archive, batch_size=1, seed=0
+    )
     assert info["mixed_spaces_refused"] is True
     assert "embedding_space_mismatch" in info["degraded"]
 
 
 def test_model_prompt_asks_for_gaps():
     from zeroproof.simulations.generate.generator import ModelSimulator
-    sim = ModelSimulator("vllm:fake@http://example", tools=TOOLS,
-                         policy="Look up an item first. Do not invent ids.",
-                         timeout=1)
+
+    sim = ModelSimulator(
+        "vllm:fake@http://example",
+        tools=TOOLS,
+        policy="Look up an item first. Do not invent ids.",
+        timeout=1,
+    )
     sim.set_search_context(
         avoid=["basic refund please"],
         underexplored=["tool timeout on a half-finished order"],
-        behavior_gaps=["same lookup then refund every time"])
+        behavior_gaps=["same lookup then refund every time"],
+    )
     prompt = sim._prompt(1, sim.regions[:2] if sim.regions else [])
     assert "UNDEREXPLORED" in prompt
     assert "AVOID" in prompt
@@ -197,8 +270,7 @@ def test_model_prompt_asks_for_gaps():
 
 
 def test_coverage_axes_come_from_this_agent():
-    policy = ("Look up an item before ordering it.\n"
-              "2. Never invent an item_id.")
+    policy = "Look up an item before ordering it.\n2. Never invent an item_id."
     dims = zps.build_dimensions(TOOLS, policy)
     assert "lookup_item" in dims["tool"]
     assert "create_order" in dims["tool"]
@@ -234,11 +306,11 @@ def test_selection_keeps_typical_and_fills_gaps():
                     vectors.append([0.0, 0.0, 1.0])
             return vectors
 
-    texts = [f"common request {i}" for i in range(8)] + [
-        "rare outlier alpha", "other side beta"]
+    texts = [f"common request {i}" for i in range(8)] + ["rare outlier alpha", "other side beta"]
     archive = EmbeddingArchive("stub-semantic", True)
     batch, info = select_execution_batch(
-        texts, embedder=Stub(), archive=archive, batch_size=6, seed=0)
+        texts, embedder=Stub(), archive=archive, batch_size=6, seed=0
+    )
     reasons = [row["reason"] for row in batch]
     assert any(r.startswith("typical") for r in reasons)
     assert any(r.startswith("fill") for r in reasons)

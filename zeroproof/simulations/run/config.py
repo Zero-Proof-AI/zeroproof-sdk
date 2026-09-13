@@ -5,6 +5,7 @@ validated here, and lands on one :class:`RunConfig`. The engine never
 touches ``**kwargs`` again; whatever is left in ``RunConfig.advanced``
 goes to the situation writer as keyword arguments.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,13 +37,32 @@ _MODE_PRESETS: dict[str, dict[str, Any]] = {
 }
 
 _ALIAS_NAMES = {
-    "unique", "repeats", "rollouts_per_prompt", "n", "phrasings",
-    "repeat_policy", "policy",
+    "unique",
+    "repeats",
+    "rollouts_per_prompt",
+    "n",
+    "phrasings",
+    "repeat_policy",
+    "policy",
 }
 _MOVED_NAMES = {
-    "concurrency", "dimensions", "simulator", "backend", "fault_rate", "risk",
-    "texture", "max_turns", "avg_turns", "min_user_turns", "temperature", "seed", "grader",
-    "llm_spec", "embedder", "seed_prompts", "extra_situations",
+    "concurrency",
+    "dimensions",
+    "simulator",
+    "backend",
+    "fault_rate",
+    "risk",
+    "texture",
+    "max_turns",
+    "avg_turns",
+    "min_user_turns",
+    "temperature",
+    "seed",
+    "grader",
+    "llm_spec",
+    "embedder",
+    "seed_prompts",
+    "extra_situations",
     "prefer_success",
     # steering_weight is an advanced knob, not a named parameter.
     "steering_weight",
@@ -52,8 +72,9 @@ _MOVED_NAMES = {
 }
 
 
-def _parse_situations_arg(situations: Any, extra_situations: list | None
-                          ) -> tuple[int | None, list[str]]:
+def _parse_situations_arg(
+    situations: Any, extra_situations: list | None
+) -> tuple[int | None, list[str]]:
     """Public ``situations=`` is N (int). Seed openers come from advanced."""
     seeds: list[str] = []
     for item in extra_situations or []:
@@ -63,8 +84,7 @@ def _parse_situations_arg(situations: Any, extra_situations: list | None
     if situations is None:
         return None, seeds
     if isinstance(situations, bool) or not isinstance(situations, int):
-        raise ValueError(
-            "situations= is N, an int. Pass seed openers in advanced['seed_prompts']")
+        raise ValueError("situations= is N, an int. Pass seed openers in advanced['seed_prompts']")
     return max(1, int(situations)), seeds
 
 
@@ -78,8 +98,7 @@ def _merge_advanced(advanced: dict | None, passed: dict) -> tuple[dict, dict]:
         elif key in _MOVED_NAMES:
             cfg[key] = val
         else:
-            raise TypeError(
-                f"simulate() got unexpected keyword argument {key!r}")
+            raise TypeError(f"simulate() got unexpected keyword argument {key!r}")
     return cfg, aliases
 
 
@@ -93,26 +112,29 @@ def writer_spec_for(agent: Any, simulator: Any) -> Any:
     """
     if simulator is not None or os.environ.get("ZEROPROOF_SURROGATE"):
         return simulator
-    if (isinstance(agent, str) and ":" in agent
-            and not agent.startswith(("http://", "https://"))):
+    if isinstance(agent, str) and ":" in agent and not agent.startswith(("http://", "https://")):
         return agent
     return simulator
 
 
-def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = None,
-                     unique: bool = False, unique_situations: bool = False,
-                     requests_per_situation: int | None = None,
-                     n: int | None = None, phrasings: int | None = None,
-                     rollouts_per_request: int | None = None,
-                     repeats: int | None = None,
-                     rollouts_per_prompt: int | None = None) -> dict[str, Any]:
+def resolve_topology(
+    *,
+    mode: str | None = None,
+    repeat_policy: str | None = None,
+    unique: bool = False,
+    unique_situations: bool = False,
+    requests_per_situation: int | None = None,
+    n: int | None = None,
+    phrasings: int | None = None,
+    rollouts_per_request: int | None = None,
+    repeats: int | None = None,
+    rollouts_per_prompt: int | None = None,
+) -> dict[str, Any]:
     """Map public knobs. Phrasings (n) are wordings per situation; repeats (k) are reruns per phrasing."""
-    k_vals = [int(x) for x in (rollouts_per_request, repeats, rollouts_per_prompt)
-              if x is not None]
+    k_vals = [int(x) for x in (rollouts_per_request, repeats, rollouts_per_prompt) if x is not None]
     if len(set(k_vals)) > 1:
         raise ValueError("pass rollouts_per_request= or repeats=, not both")
-    n_vals = [int(x) for x in (requests_per_situation, n, phrasings)
-              if x is not None]
+    n_vals = [int(x) for x in (requests_per_situation, n, phrasings) if x is not None]
     if len(set(n_vals)) > 1:
         raise ValueError("pass requests_per_situation=, phrasings=, or n=, not both")
     k_explicit = bool(k_vals)
@@ -135,8 +157,7 @@ def resolve_topology(*, mode: str | None = None, repeat_policy: str | None = Non
         policy_name = "none"
         new_cards = True
     if mode_name not in _MODE_PRESETS:
-        raise ValueError(
-            "mode= must be explore, sft, rl, or adaptive")
+        raise ValueError("mode= must be explore, sft, rl, or adaptive")
     preset = _MODE_PRESETS[mode_name]
     if policy_name is None:
         policy_name = preset["repeat_policy"]
@@ -181,6 +202,7 @@ def _model_version_tag(agent: Any, advanced: dict) -> str:
         return getattr(agent, "__name__", "callable-agent")
     try:
         from ..generate.agents import default_simulator_spec, parse_backend_spec
+
         spec = agent if isinstance(agent, str) else default_simulator_spec()
         return parse_backend_spec(spec)[1]
     except Exception:
@@ -260,25 +282,33 @@ class RunConfig:
     advanced: dict = field(default_factory=dict)
 
 
-def resolve_run_config(agent: Any = None, *, spec: Any = None,
-                       tools: list[dict] | None = None,
-                       system_prompt: str | None = None,
-                       budget: int | None = 1000,
-                       time_budget: float | None = None,
-                       until: str = "compute", mode: str = "explore",
-                       situations: int | None = None,
-                       requests_per_situation: int | None = None,
-                       rollouts_per_request: int | None = None,
-                       unique_situations: bool = False,
-                       reproducible: bool = False,
-                       grade: bool = False, llm_grade: bool = False,
-                       traces: Any = None, grader: Any = None,
-                       strategy: str = "auto", seeds: list | None = None,
-                       scaffold: str | None = None,
-                       execute: Callable | None = None,
-                       output: str | None = None,
-                       advanced: dict | None = None,
-                       passed: dict | None = None) -> RunConfig:
+def resolve_run_config(
+    agent: Any = None,
+    *,
+    spec: Any = None,
+    tools: list[dict] | None = None,
+    system_prompt: str | None = None,
+    budget: int | None = 1000,
+    time_budget: float | None = None,
+    until: str = "compute",
+    mode: str = "explore",
+    situations: int | None = None,
+    requests_per_situation: int | None = None,
+    rollouts_per_request: int | None = None,
+    unique_situations: bool = False,
+    reproducible: bool = False,
+    grade: bool = False,
+    llm_grade: bool = False,
+    traces: Any = None,
+    grader: Any = None,
+    strategy: str = "auto",
+    seeds: list | None = None,
+    scaffold: str | None = None,
+    execute: Callable | None = None,
+    output: str | None = None,
+    advanced: dict | None = None,
+    passed: dict | None = None,
+) -> RunConfig:
     """Turn the ``simulate()`` call into a :class:`RunConfig`.
 
     Validation errors surface here, before any model or file is touched.
@@ -294,24 +324,28 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
         # A leftover default 1 plus an alias means the alias wins.
         k_arg = None
     topo = resolve_topology(
-        mode=mode, repeat_policy=aliases.get("repeat_policy"),
-        unique=unique_flag, unique_situations=unique_flag,
-        requests_per_situation=requests_per_situation, n=aliases.get("n"),
+        mode=mode,
+        repeat_policy=aliases.get("repeat_policy"),
+        unique=unique_flag,
+        unique_situations=unique_flag,
+        requests_per_situation=requests_per_situation,
+        n=aliases.get("n"),
         phrasings=aliases.get("phrasings"),
-        rollouts_per_request=k_arg, repeats=repeats,
-        rollouts_per_prompt=rollouts_per_prompt)
+        rollouts_per_request=k_arg,
+        repeats=repeats,
+        rollouts_per_prompt=rollouts_per_prompt,
+    )
 
     seed_prompts: list[str] = []
     for item in list(seeds or []) + list(cfg.pop("seed_prompts", None) or []):
         text = str(item or "").strip()
         if text:
             seed_prompts.append(text)
-    for item in (cfg.pop("extra_situations", None) or []):
+    for item in cfg.pop("extra_situations", None) or []:
         text = str(item or "").strip()
         if text:
             seed_prompts.append(text)
-    n_situations_target, seed_prompts = _parse_situations_arg(
-        situations, seed_prompts)
+    n_situations_target, seed_prompts = _parse_situations_arg(situations, seed_prompts)
 
     concurrency = int(cfg.pop("concurrency", 32))
     dimensions = cfg.pop("dimensions", None)
@@ -346,8 +380,7 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
         until_sat = False
         until_key = "compute"
     else:
-        raise ValueError(
-            "until= must be compute, saturation, first, or budget_only")
+        raise ValueError("until= must be compute, saturation, first, or budget_only")
     time_budget = None if time_budget is None or float(time_budget) <= 0 else float(time_budget)
 
     repeat_count = int(topo["k"])
@@ -414,7 +447,8 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
             opening_req = float(opening_req)
         except (TypeError, ValueError):
             raise ValueError(
-                'opening= must be "user", "agent", "auto", or a rate in [0, 1]') from None
+                'opening= must be "user", "agent", "auto", or a rate in [0, 1]'
+            ) from None
         if not 0.0 <= opening_req <= 1.0:
             raise ValueError("opening= rate must be in [0, 1]")
     if steering_weight is not None:
@@ -431,30 +465,60 @@ def resolve_run_config(agent: Any = None, *, spec: Any = None,
 
     cap = budget if budget is not None else SATURATION_CAP
     return RunConfig(
-        agent=agent, spec=spec, tools=tools, system_prompt=policy,
-        scaffold_text=scaffold_text, traces=traces, execute=execute,
-        seeds=seeds, seed_prompts=seed_prompts,
+        agent=agent,
+        spec=spec,
+        tools=tools,
+        system_prompt=policy,
+        scaffold_text=scaffold_text,
+        traces=traces,
+        execute=execute,
+        seeds=seeds,
+        seed_prompts=seed_prompts,
         n_situations_target=n_situations_target,
-        topo=topo, repeat_count=repeat_count, n_req=n_req,
-        unique_cards=unique_cards, k_immediate=k_immediate,
+        topo=topo,
+        repeat_count=repeat_count,
+        n_req=n_req,
+        unique_cards=unique_cards,
+        k_immediate=k_immediate,
         reproducible=bool(reproducible),
-        budget=budget, cap=int(cap), time_budget=time_budget,
-        until_key=until_key, until_sat=until_sat,
-        strategy=strategy, resolved_strategy=resolved_strategy,
-        steering_weight=steering_weight, opening_req=opening_req,
+        budget=budget,
+        cap=int(cap),
+        time_budget=time_budget,
+        until_key=until_key,
+        until_sat=until_sat,
+        strategy=strategy,
+        resolved_strategy=resolved_strategy,
+        steering_weight=steering_weight,
+        opening_req=opening_req,
         targeted_regions=targeted_regions,
-        output=output, out_path=out_path, grade=grade, grader=grader,
-        llm_grade=llm_grade, llm_spec=llm_spec,
-        concurrency=concurrency, dimensions=dimensions, simulator=simulator,
-        backend=backend, fault_rate=fault_rate, max_turns=max_turns,
-        avg_turns=avg_turns, min_user_turns=min_user_turns,
-        temperature=temperature, seed=seed, embedder=embedder,
-        mutate_failures=mutate_failures, pool_size=pool_size,
-        scenario_concurrency=scenario_concurrency, writer_flight=writer_flight,
+        output=output,
+        out_path=out_path,
+        grade=grade,
+        grader=grader,
+        llm_grade=llm_grade,
+        llm_spec=llm_spec,
+        concurrency=concurrency,
+        dimensions=dimensions,
+        simulator=simulator,
+        backend=backend,
+        fault_rate=fault_rate,
+        max_turns=max_turns,
+        avg_turns=avg_turns,
+        min_user_turns=min_user_turns,
+        temperature=temperature,
+        seed=seed,
+        embedder=embedder,
+        mutate_failures=mutate_failures,
+        pool_size=pool_size,
+        scenario_concurrency=scenario_concurrency,
+        writer_flight=writer_flight,
         scenarios_per_request=scenarios_per_request,
         distinct_cards=distinct_cards,
         completions_per_request=completions_per_request,
-        extra_cards=extra_cards, hung_slot_s=hung_slot_s,
+        extra_cards=extra_cards,
+        hung_slot_s=hung_slot_s,
         stop_grace_s=stop_grace_s,
-        rollout_timeout=rollout_timeout, model_version_tag=model_version_tag,
-        advanced=cfg)
+        rollout_timeout=rollout_timeout,
+        model_version_tag=model_version_tag,
+        advanced=cfg,
+    )

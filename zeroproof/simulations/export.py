@@ -15,6 +15,7 @@ target model emits thinking tokens. ``training_rows`` closes that gap:
 
 The result trains any chat-template model. No field is model-specific.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,12 +33,35 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
 # training file that drops them cannot answer "which slice regressed" after
 # the run: post-training evals stratify by exactly these, and re-deriving
 # them from message text is guesswork.
-_CARRY_KEYS = ("reward", "qwen_reward", "reason", "prompt", "scenario_id",
-               "world_state", "faults", "fault_detected", "label_source",
-               "failure_class", "judge_status", "judge_name", "lineage",
-               "tier", "ask_family", "ask", "stance", "tone", "texture",
-               "vagueness", "phrasing", "pressure", "user", "history",
-               "length", "intent_known", "tool_known")
+_CARRY_KEYS = (
+    "reward",
+    "qwen_reward",
+    "reason",
+    "prompt",
+    "scenario_id",
+    "world_state",
+    "faults",
+    "fault_detected",
+    "label_source",
+    "failure_class",
+    "judge_status",
+    "judge_name",
+    "lineage",
+    "tier",
+    "ask_family",
+    "ask",
+    "stance",
+    "tone",
+    "texture",
+    "vagueness",
+    "phrasing",
+    "pressure",
+    "user",
+    "history",
+    "length",
+    "intent_known",
+    "tool_known",
+)
 
 
 def _strip_think(text: str) -> str:
@@ -77,10 +101,9 @@ def tool_call_roundtrip(rows: Sequence[dict]) -> dict[str, Any]:
     bad_rows: list[int] = []
     for i, row in enumerate(rows):
         row_bad = False
-        for message in (row.get("messages") or []):
-            for call in (message.get("tool_calls") or []):
-                fn = call.get("function") if isinstance(
-                    call.get("function"), dict) else {}
+        for message in row.get("messages") or []:
+            for call in message.get("tool_calls") or []:
+                fn = call.get("function") if isinstance(call.get("function"), dict) else {}
                 checked += 1
                 raw = fn.get("arguments")
                 try:
@@ -95,8 +118,7 @@ def tool_call_roundtrip(rows: Sequence[dict]) -> dict[str, Any]:
     return {"checked": checked, "invalid": invalid, "rows": bad_rows[:20]}
 
 
-def _convert_messages(messages: Sequence[dict], *, system: str,
-                      strip_think: bool) -> list[dict]:
+def _convert_messages(messages: Sequence[dict], *, system: str, strip_think: bool) -> list[dict]:
     out: list[dict] = []
     if system:
         out.append({"role": "system", "content": system})
@@ -120,23 +142,27 @@ def _convert_messages(messages: Sequence[dict], *, system: str,
                     call_id = str(call.get("id") or f"call_{call_i:04d}")
                     call_i += 1
                     pending_ids.append(call_id)
-                    wire.append({
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": str(fn.get("name") or ""),
-                            "arguments": _wire_arguments(fn.get("arguments")),
-                        },
-                    })
+                    wire.append(
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": str(fn.get("name") or ""),
+                                "arguments": _wire_arguments(fn.get("arguments")),
+                            },
+                        }
+                    )
                 entry["tool_calls"] = wire
             out.append(entry)
         elif role == "tool":
             entry = {"role": "tool", "content": content}
             if message.get("name"):
                 entry["name"] = str(message["name"])
-            call_id = (str(message.get("tool_call_id"))
-                       if message.get("tool_call_id")
-                       else (pending_ids.pop(0) if pending_ids else ""))
+            call_id = (
+                str(message.get("tool_call_id"))
+                if message.get("tool_call_id")
+                else (pending_ids.pop(0) if pending_ids else "")
+            )
             if call_id:
                 entry["tool_call_id"] = call_id
             out.append(entry)
@@ -157,9 +183,13 @@ def _resolve(source) -> tuple[list[dict], str, list, str]:
     return list(source), "", [], ""
 
 
-def training_rows(source, *, system_prompt: str | None = None,
-                  tools: Sequence[dict] | None = None,
-                  strip_think: bool = True) -> list[dict]:
+def training_rows(
+    source,
+    *,
+    system_prompt: str | None = None,
+    tools: Sequence[dict] | None = None,
+    strip_think: bool = True,
+) -> list[dict]:
     """Rows a trainer can consume directly. See the module docstring.
 
     ``source`` is a ``SimulationData`` (system prompt and tools come from
@@ -168,6 +198,7 @@ def training_rows(source, *, system_prompt: str | None = None,
     its policy trains an agent that never saw its rules.
     """
     from zeroproof.simulations import conversation
+
     rows, system, resolved_tools, _ = _resolve(source)
     if system_prompt is not None:
         system = str(system_prompt)
@@ -182,18 +213,24 @@ def training_rows(source, *, system_prompt: str | None = None,
         # (arguments/result). Without this bridge a pulled trace exports as
         # a tool-less chat and the roundtrip gate has nothing to check —
         # the dataset trains an agent that never calls a tool.
-        if (not row.get("messages") and not row.get("steps")
-                and isinstance(row.get("tool_trace"), list)):
+        if (
+            not row.get("messages")
+            and not row.get("steps")
+            and isinstance(row.get("tool_trace"), list)
+        ):
             row = dict(row)
             row["steps"] = [
-                {"tool": step.get("tool"),
-                 "arguments": step.get("input"),
-                 "result": step.get("output")}
-                for step in row["tool_trace"] if isinstance(step, dict)]
+                {
+                    "tool": step.get("tool"),
+                    "arguments": step.get("input"),
+                    "result": step.get("output"),
+                }
+                for step in row["tool_trace"]
+                if isinstance(step, dict)
+            ]
         messages = row.get("messages") or conversation(row)
         entry: dict[str, Any] = {
-            "messages": _convert_messages(messages, system=system,
-                                          strip_think=strip_think),
+            "messages": _convert_messages(messages, system=system, strip_think=strip_think),
         }
         if resolved_tools:
             entry["tools"] = list(resolved_tools)
@@ -236,11 +273,15 @@ def _stamp_groups(rows: list[dict]) -> None:
             m["n1"] = n1
 
 
-def export_training(source, output: str | None = None, *,
-                    system_prompt: str | None = None,
-                    tools: Sequence[dict] | None = None,
-                    strip_think: bool = True,
-                    validate: bool = True) -> dict[str, Any]:
+def export_training(
+    source,
+    output: str | None = None,
+    *,
+    system_prompt: str | None = None,
+    tools: Sequence[dict] | None = None,
+    strip_think: bool = True,
+    validate: bool = True,
+) -> dict[str, Any]:
     """Write ``training_rows`` as JSONL. Never overwrites the source.
 
     With a path source and no ``output``, writes ``<name>.train.jsonl``
@@ -248,8 +289,7 @@ def export_training(source, output: str | None = None, *,
     calls do not round-trip to structured arguments; pass ``validate=False``
     to export anyway and read the report instead.
     """
-    rows = training_rows(source, system_prompt=system_prompt, tools=tools,
-                         strip_think=strip_think)
+    rows = training_rows(source, system_prompt=system_prompt, tools=tools, strip_think=strip_think)
     roundtrip = tool_call_roundtrip(rows)
     if validate and roundtrip["invalid"]:
         raise ValueError(
@@ -257,18 +297,18 @@ def export_training(source, output: str | None = None, *,
             f"{roundtrip['checked']} tool calls do not parse back to "
             f"structured arguments (rows {roundtrip['rows']}); training on "
             "them teaches string-wrapped arguments. Fix the rows or pass "
-            "validate=False.")
+            "validate=False."
+        )
     _, _, _, src = _resolve(source)
     dest = output
     if not dest and src:
         path = Path(src)
-        dest = str(path.with_name(path.stem + ".train"
-                                  + (path.suffix or ".jsonl")))
+        dest = str(path.with_name(path.stem + ".train" + (path.suffix or ".jsonl")))
     report: dict[str, Any] = {
         "n": len(rows),
-        "with_system": sum(1 for r in rows
-                           if r["messages"] and
-                           r["messages"][0]["role"] == "system"),
+        "with_system": sum(
+            1 for r in rows if r["messages"] and r["messages"][0]["role"] == "system"
+        ),
         "with_tools": sum(1 for r in rows if r.get("tools")),
         "groups": len({r["group_id"] for r in rows if "group_id" in r}),
         "tool_call_roundtrip": roundtrip,
@@ -284,11 +324,15 @@ def export_training(source, output: str | None = None, *,
 export_dataset = export_training
 
 
-def export_preference(pairs: Sequence[dict], output: str | None = None, *,
-                      system_prompt: str | None = None,
-                      tools: Sequence[dict] | None = None,
-                      strip_think: bool = True,
-                      validate: bool = True) -> dict[str, Any]:
+def export_preference(
+    pairs: Sequence[dict],
+    output: str | None = None,
+    *,
+    system_prompt: str | None = None,
+    tools: Sequence[dict] | None = None,
+    strip_think: bool = True,
+    validate: bool = True,
+) -> dict[str, Any]:
     """Write chosen/rejected pairs as DPO-style JSONL.
 
     Each line: ``{"prompt": ..., "chosen": [...messages...], "rejected":
@@ -297,16 +341,20 @@ def export_preference(pairs: Sequence[dict], output: str | None = None, *,
     ``ScoredData.select_for_preference()`` / ``build_preference_pairs``.
     """
     from zeroproof.simulations import conversation
+
     entries = [p for p in pairs if isinstance(p, dict)]
-    not_pairs = [i for i, p in enumerate(entries)
-                 if not (isinstance(p.get("chosen"), dict)
-                         and isinstance(p.get("rejected"), dict))]
+    not_pairs = [
+        i
+        for i, p in enumerate(entries)
+        if not (isinstance(p.get("chosen"), dict) and isinstance(p.get("rejected"), dict))
+    ]
     if not_pairs:
         raise ValueError(
             f"export_preference takes chosen/rejected pairs, and {len(not_pairs)} "
             f"of {len(entries)} entries have no chosen/rejected side. Build the "
             "pairs first: export_preference(build_preference_pairs(rows), ...) "
-            "or scored.select_for_preference().")
+            "or scored.select_for_preference()."
+        )
     system = str(system_prompt or "")
     out_rows: list[dict] = []
     for pair in pairs:
@@ -316,27 +364,24 @@ def export_preference(pairs: Sequence[dict], output: str | None = None, *,
         for side in ("chosen", "rejected"):
             row = pair.get(side) or {}
             messages = row.get("messages") or conversation(row)
-            entry[side] = _convert_messages(messages, system=system,
-                                            strip_think=strip_think)
+            entry[side] = _convert_messages(messages, system=system, strip_think=strip_think)
         if tools:
             entry["tools"] = list(tools)
-        for key in ("chosen_reason", "rejected_reason",
-                    "rejected_failure_class", "lineage"):
+        for key in ("chosen_reason", "rejected_reason", "rejected_failure_class", "lineage"):
             if pair.get(key) is not None:
                 entry[key] = pair[key]
         out_rows.append(stamp(entry))
     check(out_rows, "preference", where="export_preference")
-    both_sides = [{"messages": r[side]} for r in out_rows
-                  for side in ("chosen", "rejected")]
+    both_sides = [{"messages": r[side]} for r in out_rows for side in ("chosen", "rejected")]
     roundtrip = tool_call_roundtrip(both_sides)
     if validate and roundtrip["invalid"]:
         raise ValueError(
             f"tool_call_roundtrip_invalid: {roundtrip['invalid']} of "
             f"{roundtrip['checked']} tool calls in the pairs do not parse "
             "back to structured arguments. Fix the rows or pass "
-            "validate=False.")
-    report: dict[str, Any] = {"pairs": len(out_rows),
-                              "tool_call_roundtrip": roundtrip}
+            "validate=False."
+        )
+    report: dict[str, Any] = {"pairs": len(out_rows), "tool_call_roundtrip": roundtrip}
     # A 0-byte JSONL is not an empty dataset, it is a crash downstream:
     # datasets raises a bare StopIteration on it and pyarrow refuses the
     # file. No pairs means no file, loudly.
@@ -346,7 +391,8 @@ def export_preference(pairs: Sequence[dict], output: str | None = None, *,
                 "no_preference_pairs: nothing had a chosen and a rejected "
                 "side. All-pass or all-fail runs produce no contrast; "
                 "regrade or raise difficulty, or pass validate=False to "
-                "get the empty report without a file.")
+                "get the empty report without a file."
+            )
         report["path"] = None
         return report
     if output:

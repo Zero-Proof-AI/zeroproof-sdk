@@ -4,6 +4,7 @@ The stamp is born in the engine, so the streamed file and a later save()
 agree. The JSON Schema and the dataclasses cannot drift. Each legacy shape
 has a fixture that round-trips through from_row / to_row.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -26,6 +27,7 @@ def _load(name: str) -> dict:
 
 # ------------------------------------------------------------------ drift
 
+
 def test_axes_match_data_conversation_fields():
     assert schema.AXES == _CONVERSATION_FIELDS
 
@@ -47,11 +49,13 @@ def test_json_schema_and_dataclasses_agree():
 
 def test_json_schema_ships_in_the_package():
     from importlib import resources
+
     path = resources.files("zeroproof.simulations") / "schemas" / "row-v1.json"
     assert path.is_file()
 
 
 # ------------------------------------------------------------------ shapes
+
 
 def test_detect_shape_and_version():
     assert schema.detect_shape(_load("engine")) == "engine"
@@ -82,15 +86,15 @@ def test_engine_shaped_rows_round_trip_byte_for_byte(name):
 def test_platform_trace_pull_normalizes_like_load_traces():
     row = _load("platform_pull")
     expected = zps.load_traces([row])[0]
-    expected.pop("tool_trace")            # load_traces carries it; to_row emits steps
+    expected.pop("tool_trace")  # load_traces carries it; to_row emits steps
     task, rollout, judgments, markers = schema.from_row(row)
     assert [s.tool for s in rollout.steps] == ["read_file", "write_file"]
     assert rollout.steps[0].arguments == '{"path": "paging.py"}'
     assert judgments[0].reward == 1 and judgments[0].scorer.name == "unlabeled"
     back = schema.to_row(task, rollout, judgments, markers)
     assert back.pop("schema_version") == "1"
-    assert back.pop("scenario_id").startswith("task_")   # none in the legacy row
-    back.pop("messages")                                 # derived
+    assert back.pop("scenario_id").startswith("task_")  # none in the legacy row
+    back.pop("messages")  # derived
     assert back == expected
 
 
@@ -122,11 +126,10 @@ def test_hugging_face_flat_rows_parse_their_json_columns():
     row = _load("hf_flat")
     assert schema.detect_shape(row) == "hf_flat"
     task, rollout, judgments, markers = schema.from_row(row)
-    assert [s.tool for s in rollout.steps] == [
-        s.get("tool") for s in json.loads(row["steps_json"])]
+    assert [s.tool for s in rollout.steps] == [s.get("tool") for s in json.loads(row["steps_json"])]
     back = schema.to_row(task, rollout, judgments, markers)
     assert back["messages"] == json.loads(row["messages_json"])
-    assert back["agent_type"] == row["agent_type"]      # unknown keys ride along
+    assert back["agent_type"] == row["agent_type"]  # unknown keys ride along
     assert back["mode"] == row["mode"]
     assert back["reward"] == row["reward"]
     assert "steps_json" not in back and "messages_json" not in back
@@ -142,12 +145,28 @@ def test_unknown_keys_pass_through():
 
 def test_garbage_never_crashes_and_the_output_validates():
     rows = [
-        {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
-         "faults": {"*": {"mode": "timeout", "rate": "half"}}},
-        {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
-         "rollout_index": "three"},
-        {"scenario_id": "s", "prompt": "p", "steps": "no", "final_text": "f",
-         "reward": True, "markers": {"a": True, "b": "x", "c": 0.5}},
+        {
+            "scenario_id": "s",
+            "prompt": "p",
+            "steps": [],
+            "final_text": "f",
+            "faults": {"*": {"mode": "timeout", "rate": "half"}},
+        },
+        {
+            "scenario_id": "s",
+            "prompt": "p",
+            "steps": [],
+            "final_text": "f",
+            "rollout_index": "three",
+        },
+        {
+            "scenario_id": "s",
+            "prompt": "p",
+            "steps": "no",
+            "final_text": "f",
+            "reward": True,
+            "markers": {"a": True, "b": "x", "c": 0.5},
+        },
         {"prompt": None, "steps": None, "final_text": None, "reward": "1"},
     ]
     for row in rows:
@@ -158,16 +177,24 @@ def test_garbage_never_crashes_and_the_output_validates():
     _, r2, _, _ = schema.from_row(rows[1])
     assert r2.index == 0
     _, _, j3, m3 = schema.from_row(rows[2])
-    assert j3[0].reward == 1                      # bool coerced, not rejected
+    assert j3[0].reward == 1  # bool coerced, not rejected
     assert {m.name: m.value for m in m3} == {"a": 1.0, "c": 0.5}
     _, _, j4, _ = schema.from_row(rows[3])
     assert j4[0].reward == 1 and j4[0].status == "ok"
 
 
 def test_judge_rows_keep_their_metadata_even_without_a_reward():
-    row = {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
-           "reward": None, "judge_status": "error", "judge_name": "j",
-           "judge_meta": {"error": "boom"}, "lineage": {"scoring_run_id": "r"}}
+    row = {
+        "scenario_id": "s",
+        "prompt": "p",
+        "steps": [],
+        "final_text": "f",
+        "reward": None,
+        "judge_status": "error",
+        "judge_name": "j",
+        "judge_meta": {"error": "boom"},
+        "lineage": {"scoring_run_id": "r"},
+    }
     task, rollout, judgments, markers = schema.from_row(row)
     j = judgments[0]
     assert j.scorer == schema.ScorerRef(name="j", kind="judge")
@@ -179,8 +206,15 @@ def test_judge_rows_keep_their_metadata_even_without_a_reward():
 
 
 def test_judge_name_and_label_source_both_survive():
-    row = {"scenario_id": "s", "prompt": "p", "steps": [], "final_text": "f",
-           "reward": 1, "judge_name": "j", "label_source": "conduct"}
+    row = {
+        "scenario_id": "s",
+        "prompt": "p",
+        "steps": [],
+        "final_text": "f",
+        "reward": 1,
+        "judge_name": "j",
+        "label_source": "conduct",
+    }
     task, rollout, judgments, markers = schema.from_row(row)
     assert judgments[0].scorer.name == "j"
     assert judgments[0].evidence["label_source"] == "conduct"
@@ -189,13 +223,13 @@ def test_judge_name_and_label_source_both_survive():
 
 
 def test_legacy_rows_are_never_rejected():
-    for name in ("engine", "platform_pull_engine", "platform_pull",
-                 "training", "hf_flat"):
+    for name in ("engine", "platform_pull_engine", "platform_pull", "training", "hf_flat"):
         assert schema.validate(_load(name)) == []
     assert schema.validate({"anything": 1}) == []
 
 
 # ------------------------------------------------------------------ validate
+
 
 def test_stamped_rows_are_type_checked():
     assert schema.validate({"schema_version": "1", "prompt": 3}) == ["prompt_not_str"]
@@ -204,8 +238,9 @@ def test_stamped_rows_are_type_checked():
     assert schema.validate({"schema_version": "9"}) == ["unknown_schema_version:9"]
     assert schema.validate("row") == ["not_a_dict"]
     assert schema.validate({"schema_version": "1"}, "training") == ["messages_missing"]
-    assert schema.validate({"schema_version": "1", "chosen": [{"role": "user"}]},
-                           "preference") == ["rejected_missing"]
+    assert schema.validate({"schema_version": "1", "chosen": [{"role": "user"}]}, "preference") == [
+        "rejected_missing"
+    ]
 
 
 def test_check_names_the_boundary_and_the_rows():
@@ -219,6 +254,7 @@ def test_push_rows_validates_before_any_network_call():
 
 
 # ------------------------------------------------------------------ engine
+
 
 def test_stamp_is_born_in_the_engine_and_stream_equals_save(tmp_path):
     out = tmp_path / "run.jsonl"

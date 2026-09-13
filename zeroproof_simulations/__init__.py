@@ -4,6 +4,7 @@
 working for now and resolve to the very same module objects, so
 ``zeroproof_simulations.run.engine is zeroproof.simulations.run.engine``.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -25,7 +26,7 @@ class _AliasFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         return None
 
     def create_module(self, spec):
-        return importlib.import_module(_NEW + spec.name[len(_OLD):])
+        return importlib.import_module(_NEW + spec.name[len(_OLD) :])
 
     def exec_module(self, module):
         return None
@@ -35,7 +36,9 @@ warnings.warn(
     "zeroproof_simulations moved to zeroproof.simulations; the old name is "
     "kept for now and goes away in a later release. Change "
     "`import zeroproof_simulations as zps` to `import zeroproof.simulations as zps`.",
-    DeprecationWarning, stacklevel=2)
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 if not any(isinstance(f, _AliasFinder) for f in sys.meta_path):
     sys.meta_path.insert(0, _AliasFinder())

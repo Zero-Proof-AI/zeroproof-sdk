@@ -1,4 +1,5 @@
 """Binary 0/1 situation grade. Default brain is hosted Qwen. Separate from simulate."""
+
 from __future__ import annotations
 
 import json
@@ -63,8 +64,9 @@ _FAULT_NAMES = {
 }
 
 
-def judge_spec(*, spec: str | None = None, base_url: str | None = None,
-               model: str | None = None) -> str:
+def judge_spec(
+    *, spec: str | None = None, base_url: str | None = None, model: str | None = None
+) -> str:
     """vLLM / OpenAI-compatible spec. Default is hosted Qwen."""
     text = str(spec or "").strip()
     if text:
@@ -85,10 +87,13 @@ def hosted_judge_endpoint() -> dict[str, str]:
     return {"spec": spec, "base_url": url, "model": model, "brain": "hosted"}
 
 
-def require_judge_key(api_key: str | None = None, *,
-                      spec: str | None = None,
-                      base_url: str | None = None,
-                      model: str | None = None) -> str:
+def require_judge_key(
+    api_key: str | None = None,
+    *,
+    spec: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> str:
     """Resolve spec. Raise if hosted Qwen is missing VLLM_API_KEY."""
     resolved = judge_spec(spec=spec, base_url=base_url, model=model)
     url, _ = parse_backend_spec(resolved)
@@ -118,14 +123,12 @@ def _step_fault_like(step: dict) -> bool:
     if result.get("stale") is True:
         return True
     status = _normalize_fault(str(result.get("status") or ""))
-    return status is not None or "garbled" in json.dumps(
-        result, default=str).lower()
+    return status is not None or "garbled" in json.dumps(result, default=str).lower()
 
 
-def _render_payload(trajectory: dict, *, policy: str = "",
-                    tools: Sequence | None = None) -> str:
+def _render_payload(trajectory: dict, *, policy: str = "", tools: Sequence | None = None) -> str:
     steps = []
-    for step in (trajectory.get("steps") or []):
+    for step in trajectory.get("steps") or []:
         if not isinstance(step, dict):
             continue
         item = {}
@@ -225,9 +228,9 @@ def _injected_fault_lead(trajectory: dict) -> str:
     )
 
 
-def _user_message(trajectory: dict, *, policy: str = "",
-                  tools: Sequence | None = None,
-                  fault_lead: bool = True) -> str:
+def _user_message(
+    trajectory: dict, *, policy: str = "", tools: Sequence | None = None, fault_lead: bool = True
+) -> str:
     # The fault lead states our default rubric (honest miss is a 1). A
     # caller-supplied judge prompt is the rubric; do not argue with it.
     lead = _injected_fault_lead(trajectory) if fault_lead else ""
@@ -279,26 +282,32 @@ def _parse_binary(text: str) -> int | None:
     return score
 
 
-def grade_one(trajectory: dict, *, policy: str = "",
-              tools: Sequence | None = None,
-              backend_spec: str | None = None,
-              api_key: str | None = None,
-              prompt: str | None = None,
-              timeout: float = 45) -> dict[str, Any]:
+def grade_one(
+    trajectory: dict,
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    backend_spec: str | None = None,
+    api_key: str | None = None,
+    prompt: str | None = None,
+    timeout: float = 45,
+) -> dict[str, Any]:
     """Score one trajectory. Returns reward 0/1 and a one-sentence reason."""
     spec = backend_spec or default_agent_spec()
     url, model = parse_backend_spec(spec)
     custom = str(prompt or "").strip()
     system = custom or JUDGE_SYSTEM
-    payload = _user_message(trajectory, policy=policy, tools=tools,
-                            fault_lead=not custom)
+    payload = _user_message(trajectory, policy=policy, tools=tools, fault_lead=not custom)
     try:
         reply = complete(
-            url, model,
-            [{"role": "system", "content": system},
-             {"role": "user", "content": payload}],
-            api_key=api_key, temperature=0.0,
-            max_tokens=JUDGE_MAX_TOKENS, timeout=timeout)
+            url,
+            model,
+            [{"role": "system", "content": system}, {"role": "user", "content": payload}],
+            api_key=api_key,
+            temperature=0.0,
+            max_tokens=JUDGE_MAX_TOKENS,
+            timeout=timeout,
+        )
     except OSError:
         return {"reward": None, "reason": ""}
     except Exception:
@@ -307,11 +316,15 @@ def grade_one(trajectory: dict, *, policy: str = "",
     return {"reward": score, "reason": reason}
 
 
-def audit_one(trajectory: dict, *, policy: str = "",
-              tools: Sequence | None = None,
-              backend_spec: str | None = None,
-              api_key: str | None = None,
-              timeout: float = 45) -> dict[str, Any]:
+def audit_one(
+    trajectory: dict,
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    backend_spec: str | None = None,
+    api_key: str | None = None,
+    timeout: float = 45,
+) -> dict[str, Any]:
     """Fairness pass on an existing 0/1. Does not overwrite reward."""
     existing = trajectory.get("reward")
     payload = _user_message(trajectory, policy=policy, tools=tools)
@@ -320,11 +333,14 @@ def audit_one(trajectory: dict, *, policy: str = "",
     url, model = parse_backend_spec(spec)
     try:
         reply = complete(
-            url, model,
-            [{"role": "system", "content": AUDIT_SYSTEM},
-             {"role": "user", "content": user[:8000]}],
-            api_key=api_key, temperature=0.0,
-            max_tokens=JUDGE_MAX_TOKENS, timeout=timeout)
+            url,
+            model,
+            [{"role": "system", "content": AUDIT_SYSTEM}, {"role": "user", "content": user[:8000]}],
+            api_key=api_key,
+            temperature=0.0,
+            max_tokens=JUDGE_MAX_TOKENS,
+            timeout=timeout,
+        )
     except OSError:
         return {"audit_reward": None, "existing": existing, "agreed": None}
     except Exception:
@@ -334,38 +350,47 @@ def audit_one(trajectory: dict, *, policy: str = "",
     return {"audit_reward": score, "existing": existing, "agreed": agreed}
 
 
-def apply_grade_llm(trajectories: Sequence[dict], *,
-                    policy: str = "",
-                    tools: Sequence | None = None,
-                    backend_spec: str | None = None,
-                    base_url: str | None = None,
-                    model: str | None = None,
-                    api_key: str | None = None,
-                    prompt: str | None = None,
-                    concurrency: int = 16,
-                    limit: int | None = None,
-                    degraded: list[str] | None = None) -> dict[str, Any]:
+def apply_grade_llm(
+    trajectories: Sequence[dict],
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    backend_spec: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    prompt: str | None = None,
+    concurrency: int = 16,
+    limit: int | None = None,
+    degraded: list[str] | None = None,
+) -> dict[str, Any]:
     """Write ``reward`` 0/1 and a one-sentence ``reason``. Search does not read this."""
     import concurrent.futures
 
-    spec = require_judge_key(
-        api_key, spec=backend_spec, base_url=base_url, model=model)
+    spec = require_judge_key(api_key, spec=backend_spec, base_url=base_url, model=model)
     rows = list(trajectories)
     if not rows:
-        return {"status": "empty", "graded": 0, "unreachable": 0,
-                "backend": spec, "seconds": 0.0, "seconds_per_row": None,
-                "n0": 0, "n1": 0}
+        return {
+            "status": "empty",
+            "graded": 0,
+            "unreachable": 0,
+            "backend": spec,
+            "seconds": 0.0,
+            "seconds_per_row": None,
+            "n0": 0,
+            "n1": 0,
+        }
     cap = len(rows) if limit is None else max(0, min(len(rows), int(limit)))
     targets = rows[:cap]
     started = time.monotonic()
 
     def one(row: dict) -> dict[str, Any]:
-        return grade_one(row, policy=policy, tools=tools, backend_spec=spec,
-                         api_key=api_key, prompt=prompt)
+        return grade_one(
+            row, policy=policy, tools=tools, backend_spec=spec, api_key=api_key, prompt=prompt
+        )
 
     if targets:
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=max(1, int(concurrency))) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(concurrency))) as pool:
             verdicts = list(pool.map(one, targets))
     else:
         verdicts = []
@@ -390,6 +415,7 @@ def apply_grade_llm(trajectories: Sequence[dict], *,
             row.pop("reason", None)
         if int(reward) == 0:
             from .preflight import classify_failure
+
             row["failure_class"] = classify_failure(row)
         else:
             row.pop("failure_class", None)
@@ -418,35 +444,42 @@ def apply_grade_llm(trajectories: Sequence[dict], *,
     }
 
 
-def audit_grades(trajectories: Sequence[dict], *,
-                 policy: str = "",
-                 tools: Sequence | None = None,
-                 backend_spec: str | None = None,
-                 base_url: str | None = None,
-                 model: str | None = None,
-                 api_key: str | None = None,
-                 concurrency: int = 16,
-                 limit: int | None = None) -> dict[str, Any]:
+def audit_grades(
+    trajectories: Sequence[dict],
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    backend_spec: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    concurrency: int = 16,
+    limit: int | None = None,
+) -> dict[str, Any]:
     """Second Qwen call. Times fairness of existing 0/1. Does not write reward."""
     import concurrent.futures
 
-    spec = require_judge_key(
-        api_key, spec=backend_spec, base_url=base_url, model=model)
+    spec = require_judge_key(api_key, spec=backend_spec, base_url=base_url, model=model)
     rows = list(trajectories)
     if not rows:
-        return {"status": "empty", "audited": 0, "unreachable": 0,
-                "agreed": 0, "disagreed": 0, "backend": spec,
-                "seconds": 0.0, "seconds_per_row": None}
+        return {
+            "status": "empty",
+            "audited": 0,
+            "unreachable": 0,
+            "agreed": 0,
+            "disagreed": 0,
+            "backend": spec,
+            "seconds": 0.0,
+            "seconds_per_row": None,
+        }
     cap = len(rows) if limit is None else max(0, min(len(rows), int(limit)))
     targets = rows[:cap]
     started = time.monotonic()
 
     def one(row: dict) -> dict[str, Any]:
-        return audit_one(row, policy=policy, tools=tools, backend_spec=spec,
-                         api_key=api_key)
+        return audit_one(row, policy=policy, tools=tools, backend_spec=spec, api_key=api_key)
 
-    with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, int(concurrency))) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(concurrency))) as pool:
         verdicts = list(pool.map(one, targets))
 
     elapsed = time.monotonic() - started

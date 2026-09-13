@@ -14,6 +14,7 @@ post-training target:
 The optimizer does not create diversity. If the mixed rate is low after
 trimming, rerun the simulator rather than squeezing this batch harder.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,7 +48,9 @@ _VERIFIED_SOURCES = ("claude", "gold")
 _RAW_TOOL_MARKUP = re.compile(r"</?tool_call>", re.I)
 _TOOL_SCHEMA_DUMP = re.compile(
     r'"name"\s*:\s*"[^"]+".{0,500}"description"\s*:'
-    r'.{0,500}"parameters"\s*:', re.I | re.S)
+    r'.{0,500}"parameters"\s*:',
+    re.I | re.S,
+)
 
 
 def _messages(row: dict) -> list[dict]:
@@ -55,6 +58,7 @@ def _messages(row: dict) -> list[dict]:
     if isinstance(msgs, list) and msgs:
         return [m for m in msgs if isinstance(m, dict)]
     from zeroproof.simulations import conversation
+
     return conversation(row)
 
 
@@ -131,7 +135,11 @@ def is_incomplete_junk(row: dict) -> bool:
     last_role = str(messages[-1].get("role") or "")
     if last_role in {"user", "tool"}:
         return True
-    return bool(not has_tool and _QUESTION_END.search(final) and len(str(row.get("prompt") or "").split()) <= 2)
+    return bool(
+        not has_tool
+        and _QUESTION_END.search(final)
+        and len(str(row.get("prompt") or "").split()) <= 2
+    )
 
 
 def _is_binary_01(value) -> bool:
@@ -155,9 +163,10 @@ def is_unusable_label(row: dict) -> bool:
 def _has_trainable_content(row: dict) -> bool:
     if _has_tool_call(row) or str(row.get("final_text") or "").strip():
         return True
-    return any(m.get("role") == "assistant"
-               and (m.get("content") or m.get("tool_calls"))
-               for m in _messages(row))
+    return any(
+        m.get("role") == "assistant" and (m.get("content") or m.get("tool_calls"))
+        for m in _messages(row)
+    )
 
 
 def is_verified_zero(row: dict) -> bool:
@@ -193,8 +202,9 @@ def drop_reason(row: dict, *, has_tools: bool = True) -> str | None:
     return None
 
 
-def filter_rl_rows(rows: Sequence[dict], *,
-                   has_tools: bool = True) -> tuple[list[dict], dict[str, Any]]:
+def filter_rl_rows(
+    rows: Sequence[dict], *, has_tools: bool = True
+) -> tuple[list[dict], dict[str, Any]]:
     """Split keep/drop. Does not mutate ``rows``."""
     kept: list[dict] = []
     counts = {DO_NOTHING: 0, INCOMPLETE_JUNK: 0, UNUSABLE_LABEL: 0}
@@ -202,9 +212,9 @@ def filter_rl_rows(rows: Sequence[dict], *,
     for row in rows:
         reason = drop_reason(row, has_tools=has_tools)
         if reason is None:
-            if (is_verified_zero(row)
-                    and (is_incomplete_junk(row)
-                         or is_do_nothing(row, has_tools=has_tools))):
+            if is_verified_zero(row) and (
+                is_incomplete_junk(row) or is_do_nothing(row, has_tools=has_tools)
+            ):
                 kept_verified += 1
             kept.append(row)
         else:
@@ -241,8 +251,7 @@ def _group_label_lists(rows: Sequence[dict]) -> dict[str, list[int]]:
     return groups
 
 
-def group_signal(rows: Sequence[dict], *, lo: float = 0.3,
-                 hi: float = 0.7) -> dict[str, Any]:
+def group_signal(rows: Sequence[dict], *, lo: float = 0.3, hi: float = 0.7) -> dict[str, Any]:
     """Within-ask contrast. Signal is a group whose k rollouts disagree.
 
     A grouped RL update learns from a mix of 0 and 1 on the same ask,
@@ -277,8 +286,9 @@ def group_signal(rows: Sequence[dict], *, lo: float = 0.3,
     }
 
 
-def trim_unanimous_groups(rows: Sequence[dict], *,
-                          min_k: int = 2) -> tuple[list[dict], dict[str, Any]]:
+def trim_unanimous_groups(
+    rows: Sequence[dict], *, min_k: int = 2
+) -> tuple[list[dict], dict[str, Any]]:
     """Drop asks whose k >= ``min_k`` rollouts all landed 0 or all landed 1.
 
     The basic optimizer from the working decision: trim zeros and ones
@@ -292,8 +302,7 @@ def trim_unanimous_groups(rows: Sequence[dict], *,
     for prompt, labels in groups.items():
         if len(labels) >= max(2, int(min_k)) and len(set(labels)) == 1:
             dead.add(prompt)
-    kept = [row for row in rows
-            if str(row.get("prompt") or "") not in dead]
+    kept = [row for row in rows if str(row.get("prompt") or "") not in dead]
     report = {
         "n": len(rows),
         "n_kept": len(kept),
@@ -318,8 +327,9 @@ def _binary_label(row: dict) -> int | None:
     return None
 
 
-def select_for_sft(rows: Sequence[dict], *,
-                   target: int = 1000) -> tuple[list[dict], dict[str, Any]]:
+def select_for_sft(
+    rows: Sequence[dict], *, target: int = 1000
+) -> tuple[list[dict], dict[str, Any]]:
     """Diverse correct demonstrations, at most ``target`` rows.
 
     Imitation clones what it sees, so only 1-labeled, non-junk rows
@@ -380,10 +390,14 @@ def select_for_sft(rows: Sequence[dict], *,
     return selected, report
 
 
-def select_for_rl(rows: Sequence[dict], *, target: int = 1000,
-                  lo: float = 0.3, hi: float = 0.7,
-                  has_tools: bool = True
-                  ) -> tuple[list[dict], dict[str, Any]]:
+def select_for_rl(
+    rows: Sequence[dict],
+    *,
+    target: int = 1000,
+    lo: float = 0.3,
+    hi: float = 0.7,
+    has_tools: bool = True,
+) -> tuple[list[dict], dict[str, Any]]:
     """Whole mixed groups up to roughly ``target`` rows. Groups never split.
 
     After the row gates and the unanimous trim, remaining asks are ranked
@@ -400,8 +414,7 @@ def select_for_rl(rows: Sequence[dict], *, target: int = 1000,
         groups.setdefault(str(row.get("prompt") or ""), []).append(row)
 
     def _score(prompt: str) -> tuple:
-        labels = [lbl for lbl in (_binary_label(r) for r in groups[prompt])
-                  if lbl is not None]
+        labels = [lbl for lbl in (_binary_label(r) for r in groups[prompt]) if lbl is not None]
         p = sum(labels) / len(labels) if labels else 0.0
         in_band = lo <= p <= hi
         return (0 if in_band else 1, abs(p - 0.5), _stable_key(prompt))
@@ -437,8 +450,7 @@ def select_for_rl(rows: Sequence[dict], *, target: int = 1000,
         "unanimous_groups_dropped": trim_report["n_groups_dropped"],
         "n_selected": len(selected),
         "groups_selected": picked_groups,
-        "fault_kinds": {fault: len(prompts)
-                        for fault, prompts in fault_buckets.items()},
+        "fault_kinds": {fault: len(prompts) for fault, prompts in fault_buckets.items()},
         "target": goal,
         "signal": group_signal(selected, lo=lo, hi=hi),
     }
@@ -451,7 +463,8 @@ def select_for_rl(rows: Sequence[dict], *, target: int = 1000,
             "no_mixed_groups: every selected group is unanimous or single, "
             "so group-relative advantages are all zero. Regrade with a "
             "stricter rubric or raise difficulty (fault_rate, harder asks) "
-            "before training on this.")
+            "before training on this."
+        )
     return selected, report
 
 
@@ -460,8 +473,9 @@ def _default_output(src: str) -> str:
     return str(path.with_name(path.stem + ".rl" + (path.suffix or ".jsonl")))
 
 
-def optimize_for_rl(source, *, output: str | None = None,
-                    trim_unanimous: bool = True) -> dict[str, Any]:
+def optimize_for_rl(
+    source, *, output: str | None = None, trim_unanimous: bool = True
+) -> dict[str, Any]:
     """Filter a JSONL path or a row list. Writes kept rows when given a path.
 
     Given a path and no ``output``, kept rows land next to the source as
@@ -512,9 +526,14 @@ def optimize_for_rl(source, *, output: str | None = None,
     return report
 
 
-def recommend(tools: Sequence[dict] | None = None, policy: str = "", *,
-              mode: str = "sft", target: int | None = None,
-              mixed_rate: float = 0.5) -> dict[str, Any]:
+def recommend(
+    tools: Sequence[dict] | None = None,
+    policy: str = "",
+    *,
+    mode: str = "sft",
+    target: int | None = None,
+    mixed_rate: float = 0.5,
+) -> dict[str, Any]:
     """How much data this agent needs, from its own grid. No guessing.
 
     Grounded two ways: the agent's measured covering grid (every cell wants
@@ -529,9 +548,9 @@ def recommend(tools: Sequence[dict] | None = None, policy: str = "", *,
     """
     from ..generate.coverage import SATURATION_COPIES
     from ..generate.scenarios import scenario_regions
+
     kind = "sft" if str(mode).lower() == "sft" else "rl"
-    cells = len(scenario_regions(list(tools or []), policy,
-                                 mode=str(mode).lower()))
+    cells = len(scenario_regions(list(tools or []), policy, mode=str(mode).lower()))
     reasoning = [f"covering grid: {cells} cells for this agent"]
     if kind == "sft":
         goal = int(target or 800)
@@ -539,17 +558,17 @@ def recommend(tools: Sequence[dict] | None = None, policy: str = "", *,
         raw = max(by_grid, 3 * goal)
         raw = int(-(-raw // 100) * 100)
         reasoning += [
-            f"saturation wants {SATURATION_COPIES} visits per cell "
-            f"= {by_grid} rows",
+            f"saturation wants {SATURATION_COPIES} visits per cell = {by_grid} rows",
             f"selection wants about 3x its target of {goal} to choose from",
             f"generate {raw}, select {goal} diverse 1-labeled rows",
             "time_budget off: a sized run stops on rows, not the clock",
         ]
         return {
-            "mode": "sft", "grid_cells": cells, "budget": raw,
+            "mode": "sft",
+            "grid_cells": cells,
+            "budget": raw,
             "optimize_target": goal,
-            "simulate_kwargs": {"mode": "sft", "budget": raw,
-                                "time_budget": None},
+            "simulate_kwargs": {"mode": "sft", "budget": raw, "time_budget": None},
             "reasoning": reasoning,
         }
     goal = int(target or 800)
@@ -569,25 +588,32 @@ def recommend(tools: Sequence[dict] | None = None, policy: str = "", *,
     reasoning += [
         f"k={k} rollouts per ask; assumed mixed-group rate {rate:.0%} "
         "(measure it with a 12-ask probe and group_signal, then recompute)",
-        f"{situations} asks x {k} = {raw} rows to select about {goal} "
-        "mixed-group rows",
+        f"{situations} asks x {k} = {raw} rows to select about {goal} mixed-group rows",
         "a low measured rate means the grid is too easy for this agent: "
         "use traces=, harder cells, or a stricter judge prompt before "
         "buying more rollouts",
     ]
     return {
-        "mode": "rl", "grid_cells": cells, "budget": raw,
-        "situations": situations, "rollouts_per_request": k,
+        "mode": "rl",
+        "grid_cells": cells,
+        "budget": raw,
+        "situations": situations,
+        "rollouts_per_request": k,
         "mixed_rate": rate,
         "optimize_target": goal,
-        "simulate_kwargs": {"mode": "rl", "situations": situations,
-                            "budget": raw, "time_budget": None},
+        "simulate_kwargs": {
+            "mode": "rl",
+            "situations": situations,
+            "budget": raw,
+            "time_budget": None,
+        },
         "reasoning": reasoning,
     }
 
 
-def optimize(source, *, mode: str | None = None, target: int = 1000,
-             output: str | None = None) -> tuple[list[dict], dict[str, Any]]:
+def optimize(
+    source, *, mode: str | None = None, target: int = 1000, output: str | None = None
+) -> tuple[list[dict], dict[str, Any]]:
     """One call after grading: concentrate for the post-training target.
 
     ``source`` is a ``SimulationData``, a row list, or a JSONL path.
@@ -615,14 +641,12 @@ def optimize(source, *, mode: str | None = None, target: int = 1000,
     if resolved == "sft":
         picked, report = select_for_sft(rows, target=target)
     else:
-        picked, report = select_for_rl(rows, target=target,
-                                       has_tools=has_tools)
+        picked, report = select_for_rl(rows, target=target, has_tools=has_tools)
     report["mode"] = resolved
     dest = output
     if not dest and src:
         path = Path(src)
-        dest = str(path.with_name(
-            path.stem + f".{resolved}" + (path.suffix or ".jsonl")))
+        dest = str(path.with_name(path.stem + f".{resolved}" + (path.suffix or ".jsonl")))
     if dest:
         report["path"] = write_jsonl(dest, picked)
         report["n_written"] = len(picked)

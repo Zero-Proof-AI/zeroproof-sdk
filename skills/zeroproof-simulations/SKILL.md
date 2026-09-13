@@ -157,14 +157,25 @@ runs. The difference is whether `traces=` is supplied:
 agent = "openai:gpt-4.1-mini"
 
 repair = zps.simulate(
-    agent=agent, tools=tools, system_prompt=policy, traces=traces,
-    mode="explore", budget=40, time_budget=150, grade=False,
+    agent=agent,
+    tools=tools,
+    system_prompt=policy,
+    traces=traces,
+    mode="explore",
+    budget=40,
+    time_budget=150,
+    grade=False,
     output="simulations/trace_guided.jsonl",
 )
 
 discovery = zps.simulate(
-    agent=agent, tools=tools, system_prompt=policy,
-    mode="explore", budget=40, time_budget=150, grade=False,
+    agent=agent,
+    tools=tools,
+    system_prompt=policy,
+    mode="explore",
+    budget=40,
+    time_budget=150,
+    grade=False,
     output="simulations/policy_guided.jsonl",
 )
 ```
@@ -202,8 +213,8 @@ converted to failures.
 ```python
 def developer_judge(row: dict):
     # Apply the target agent's policy, expected end state, tests, or evaluator.
-    return {"reward": 1 if developer_passes(row) else 0,
-            "reason": developer_reason(row)}
+    return {"reward": 1 if developer_passes(row) else 0, "reason": developer_reason(row)}
+
 
 scored = data.grade(judge=developer_judge)
 scored.save("simulations/scored.jsonl")

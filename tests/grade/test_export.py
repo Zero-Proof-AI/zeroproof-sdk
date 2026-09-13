@@ -1,4 +1,5 @@
 """Training export: system + tools attached, wire format, think stripped."""
+
 from __future__ import annotations
 
 import json
@@ -6,27 +7,40 @@ import json
 from zeroproof.simulations.export import export_training, training_rows
 from zeroproof.simulations.score.optimize import recommend
 
-TOOLS = [{"type": "function", "function": {
-    "name": "get_issue",
-    "parameters": {"type": "object",
-                   "properties": {"number": {"type": "number"}},
-                   "required": ["number"]}}}]
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_issue",
+            "parameters": {
+                "type": "object",
+                "properties": {"number": {"type": "number"}},
+                "required": ["number"],
+            },
+        },
+    }
+]
 POLICY = "Look before you act. Report misses honestly."
 
 ROW = {
     "prompt": "look up issue 4412",
     "reward": 1,
-    "steps": [{"tool": "get_issue", "arguments": {"number": 4412},
-               "result": {"status": "ok", "number": 4412}}],
+    "steps": [
+        {
+            "tool": "get_issue",
+            "arguments": {"number": 4412},
+            "result": {"status": "ok", "number": 4412},
+        }
+    ],
     "final_text": "Issue 4412 is open.",
     "messages": [
         {"role": "user", "content": "look up issue 4412"},
-        {"role": "assistant",
-         "content": "<think>user wants the issue, call the tool</think>",
-         "tool_calls": [{"name": "get_issue",
-                         "arguments": {"number": 4412}}]},
-        {"role": "tool", "name": "get_issue",
-         "content": '{"status": "ok", "number": 4412}'},
+        {
+            "role": "assistant",
+            "content": "<think>user wants the issue, call the tool</think>",
+            "tool_calls": [{"name": "get_issue", "arguments": {"number": 4412}}],
+        },
+        {"role": "tool", "name": "get_issue", "content": '{"status": "ok", "number": 4412}'},
         {"role": "assistant", "content": "Issue 4412 is open."},
     ],
 }
@@ -56,8 +70,7 @@ def test_think_blocks_never_reach_a_student_model():
     rows = training_rows([ROW], system_prompt=POLICY, tools=TOOLS)
     blob = json.dumps(rows)
     assert "<think>" not in blob
-    kept = training_rows([ROW], system_prompt=POLICY, tools=TOOLS,
-                         strip_think=False)
+    kept = training_rows([ROW], system_prompt=POLICY, tools=TOOLS, strip_think=False)
     assert "<think>" in json.dumps(kept)
 
 
@@ -92,8 +105,11 @@ def _row_with_arguments(arguments):
         "reward": 1,
         "messages": [
             {"role": "user", "content": "look up issue 4412"},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"name": "get_issue", "arguments": arguments}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"name": "get_issue", "arguments": arguments}],
+            },
             {"role": "tool", "name": "get_issue", "content": '{"status": "ok"}'},
             {"role": "assistant", "content": "Issue 4412 is open."},
         ],
@@ -102,8 +118,7 @@ def _row_with_arguments(arguments):
 
 def test_double_encoded_arguments_normalize_to_structured():
     double = json.dumps(json.dumps({"number": 4412}))
-    rows = training_rows([_row_with_arguments(double)],
-                         system_prompt=POLICY, tools=TOOLS)
+    rows = training_rows([_row_with_arguments(double)], system_prompt=POLICY, tools=TOOLS)
     wire = rows[0]["messages"][2]["tool_calls"][0]["function"]["arguments"]
     assert json.loads(wire) == {"number": 4412}
 
@@ -112,20 +127,22 @@ def test_export_refuses_unparseable_tool_arguments():
     import pytest
 
     from zeroproof.simulations.export import tool_call_roundtrip
+
     bad = _row_with_arguments("number equals 4412")
     with pytest.raises(ValueError, match="tool_call_roundtrip_invalid"):
         export_training([bad], system_prompt=POLICY, tools=TOOLS)
-    report = export_training([bad], system_prompt=POLICY, tools=TOOLS,
-                             validate=False)
+    report = export_training([bad], system_prompt=POLICY, tools=TOOLS, validate=False)
     assert report["tool_call_roundtrip"]["invalid"] == 1
     clean = training_rows([ROW], system_prompt=POLICY, tools=TOOLS)
-    assert tool_call_roundtrip(clean) == {"checked": 1, "invalid": 0,
-                                          "rows": []}
+    assert tool_call_roundtrip(clean) == {"checked": 1, "invalid": 0, "rows": []}
 
 
 def _graded(prompt: str, reward: int, tier: str = "ordinary") -> dict:
     return {
-        "prompt": prompt, "reward": reward, "tier": tier, "stance": "curt",
+        "prompt": prompt,
+        "reward": reward,
+        "tier": tier,
+        "stance": "curt",
         "messages": [
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": "done"},
@@ -135,10 +152,16 @@ def _graded(prompt: str, reward: int, tier: str = "ordinary") -> dict:
 
 def test_repeated_prompts_get_group_identity():
     rows = training_rows(
-        [_graded("refund A", 1), _graded("refund A", 0),
-         _graded("refund A", 0), _graded("lookup B", 1),
-         _graded("lookup B", 1)],
-        system_prompt=POLICY, tools=TOOLS)
+        [
+            _graded("refund A", 1),
+            _graded("refund A", 0),
+            _graded("refund A", 0),
+            _graded("lookup B", 1),
+            _graded("lookup B", 1),
+        ],
+        system_prompt=POLICY,
+        tools=TOOLS,
+    )
     a = [r for r in rows if r["prompt"] == "refund A"]
     b = [r for r in rows if r["prompt"] == "lookup B"]
     assert {r["group_id"] for r in a} != {r["group_id"] for r in b}
@@ -147,14 +170,14 @@ def test_repeated_prompts_get_group_identity():
 
 
 def test_unique_prompts_get_no_group_fields():
-    rows = training_rows([_graded("one", 1), _graded("two", 0)],
-                         system_prompt=POLICY, tools=TOOLS)
+    rows = training_rows([_graded("one", 1), _graded("two", 0)], system_prompt=POLICY, tools=TOOLS)
     assert all("group_id" not in r and "k" not in r for r in rows)
 
 
 def test_diversity_axes_survive_export():
-    rows = training_rows([_graded("refund A", 1, tier="adversarial")],
-                         system_prompt=POLICY, tools=TOOLS)
+    rows = training_rows(
+        [_graded("refund A", 1, tier="adversarial")], system_prompt=POLICY, tools=TOOLS
+    )
     assert rows[0]["tier"] == "adversarial"
     assert rows[0]["stance"] == "curt"
 
@@ -165,8 +188,11 @@ def test_pulled_tool_trace_rows_export_with_tool_calls():
         "final_text": "Done, tests pass.",
         "reward": 1,
         "tool_trace": [
-            {"tool": "read_file", "input": '{"path": "paging.py"}',
-             "output": "def page_count(): ..."},
+            {
+                "tool": "read_file",
+                "input": '{"path": "paging.py"}',
+                "output": "def page_count(): ...",
+            },
         ],
     }
     rows = training_rows([row], system_prompt=POLICY, tools=TOOLS)
@@ -174,4 +200,5 @@ def test_pulled_tool_trace_rows_export_with_tool_calls():
     assert len(calls) == 1
     assert json.loads(calls[0]["function"]["arguments"]) == {"path": "paging.py"}
     from zeroproof.simulations.export import tool_call_roundtrip as rt
+
     assert rt(rows) == {"checked": 1, "invalid": 0, "rows": []}
