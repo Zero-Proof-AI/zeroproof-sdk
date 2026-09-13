@@ -15,6 +15,7 @@ Stdlib only.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -23,8 +24,8 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 DEFAULT_API_URL = "https://api.zeroproofai.com"
 
@@ -54,10 +55,8 @@ def _write_private(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    try:
+    with contextlib.suppress(OSError):  # Windows
         os.chmod(tmp, 0o600)
-    except OSError:  # Windows
-        pass
     os.replace(tmp, path)
 
 
@@ -83,8 +82,11 @@ def resolve_api_key(explicit: str | None = None) -> str | None:
 
 def _post(path: str, body: dict, timeout: int = 30) -> tuple[int, dict]:
     request = urllib.request.Request(
-        _api_url() + path, data=json.dumps(body).encode(), method="POST",
-        headers={"Content-Type": "application/json"})
+        _api_url() + path,
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, json.loads(response.read() or b"{}")
@@ -123,8 +125,14 @@ def _resume() -> dict | None:
     return flow
 
 
-def login(*, name: str | None = None, wait: bool = True, timeout: float | None = None,
-          open_browser: bool = True, out: Callable[[str], None] | None = None) -> str | None:
+def login(
+    *,
+    name: str | None = None,
+    wait: bool = True,
+    timeout: float | None = None,
+    open_browser: bool = True,
+    out: Callable[[str], None] | None = None,
+) -> str | None:
     """Run the device login. Returns the API key, or ``None`` if still pending.
 
     ``wait=False`` prints the link and returns at once; run again to finish.
@@ -144,10 +152,8 @@ def login(*, name: str | None = None, wait: bool = True, timeout: float | None =
     say(f"    code: {flow['user_code']}")
     say("")
     if open_browser:
-        try:
+        with contextlib.suppress(Exception):
             webbrowser.open(flow["verification_uri_complete"])
-        except Exception:  # noqa: BLE001  headless box, no browser
-            pass
     if not wait:
         say("Run `zeroproof login` again once you have approved.")
         return None
@@ -170,17 +176,18 @@ def login(*, name: str | None = None, wait: bool = True, timeout: float | None =
             continue
         failures = 0
         if status == 200 and data.get("api_key"):
-            _write_private(credentials_path(), {
-                "api_key": data["api_key"],
-                "api_url": flow["api_url"],
-                "name": data.get("name"),
-                "user_id": data.get("user_id"),
-                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            })
-            try:
+            _write_private(
+                credentials_path(),
+                {
+                    "api_key": data["api_key"],
+                    "api_url": flow["api_url"],
+                    "name": data.get("name"),
+                    "user_id": data.get("user_id"),
+                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                },
+            )
+            with contextlib.suppress(OSError):
                 _pending_path().unlink()
-            except OSError:
-                pass
             say(f"Logged in. Key saved to {credentials_path()}")
             return data["api_key"]
         error = data.get("error", "")
@@ -194,10 +201,8 @@ def login(*, name: str | None = None, wait: bool = True, timeout: float | None =
             interval += 5
             time.sleep(interval)
             continue
-        try:
+        with contextlib.suppress(OSError):
             _pending_path().unlink()
-        except OSError:
-            pass
         if error == "expired_token":
             raise LoginError("That code expired. Run `zeroproof login` again.")
         raise LoginError(f"Login failed ({status}): {error or data}")

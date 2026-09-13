@@ -1,4 +1,5 @@
 """`zeroproof login`: the device flow from the CLI's side, with the gate faked."""
+
 from __future__ import annotations
 
 import json
@@ -23,10 +24,12 @@ class FakeGate:
         if path == "/device/code":
             self.started += 1
             return 200, {
-                "device_code": "d" * 64, "user_code": "ABCD-EFGH",
+                "device_code": "d" * 64,
+                "user_code": "ABCD-EFGH",
                 "verification_uri": "https://www.zeroproofai.com/device",
                 "verification_uri_complete": "https://www.zeroproofai.com/device?code=ABCD-EFGH",
-                "expires_in": 900, "interval": 0,
+                "expires_in": 900,
+                "interval": 0,
             }
         if path == "/device/token":
             assert body == {"device_code": "d" * 64, "user_code": "ABCD-EFGH"}

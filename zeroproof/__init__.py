@@ -27,14 +27,14 @@ except PackageNotFoundError:  # running from a source tree that was never instal
     __version__ = "0.0.0"
 
 __all__ = [
+    "LoginError",
     "ZeroProofIngestError",
     "__version__",
-    "login",
-    "logout",
-    "resolve_api_key",
-    "LoginError",
     "ingest_traces",
     "list_traces",
+    "login",
+    "logout",
     "otel_env",
+    "resolve_api_key",
     "send_traces",
 ]
