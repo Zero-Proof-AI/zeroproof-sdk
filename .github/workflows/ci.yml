@@ -33,6 +33,24 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
 
+  coverage:
+    name: line coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          # 3.12 for COVERAGE_CORE=sysmon. Under the default C tracer this
+          # suite takes over half an hour; under sys.monitoring it costs
+          # about 20s on top of an uninstrumented run. Do not drop the
+          # pin or the env var without re-timing the job.
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      - run: uv run pytest -q --cov=zeroproof --cov-report=term
+              --cov-fail-under=84
+        env:
+          COVERAGE_CORE: sysmon
+
   build:
     name: build is installable
     runs-on: ubuntu-latest
