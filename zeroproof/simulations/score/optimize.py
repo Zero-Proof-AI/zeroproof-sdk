@@ -32,6 +32,7 @@ from .grading import (
     behavior_signature,
     trace_fault,
 )
+from .passat import pass_at
 from .quality import _IDISH, _QUESTION_END, _STRONG_ACTION, load_jsonl, write_jsonl
 
 # Public drop tags. optimize_rl uses these strings in the report.
@@ -275,6 +276,7 @@ def group_signal(rows: Sequence[dict], *, lo: float = 0.3, hi: float = 0.7) -> d
         else:
             n_all_one += 1
     multi = n_mixed + n_all_zero + n_all_one
+    rates = pass_at(rows)
     return {
         "n_groups": len(groups),
         "n_single": n_single,
@@ -283,6 +285,13 @@ def group_signal(rows: Sequence[dict], *, lo: float = 0.3, hi: float = 0.7) -> d
         "n_all_one": n_all_one,
         "n_in_band": in_band,
         "mixed_rate": (n_mixed / multi) if multi else None,
+        # The same groups in post-training vocabulary. pass@k - pass@1 is
+        # the headroom the mixed groups carry; see score/passat.py.
+        "k": rates.k,
+        "pass_at_1": rates.pass_at_1,
+        "pass_pow_k": rates.pass_pow_k,
+        "pass_at_k": rates.pass_at_k,
+        "headroom": rates.headroom,
     }
 
 
@@ -592,6 +601,8 @@ def recommend(
         "a low measured rate means the grid is too easy for this agent: "
         "use traces=, harder cells, or a stricter judge prompt before "
         "buying more rollouts",
+        "in post-training terms the mixed rate is the pass@k - pass@1 headroom "
+        "(group_signal reports both); pass@k near pass@1 means nothing to learn",
     ]
     return {
         "mode": "rl",

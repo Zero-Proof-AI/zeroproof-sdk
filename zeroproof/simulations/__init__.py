@@ -83,6 +83,7 @@ from .score.optimize import (
     select_for_sft,
     trim_unanimous_groups,
 )
+from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
 from .score.quality import rank_rows, score_row
 from .simulation import resolve_topology, simulate
@@ -102,6 +103,7 @@ __all__ = [
     "Marker",
     "MockEnvironment",
     "ModelSimulator",
+    "PassAt",
     "Rollout",
     "ScoredData",
     "SimulationData",
@@ -144,6 +146,7 @@ __all__ = [
     "novelty",
     "open_ended_probes",
     "optimize",
+    "pass_at",
     "policy_sections",
     "preflight",
     "pull",
