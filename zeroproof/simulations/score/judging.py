@@ -174,6 +174,15 @@ class ScoredData:
         """Failures, ready to hand to ``simulate(traces=...)``."""
         return self.failures()
 
+    @property
+    def pass_at(self):
+        """pass@1 / pass^k / pass@k over the graded groups (``PassAt``).
+        pass@1 for measurement, pass^k for reliability, pass@k - pass@1
+        for RL headroom. See ``zeroproof.simulations.score.passat``."""
+        from .passat import pass_at
+
+        return pass_at(self.rows)
+
     def unjudged(self) -> list[dict]:
         """Rows the judge could not score. Never treated as failures."""
         return [r for r in self.rows if r.get("judge_status") != "ok"]

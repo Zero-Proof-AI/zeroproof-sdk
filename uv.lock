@@ -814,7 +814,7 @@ wheels = [
 
 [[package]]
 name = "zeroproof"
-version = "0.16"
+version = "0.17"
 source = { editable = "." }
 dependencies = [
     { name = "requests" },
