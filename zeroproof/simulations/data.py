@@ -476,6 +476,7 @@ class SimulationData:
                         "tools": list(getattr(self.profile, "tools", None) or []),
                         "stopped_because": self.stopped_because,
                         "coverage": self.coverage,
+                        "pass_at": self.pass_at.to_dict(),
                         "coverage_curve": self.coverage_curve,
                         "arm_weights": self.arm_weights,
                         "arm_yield": self.arm_yield,
@@ -506,6 +507,14 @@ class SimulationData:
     def report(self) -> dict:
         """Run-level coverage summary (same as ``data.coverage``)."""
         return dict(self.coverage)
+
+    @property
+    def pass_at(self):
+        """pass@1 / pass^k / pass@k over graded rows, grouped by prompt
+        (``PassAt``). Ungraded runs report ``None`` with a note."""
+        from .score.passat import pass_at
+
+        return pass_at(self.trajectories)
 
 
 def llm_grade(

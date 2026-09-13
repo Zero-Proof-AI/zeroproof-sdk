@@ -230,6 +230,13 @@ Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollo
 
 Each row, in `data.trajectories` and on disk: `prompt`, `messages`, `steps`, `final_text`, `scenario_id`. Optional `world_state`, `faults`, `reward`, `reason`. `llm_grade=True` adds `llm_reward`. `zps.rank(path)` adds `quality` without changing `reward`.
 
+After grading, `data.pass_at` (also on the `ScoredData` from `judge=` and `evaluate`) gives pass@1, pass^k and pass@k off the same groups, one job each: pass@1 is the measurement headline (the agent runs once in production), pass^k is the reliability line (all k repeats pass), and pass@k minus pass@1 (`.headroom`) is what a grouped RL update has to learn from, the same asks `group_signal` counts as mixed. k is the smallest group of repeats; below `repeats=4` the k-way numbers are `None` with a note rather than a noisy figure. `.per_task` is the raw per-prompt pass-rate vector. With an LLM judge, pass@k inflates on false positives and pass^k on false negatives, so pass@1 stays the headline.
+
+```python
+scored = data.grade(judge=my_judge)
+print(scored.pass_at)  # pass@1 0.61 | pass^8 0.32 | pass@8 0.88 | headroom 0.27 (200 groups, k=8)
+```
+
 Every row carries `schema_version` (`"1"`). A row is a projection of four objects in `zeroproof.simulations.schema`: `Task` (the situation), `Rollout` (one episode), `Judgment` (a scorer's verdict), `Marker` (a behavior measurement). `zps.from_row(row)` splits a row into them and `zps.to_row(...)` flattens them back. The wire contract is `zeroproof/simulations/schemas/row-v1.json`. Rows written before the stamp are version 0 and load by shape, so older files still work.
 
 ## The recipe
