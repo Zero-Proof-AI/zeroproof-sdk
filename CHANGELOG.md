@@ -3,6 +3,35 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Judge verdicts: a complete JSON object in the reply decides on its own.
+  A string-typed score, a duplicate `score` key, a `score` that disagrees
+  with a `reward`, a bool, NaN or 1.5 leave the row ungraded; the digit
+  salvage runs only when no complete object exists (#64).
+- A broken `agent=` callable ends the run as `stopped_because="agent_failed"`
+  instead of `writer_exhausted`, with `search["agent_errors"]`,
+  `search["first_agent_error"]` (exception type included), a degraded note
+  and a logged warning. A return shape without `steps`/`final_text` counts
+  the same way. README states the callable contract (#29).
+- `examples/agent-behavior` runs on a fresh clone: the uncommitted
+  `tasks_hard` pack is optional. `tests/examples/` smoke-tests every
+  example offline (#38).
+- `rows_from_otel` sums `gen_ai.usage.*` (and the `llm.token_count.*`
+  dialect) into `row["usage"]`, the shape simulated rows carry (#67).
+- `simulate()` documents `lineage.scoring_run_id` as per-invocation
+  identity outside the bit-for-bit guarantee; the `grader=` path is now
+  pinned by the reproducibility test (#58).
+- `select_for_rl`, `select_for_sft` and `build_preference_pairs` report
+  `eval_sourced` (rows or pairs whose reward came from `evaluate()`) and
+  warn when it is non-zero; `optimize.eval_sourced(rows)` is the count on
+  its own. No row is dropped (#37).
+- The covering array behind `scenario_regions` is memoized per process;
+  each writer wave was rebuilding it and throwing it away. The slowest
+  test drops from 26-49 s to under 1 s and the suite from 162 s to
+  100 s. Rows out of the simulator are unchanged (golden harness: 13/13
+  identical) (#36).
+
 ## 0.27 (2026-09-14)
 
 - Character training docs and example README point at the dataset's
