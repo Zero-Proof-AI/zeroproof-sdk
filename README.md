@@ -369,7 +369,9 @@ zps.compare_runs(run_a, run_b)  # paired delta with a 95% interval
 zps.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_after_fault"])
 zps.delta_report(before, after, target="pass_at_1", by="category")  # the target per kind of prompt
 noise = zps.eval_variance(eval_run_1, eval_run_2, eval_run_3)  # re-run std of the eval itself
-zps.delta_report(before, after, target="pass_at_1", run_std=noise["run_std"])  # inside the band = no verdict
+zps.delta_report(
+    before, after, target="pass_at_1", run_std=noise["run_std"]
+)  # inside the band = no verdict
 ```
 
 **Judge trust.** Label 30 to 100 rows by hand as `gold_reward` (0/1). The report gives agreement with a Wilson interval and Cohen's kappa, agreement on two task halves (tune the rubric on one, read the other), judge pass rate on short versus long replies within the same human label (length bias the humans rule out), and, with the judge callable, a re-judge of a sample as-is (consistency) and with neutral filler appended (a flip means the judge reads length). Disagreements come back as a review queue. `format_judge_trust(report)` prints it. The gold set needs both passes and failures; with one class only the report says so and skips the kappa and length flags. With the hosted judge, call `zps.grade` once first (or `warm_judge`) so the cold start, two to three minutes, is not counted as timeouts.
