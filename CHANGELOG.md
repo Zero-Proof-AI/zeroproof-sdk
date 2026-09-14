@@ -10,7 +10,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   (`prompts.balance`), so the no-id and off-topic prompts reach the
   update at the rate they matter. The invented-id regression the
   stratified holdout exposed is a sampling-frequency problem, not a
-  reward one; the README shows it closing.
+  reward one for GRPO: the invented-id rate on no-id prompts drops 0.23
+  to 0.08 at 120 steps. One-round DPO does not move on it (no pairs
+  where the base never fails); a second round is DPO's lever.
 - `examples/hosted-loop`: push, `zps.train`, `zps.serve`, call, as one
   script with a state file per step; the wiring check for training on the
   platform, with the served-base, cold-start and thinking-mode notes a
