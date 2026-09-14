@@ -5,6 +5,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- A policy edit keeps the task grid (#98). The covering array is built in
+  layers: a rule-free block over tools and situation axes, then one block
+  per policy clause, rotated by the clause text. Editing, adding or
+  removing one clause changes that clause's cells only; every other
+  `scenario_id` survives, so `compare_runs` stays paired after a prompt
+  change (12 of 53 tasks paired before; all of them now). The grid is
+  larger by the rule-free block, and cells in it carry no rule hint.
+  Fault rows are kept per row from the row's own digest, one of every
+  kind guaranteed, so a grid that grows keeps the verdict on the rows it
+  had. Every existing grid changes once with this release.
+- `compare_runs` says when it dropped tasks: `note` names how many were
+  on one side only and that the verdict rests on the shared ones, with
+  "most tasks unpaired" in front when fewer than half paired;
+  `paired_share` is the fraction. `delta_report` carries it as a warning
+  on the headline metric and reports `n_unpaired_tasks`.
 - `examples/hosted-loop`: push, `zps.train`, `zps.serve`, call, as one
   script with a state file per step; the wiring check for training on the
   platform, with the served-base, cold-start and thinking-mode notes a

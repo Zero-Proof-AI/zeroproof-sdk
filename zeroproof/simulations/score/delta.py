@@ -86,7 +86,8 @@ def delta_report(
     or ``"marker:<name>"``); the verdict on it is the headline.
     ``must_not_regress`` lists metrics whose significant drop fails the
     report. Metric names for markers are the marker names; pass@1 is
-    ``"pass_at_1"``.
+    ``"pass_at_1"``. Tasks on one side only do not pair; their count is
+    ``n_unpaired_tasks`` and, when any were dropped, a warning says so.
 
     ``by`` splits the target by a group on each row: a row key (top level,
     or a marker name) or a callable ``row -> group``. The report gains
@@ -140,8 +141,10 @@ def delta_report(
         warnings.append(
             f"{m} dropped {r['delta']:+.3f} (95% {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f})"
         )
-    if target_result and target_result.get("note"):
-        warnings.append(f"{target_key}: {target_result['note']}")
+    headline = target_result if target_result else results["pass_at_1"]
+    headline_key = target_key if target_result else "pass_at_1"
+    if headline.get("note"):
+        warnings.append(f"{headline_key}: {headline['note']}")
     if target_verdict == "target_not_measured":
         warnings.append(f"target {target!r} is not on both row sets")
     groups: dict[str, dict[str, Any]] | None = None
@@ -167,6 +170,7 @@ def delta_report(
         "target_delta": target_result["delta"] if target_result else None,
         "target_ci95": target_result["ci95"] if target_result else None,
         "n_paired_tasks": results["pass_at_1"]["n_paired"],
+        "n_unpaired_tasks": results["pass_at_1"]["n_only_a"] + results["pass_at_1"]["n_only_b"],
         "improved": improved,
         "regressions": regressions,
         "slipped": slipped,

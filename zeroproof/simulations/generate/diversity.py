@@ -499,8 +499,12 @@ def sample_cell_tags(
     situation: dict[str, Any] = {}
     if assignment.get("tool"):
         situation["tool"] = assignment["tool"]
-    if assignment.get("rule"):
-        hint = _private_hint(assignment["rule"])
+    rule = str(assignment.get("rule") or "")
+    if rule and rule != "unspecified":
+        # A rule-free cell (the block that pairs the other axes, or a run
+        # with no policy) gets no rule hint, so its card does not move
+        # when the policy does.
+        hint = _private_hint(rule)
         if hint:
             situation["rule"] = hint
 
