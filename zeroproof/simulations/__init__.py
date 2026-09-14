@@ -158,6 +158,7 @@ from .score.stats import (
     metric_summary,
 )
 from .score.style import refusal_report, style_markers, style_report
+from .score.trace import trace_flag_report, trace_flags, trace_markers
 from .simulation import resolve_topology, simulate
 from .training import (
     TrainerCallback,
@@ -339,6 +340,9 @@ __all__ = [
     "style_markers",
     "style_report",
     "to_row",
+    "trace_flag_report",
+    "trace_flags",
+    "trace_markers",
     "trace_report",
     "train",
     "training_rows",

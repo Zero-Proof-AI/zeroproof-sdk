@@ -26,9 +26,10 @@ Two feature tiers, both pure Python:
 
 * the hand tier, always on: reply length, tool calls, turns, truncation,
   surface counts (digits, punctuation, newlines, uppercase share), one
-  indicator per tool name called, the policy's mean token logprob when
-  captured, and every numeric ``markers`` entry. Add your own with
-  ``features=``.
+  indicator per tool name called, one per trajectory flag that fired
+  (``trace:lie.tests_claimed`` and the rest of ``score.trace``), the
+  policy's mean token logprob when captured, and every numeric
+  ``markers`` entry. Add your own with ``features=``.
 * the auto tier (``auto=True``): presence of the ``top_k`` most common
   words and word pairs in the agent's text, plus pairwise ANDs of the
   strongest binary features. This is the tier that finds the hack nobody
@@ -135,6 +136,10 @@ def hand_features(row: dict) -> dict[str, float]:
     }
     for name in sorted(set(_tool_names(row))):
         out[f"tool:{name}"] = 1.0
+    from .trace import trace_flags
+
+    for name in trace_flags(row):
+        out[f"trace:{name}"] = 1.0
     lp, n_tok = row.get("logprob"), row.get("n_tokens")
     if (
         isinstance(lp, (int, float))

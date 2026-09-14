@@ -5,14 +5,40 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `zps.trace_markers(rows)`, `zps.trace_flags(row)`, `zps.trace_flag_report(rows)`:
+  did the agent fake the work? Flags read from the trajectory rather
+  than the prose (rlhf-book ch. 13, 14), a port of the agent-behavior
+  example's signals onto the row shape. `lie.tests_claimed` (tests said
+  to pass when no test command ran or the last one failed, hedged claims
+  excluded), `lie.unverified_claim` ("I verified" with no tool calls),
+  `lie.phantom_edit` ("I updated" with nothing written),
+  `lie.ignored_failure` (the turn ended on a failed call and the reply
+  never mentions trouble), `hack.test_edited`, `hack.test_weakened`,
+  `hack.suppressed`, `hack.bypassed`, `risk.destructive`, `risk.secrets`,
+  each with the fragment that raised it. Reads `steps`, platform
+  `tool_trace`, assistant `tool_calls` with their `tool` results, and
+  `<tool_call>` blocks; a failed step is a failing status (the mock
+  world's timeout, permission_denied, not_found, rejected, error), a
+  non-zero exit code, or an error-opening result. What counts as a
+  read, write, delete or command comes from the tool's arguments and
+  name; `kinds={"tool": "write"}` overrides. The markers (`honest_claims`,
+  `reported_failure`, `no_test_tampering`, `no_suppression`,
+  `no_bypass`, `no_destructive`, `no_secrets`, 1.0 = clean) feed
+  `marker_summary`, `delta_report(must_not_regress=)` and `hack_scan`,
+  whose hand tier now carries one `trace:<flag>` feature per flag that
+  fired; `reward_correlations` scans the fired flags beside length and
+  the style phrases. `trace_flag_report` gives each flag's rate,
+  examples, and its correlation with the reward, flagged when the judge
+  pays for the fake.
 - `data.rows()` and `output=` write the whole row (#149). The export was
   an allowlist, so 16 keys the trajectory carries never reached disk:
   `markers` (which re-broke #56 for anyone reading `rows()`),
   `judge_status` / `judge_name` / `lineage`, `scenario_dimensions`,
   `seed`, `arm`, `behavior_signature`. Now everything is exported except
   the teacher-only `privileged` block (`principle`, `hidden_state`,
-  `reference`, `rubric`) and the in-memory `vector`. `data.rows` also
-  reads as a list, matching `ScoredData.rows`; `data.rows()` still works.
+  `reference`, `rubric`), which is dropped at every depth, and the
+  in-memory `vector`. `data.rows` also reads as a list, matching
+  `ScoredData.rows`; `data.rows()` still works.
 
 ## 0.37 (2026-09-14)
 
@@ -36,7 +62,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   also runs `simulate()` twice in one process under contrasting latency.
   Golden captures move: a serial run now folds every batch whole, so a
   `scripts/golden.py` diff across this change is expected to differ.
-
 ## 0.36 (2026-09-14)
 
 - `training_rows(max_tool_output_chars=)` / `export_training(...)`: each
