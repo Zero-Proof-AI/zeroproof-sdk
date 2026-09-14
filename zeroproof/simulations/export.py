@@ -219,6 +219,7 @@ def training_rows(
     tools: Sequence[dict] | None = None,
     strip_think: bool = True,
     mask_mode: str = "assistant",
+    unroll: bool = False,
 ) -> list[dict]:
     """Rows a trainer can consume directly. See the module docstring.
 
@@ -227,6 +228,17 @@ def training_rows(
     ``system_prompt=`` and ``tools=`` explicitly; a row exported without
     its policy trains an agent that never saw its rules. ``mask_mode``
     picks which assistant turns carry loss (see ``loss_mask``).
+
+    ``unroll=True`` turns an N-turn conversation into N samples, the
+    k-th ending at the k-th assistant turn with loss on that turn only
+    (rlhf-book ch. 4, multi-turn masking). Every earlier agent turn then
+    trains once with exactly the context it had, instead of only the
+    last one (``mask_mode="final"``) or all of them at once (``"assistant"``,
+    where later turns see context the policy never produced). Each sample
+    carries ``unroll`` (``turn``, ``turns``) and ``lineage.unrolled_from``
+    (the source row's prompt hash and rollout index); ``mask_mode`` is
+    ignored, and no group fields are stamped, since samples of one
+    conversation are not a GRPO group.
     """
     if mask_mode not in MASK_MODES:
         raise ValueError(f"mask_mode must be one of {MASK_MODES}, got {mask_mode!r}")
@@ -274,10 +286,43 @@ def training_rows(
         for key in _CARRY_KEYS:
             if row.get(key) is not None:
                 entry[key] = row[key]
-        out.append(stamp(entry))
-    _stamp_groups(out)
+        if unroll:
+            out.extend(stamp(sample) for sample in _unroll(entry, row))
+        else:
+            out.append(stamp(entry))
+    if not unroll:
+        _stamp_groups(out)
     check(out, "training", where="training_rows")
     return out
+
+
+def _unroll(entry: dict, row: dict) -> list[dict]:
+    """One sample per assistant turn: the conversation up to that turn,
+    loss on it alone. A conversation with no assistant turn is one sample
+    as it stands."""
+    messages = entry["messages"]
+    turns = [
+        i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "assistant"
+    ]
+    if not turns:
+        return [entry]
+    source = {
+        "prompt_sha1": hashlib.sha1(str(row.get("prompt") or "").encode("utf-8")).hexdigest()[:12],
+        "rollout_index": row.get("rollout_index"),
+    }
+    if row.get("scenario_id"):
+        source["scenario_id"] = row["scenario_id"]
+    samples: list[dict] = []
+    for k, i in enumerate(turns, 1):
+        sample = dict(entry)
+        sample["messages"] = list(messages[: i + 1])
+        sample["loss_mask"] = [1 if j == i else 0 for j in range(i + 1)]
+        sample["unroll"] = {"turn": k, "turns": len(turns)}
+        lineage = dict(entry.get("lineage") or {})
+        lineage["unrolled_from"] = dict(source)
+        sample["lineage"] = lineage
+        samples.append(sample)
+    return samples
 
 
 def _numeric(value: Any) -> float | None:
@@ -343,6 +388,7 @@ def export_training(
     strip_think: bool = True,
     validate: bool = True,
     mask_mode: str = "assistant",
+    unroll: bool = False,
 ) -> dict[str, Any]:
     """Write ``training_rows`` as JSONL. Never overwrites the source.
 
@@ -357,6 +403,7 @@ def export_training(
         tools=tools,
         strip_think=strip_think,
         mask_mode=mask_mode,
+        unroll=unroll,
     )
     roundtrip = tool_call_roundtrip(rows)
     if validate and roundtrip["invalid"]:
@@ -380,7 +427,8 @@ def export_training(
         "with_tools": sum(1 for r in rows if r.get("tools")),
         "groups": len({r["group_id"] for r in rows if "group_id" in r}),
         "tool_call_roundtrip": roundtrip,
-        "mask_mode": mask_mode,
+        "mask_mode": "final (unrolled)" if unroll else mask_mode,
+        "unrolled": unroll,
         "trained_messages": sum(sum(r["loss_mask"]) for r in rows),
         "masked_messages": sum(len(r["loss_mask"]) - sum(r["loss_mask"]) for r in rows),
     }
