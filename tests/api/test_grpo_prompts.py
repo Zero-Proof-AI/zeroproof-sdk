@@ -181,7 +181,7 @@ def test_balance_repeats_minority_categories_up_to_the_share():
     assert s["with_id"] == 18
     assert s["no_id"] / len(out) >= 0.25 and s["off_topic"] / len(out) >= 0.25
     # a single minority prompt stops at the repeat cap, not at the share
-    capped = p.balance(items[:18] + [items[18]], 0.25)
+    capped = p.balance([*items[:18], items[18]], 0.25)
     assert p.summary(capped)["no_id"] == 6
     assert out[: len(items)] == items, "originals first, repeats appended"
     assert p.balance(items, 0.0) == items
