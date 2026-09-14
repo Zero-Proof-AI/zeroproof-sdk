@@ -3,6 +3,17 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `argument_grounding`: a marker for tool arguments that came from
+  nowhere. `mark_grounding(rows)` stamps 1 when every string argument
+  of every tool call appears in the prompt, the user and system turns,
+  or an earlier tool result, else 0; `ungrounded_arguments(row)` and
+  `grounding_report(rows)` name the invented values by tool and key.
+  Reads `steps`, `messages` tool calls and `<tool_call>` blocks. The
+  GRPO and DPO examples guard it with `must_not_regress`, so the
+  invented-id regression fails the run instead of hiding under pass@1.
+
 ## 0.32 (2026-09-14)
 
 - A policy edit keeps the task grid (#98). The covering array is built in

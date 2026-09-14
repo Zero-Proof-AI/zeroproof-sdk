@@ -225,7 +225,7 @@ def train(
     before_replies = _sample(
         model, tokenizer, holdout_prompts, n=eval_samples, max_new_tokens=max_completion_length
     )
-    before_rows = _stamp(reward_rows(holdout_prompts, before_replies))
+    before_rows = zps.mark_grounding(_stamp(reward_rows(holdout_prompts, before_replies)))
     before = zps.pass_at(before_rows)
     print(f"before: {before}")
 
@@ -312,7 +312,7 @@ def train(
     after_replies = _sample(
         policy, tokenizer, holdout_prompts, n=eval_samples, max_new_tokens=max_completion_length
     )
-    after_rows = _stamp(reward_rows(holdout_prompts, after_replies))
+    after_rows = zps.mark_grounding(_stamp(reward_rows(holdout_prompts, after_replies)))
     after = zps.pass_at(after_rows)
     print(f"after:  {after}")
     print(f"by category: before {_by_category(before_rows)}")
@@ -356,7 +356,7 @@ def train(
             before_rows,
             after_rows,
             target="pass_at_1",
-            must_not_regress=["well_formed"],
+            must_not_regress=["well_formed", "argument_grounding"],
             by="category",
         )
         run.finish("done", summary=summary, adapter=f"zeroproof-dpo-runs:/{run_name}/adapter")
@@ -366,7 +366,7 @@ def train(
             before_rows,
             after_rows,
             target="pass_at_1",
-            must_not_regress=["well_formed"],
+            must_not_regress=["well_formed", "argument_grounding"],
             by="category",
         )
     print(zps.format_delta_report(delta))
