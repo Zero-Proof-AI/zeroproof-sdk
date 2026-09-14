@@ -108,7 +108,9 @@ def test_load_prompts_rebuilds_cases_and_split_by_scenario(tmp_path):
 def test_checked_in_prompt_set_is_well_formed():
     _, p = _modules()
     path = EXAMPLE / "prompts.jsonl"
-    assert path.exists(), "examples/grpo/prompts.jsonl is checked in; *.jsonl is ignored so it needs its own unignore line"
+    assert path.exists(), (
+        "examples/grpo/prompts.jsonl is checked in; *.jsonl is ignored so it needs its own unignore line"
+    )
     items = p.load_prompts(str(path))
     assert len(items) >= 200
     assert len({i["prompt"] for i in items}) == len(items)
