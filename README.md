@@ -361,6 +361,7 @@ Three checks that decide whether a result is believable, all report-only and all
 ```python
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 data.grade(use_privileged=True)  # judge also reads privileged principle, reference, hidden state
+zps.run_judge(rows, likert_judge, scale=(1, 5))  # rating kept, reward = (r - 1) / 4
 pairs, report = zps.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 rows, report = zps.write_rubrics(rows, domain="refunds")  # per-prompt criteria on privileged.rubric
 scored = zps.run_judge(rows, zps.rubric_judge())  # a verdict per criterion; markers rubric:<item>

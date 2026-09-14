@@ -293,6 +293,7 @@ class SimulationData:
         llm_concurrency: int = 16,
         version: str | None = None,
         use_privileged: bool = False,
+        scale: tuple[float, float] | None = None,
     ):
         """Grade after simulation with the hosted judge or a custom callable.
 
@@ -321,6 +322,7 @@ class SimulationData:
                 source="grade",
                 concurrency=min(int(concurrency), 32),
                 version=version,
+                scale=scale,
             )
         if llm:
             return self.llm_grade(
