@@ -118,7 +118,9 @@ def my_agent(message: str) -> dict:
 If it raises, the rollout is dropped and the run says so:
 `data.stopped_because == "agent_failed"` when no row survived, with the count
 and the first error in `data.search["agent_errors"]` and
-`data.search["first_agent_error"]`.
+`data.search["first_agent_error"]`. An agent that fails every call is called
+off after `max(16, 2 * budget)` lost rollouts, so a dead endpoint costs a
+handful of calls, not hundreds.
 
 Working in this repo: `uv sync`, then `uv run pytest` after `uv sync --extra dev`.
 

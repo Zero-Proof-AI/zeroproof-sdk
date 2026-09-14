@@ -28,6 +28,10 @@ HUNG_SLOT_S = 45.0
 # are already running. Queued ones are cancelled at once. Whatever is
 # still running afterwards is abandoned and reported.
 STOP_GRACE_S = 5.0
+# An agent that raises on every call is called off once this many
+# rollouts were lost with no row landed (or 2 x budget, whichever is
+# larger), instead of re-rolling until the writer runs dry (#88).
+DEAD_AGENT_MIN_ERRORS = 16
 
 _MODE_PRESETS: dict[str, dict[str, Any]] = {
     "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
