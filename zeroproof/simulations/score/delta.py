@@ -16,10 +16,57 @@ if you measure the others).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from .stats import DEFAULT_BOOT, compare_runs, marker_names
+
+GROUP_KEYS = ("delta", "ci95", "verdict", "mean_a", "mean_b", "n_used", "n_paired", "paired")
+
+
+def _group_of(row: dict, by: str | Callable[[dict], Any]) -> str | None:
+    if callable(by):
+        value = by(row)
+    else:
+        value = row.get(by)
+        if value is None and isinstance(row.get("markers"), dict):
+            value = row["markers"].get(by)
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
+def _by_group(
+    before: Sequence[dict],
+    after: Sequence[dict],
+    *,
+    by: str | Callable[[dict], Any],
+    metric: str,
+    n_boot: int,
+    seed: int,
+) -> dict[str, dict[str, Any]]:
+    """The target metric compared within each group of rows. A group needs
+    rows on both sides; rows with no group value are left out."""
+    groups_a: dict[str, list[dict]] = {}
+    groups_b: dict[str, list[dict]] = {}
+    for row in before:
+        g = _group_of(row, by)
+        if g is not None:
+            groups_a.setdefault(g, []).append(row)
+    for row in after:
+        g = _group_of(row, by)
+        if g is not None:
+            groups_b.setdefault(g, []).append(row)
+    out: dict[str, dict[str, Any]] = {}
+    for i, name in enumerate(sorted(set(groups_a) & set(groups_b))):
+        r = compare_runs(
+            groups_a[name], groups_b[name], metric=metric, n_boot=n_boot, seed=seed + 100 + i
+        )
+        slim = {k: r.get(k) for k in GROUP_KEYS}
+        slim["rows_a"] = len(groups_a[name])
+        slim["rows_b"] = len(groups_b[name])
+        out[name] = slim
+    return out
 
 
 def delta_report(
@@ -29,6 +76,7 @@ def delta_report(
     target: str | None = None,
     must_not_regress: Sequence[str] = (),
     markers: Sequence[str] | None = None,
+    by: str | Callable[[dict], Any] | None = None,
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
 ) -> dict[str, Any]:
@@ -39,6 +87,15 @@ def delta_report(
     ``must_not_regress`` lists metrics whose significant drop fails the
     report. Metric names for markers are the marker names; pass@1 is
     ``"pass_at_1"``.
+
+    ``by`` splits the target by a group on each row: a row key (top level,
+    or a marker name) or a callable ``row -> group``. The report gains
+    ``groups``: the target compared within each group, so a headline that
+    moved cannot hide a kind of prompt that moved the other way. A group
+    whose target dropped significantly is listed in ``groups_down`` and
+    warned about; it does not flip ``ok``, which stays the
+    ``must_not_regress`` contract (name the group's metric there if it
+    should).
     """
     names = (
         list(markers)
@@ -87,6 +144,22 @@ def delta_report(
         warnings.append(f"{target_key}: {target_result['note']}")
     if target_verdict == "target_not_measured":
         warnings.append(f"target {target!r} is not on both row sets")
+    groups: dict[str, dict[str, Any]] | None = None
+    groups_down: list[str] = []
+    if by is not None:
+        group_metric = target_key if target_key in results else "pass_at_1"
+        groups = _by_group(before, after, by=by, metric=group_metric, n_boot=n_boot, seed=seed)
+        groups_down = [g for g, r in groups.items() if r.get("verdict") == "a_better"]
+        for g in groups_down:
+            r = groups[g]
+            warnings.append(
+                f"{group_metric} moved the wrong way for {g}: {r['delta']:+.3f} "
+                f"(95% {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f}, {r['rows_b']} rows)"
+            )
+        if not groups:
+            warnings.append(
+                f"by={by if isinstance(by, str) else 'callable'}: no group is on both row sets"
+            )
     return {
         "ok": ok,
         "target": target_key,
@@ -99,6 +172,11 @@ def delta_report(
         "slipped": slipped,
         "metrics": results,
         "warnings": warnings,
+        "by": (
+            by if isinstance(by, str) else (getattr(by, "__name__", "callable") if by else None)
+        ),
+        "groups": groups,
+        "groups_down": groups_down,
     }
 
 
@@ -133,6 +211,27 @@ def format_delta_report(report: dict[str, Any]) -> str:
             f"  {name:<28} {r['mean_a']:.3f} -> {r['mean_b']:.3f}  {r['delta']:+.3f} "
             f"[{span}]  {tag}  ({r['n_used']} {pair})"
         )
+    groups = report.get("groups")
+    if groups:
+        lines.append(f"by {report.get('by')}:")
+        for name, r in groups.items():
+            if r.get("delta") is None:
+                lines.append(
+                    f"  {name:<28} insufficient data ({r.get('rows_a', 0)}/{r.get('rows_b', 0)} rows)"
+                )
+                continue
+            ci = r.get("ci95")
+            span = f"{ci[0]:+.3f}..{ci[1]:+.3f}" if ci else "n/a"
+            tag = {
+                "b_better": "up",
+                "a_better": "DOWN",
+                "no_difference_detected": "flat",
+                "insufficient_data": "n/a",
+            }[r["verdict"]]
+            lines.append(
+                f"  {name:<28} {r['mean_a']:.3f} -> {r['mean_b']:.3f}  {r['delta']:+.3f} "
+                f"[{span}]  {tag}  ({r['rows_a']}/{r['rows_b']} rows)"
+            )
     for w in report.get("warnings") or []:
         lines.append(f"! {w}")
     return "\n".join(lines)

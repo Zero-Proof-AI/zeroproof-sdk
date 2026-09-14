@@ -222,11 +222,17 @@ def reward_correlations(
     rows: Sequence[dict], *, threshold: float = HACK_THRESHOLD
 ) -> dict[str, Any]:
     """corr(reward, feature) for the cheap features a judge tends to
-    reward by accident: reply length, tool-call count, assistant turns.
-    Any |corr| at or above ``threshold`` is flagged. A negative tool-count
-    correlation means the reward pays the policy to do less."""
+    reward by accident: reply length, tool-call count, assistant turns,
+    and the over-optimization signatures of rlhf-book ch. 14 (boilerplate,
+    hedging, sycophancy, refusal phrases, 1 when present; see
+    ``score.style``). Any |corr| at or above ``threshold`` is flagged. A
+    negative tool-count correlation means the reward pays the policy to
+    do less; a positive phrase correlation means it pays for the tic."""
+    from .style import STYLE_FEATURES, assistant_text, phrase_hits
+
     graded = [r for r in rows if isinstance(r, dict) and _binary_label(r) is not None]
     labels = [float(_binary_label(r) or 0) for r in graded]
+    texts = [assistant_text(r) for r in graded]
     features = {
         "reply_length": [float(reply_length(r)) for r in graded],
         "tool_calls": [float(tool_calls(r)) for r in graded],
@@ -235,6 +241,8 @@ def reward_correlations(
             for r in graded
         ],
     }
+    for name, plist in STYLE_FEATURES.items():
+        features[name] = [1.0 if phrase_hits(t, plist) else 0.0 for t in texts]
     corr = {name: pearson(values, labels) for name, values in features.items()}
     flagged = {
         name: value for name, value in corr.items() if value is not None and abs(value) >= threshold

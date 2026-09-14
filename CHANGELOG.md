@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.31 (2026-09-14)
 
 - `examples/grpo` and `examples/dpo`: the model-written set is split by
   scenario within each prompt category (`split_holdout_stratified`); the
@@ -13,6 +13,38 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   per category). `examples/dpo --from-run` merges a previous round's
   adapter and samples fresh pairs from it: iterated on-policy DPO, with
   the merged policy saved for serving or a further round.
+- `delta_report(by=...)`, and `by=` on `run.delta` / `attach_delta`: the
+  target compared within each group of rows (a row key, a marker name,
+  or a callable), reported as `groups` with `groups_down` for a group
+  whose target dropped significantly; `format_delta_report` prints the
+  block and the run page draws it. A headline over one dominant kind of
+  prompt no longer hides the other kinds.
+- Over-optimization signatures as markers (rlhf-book ch. 14, 17):
+  `zps.style_markers(rows)` stamps `no_boilerplate`, `no_hedging`,
+  `no_apology`, `no_sycophancy` and `answered` (1 = clean) from phrase
+  lists, so `marker_summary` and `delta_report(must_not_regress=)`
+  watch them; `zps.style_report(rows)` gives each signature's clean
+  share with an interval, the phrases that fired, and its correlation
+  with the reward, flagged when the judge pays for the tic;
+  `zps.refusal_report(benign_rows)` is the over-refusal rate with a
+  Wilson interval and examples. `reward_correlations` (and so the
+  publish gate's hygiene warnings) now scans the same four phrase
+  features next to length, tool calls and turns.
+- `select_for_sft` / `optimize(mode="sft")` is rejection sampling by
+  reward (rlhf-book ch. 9): `select="top_per_prompt"` (default),
+  `"top_k_overall"` with `k=`, and `"random_per_prompt"` /
+  `"random_k_overall"` as chance controls; `min_reward` (default 1.0)
+  admits partial-credit graders, whose 0.9s were dropped as not-pass.
+  Reports gain `selection`, `min_reward`, `reward_mean_eligible`,
+  `reward_mean_selected`.
+- Exported groups: `n0`/`n1` count partial credit below/above 0.5 (a
+  0.3/0.9 group read as unanimous), plus `reward_mean` and `reward_std`
+  per group so a trainer can see where group normalization divides by
+  ~zero (rlhf-book ch. 6).
+- `decontaminate` no longer takes the eval set's own replies as n-gram
+  sources, only prompts, answers and references (rlhf-book ch. 16); tool
+  boilerplate shared between two replies flagged clean rows.
+- `llm_judge` samples at temperature 0, like `grade_llm`.
 - `examples/grpo`: `--loss-type` (bnpo, TRL's default; grpo; dr_grpo),
   `--epsilon-high`, `--no-scale-rewards` and `--mask-truncated`, so
   Dr.GRPO and DAPO's clip and overlong mask are flags on the one trainer

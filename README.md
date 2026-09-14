@@ -276,7 +276,7 @@ rows, report = zps.optimize(data, mode="rl", enforce_band=False)  # rank, do not
 report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 ```
 
-`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter. Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
+`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. `optimize(mode="sft")` is rejection sampling (rlhf-book ch. 9): `select="top_per_prompt"` keeps each prompt's highest-reward completion above `min_reward` (default 1.0; lower it for a partial-credit grader), `"top_k_overall"` the best `k` across prompts, and the `random_*` rules are the matching chance controls. Exported groups carry `n0`/`n1` (fail/pass, partial credit splits at 0.5) and `reward_mean`/`reward_std`. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter. Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
 
 The report also carries the reward-hack scan: `report["correlations"]` is corr(reward, feature) for reply length, tool-call count, and assistant turns, and `report["hygiene_warnings"]` names anything at or above `HACK_THRESHOLD` (0.3). Reward that tracks length or punishes tool use is a judge problem, so it is flagged, not pruned. The same scan, plus near-duplicate asks and length spread, runs in the publish gate. Standalone: `zps.reward_correlations(rows)`, `zps.dedupe_groups(rows)`, `zps.near_duplicate_prompts(rows)`, `zps.length_report(rows)`.
 
@@ -327,8 +327,12 @@ Three checks that decide whether a result is believable, all report-only and all
 ```python
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 zps.decontaminate(train_rows, against=[eval_rows])  # 8-gram overlap with the eval set
+zps.style_markers(rows)  # no_boilerplate, no_hedging, no_apology, no_sycophancy, answered
+zps.style_report(rows)["warnings"]  # "reward pays for hedging (corr +0.41 ...)"
+zps.refusal_report(benign_rows)  # over-refusal rate with a Wilson interval
 zps.compare_runs(run_a, run_b)  # paired delta with a 95% interval
 zps.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_after_fault"])
+zps.delta_report(before, after, target="pass_at_1", by="category")  # the target per kind of prompt
 ```
 
 **Judge trust.** Label 30 to 100 rows by hand as `gold_reward` (0/1). The report gives agreement with a Wilson interval and Cohen's kappa, agreement on two task halves (tune the rubric on one, read the other), judge pass rate on short versus long replies within the same human label (length bias the humans rule out), and, with the judge callable, a re-judge of a sample as-is (consistency) and with neutral filler appended (a flip means the judge reads length). Disagreements come back as a review queue. `format_judge_trust(report)` prints it. The gold set needs both passes and failures; with one class only the report says so and skips the kappa and length flags. With the hosted judge, call `zps.grade` once first (or `warm_judge`) so the cold start, two to three minutes, is not counted as timeouts.
@@ -337,14 +341,14 @@ zps.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_af
 
 **Intervals and comparison.** Every pass@1 now carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
 
-**Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric.
+**Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
 
 ### Train, and watch it
 
 Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO or DPO, LoRA on an A10G) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
 
 ```python
-run = zps.train("ds_...", method="grpo", steps=40)  # or "sft" (epochs=), "dpo"
+run = zps.train("ds_...", method="sft", base_model="Qwen/Qwen3-4B")  # or "grpo" (steps=), "dpo"
 run.wait()  # done or failed; run.url is the curve while it goes
 run.training["before"], run.training["after"]  # holdout pass@1 (SFT: loss)
 model = zps.serve("refund-v2", run)  # adapter on an OpenAI-compatible endpoint
@@ -352,7 +356,7 @@ model = zps.serve("refund-v2", run)  # adapter on an OpenAI-compatible endpoint
 zps.models()  # what the account hosts
 ```
 
-`holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`).
+`holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`). The trainer's default bases (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) train in under a minute but cannot be served, so `train` warns when a run will not reach an endpoint; SFT on Qwen3-4B fits the A10G, GRPO and DPO on a 4B base do not yet. Qwen3 answers in thinking mode by default: leave room in `max_tokens` or send `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`.
 
 Your own trainer, three ways in:
 

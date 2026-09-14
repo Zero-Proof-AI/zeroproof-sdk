@@ -169,6 +169,27 @@ def test_repeated_prompts_get_group_identity():
     assert all(r["k"] == 2 and r["n0"] == 0 and r["n1"] == 2 for r in b)
 
 
+def test_partial_credit_groups_are_not_unanimous():
+    """A 0.3/0.9 group used to stamp n0 = n1 = 0 (exact 0/1 counts) and
+    read as unanimous to a consumer following the docstring."""
+    rows = training_rows(
+        [_graded("score A", 0.3), _graded("score A", 0.9), _graded("score A", 0.5)],
+        system_prompt=POLICY,
+        tools=TOOLS,
+    )
+    assert all(r["k"] == 3 and r["n0"] == 1 and r["n1"] == 1 for r in rows)
+    assert all(abs(r["reward_mean"] - 0.5666) < 1e-3 for r in rows)
+    assert all(abs(r["reward_std"] - 0.2494) < 1e-3 for r in rows)
+
+
+def test_binary_groups_keep_exact_counts_and_report_std():
+    rows = training_rows(
+        [_graded("bin A", 1), _graded("bin A", 0)], system_prompt=POLICY, tools=TOOLS
+    )
+    assert all(r["n0"] == 1 and r["n1"] == 1 and r["reward_mean"] == 0.5 for r in rows)
+    assert all(r["reward_std"] == 0.5 for r in rows)
+
+
 def test_unique_prompts_get_no_group_fields():
     rows = training_rows([_graded("one", 1), _graded("two", 0)], system_prompt=POLICY, tools=TOOLS)
     assert all("group_id" not in r and "k" not in r for r in rows)

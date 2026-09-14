@@ -127,6 +127,7 @@ from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, 
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
 from .score.stats import compare_runs, decontaminate, marker_summary, metric_summary
+from .score.style import refusal_report, style_markers, style_report
 from .simulation import resolve_topology, simulate
 from .training import (
     TrainerCallback,
@@ -248,6 +249,7 @@ __all__ = [
     "rank_rows",
     "recommend",
     "refresh_delegated_credential",
+    "refusal_report",
     "register_agent",
     "resolve_topology",
     "reward_correlations",
@@ -261,6 +263,8 @@ __all__ = [
     "simulate",
     "simulate_from_traces",
     "split_pseudo_production",
+    "style_markers",
+    "style_report",
     "to_row",
     "trace_report",
     "train",

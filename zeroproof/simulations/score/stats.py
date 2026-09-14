@@ -279,8 +279,13 @@ def _load_rows(source: Any) -> list[dict]:
 
 
 def _eval_texts(row: dict) -> list[str]:
+    """What an evaluation row contributes: its prompt and its gold answer
+    or reference. Not its ``final_text``: on a rollout-shaped eval set
+    that is a policy's reply, and tool boilerplate shared between any two
+    replies would flag training rows that never saw the eval question
+    (rlhf-book ch. 16 decontaminates on prompt overlap)."""
     out = [str(row.get("prompt") or "")]
-    for key in ("answer", "reference", "final_text"):
+    for key in ("answer", "reference"):
         if row.get(key):
             out.append(str(row[key]))
     return out
@@ -296,8 +301,9 @@ def decontaminate(
     """Drop rows that share any word ``n``-gram with an evaluation set.
 
     ``against`` is one or more evaluation sources: row lists, JSONL paths,
-    or platform dataset ids (``ds_...``). Evaluation prompts, answers, and
-    replies contribute n-grams; a training row is contaminated when any of
+    or platform dataset ids (``ds_...``). Evaluation prompts, answers and
+    references contribute n-grams (not the eval set's own replies); a
+    training row is contaminated when any of
     its ``fields`` shares an n-gram, or, for text shorter than ``n`` words,
     matches an evaluation prompt exactly after normalization. Returns the
     clean rows and a report with the first offenders.

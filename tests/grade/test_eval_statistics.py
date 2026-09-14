@@ -137,6 +137,17 @@ def test_decontaminate_by_ngram_and_exact_match(tmp_path):
     assert report["examples"][-1]["field"] == "final_text"
     assert report["n_eval_rows"] == 2 and report["ngram"] == 8
 
+    # The eval set's own replies are not a contamination source: shared tool
+    # boilerplate between two replies says nothing about the eval question.
+    evals_with_replies = [
+        {"prompt": "an eval question nobody trained on", "final_text": "Issue 1 is open."}
+    ]
+    _kept3, report3 = decontaminate(rows, evals_with_replies, n=3)
+    assert report3["n_contaminated"] == 0
+    with_answer = [{"prompt": "another eval", "answer": "Issue 1 is open."}]
+    # four rows carry the default reply; the fifth reply is the eval prompt text
+    assert decontaminate(rows, with_answer, n=3)[1]["n_contaminated"] == len(rows) - 1
+
     path = tmp_path / "eval.jsonl"
     path.write_text("".join(json.dumps(e) + "\n" for e in evals))
     _kept2, report2 = decontaminate(rows, [str(path)], n=15)

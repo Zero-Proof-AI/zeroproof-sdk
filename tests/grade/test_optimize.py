@@ -169,6 +169,51 @@ def test_select_for_sft_takes_only_passes_and_spreads_behaviors():
     assert report["n_selected"] == len(picked)
 
 
+def _scored(prompt, reward, final="ok"):
+    return {
+        "prompt": prompt,
+        "reward": reward,
+        "final_text": f"{final} {reward}",
+        "steps": [{"tool": "get_order", "arguments": {"id": "1"}, "result": {"ok": 1}}],
+        "messages": [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": f"{final} {reward}"},
+        ],
+    }
+
+
+def test_select_for_sft_ranks_partial_credit_by_reward():
+    """rlhf-book ch. 9: argmax per prompt over a scalar reward. A 0.9 used
+    to be dropped as not-pass because only exact 1s qualified."""
+    from zeroproof.simulations.score.optimize import select_for_sft
+
+    rows = [_scored("a", 0.3), _scored("a", 0.9), _scored("a", 0.6), _scored("b", 0.7)]
+    picked, report = select_for_sft(rows, target=10)
+    assert picked == [] and report["n_not_pass"] == 4  # default min_reward=1.0
+    picked, report = select_for_sft(rows, target=10, min_reward=0.5)
+    assert sorted((r["prompt"], r["reward"]) for r in picked) == [("a", 0.9), ("b", 0.7)]
+    assert report["selection"] == "top_per_prompt" and report["min_reward"] == 0.5
+    assert report["n_not_pass"] == 1 and report["reward_mean_selected"] == 0.8
+
+
+def test_select_for_sft_top_k_overall_and_random_controls():
+    from zeroproof.simulations.score.optimize import select_for_sft
+
+    rows = [_scored("a", 0.3), _scored("a", 0.9), _scored("a", 0.6), _scored("b", 0.7)]
+    picked, report = select_for_sft(rows, select="top_k_overall", k=2, min_reward=0.0)
+    assert [r["reward"] for r in picked] == [0.9, 0.7] and report["k"] == 2
+    picked, _ = select_for_sft(rows, select="random_per_prompt", min_reward=0.0, seed=1)
+    assert {r["prompt"] for r in picked} == {"a", "b"} and len(picked) == 2
+    again, _ = select_for_sft(rows, select="random_per_prompt", min_reward=0.0, seed=1)
+    assert [r["reward"] for r in again] == [r["reward"] for r in picked]
+    picked, report = select_for_sft(rows, select="random_k_overall", k=3, min_reward=0.0, seed=2)
+    assert len(picked) == 3 and report["selection"] == "random_k_overall"
+    import pytest
+
+    with pytest.raises(ValueError, match="select must be one of"):
+        select_for_sft(rows, select="best")
+
+
 def test_optimize_dispatches_on_mode_and_never_overwrites(tmp_path):
     import json
 
