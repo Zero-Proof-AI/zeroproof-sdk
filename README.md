@@ -327,6 +327,9 @@ Three checks that decide whether a result is believable, all report-only and all
 ```python
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 zps.decontaminate(train_rows, against=[eval_rows])  # 8-gram overlap with the eval set
+zps.style_markers(rows)  # no_boilerplate, no_hedging, no_apology, no_sycophancy, answered
+zps.style_report(rows)["warnings"]  # "reward pays for hedging (corr +0.41 ...)"
+zps.refusal_report(benign_rows)  # over-refusal rate with a Wilson interval
 zps.compare_runs(run_a, run_b)  # paired delta with a 95% interval
 zps.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_after_fault"])
 ```

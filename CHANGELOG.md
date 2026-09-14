@@ -5,6 +5,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Over-optimization signatures as markers (rlhf-book ch. 14, 17):
+  `zps.style_markers(rows)` stamps `no_boilerplate`, `no_hedging`,
+  `no_apology`, `no_sycophancy` and `answered` (1 = clean) from phrase
+  lists, so `marker_summary` and `delta_report(must_not_regress=)`
+  watch them; `zps.style_report(rows)` gives each signature's clean
+  share with an interval, the phrases that fired, and its correlation
+  with the reward, flagged when the judge pays for the tic;
+  `zps.refusal_report(benign_rows)` is the over-refusal rate with a
+  Wilson interval and examples. `reward_correlations` (and so the
+  publish gate's hygiene warnings) now scans the same four phrase
+  features next to length, tool calls and turns.
 - `select_for_sft` / `optimize(mode="sft")` is rejection sampling by
   reward (rlhf-book ch. 9): `select="top_per_prompt"` (default),
   `"top_k_overall"` with `k=`, and `"random_per_prompt"` /
