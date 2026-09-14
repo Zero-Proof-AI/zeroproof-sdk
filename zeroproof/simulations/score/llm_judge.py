@@ -137,7 +137,7 @@ def judge_one(
             model,
             [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": payload}],
             api_key=api_key,
-            temperature=0.1,
+            temperature=0.0,  # a judge is read at zero (rlhf-book ch. 5), like grade_llm
             max_tokens=120,
             timeout=timeout,
         )

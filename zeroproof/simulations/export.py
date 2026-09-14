@@ -277,6 +277,16 @@ def training_rows(
     return out
 
 
+def _numeric(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if number != number else number
+
+
 def _stamp_groups(rows: list[dict]) -> None:
     """GRPO group identity, stamped whenever any prompt repeats.
 
@@ -284,9 +294,14 @@ def _stamp_groups(rows: list[dict]) -> None:
     flatten them: a GRPO trainer had to re-group by exact prompt string, an
     equality that one whitespace edit silently breaks. ``group_id`` is the
     stable name (sha1 of the prompt, like the studio packs used), ``k`` the
-    group size, ``n0``/``n1`` the 0/1 label counts so a consumer can drop
-    unanimous groups without rescoring. A run with no repeated prompt is an
-    SFT/explore export and gets no group fields at all.
+    group size, ``n0``/``n1`` the fail/pass counts so a consumer can drop
+    unanimous groups without rescoring, and ``reward_mean``/``reward_std``
+    the group's reward statistics (rlhf-book ch. 6: group-normalized
+    advantages divide by this std, so a trainer can see where it is near
+    zero and choose batch-level normalization or Dr. GRPO instead). A
+    partial-credit reward counts as a pass above 0.5 and a fail below it;
+    exactly 0.5 (an advisory verdict) counts as neither. A run with no
+    repeated prompt is an SFT/explore export and gets no group fields.
     """
     groups: dict[str, list[dict]] = {}
     for row in rows:
@@ -297,14 +312,23 @@ def _stamp_groups(rows: list[dict]) -> None:
         return
     for prompt, members in groups.items():
         gid = hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
-        rewards = [m.get("reward") for m in members]
-        n0 = sum(1 for v in rewards if v == 0)
-        n1 = sum(1 for v in rewards if v == 1)
+        rewards = [_numeric(m.get("reward")) for m in members]
+        numeric = [v for v in rewards if v is not None]
+        n0 = sum(1 for v in numeric if v < 0.5)
+        n1 = sum(1 for v in numeric if v > 0.5)
+        mean = sum(numeric) / len(numeric) if numeric else None
+        std = (
+            (sum((v - mean) ** 2 for v in numeric) / len(numeric)) ** 0.5
+            if numeric and mean is not None
+            else None
+        )
         for m in members:
             m["group_id"] = gid
             m["k"] = len(members)
             m["n0"] = n0
             m["n1"] = n1
+            m["reward_mean"] = mean
+            m["reward_std"] = std
 
 
 def export_training(

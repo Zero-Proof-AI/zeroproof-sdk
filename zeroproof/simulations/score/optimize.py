@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import random
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -365,35 +366,96 @@ def _binary_label(row: dict) -> int | None:
     return None
 
 
+SFT_SELECTIONS = ("top_per_prompt", "random_per_prompt", "top_k_overall", "random_k_overall")
+
+
+def _scalar_reward(row: dict) -> float | None:
+    for key in ("reward", "qwen_reward"):
+        value = row.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number == number:
+            return number
+    return None
+
+
 def select_for_sft(
-    rows: Sequence[dict], *, target: int = 1000
+    rows: Sequence[dict],
+    *,
+    target: int = 1000,
+    select: str = "top_per_prompt",
+    k: int | None = None,
+    min_reward: float = 1.0,
+    seed: int = 0,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Diverse correct demonstrations, at most ``target`` rows.
 
-    Imitation clones what it sees, so only 1-labeled, non-junk rows
-    qualify; unanimity is not a problem here. Selection round-robins
-    across behavior signatures (tool sequence, argument provenance,
-    outcome shape), so every distinct way of being right appears before
-    any of them repeats. Duplicate prompts never ship twice.
+    Imitation clones what it sees, so only rows whose reward reaches
+    ``min_reward`` (default 1.0: judge-approved) and that are not junk
+    qualify; unanimity is not a problem here. A grader with partial
+    credit ranks by its score: lower ``min_reward`` to admit it.
+
+    ``select`` is the rejection-sampling rule (rlhf-book ch. 9, "Scoring
+    Completions"): ``"top_per_prompt"`` keeps each prompt's highest-reward
+    completion and then round-robins across behavior signatures (tool
+    sequence, argument provenance, outcome shape) so every distinct way
+    of being right appears before any repeats; ``"top_k_overall"`` keeps
+    the ``k`` highest-reward completions across all prompts, several per
+    prompt allowed; the two ``random_*`` rules are the book's control
+    (same counts, seeded random picks) so a claimed gain from selection
+    can be checked against chance. ``k`` defaults to ``target``.
     """
-    eligible: list[dict] = []
+    if select not in SFT_SELECTIONS:
+        raise ValueError(f"select must be one of {', '.join(SFT_SELECTIONS)}; got {select!r}")
+    rng = random.Random(int(seed))
+    scored: list[tuple[float, dict]] = []
     n_wrong = n_junk = 0
-    seen_prompts: set[str] = set()
     for row in rows:
         if not isinstance(row, dict):
             continue
-        if _binary_label(row) != 1:
+        value = _scalar_reward(row)
+        if value is None or value < float(min_reward):
             n_wrong += 1
             continue
-        # 1-labeled rows are judge-approved; only structural junk drops.
+        # passing rows are judge-approved; only structural junk drops.
         if is_incomplete_junk(row):
             n_junk += 1
             continue
+        scored.append((value, row))
+    goal = max(1, int(target))
+    limit = max(1, int(k)) if k else goal
+    if select in ("top_k_overall", "random_k_overall"):
+        if select == "top_k_overall":
+            scored.sort(
+                key=lambda pair: (
+                    -pair[0],
+                    _stable_key(str(pair[1].get("prompt") or ""), behavior_signature(pair[1])),
+                )
+            )
+        else:
+            rng.shuffle(scored)
+        picked_overall = [row for _, row in scored[:limit]]
+        pool = [row for _, row in scored]
+        return picked_overall, _sft_report(
+            rows, pool, picked_overall, n_wrong, n_junk, goal, select, limit, min_reward
+        )
+    by_prompt: dict[str, list[tuple[float, dict]]] = {}
+    for value, row in scored:
         prompt = " ".join(str(row.get("prompt") or "").lower().split())
-        if prompt in seen_prompts:
+        by_prompt.setdefault(prompt, []).append((value, row))
+    eligible: list[dict] = []
+    for prompt, candidates in by_prompt.items():
+        if select == "random_per_prompt":
+            eligible.append(rng.choice(candidates)[1])
             continue
-        seen_prompts.add(prompt)
-        eligible.append(row)
+        candidates.sort(
+            key=lambda pair: (-pair[0], _stable_key(prompt, behavior_signature(pair[1])))
+        )
+        eligible.append(candidates[0][1])
     buckets: dict[str, list[dict]] = {}
     for row in eligible:
         buckets.setdefault(behavior_signature(row), []).append(row)
@@ -402,7 +464,6 @@ def select_for_sft(
     order = sorted(buckets, key=lambda sig: (-len(buckets[sig]), sig))
     selected: list[dict] = []
     round_i = 0
-    goal = max(1, int(target))
     while len(selected) < goal:
         took = False
         for sig in order:
@@ -415,6 +476,27 @@ def select_for_sft(
         if not took:
             break
         round_i += 1
+    return selected, _sft_report(
+        rows, eligible, selected, n_wrong, n_junk, goal, select, None, min_reward
+    )
+
+
+def _sft_report(
+    rows: Sequence[dict],
+    eligible: Sequence[dict],
+    selected: Sequence[dict],
+    n_wrong: int,
+    n_junk: int,
+    goal: int,
+    select: str,
+    k: int | None,
+    min_reward: float,
+) -> dict[str, Any]:
+    def _mean(items: Sequence[dict]) -> float | None:
+        values = [v for v in (_scalar_reward(r) for r in items) if v is not None]
+        return round(sum(values) / len(values), 4) if values else None
+
+    buckets = {behavior_signature(r) for r in eligible}
     report: dict[str, Any] = {
         "n": len(rows),
         "n_eligible": len(eligible),
@@ -424,8 +506,14 @@ def select_for_sft(
         "unique_behaviors": len(buckets),
         "behaviors_covered": len({behavior_signature(r) for r in selected}),
         "target": goal,
+        "selection": select,
+        "min_reward": float(min_reward),
+        "reward_mean_eligible": _mean(eligible),
+        "reward_mean_selected": _mean(selected),
         "eval_sourced": eval_sourced(selected),
     }
+    if k is not None:
+        report["k"] = k
     if report["eval_sourced"]:
         report["warning"] = _eval_sourced_warning(report["eval_sourced"], "selected row(s)")
     # Rejection sampling picks the best of N completions per prompt, and
@@ -445,7 +533,7 @@ def select_for_sft(
             "wants 10 to 30 so the pick is not biased (rlhf-book ch. 9). Raise "
             "repeats= if you mean to choose among completions rather than filter."
         )
-    return selected, report
+    return report
 
 
 def trim_out_of_band(
@@ -780,12 +868,15 @@ def optimize(
     output: str | None = None,
     band: tuple[float, float] = DEFAULT_BAND,
     enforce_band: bool = True,
+    select: str = "top_per_prompt",
+    min_reward: float = 1.0,
 ) -> tuple[list[dict], dict[str, Any]]:
     """One call after grading: concentrate for the post-training target.
 
     ``source`` is a ``SimulationData``, a row list, or a JSONL path.
     ``mode`` defaults to the data's own mode: ``"sft"`` picks diverse
-    correct demonstrations, anything else keeps whole mixed RL groups
+    correct demonstrations (``select`` and ``min_reward`` as in
+    ``select_for_sft``), anything else keeps whole mixed RL groups
     inside the difficulty ``band`` (default 20%-80% pass rate;
     ``enforce_band=False`` only ranks out-of-band asks last).
     Returns ``(rows, report)``; writes ``output`` when given, or
@@ -808,7 +899,7 @@ def optimize(
         rows = list(source)
     resolved = "sft" if str(resolved or "").lower() == "sft" else "rl"
     if resolved == "sft":
-        picked, report = select_for_sft(rows, target=target)
+        picked, report = select_for_sft(rows, target=target, select=select, min_reward=min_reward)
     else:
         picked, report = select_for_rl(
             rows,

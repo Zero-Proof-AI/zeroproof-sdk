@@ -5,6 +5,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `select_for_sft` / `optimize(mode="sft")` is rejection sampling by
+  reward (rlhf-book ch. 9): `select="top_per_prompt"` (default),
+  `"top_k_overall"` with `k=`, and `"random_per_prompt"` /
+  `"random_k_overall"` as chance controls; `min_reward` (default 1.0)
+  admits partial-credit graders, whose 0.9s were dropped as not-pass.
+  Reports gain `selection`, `min_reward`, `reward_mean_eligible`,
+  `reward_mean_selected`.
+- Exported groups: `n0`/`n1` count partial credit below/above 0.5 (a
+  0.3/0.9 group read as unanimous), plus `reward_mean` and `reward_std`
+  per group so a trainer can see where group normalization divides by
+  ~zero (rlhf-book ch. 6).
+- `decontaminate` no longer takes the eval set's own replies as n-gram
+  sources, only prompts, answers and references (rlhf-book ch. 16); tool
+  boilerplate shared between two replies flagged clean rows.
+- `llm_judge` samples at temperature 0, like `grade_llm`.
 - `examples/grpo`: `--loss-type` (bnpo, TRL's default; grpo; dr_grpo),
   `--epsilon-high`, `--no-scale-rewards` and `--mask-truncated`, so
   Dr.GRPO and DAPO's clip and overlong mask are flags on the one trainer
