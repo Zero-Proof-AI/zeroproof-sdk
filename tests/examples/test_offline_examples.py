@@ -120,38 +120,7 @@ def test_modal_examples_are_listed_not_forgotten():
         assert (EXAMPLES / rel).exists(), f"{rel} is listed here but gone from disk"
 
 
-def test_agent_behavior_selftest_passes_with_no_key(tmp_path):
-    """The example's own invariant suite. No model, no network, exit 0."""
-    out = _run(EXAMPLES / "agent-behavior/selftest.py", cwd=tmp_path, timeout=300)
-    assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
-    assert "all checks passed" in out.stdout
-
-
-def test_agent_behavior_task_pack_is_self_contained():
-    """The seven documented tasks load without the optional tasks_hard pack."""
-    out = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; sys.path.insert(0, '.'); import tasks; print(len(tasks.TASKS))",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=str(EXAMPLES / "agent-behavior"),
-        env=_offline_env(),
-        timeout=60,
-    )
-    assert out.returncode == 0, out.stderr[-2000:]
-    assert int(out.stdout.split()[0]) >= 7, out.stdout
-
-
-def test_example_that_needs_a_key_says_which_one(tmp_path):
-    """Fail fast, name the env var, link to where the key comes from."""
-    out = _run(EXAMPLES / "agent-behavior/run.py", "--runs", "1", cwd=tmp_path)
-    assert out.returncode != 0
-    message = out.stdout + out.stderr
-    assert "ZEROPROOF_API_KEY" in message, message[-2000:]
-    assert "http" in message, message[-2000:]
+# The agent-behavior example's own checks live in test_agent_behavior.py.
 
 
 def test_hosted_loop_without_a_key_names_the_env_var(tmp_path):

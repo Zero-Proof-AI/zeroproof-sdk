@@ -342,6 +342,14 @@ def main(argv: list[str] | None = None) -> int:
             print(err, file=sys.stderr)
             return 2
 
+    # A dry run still needs the model. Say so once, here, rather than once
+    # per row from inside the pool with an exit code of 0 at the end.
+    try:
+        agents.Llm(args.model_url, args.model_key, args.model)
+    except agents.LlmError as err:
+        print(err, file=sys.stderr)
+        return 2
+
     seed = args.seed if args.seed is not None else random.randrange(1 << 30)
     rng = random.Random(seed)
     plan = draw(args.runs, task_ids, personas, agents.PERSONA_WEIGHTS, rng)

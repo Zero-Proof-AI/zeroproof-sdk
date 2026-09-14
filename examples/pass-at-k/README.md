@@ -24,20 +24,26 @@ python measure.py graded.jsonl     # any graded row file (reward 0/1, grouped by
 No key needed for the scripted run; it finishes in seconds. Output:
 
 ```
-pass@1 0.52 | pass^8 0.42 | pass@8 0.58 | headroom 0.06 (12 groups, k=8)
-  never (p=0)          5
-  sometimes (0<p<1)    2
+pass@1 0.47 [0.19..0.74] | pass^8 0.42 | pass@8 0.50 | headroom 0.03 (12 groups, k=8)
+  never (p=0)          6
+  sometimes (0<p<1)    1
   always (p=1)         5
-- production sees pass@1 = 52%
+- production sees pass@1 = 47%
 - the agent is right every time on pass^8 = 42% of asks; the gap to pass@1 is inconsistency, not inability
-- RL headroom 6%: almost nothing a grouped update can learn here; harder cells or a stricter judge before buying more rollouts
+- RL headroom 3%: almost nothing a grouped update can learn here; harder cells or a stricter judge before buying more rollouts
 ```
 
-Numbers vary with `--seed`; the shape is the point. This agent is mostly
-consistent (right or wrong every time on ten of twelve asks), so the honest
-verdict is that repeats alone will not teach it much: the two mixed asks are
-the only gradient, and the five it never passes need harder cells or
-demonstrations, not more rollouts.
+The bracket after pass@1 is a 95% bootstrap interval over asks (`ci95` on
+the `PassAt`). Twelve asks is a small sample and the interval says so;
+report it next to the point estimate.
+
+The seed decides the draw: the run passes `reproducible=True`, so the same
+`--seed` prints the same numbers at any `--concurrency`. Change the seed and
+the numbers move; the shape is the point. This agent is mostly consistent
+(right or wrong every time on eleven of twelve asks), so the honest verdict
+is that repeats alone will not teach it much: the one mixed ask is the only
+gradient, and the six it never passes need harder cells or demonstrations,
+not more rollouts.
 
 ## Reading it
 

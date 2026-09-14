@@ -44,13 +44,14 @@ Sign in at https://www.zeroproofai.com/platform for your key. For the
 model, ask ZeroProof for an endpoint and token, or point it at anything that
 speaks the OpenAI chat-completions API.
 
-No dependencies and nothing to install: six stdlib modules in this directory.
-About eight minutes for 40 runs at the default concurrency of 4.
+No dependencies and nothing to install: seven stdlib-only files in this
+directory. About eight minutes for 40 runs at the default concurrency of 4.
 
 Then open [the traces page](https://www.zeroproofai.com/platform/traces) and
 pick the `demo-agent` row.
 
-Try it without sending anything first:
+Try it without sending anything first. This still needs the model endpoint,
+only the platform key is optional:
 
 ```bash
 python run.py --runs 4 --dry-run
@@ -173,7 +174,7 @@ the judge whenever you have any: ranking a judge against itself measures the
 judge's self-consistency and tells you nothing about the agent. The judge's own
 measurements carry `"source": "example-judge"` for the same reason, so the
 platform can tell one grader's four opinions apart from four independent
-signals. See `agents.ground_truth_score`.
+signals. See `ground_truth_score` in `agent.py`.
 
 Then read the rows where the two graders disagree:
 
@@ -219,11 +220,11 @@ print(zps.datasets())
 
 ## Pointing it at your own agent
 
-Four files, in the order worth reading:
+Seven files, in the order worth reading:
 
 | file | what it is |
 |---|---|
-| `gate.py` | the OTLP envelope and the two POSTs, by hand, no OTel SDK. ~250 lines. |
+| `gate.py` | the OTLP envelope and the two POSTs, by hand, no OTel SDK. ~330 lines. |
 | `signals.py` | the observable metrics. A port of daisy's `src/metrics.ts`, kept name-for-name so traces from both chart on the same axes. |
 | `agent.py` | the loop, the personas, the judge, the verdict parser. |
 | `sandbox.py` | the fake repo, its four tools, and the restricted shell. |
@@ -251,9 +252,16 @@ already emitting, and every one of them is optional.
 --concurrency N     turns in flight at once (default 4)
 --dataset NAME      zeroproof.dataset resource attribute
 --agent NAME        gen_ai.agent.name; the row the platform groups by
+--service NAME      service.name resource attribute
 --tasks a,b         restrict to these task ids
 --personas a,b      restrict to these personas
+--max-steps N       tool rounds before a turn is cancelled (default 12)
 --seed N            reproducible task and persona draw
+--api-key KEY       platform key, or set ZEROPROOF_API_KEY
+--gate URL          platform API base, or set ZEROPROOF_API_URL
+--model-url URL     OpenAI-compatible base URL, or set ZEROPROOF_MODEL_URL
+--model-key KEY     its bearer token, or set ZEROPROOF_MODEL_KEY
+--model ID          model id, or set ZEROPROOF_MODEL
 --no-judge          observable signals only, no second model call.
                     Ground truth is still sent: it carries the pass_at that
                     makes the charts rankable.
@@ -267,8 +275,9 @@ today, which is the day the store first saw the trace.
 
 The model comes from `ZEROPROOF_MODEL_URL`, `ZEROPROOF_MODEL_KEY` and
 `ZEROPROOF_MODEL`, or the matching flags. Any OpenAI-compatible endpoint that
-returns `tool_calls` works; it was built against Qwen3.8-27B, which is the
-default for `--model` and the only thing about the model this repo hard-codes.
+returns `tool_calls` works; the default for `--model` is
+`Qwen/Qwen3-4B-Instruct-2507`, the only thing about the model this repo
+hard-codes.
 There is no default URL: an inference endpoint is infrastructure and belongs in
 your environment, not in a public repo.
 

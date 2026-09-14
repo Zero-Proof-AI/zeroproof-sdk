@@ -22,7 +22,7 @@ Offline output:
 
 ```
 traits 8 | train 57 prompts x 4 = 228 rows | adversarial 120 | control 24 | spec 35
-judge reference vs spec labels: agreement 1.0 (n=35)
+judge reference vs spec labels: agreement 1.00 (n=35, kappa 1.00)
 pass@1 0.58 | pass^4 0.39 | pass@4 0.79 | headroom 0.21 | mixed prompts 23/57
   avoid_being_condescending                  pass@1 0.44 headroom 0.56  (4 prompts)
   avoid_sycophancy                           pass@1 0.73 headroom 0.27  (11 prompts)
@@ -155,9 +155,9 @@ that has the character and drops the task is a 0.
 | file | what |
 |---|---|
 | `from_model_spec.py` | spec markdown to `constitution.json`; one explicit-content example skipped by default |
-| `constitution.json` | 8 traits, 16 comparisons, 16 GOOD and 21 BAD replies, with the spec commit |
+| `constitution.json` | 8 traits, 15 comparisons, 15 GOOD and 20 BAD replies (the 35 `spec` rows), with the spec commit |
 | `run.py` | tasks, students (scripted or live), judges (reference or LLM), markers, pairs, SFT, report |
 | `measure.py` | before/after delta on `holdout.jsonl` |
 | `out/` | `rows.jsonl`, `pairs.jsonl`, `sft.jsonl`, `holdout.jsonl`, `report.json` |
 
-Tests: `pytest tests/api/test_character_example.py -q`.
+Tests: `pytest tests/api/test_character_example.py tests/examples/test_character.py -q`.

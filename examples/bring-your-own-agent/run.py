@@ -97,12 +97,20 @@ def part_contract() -> zps.SimulationData:
         simulator=False,  # template writer, no model key needed
         budget=16,
         mode="rl",
+        situations=4,
         repeats=4,
+        # mode="rl" defaults to repeat_policy="successive": two probe
+        # rollouts per ask, the rest only where the graded probes split.
+        # This run is not graded, so without "fixed" no ask ever reaches
+        # its third repeat and the careless branch above never fires.
+        repeat_policy="fixed",
         seed=0,
     )
     print(f"rows={len(data.trajectories)} stopped_because={data.stopped_because!r}")
     row = data.trajectories[0]
     print(f"first row: {len(row['steps'])} step(s), final_text={row['final_text']!r}")
+    careless = sum(1 for r in data.trajectories if len(r["steps"]) == 1)
+    print(f"{careless} of {len(data.trajectories)} rows skipped the runbook (rollout_index 2)")
     return data
 
 

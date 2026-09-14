@@ -109,9 +109,10 @@ def scripted_agent(message: str) -> dict:
 
 def simulate_rows(asks: int = 12, k: int = 8, seed: int = 0, *, concurrency: int = 4) -> list[dict]:
     """``asks`` situations, ``k`` repeats each, graded by the built-in
-    conduct grader. Offline: template writer, scripted agent. Which asks
-    a seed draws is reproducible at ``concurrency=1`` only; higher
-    concurrency lets completion order steer later draws."""
+    conduct grader. Offline: template writer, scripted agent.
+    ``reproducible=True`` makes the seed decide which asks are drawn at
+    any concurrency; without it completion order steers later draws and
+    the same seed prints different numbers run to run."""
     data = zps.simulate(
         scripted_agent,
         tools=TOOLS,
@@ -122,6 +123,7 @@ def simulate_rows(asks: int = 12, k: int = 8, seed: int = 0, *, concurrency: int
         seed=seed,
         grade=True,
         concurrency=concurrency,
+        reproducible=True,
         simulator=False,
         time_budget=None,
         mode="rl",
@@ -151,6 +153,7 @@ def report(rows: list[dict]) -> dict:
     rates = zps.pass_at(rows)
     signal = zps.group_signal(rows)
     out = {
+        "summary": str(rates),  # the headline line, interval included
         "pass_at": rates.to_dict(),
         "histogram": histogram(rates.per_task),
         "n_mixed": signal["n_mixed"],
@@ -188,12 +191,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--asks", type=int, default=12)
     parser.add_argument("--k", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--concurrency", type=int, default=4, help="rollouts in flight")
     args = parser.parse_args(argv)
 
-    rows = load_rows(Path(args.rows)) if args.rows else simulate_rows(args.asks, args.k, args.seed)
+    rows = (
+        load_rows(Path(args.rows))
+        if args.rows
+        else simulate_rows(args.asks, args.k, args.seed, concurrency=args.concurrency)
+    )
     out = report(rows)
-    rates = zps.PassAt(**{k: v for k, v in out["pass_at"].items() if k != "headroom"})
-    print(rates)
+    print(out["summary"])
     for bucket, count in out["histogram"].items():
         print(f"  {bucket:<20} {count}")
     for line in out["verdict"]:
