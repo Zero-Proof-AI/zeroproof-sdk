@@ -360,7 +360,7 @@ Three checks that decide whether a result is believable, all report-only and all
 
 ```python
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
-data.grade(use_privileged=True)  # the judge also reads privileged principle / reference / hidden state
+data.grade(use_privileged=True)  # judge also reads privileged principle, reference, hidden state
 pairs, report = zps.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 zps.decontaminate(train_rows, against=[eval_rows])  # 8-gram overlap with the eval set
 zps.style_markers(rows)  # no_boilerplate, no_hedging, no_apology, no_sycophancy, answered
