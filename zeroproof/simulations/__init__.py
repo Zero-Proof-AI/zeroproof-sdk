@@ -78,16 +78,19 @@ from .score.judging import (
     run_judge,
 )
 from .score.optimize import (
+    DEFAULT_BAND,
     filter_rl_rows,
     group_signal,
     optimize,
     recommend,
     select_for_rl,
     select_for_sft,
+    trim_out_of_band,
     trim_unanimous_groups,
 )
 from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
+from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
 from .simulation import resolve_topology, simulate
 from .world.sandbox import MockEnvironment
@@ -97,6 +100,7 @@ from .world.sandbox import MockEnvironment
 _logging.getLogger(__name__).addHandler(_logging.NullHandler())
 
 __all__ = [
+    "DEFAULT_BAND",
     "FAILURE_CLASSES",
     "SCHEMA_VERSION",
     "AgentProfile",
@@ -107,6 +111,7 @@ __all__ = [
     "MockEnvironment",
     "ModelSimulator",
     "PassAt",
+    "PublishGateError",
     "Rollout",
     "ScoredData",
     "SimulationData",
@@ -116,6 +121,7 @@ __all__ = [
     "behavior_signature",
     "build_dimensions",
     "build_preference_pairs",
+    "calibrate",
     "catalog",
     "classify_failure",
     "claude_code",
@@ -154,6 +160,7 @@ __all__ = [
     "policy_sections",
     "preflight",
     "publish",
+    "publish_gate",
     "pull",
     "push_file",
     "push_rows",
@@ -174,6 +181,7 @@ __all__ = [
     "to_row",
     "trace_report",
     "training_rows",
+    "trim_out_of_band",
     "trim_unanimous_groups",
     "unpublish",
     "validate",

@@ -222,16 +222,31 @@ def push_to_studio(
 
 
 def push_rows(
-    rows: list[dict], name: str, *, api_key: str | None = None, parent: str | None = None
+    rows: list[dict],
+    name: str,
+    *,
+    api_key: str | None = None,
+    parent: str | None = None,
+    gate: bool = False,
+    mode: str | None = None,
 ) -> dict:
     """Upload rows as JSONL to your Zero Proof Labs account.
 
     Returns the registry entry, including ``datasetId``. Pass ``parent`` (a
     ``ds_...`` id) when this dataset is an iteration of an existing one, so
-    lineage shows on the platform.
+    lineage shows on the platform. ``gate=True`` runs ``publish_gate``
+    first (calibration stamp; RL-shaped rows refused when ungraded or
+    without a mixed group) and returns its report as ``entry["gate"]``.
+    ``SimulationData.push`` gates by default; this row-level entry point
+    does not, because the caller may already have run ``optimize``.
     """
     from ..schema import check
 
+    gate_report = None
+    if gate:
+        from ..score.publish_gate import publish_gate
+
+        gate_report = publish_gate(rows, mode=mode)
     check(rows, where="push_rows")
     body: dict = {"name": name}
     if parent:
@@ -247,6 +262,8 @@ def push_rows(
         content_type="application/jsonl",
     )
     final = _call("POST", f"/datasets/{created['datasetId']}/finalize", api_key)
+    if gate_report is not None:
+        final = {**final, "gate": gate_report}
     return final
 
 

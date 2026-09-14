@@ -190,6 +190,19 @@ zps.delete_dataset(v1["datasetId"])  # permanent
 Storage is private per account, 5 GB free. `parent=` records dataset
 lineage so iterations show as a family on the platform.
 
+`data.push` runs a publish gate first (`gate=False` skips it). Every graded row gets a `calibration` stamp: its task's pass rate over k repeats, k, and the policy that produced it, so a trainer can build a curriculum or retire solved tasks. An RL-shaped run (repeats of one ask) is refused with `PublishGateError` when it is ungraded or has no mixed group, because a grouped update would learn nothing from it. The report comes back as `entry["gate"]`, with warnings when out-of-band or unanimous asks are still present; `zps.optimize(data, mode="rl")` prunes those. `zps.publish_gate(rows)` runs the same check on any row list.
+
+### Prune before training
+
+```python
+rows, report = zps.optimize(data, mode="rl")  # whole groups, 20%-80% pass rate
+rows, report = zps.optimize(data, mode="rl", band=(0.3, 0.7))
+rows, report = zps.optimize(data, mode="rl", enforce_band=False)  # rank, do not drop
+report["band_dropped"]  # {"too_easy": n, "too_hard": n}
+```
+
+`optimize(mode="rl")` drops junk rows, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter.
+
 ### Publish a dataset as a card
 
 ```python

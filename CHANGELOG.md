@@ -9,6 +9,16 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `zps.catalog()`, and `data.push(..., agent=..., publish=True)` put a
   dataset on zeroproofai.com/datasets as a card grouped by agent.
   `zps.pull` fetches public sets with no key.
+- Difficulty band is enforced, not just ranked: `select_for_rl` and
+  `optimize(mode="rl")` drop asks whose pass rate falls outside
+  `band=(0.2, 0.8)` (`enforce_band=False` restores rank-only); the
+  report carries `band_dropped` by side. `group_signal` defaults to the
+  same band (was 0.3-0.7). New `trim_out_of_band`, `DEFAULT_BAND`.
+- Publish gate: `data.push` (and `push_rows(gate=True)`) runs
+  `publish_gate` first. Every graded row gets a `calibration` stamp
+  (task pass rate, k, producing policy); RL-shaped rows that are
+  ungraded or have no mixed group raise `PublishGateError`. Report on
+  `entry["gate"]`. New `zps.publish_gate`, `zps.calibrate`.
 
 ## 0.17 (2026-09-13)
 

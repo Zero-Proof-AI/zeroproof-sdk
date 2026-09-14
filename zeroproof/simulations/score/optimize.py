@@ -36,6 +36,12 @@ from .passat import pass_at
 from .quality import _IDISH, _QUESTION_END, _STRONG_ACTION, load_jsonl, write_jsonl
 
 # Public drop tags. optimize_rl uses these strings in the report.
+# The difficulty band: keep asks the policy passes between 20% and 80% of
+# the time (rlhf-book ch. 7, offline difficulty filtering; Seed-Thinking,
+# ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a form of it).
+# A heuristic with no published ablation, so it stays configurable.
+DEFAULT_BAND: tuple[float, float] = (0.2, 0.8)
+
 DO_NOTHING = "do_nothing"
 INCOMPLETE_JUNK = "incomplete_junk"
 UNUSABLE_LABEL = "unusable_label"
@@ -252,7 +258,9 @@ def _group_label_lists(rows: Sequence[dict]) -> dict[str, list[int]]:
     return groups
 
 
-def group_signal(rows: Sequence[dict], *, lo: float = 0.3, hi: float = 0.7) -> dict[str, Any]:
+def group_signal(
+    rows: Sequence[dict], *, lo: float = DEFAULT_BAND[0], hi: float = DEFAULT_BAND[1]
+) -> dict[str, Any]:
     """Within-ask contrast. Signal is a group whose k rollouts disagree.
 
     A grouped RL update learns from a mix of 0 and 1 on the same ask,
@@ -399,25 +407,72 @@ def select_for_sft(
     return selected, report
 
 
+def trim_out_of_band(
+    rows: Sequence[dict],
+    *,
+    lo: float = DEFAULT_BAND[0],
+    hi: float = DEFAULT_BAND[1],
+    min_k: int = 2,
+) -> tuple[list[dict], dict[str, Any]]:
+    """Drop asks whose pass rate over k >= ``min_k`` rollouts sits outside
+    [``lo``, ``hi``]. The offline difficulty filter: an ask the policy
+    almost always or almost never passes carries little gradient per
+    rollout. Unanimous asks are ``trim_unanimous_groups``'s job and are
+    left alone here; singles always stay.
+    """
+    if not 0.0 <= lo <= hi <= 1.0:
+        raise ValueError(f"band must satisfy 0 <= lo <= hi <= 1, got ({lo}, {hi})")
+    groups = _group_label_lists(rows)
+    too_easy: set[str] = set()
+    too_hard: set[str] = set()
+    for prompt, labels in groups.items():
+        if len(labels) < max(2, int(min_k)):
+            continue
+        p = sum(labels) / len(labels)
+        if not 0.0 < p < 1.0:
+            continue
+        if p > hi:
+            too_easy.add(prompt)
+        elif p < lo:
+            too_hard.add(prompt)
+    dead = too_easy | too_hard
+    kept = [row for row in rows if str(row.get("prompt") or "") not in dead]
+    return kept, {
+        "n": len(rows),
+        "n_kept": len(kept),
+        "n_dropped": len(rows) - len(kept),
+        "n_groups_dropped": len(dead),
+        "too_easy": len(too_easy),
+        "too_hard": len(too_hard),
+        "band": [lo, hi],
+    }
+
+
 def select_for_rl(
     rows: Sequence[dict],
     *,
     target: int = 1000,
-    lo: float = 0.3,
-    hi: float = 0.7,
+    lo: float = DEFAULT_BAND[0],
+    hi: float = DEFAULT_BAND[1],
+    enforce_band: bool = True,
     has_tools: bool = True,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Whole mixed groups up to roughly ``target`` rows. Groups never split.
 
-    After the row gates and the unanimous trim, remaining asks are ranked
-    mixed-band first (pass rate nearest 0.5) and taken round-robin across
-    observed fault kinds, so the dataset keeps a grounded spread of
-    no-fault, miss, timeout, and already-done situations rather than one
-    over-represented failure. The last group may overshoot ``target``;
-    an RL update wants the complete group or none of it.
+    After the row gates, the unanimous trim, and (``enforce_band``) the
+    difficulty band, remaining asks are ranked by distance from p = 0.5
+    and taken round-robin across observed fault kinds, so the dataset
+    keeps a grounded spread of no-fault, miss, timeout, and already-done
+    situations rather than one over-represented failure. The last group
+    may overshoot ``target``; an RL update wants the complete group or
+    none of it. ``enforce_band=False`` keeps out-of-band asks and only
+    ranks them last.
     """
     kept, base_report = filter_rl_rows(rows, has_tools=has_tools)
     kept, trim_report = trim_unanimous_groups(kept)
+    band_report: dict[str, Any] = {"n_groups_dropped": 0, "too_easy": 0, "too_hard": 0}
+    if enforce_band:
+        kept, band_report = trim_out_of_band(kept, lo=lo, hi=hi)
     groups: dict[str, list[dict]] = {}
     for row in kept:
         groups.setdefault(str(row.get("prompt") or ""), []).append(row)
@@ -461,6 +516,10 @@ def select_for_rl(
         "groups_selected": picked_groups,
         "fault_kinds": {fault: len(prompts) for fault, prompts in fault_buckets.items()},
         "target": goal,
+        "band": [lo, hi],
+        "enforce_band": bool(enforce_band),
+        "band_groups_dropped": band_report["n_groups_dropped"],
+        "band_dropped": {"too_easy": band_report["too_easy"], "too_hard": band_report["too_hard"]},
         "signal": group_signal(selected, lo=lo, hi=hi),
     }
     # A selection with no mixed group has no within-group contrast: GRPO
@@ -623,13 +682,21 @@ def recommend(
 
 
 def optimize(
-    source, *, mode: str | None = None, target: int = 1000, output: str | None = None
+    source,
+    *,
+    mode: str | None = None,
+    target: int = 1000,
+    output: str | None = None,
+    band: tuple[float, float] = DEFAULT_BAND,
+    enforce_band: bool = True,
 ) -> tuple[list[dict], dict[str, Any]]:
     """One call after grading: concentrate for the post-training target.
 
     ``source`` is a ``SimulationData``, a row list, or a JSONL path.
     ``mode`` defaults to the data's own mode: ``"sft"`` picks diverse
-    correct demonstrations, anything else keeps whole mixed RL groups.
+    correct demonstrations, anything else keeps whole mixed RL groups
+    inside the difficulty ``band`` (default 20%-80% pass rate;
+    ``enforce_band=False`` only ranks out-of-band asks last).
     Returns ``(rows, report)``; writes ``output`` when given, or
     ``<name>.<mode>.jsonl`` next to a path source. Never overwrites the
     source file unless ``output`` names it explicitly.
@@ -652,7 +719,14 @@ def optimize(
     if resolved == "sft":
         picked, report = select_for_sft(rows, target=target)
     else:
-        picked, report = select_for_rl(rows, target=target, has_tools=has_tools)
+        picked, report = select_for_rl(
+            rows,
+            target=target,
+            lo=float(band[0]),
+            hi=float(band[1]),
+            enforce_band=enforce_band,
+            has_tools=has_tools,
+        )
     report["mode"] = resolved
     dest = output
     if not dest and src:

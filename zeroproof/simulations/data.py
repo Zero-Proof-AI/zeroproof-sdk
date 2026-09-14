@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -120,6 +121,12 @@ _CONVERSATION_FIELDS = (
     "texture",
     "history",
 )
+
+
+def _prompt_hash(policy: str) -> str | None:
+    if not policy:
+        return None
+    return hashlib.sha256(policy.encode("utf-8")).hexdigest()[:16]
 
 
 def export_row(row: dict) -> dict:
@@ -430,6 +437,7 @@ class SimulationData:
         agent: str | None = None,
         publish: bool = False,
         description: str | None = None,
+        gate: bool = True,
     ) -> dict:
         """Upload this run to your Zero Proof Labs account as a dataset.
 
@@ -439,12 +447,33 @@ class SimulationData:
         on the platform. ``publish=True`` with an ``agent`` name also puts it
         on the public catalog at zeroproofai.com/datasets as a card. Returns
         the registry entry with ``datasetId``.
+
+        ``gate=True`` runs ``publish_gate`` first: every graded row gets a
+        ``calibration`` stamp (per-task pass rate, k, producing policy),
+        and an RL-shaped run that is ungraded or has no mixed group is
+        refused with ``PublishGateError``. The gate report is returned as
+        ``entry["gate"]``. ``gate=False`` uploads rows as they are.
         """
         from .ingest.platform import publish as _publish
+        from .score.publish_gate import publish_gate
 
         if publish and not agent:
             raise ValueError("publish=True needs agent=..., cards are grouped by agent")
-        entry = push_rows(self.rows(), name, api_key=api_key, parent=parent)
+        rows = self.rows()
+        gate_report = None
+        if gate:
+            profile = self.profile
+            gate_report = publish_gate(
+                rows,
+                mode=self.mode,
+                policy={
+                    "name": str(getattr(profile, "name", "") or ""),
+                    "prompt_hash": _prompt_hash(str(getattr(profile, "policy", "") or "")),
+                },
+            )
+        entry = push_rows(rows, name, api_key=api_key, parent=parent)
+        if gate_report is not None:
+            entry = {**entry, "gate": gate_report}
         if publish:
             entry = {
                 **entry,
