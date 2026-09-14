@@ -89,6 +89,25 @@ holdout 159 prompts): 308 pairs from 193 prompts with contrast, pass@1
 0.17 [0.13, 0.22] to 0.69 [0.63, 0.75], +0.49 [+0.37, +0.60], `moved`.
 See the GRPO README for the set and the side-by-side.
 
-One round of on-policy pairs is what this example does. The pairs go stale
-as the policy moves; for more, sample again from the adapter and run a
-second round, or move to GRPO, which does that every step.
+## Round two
+
+`--from-run <run name>` merges that run's adapter into the base weights,
+samples fresh pairs from the merged policy, and trains a new adapter with
+the merged policy as the reference: iterated on-policy DPO. The merged
+policy is saved under `merged/` on the volume for serving or a third round.
+
+```bash
+uv run --with modal modal run examples/dpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl --run-name refund-dpo-r1
+uv run --with modal modal run examples/dpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl --from-run refund-dpo-r1 --run-name refund-dpo-r2
+```
+
+On the model-written set, round two from the 0.69 policy: 412 pairs from
+261 prompts with contrast (the policy now fails less often, so fewer
+prompts split, but more pairs per split prompt), pass@1 0.63 [0.57, 0.69]
+to 0.92 [0.90, 0.95], +0.26 [+0.17, +0.35], `moved`. Two rounds of DPO
+(0.17 to 0.92) passed 120 steps of GRPO (0.85) on this environment. The
+round-two "before" (0.63) is the round-one policy resampled; it sits inside
+round one's after interval, which is what a stable measurement looks like.
+
+The pairs go stale as the policy moves, which is why each round samples
+its own; GRPO does the same every step.
