@@ -414,13 +414,6 @@ zps.behavioral_markers(scored.rows)  # {"boilerplate": 0.31, "refusal": 0.04, ..
 
 For a before/after comparison use `style_markers` / `style_report` above, not these: those markers are 1.0 when the reply is clean (higher is better), which is the polarity `delta_report(must_not_regress=...)` expects. `behavioral_markers` is presence (higher is worse), so it reads a paired delta backwards. The two cover the same ch. 14 behaviors and are being consolidated onto `style`.
 
-**Benchmark across seeds.** `pass_at(rows).ci95` is the interval over which tasks you picked; it does not see that the model is stochastic and the same eval re-run gives a different number (rlhf-book ch. 16). `benchmark_report(seed_runs)` takes several graded runs of one frozen eval and reports pass@1 mean and SD across seeds, the spread, and the tasks that flip seed to seed, so you know whether a before/after delta clears the run-to-run noise. `run_benchmark(eval_set, judge=, rollout=, seeds=5)` drives the seed loop for you; pass `decontaminate_against=train_rows` to fold an 8-gram leak check into the scorecard.
-
-```python
-runs = [evaluate(roll(seed=s), judge=my_judge).rows for s in range(5)]
-print(zps.format_benchmark(zps.benchmark_report(runs, name="telecom-holdout")))
-```
-
 **Stage lineage.** The pipeline is a sequence of stages (rlhf-book ch. 3): SFT, reward modeling, RL, and the eval that judges the result. `stamp_stage(rows, "sft")` records which stage a row fed, and `stage_report(rows)` counts rows per stage and flags the one mistake it most needs caught: any task used in both `eval` and a training stage. `zps.stamp_stage`, `zps.stage_report`, `zps.stage_of`, `zps.STAGES` (`sft`, `rm`, `rl`, `eval`, `mid`).
 
 **Model spec as an object.** A spec or constitution is a living, versioned document (rlhf-book ch. 17). `load_spec(constitution)` wraps the `{source, traits: [{id, name, principle, authority}]}` shape (what the character example writes) into a `Spec` whose `version` is a content hash, so any edit to a principle changes it. `spec.behaviors()` are the trait ids, ready for `delta_report(must_not_regress=...)`; `stamp_spec(rows, spec)` tags a run with the spec version it targeted, so you can ask whether adherence held from one spec or model version to the next.

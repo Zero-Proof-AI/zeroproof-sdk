@@ -25,7 +25,26 @@ adds custom detectors. Report-only; nothing here changes a reward.
 from __future__ import annotations
 
 import re
+import warnings
 from collections.abc import Callable, Sequence
+
+# Consolidated onto score.style, the delta-ready over-optimization module
+# (1.0 = clean, higher is better). These presence-polarity functions stay for
+# the v0.32 API but warn; prefer style_markers / style_report / refusal_report.
+_DEPRECATION = (
+    "zeroproof.simulations.score.markers is deprecated; use score.style "
+    "(style_markers / style_report / refusal_report), whose markers are "
+    "delta_report-ready (1.0 = clean, higher is better)."
+)
+_warned = False
+
+
+def _warn_deprecated() -> None:
+    global _warned
+    if not _warned:
+        warnings.warn(_DEPRECATION, DeprecationWarning, stacklevel=3)
+        _warned = True
+
 
 # Each pattern is a signature the RLHF book names as an over-optimization
 # tell. Presence, not count: a reply either does the thing or it does not.
@@ -108,7 +127,11 @@ def mark_rows(
     """Return copies of ``rows`` with the stock markers merged into each
     row's ``markers`` dict, ready for ``marker_summary`` / ``delta_report``.
     ``extra`` adds custom named detectors ``row -> value``. Existing marker
-    values are kept; stock names overwrite only themselves."""
+    values are kept; stock names overwrite only themselves.
+
+    Deprecated: presence polarity (1 = tic present) reads a ``delta_report``
+    paired comparison backwards. Use ``score.style.style_markers``."""
+    _warn_deprecated()
     out = []
     for row in rows:
         if not isinstance(row, dict):
@@ -129,7 +152,10 @@ def behavioral_markers(
     rows: Sequence[dict], *, names: Sequence[str] | None = None
 ) -> dict[str, float]:
     """Rate of each stock marker over ``rows`` (fraction of rollouts that
-    trip it). The over-optimization dashboard in one call."""
+    trip it). The over-optimization dashboard in one call.
+
+    Deprecated: use ``score.style.style_report`` for the delta-ready view."""
+    _warn_deprecated()
     names = list(names or STOCK_MARKERS)
     if not rows:
         return {name: 0.0 for name in names}

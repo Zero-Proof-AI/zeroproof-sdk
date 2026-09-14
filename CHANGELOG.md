@@ -3,13 +3,20 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.34 (2026-09-14)
 
+<<<<<<< HEAD
 - `examples/dpo --constructed-negatives`: for every no-id or off-topic
   prompt the policy answered without a tool call, pair that reply
   against an invented call (`pairs.constructed_negatives`), so DPO has
   contrast on the prompts where its own samples had none; a second
   balanced round without it had made the invented-id habit worse.
+=======
+- `run_judge(scale=(lo, hi))`, `evaluate(scale=)`, `data.grade(judge=, scale=)`:
+  a rating judge (1 to 5, 0 to 10) is read on its scale; `reward` is the
+  rating mapped onto [0, 1] and `judge_meta` keeps `rating` and `scale`;
+  a rating outside the scale is `invalid_result` (rlhf-book ch. 11) (#137).
+>>>>>>> origin/main
 - `zps.attach_labels(rows, labels, annotator=)`: hand labels from a JSONL
   path, a list or a mapping, matched by rollout id, scenario id plus
   rollout index, or prompt plus final text; every label stays on the row
