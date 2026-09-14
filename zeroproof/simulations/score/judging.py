@@ -537,6 +537,11 @@ def build_preference_pairs(
             f"{mixed_policy}/{n} pairs mix policies (chosen and rejected from different "
             "models); on-policy pairs train better (rlhf-book ch. 11)"
         )
+    from .optimize import _eval_sourced_warning, eval_sourced
+
+    eval_pairs = sum(1 for p in pairs if eval_sourced([p["chosen"], p["rejected"]]))
+    if eval_pairs:
+        warnings.append(_eval_sourced_warning(eval_pairs, "pair(s)"))
     report = {
         "pairs": n,
         "prompts_seen": len(groups),
@@ -546,6 +551,7 @@ def build_preference_pairs(
         "partial_score_pairs": partial,
         "same_policy_pairs": same_policy,
         "mixed_policy_pairs": mixed_policy,
+        "eval_sourced": eval_pairs,
         "length": {
             "median_delta": deltas[n // 2] if n else None,
             "chosen_longer": chosen_longer,

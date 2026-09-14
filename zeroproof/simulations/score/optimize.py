@@ -330,6 +330,27 @@ def trim_unanimous_groups(
     return kept, report
 
 
+def eval_sourced(rows: Sequence[dict]) -> int:
+    """Rows whose reward came from ``evaluate()`` (``lineage.source == "eval"``).
+
+    An eval score is the number you report; training on it makes the
+    held-out scorer the reward model. The count is surfaced on every
+    selector report so the leak is visible before a run starts.
+    """
+    return sum(
+        1
+        for row in rows
+        if isinstance(row, dict) and (row.get("lineage") or {}).get("source") == "eval"
+    )
+
+
+def _eval_sourced_warning(count: int, unit: str) -> str:
+    return (
+        f"{count} {unit} carry rewards from evaluate() (lineage.source == 'eval'); "
+        "training on them turns the held-out scorer into the reward model"
+    )
+
+
 def _stable_key(text: str, salt: str = "") -> str:
     return hashlib.sha256(f"{salt}:{text}".encode()).hexdigest()
 
@@ -403,7 +424,10 @@ def select_for_sft(
         "unique_behaviors": len(buckets),
         "behaviors_covered": len({behavior_signature(r) for r in selected}),
         "target": goal,
+        "eval_sourced": eval_sourced(selected),
     }
+    if report["eval_sourced"]:
+        report["warning"] = _eval_sourced_warning(report["eval_sourced"], "selected row(s)")
     # Rejection sampling picks the best of N completions per prompt, and
     # the published recipes use 10 to 30 (rlhf-book ch. 9); fewer makes
     # the pick biased or noisy. With k=1 there is no pick at all, only a
@@ -578,12 +602,17 @@ def select_for_rl(
         "length": length_report(selected),
         "correlations": reward_correlations(selected),
         "signal": group_signal(selected, lo=lo, hi=hi),
+        "eval_sourced": eval_sourced(selected),
     }
     report["hygiene_warnings"] = hygiene_warnings(
         duplicates=dup_report,
         lengths=report["length"],
         correlations=report["correlations"],
     )
+    if report["eval_sourced"]:
+        report["hygiene_warnings"].append(
+            _eval_sourced_warning(report["eval_sourced"], "selected row(s)")
+        )
     # A selection with no mixed group has no within-group contrast: GRPO
     # advantage is zero everywhere and the run trains nothing. That is a
     # grading or difficulty problem upstream, and it must not exit this
