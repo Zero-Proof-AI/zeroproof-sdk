@@ -39,6 +39,7 @@ from ..generate.actionspace import (
 )
 from ..generate.adapters import inspect, resolve
 from ..generate.agents import (
+    LOCAL_MODEL_TEMPERATURE,
     current_rollout,
     default_max_turns,
     hosted_model,
@@ -405,6 +406,20 @@ class Run:
             runner_kw["temperature"] = float(c.temperature)
         if c.logprobs:
             runner_kw["logprobs"] = c.logprobs
+        self.policy_version = (
+            f"{c.model_version_tag}@"
+            f"{hashlib.sha256(str(self.gen_policy or '').encode('utf-8')).hexdigest()[:16]}"
+        )
+        # A callable agent samples however it samples; only a model backend
+        # has a temperature the engine set.
+        self.sampling: dict[str, Any] | None = None
+        if c.backend:
+            self.sampling = {
+                "temperature": float(c.temperature)
+                if c.temperature is not None
+                else LOCAL_MODEL_TEMPERATURE,
+                "logprobs": c.logprobs if c.logprobs else False,
+            }
         if c.execute is not None:
             runner_kw["execute"] = c.execute
         if c.backend:
@@ -658,6 +673,22 @@ class Run:
         if lp_steps:
             t["logprob"] = round(sum(float(s["logprob"]) for s in lp_steps), 6)
             t["n_tokens"] = sum(int(s.get("n_tokens") or 0) for s in lp_steps)
+            tokens = [
+                float(x)
+                for s in lp_steps
+                for x in (s.get("token_logprobs") or [])
+                if isinstance(x, (int, float)) and not isinstance(x, bool)
+            ]
+            if tokens:
+                # per-token, in generation order across the agent's turns:
+                # what a truncated-importance-sampling ratio is built from
+                t["token_logprobs"] = tokens
+        # Which policy, exactly, and how it was sampled (rlhf-book ch. 6
+        # async RL, ch. 9): a later update needs the sampler's version and
+        # temperature on the row, not in a notebook.
+        t["policy_version"] = self.policy_version
+        if self.sampling is not None:
+            t["sampling"] = dict(self.sampling)
         # Token usage rolls up the same way, so a row says what it cost and a
         # trace built from it can carry gen_ai.usage.* on every model turn.
         used = [

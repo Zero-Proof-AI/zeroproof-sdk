@@ -1169,6 +1169,12 @@ def _answer_tool_call(env: Any, execute: Callable | None, tool: str, arguments: 
     return {"status": "ok", "result": result}
 
 
+#: Sampling temperature a model-backed rollout uses unless simulate(temperature=)
+#: says otherwise. Recorded on every row under ``sampling`` (rlhf-book ch. 9:
+#: rejection sampling is run at 0.7 to 1.0; the row has to say what it was).
+LOCAL_MODEL_TEMPERATURE = 0.8
+
+
 def local_model(
     base_url: str,
     model: str,
@@ -1180,7 +1186,7 @@ def local_model(
     avg_turns: float = 6,
     min_user_turns: int = 1,
     turn_stats: dict | None = None,
-    temperature: float = 0.8,
+    temperature: float = LOCAL_MODEL_TEMPERATURE,
     logprobs: bool | str = False,
     fault_plans: dict | None = None,
     result_shapes: dict | None = None,

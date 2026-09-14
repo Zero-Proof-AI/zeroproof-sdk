@@ -94,6 +94,8 @@ _CARRY_ROLLOUT = (
     "group_id",
     "logprob",
     "n_tokens",
+    "token_logprobs",
+    "sampling",
     "usage",
 )
 
@@ -112,6 +114,7 @@ _CONSUMED = frozenset(
         "seed",
         "rollout_index",
         "model_version",
+        "policy_version",
         "markers",
         "calibration",
         "tool_trace",
@@ -649,7 +652,11 @@ def from_row(row: dict) -> tuple[Task, Rollout, list[Judgment], list[Marker]]:
     rollout = Rollout(
         rollout_id=rollout_id,
         task_id=task_id,
-        policy=PolicyRef(name=str(model or ""), model=model),
+        policy=PolicyRef(
+            name=str(model or ""),
+            model=model,
+            version=str(raw["policy_version"]) if raw.get("policy_version") else None,
+        ),
         index=index,
         steps=_steps(raw.get("steps")),
         final_text=str(raw.get("final_text") or ""),
@@ -741,7 +748,7 @@ def to_row(
         "scenario_id": task.task_id,
     }
     row["messages"] = rollout.extra.get("messages") or conversation(row)
-    for key in ("opener", "opening"):
+    for key in ("opener", "opening", "sampling", "token_logprobs"):
         if rollout.extra.get(key):
             row[key] = rollout.extra[key]
     for key in AXES:
@@ -758,6 +765,8 @@ def to_row(
         row["rollout_index"] = rollout.index
     if rollout.policy.model is not None:
         row["model_version"] = rollout.policy.model
+    if rollout.policy.version:
+        row["policy_version"] = rollout.policy.version
     primary = next((j for j in judgments if j.scorer.name not in {"llm", "qwen"}), None)
     if primary is not None:
         if primary.reward is not None or primary.evidence.get("reward_present"):

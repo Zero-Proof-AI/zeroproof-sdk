@@ -39,6 +39,9 @@
         "markers": {"type": "object", "additionalProperties": {"type": "number"}, "$comment": "Marker[] as name -> value"},
         "logprob": {"type": "number", "$comment": "summed log-probability of the agent's generated tokens under the sampling policy; simulate(logprobs=True)"},
         "n_tokens": {"type": "integer", "$comment": "generated tokens the logprob sums over"},
+        "token_logprobs": {"type": "array", "items": {"type": "number"}, "$comment": "per-token log-probabilities in generation order across the agent's turns; simulate(logprobs=\"tokens\")"},
+        "sampling": {"type": "object", "properties": {"temperature": {"type": "number"}, "logprobs": {}}, "$comment": "how a model backend was sampled; absent for a callable agent"},
+        "policy_version": {"type": "string", "$comment": "Rollout.policy.version: <model_version>@<sha256 of the system policy>[:16]"},
         "calibration": {
           "type": "object",
           "required": ["n", "pass_rate"],

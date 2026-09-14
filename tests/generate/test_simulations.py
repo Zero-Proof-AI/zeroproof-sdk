@@ -47,6 +47,7 @@ _PUBLIC = {
     "quality_scores",
     "rollout_index",
     "model_version",
+    "policy_version",
 }
 
 

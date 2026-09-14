@@ -158,4 +158,72 @@ def mean_kl(rows: Sequence[dict], ref: str | Sequence[dict] = "ref_logprob") -> 
     }
 
 
-__all__ = ["logprob_report", "mean_kl"]
+def staleness_report(rows: Sequence[dict], *, base_model: str | None = None) -> dict[str, Any]:
+    """Which policies produced these rows, and can an update still use them.
+
+    rlhf-book ch. 6 (asynchronous RL, truncated importance sampling): rows
+    sampled by an older policy are usable when the row carries the
+    sampler's version and its logprobs so the ratio can be formed; rows
+    from an unknown sampler are not. ``versions`` counts rows per
+    ``policy_version`` (``model_version`` when the row predates it);
+    ``base_model`` names the model about to be trained, and rows whose
+    ``model_version`` differs are ``stale``. Coverage says how many rows
+    carry ``sampling``, ``logprob`` and ``token_logprobs``.
+    """
+    versions: dict[str, int] = {}
+    models: dict[str, int] = {}
+    temperatures: dict[str, int] = {}
+    n = with_sampling = with_logprob = with_tokens = stale = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        n += 1
+        version = str(row.get("policy_version") or row.get("model_version") or "unknown")
+        versions[version] = versions.get(version, 0) + 1
+        model = str(row.get("model_version") or "unknown")
+        models[model] = models.get(model, 0) + 1
+        sampling = row.get("sampling")
+        if isinstance(sampling, dict):
+            with_sampling += 1
+            key = str(sampling.get("temperature"))
+            temperatures[key] = temperatures.get(key, 0) + 1
+        if _num(row.get("logprob")) is not None:
+            with_logprob += 1
+        if isinstance(row.get("token_logprobs"), list) and row["token_logprobs"]:
+            with_tokens += 1
+        if base_model and model != base_model:
+            stale += 1
+    warnings: list[str] = []
+    if len(versions) > 1:
+        warnings.append(
+            f"rows come from {len(versions)} policy versions; an on-policy update wants one, "
+            "and an off-policy one needs the sampler's logprob on every row"
+        )
+    if base_model and stale:
+        warnings.append(
+            f"{stale}/{n} rows were sampled by a model other than {base_model}; "
+            "they are off-policy for it"
+        )
+    if n and with_logprob < n and len(versions) > 1:
+        warnings.append(
+            f"{n - with_logprob}/{n} rows carry no logprob; a stale row without one "
+            "cannot be importance-weighted (simulate(logprobs=True))"
+        )
+    if n and with_sampling and with_sampling < n:
+        warnings.append(f"{n - with_sampling}/{n} rows do not say how they were sampled")
+    return {
+        "n": n,
+        "versions": versions,
+        "models": models,
+        "base_model": base_model,
+        "stale": stale if base_model else None,
+        "stale_share": round(stale / n, 4) if base_model and n else None,
+        "temperatures": temperatures,
+        "sampling_coverage": round(with_sampling / n, 4) if n else None,
+        "logprob_coverage": round(with_logprob / n, 4) if n else None,
+        "token_logprob_coverage": round(with_tokens / n, 4) if n else None,
+        "warnings": warnings,
+    }
+
+
+__all__ = ["logprob_report", "mean_kl", "staleness_report"]

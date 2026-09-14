@@ -112,7 +112,7 @@ from .score.judging import (
     normalize_judge_result,
     run_judge,
 )
-from .score.logprobs import logprob_report, mean_kl
+from .score.logprobs import logprob_report, mean_kl, staleness_report
 from .score.markers import STOCK_MARKERS, behavioral_markers, format_markers, mark_rows, row_markers
 from .score.optimize import (
     DEFAULT_BAND,
@@ -299,6 +299,7 @@ __all__ = [
     "split_pseudo_production",
     "stage_of",
     "stage_report",
+    "staleness_report",
     "stamp_spec",
     "stamp_stage",
     "style_markers",
