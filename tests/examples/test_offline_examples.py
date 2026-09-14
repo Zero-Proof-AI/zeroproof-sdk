@@ -23,6 +23,7 @@ EXAMPLES = REPO / "examples"
 # the parser, so it catches import-time breakage without a real run.
 CLI_EXAMPLES = [
     "agent-behavior/run.py",
+    "bring-your-own-agent/run.py",
     "character/from_model_spec.py",
     "character/measure.py",
     "character/run.py",

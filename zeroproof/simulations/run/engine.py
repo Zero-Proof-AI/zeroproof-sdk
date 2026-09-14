@@ -102,7 +102,7 @@ from ..ingest.traces import (
 )
 from ..schema import SCHEMA_KEY, SCHEMA_VERSION
 from ..score.grading import behavior_signature, conduct_grade
-from .config import RunConfig
+from .config import DEAD_AGENT_MIN_ERRORS, RunConfig
 from .rows import (
     _row_conversation,
     _situation_key_from_meta,
@@ -685,12 +685,27 @@ class Run:
         return t
 
     def _note_lost(self, t: dict) -> None:
-        """A rollout that did not become a row: an agent error is counted."""
+        """A rollout that did not become a row: an agent error is counted.
+
+        A dead agent is called off early. Every lost rollout is re-rolled
+        up to repeat_count times and a fresh situation then fills the
+        slot, so an agent that raises on every call burned ~15 calls per
+        budgeted row before the writer ran dry (#88). Once no row has
+        landed and the errors pass the allowance, the run stops as
+        agent_failed. A run with any surviving row keeps re-rolling.
+        """
         final = str((t or {}).get("final_text") or "")
         if final.lower().startswith("<agent error"):
             self.agent_errors += 1
             if not self.first_agent_error:
                 self.first_agent_error = final[len("<agent error: ") :].rstrip(">")
+            if (
+                not self.stopping
+                and not self.data.trajectories
+                and self.agent_errors >= self.agent_error_allowance
+            ):
+                self.stopping = True
+                self.agent_dead = True
 
     # -------------------------------------------------------- loop state
 
@@ -707,6 +722,8 @@ class Run:
         # run that drops every rollout says so instead of blaming the writer.
         self.agent_errors = 0
         self.first_agent_error = ""
+        self.agent_error_allowance = max(DEAD_AGENT_MIN_ERRORS, 2 * int(c.cap or 0))
+        self.agent_dead = False
         self.writer_idle = 0
         self.restart_count = 0
         # Starvation relief: when every situation slot is used but rows are
@@ -1153,6 +1170,9 @@ class Run:
                     # round's selection seed sees the same state.
                     concurrent.futures.wait(list(self.inflight), timeout=c.hung_slot_s)
             results, jobs_for = self._collect()
+            if self.agent_dead:
+                data.stopped_because = "agent_failed"
+                break
             if self._update_search(results, jobs_for, info, selected):
                 break
 
@@ -1665,6 +1685,12 @@ class Run:
                 # Leaves the future in inflight to avoid launching a
                 # replacement on top of a still-running request.
                 continue
+        if self.stopping:
+            # Rollouts that started after the stop returned empty; they
+            # are not lost work and must not be re-rolled.
+            kept = [(t, job) for t, job in zip(results, jobs_for) if not t.get("_skipped")]
+            results = [t for t, _ in kept]
+            jobs_for = [job for _, job in kept]
         paired = [(t, job) for t, job in zip(results, jobs_for) if _usable_rollout(t)]
         if len(paired) != len(results):
             # a lost rollout is re-rolled for the same prompt so a
@@ -1676,7 +1702,7 @@ class Run:
                     continue
                 self._note_lost(t)
                 key = str(job[0])
-                if self.rerolls.get(key, 0) < c.repeat_count:
+                if not self.stopping and self.rerolls.get(key, 0) < c.repeat_count:
                     self.rerolls[key] = self.rerolls.get(key, 0) + 1
                     fut = self.pool.submit(self._build_row, job)
                     self.inflight[fut] = job

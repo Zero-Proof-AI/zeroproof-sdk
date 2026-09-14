@@ -284,11 +284,15 @@ class SimulationData:
         llm_concurrency: int = 16,
         version: str | None = None,
     ):
-        """Grade after simulation with hosted Qwen or a custom callable.
+        """Grade after simulation with the hosted judge or a custom callable.
 
-        With no callable, this is the binary hosted-Qwen grader and reads
-        ``VLLM_API_KEY`` from the environment. Pass a callable for a custom
-        score. Simulation itself never invokes this method by default.
+        With no callable this is ``grade_llm``: the hosted LLM judge (Phi-4,
+        a different family from the hosted Qwen policy), read from
+        ``VLLM_API_KEY``. It writes ``reward`` and ``reason`` onto the rows
+        in place and returns the judge report (a dict: graded, n0, n1,
+        backend, judge_version, warnings). ``llm=True`` is the same path.
+        A plain ``grader=`` callable scores in place too and returns
+        nothing. Simulation itself never invokes this method by default.
 
         ``judge=`` is the contract path: any callable honoring the judge
         contract (see ``zeroproof.simulations.judging``). It returns a

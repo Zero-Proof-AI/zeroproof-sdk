@@ -155,8 +155,20 @@ def pass_at(
     note = ""
     pass_pow_k: float | None = None
     pass_at_k: float | None = None
+    sizes = sorted(set(multi))
+    uneven = k is None and len(sizes) > 1
     if resolved_k < max(1, int(min_k)):
         note = f"set repeats>={int(min_k)} for pass^k and pass@k"
+        if uneven:
+            # A time or row budget cut mid-group leaves ragged groups; k
+            # defaults to the smallest, so the k-way numbers vanish even
+            # though most groups reached the requested repeats.
+            reached = sum(1 for n in multi if n >= sizes[-1])
+            note = (
+                f"groups are uneven ({sizes[0]} to {sizes[-1]} repeats); k defaults "
+                f"to the smallest, so pass k={sizes[-1]} to score the {reached} "
+                f"group(s) that reached it, or finish the cut groups"
+            )
     elif not eligible:
         note = f"no group has {resolved_k} graded repeats"
     else:
@@ -164,6 +176,8 @@ def pass_at(
         at_vals = [_pass_at_k_group(len(g), sum(g), resolved_k) for g in eligible]
         pass_pow_k = sum(pow_vals) / len(pow_vals)
         pass_at_k = sum(at_vals) / len(at_vals)
+        if uneven:
+            note = f"groups are uneven ({sizes[0]} to {sizes[-1]} repeats); k is the smallest"
     from .stats import bootstrap_ci
 
     return PassAt(

@@ -26,7 +26,7 @@ A situation is drawn across the world axes (from the agent's tools) and the huma
 3. **Write users.** A separate writer (same hosted model, different prompt, no agent policy) samples situations across tools, stance, history, and so on.
 4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of the same prompt.
 5. **Play the agent.** It talks, calls tools, gets results, talks again. All of that is stored: user text, agent text, tool calls, tool results, `final_text`.
-6. **Grade.** Rows come back ungraded. Grade after with `zps.grade(...)`, pass your own `grader=`, or `grade=True` for the deterministic conduct score.
+6. **Grade.** Rows come back ungraded. Grade after with `data.grade()` (hosted judge), `data.grade(judge=...)` (your judge), or `zps.grade(path)`. The legacy `grade=True` flag writes deterministic conduct rewards; avoid it for the rubric workflow.
 
 Stop when the row cap or the clock hits.
 
@@ -118,7 +118,9 @@ def my_agent(message: str) -> dict:
 If it raises, the rollout is dropped and the run says so:
 `data.stopped_because == "agent_failed"` when no row survived, with the count
 and the first error in `data.search["agent_errors"]` and
-`data.search["first_agent_error"]`.
+`data.search["first_agent_error"]`. An agent that fails every call is called
+off after `max(16, 2 * budget)` lost rollouts, so a dead endpoint costs a
+handful of calls, not hundreds.
 
 Working in this repo: `uv sync`, then `uv run pytest` after `uv sync --extra dev`.
 
@@ -147,7 +149,7 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `simulator` | hosted Qwen | Situation writer. `False` uses the built-in template writer (no model, less variety); an `openai:`/`vllm:` spec runs it on your endpoint |
 | `logprobs` | `False` | Ask the rollout model for the log-probability of every token it generates. Each agent turn's step gets `logprob` and `n_tokens`, the row gets the totals. `"tokens"` keeps the per-token list. Model backends only |
 | `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off |
-| `grade` | `False` | Rows come back ungraded; grade after with `zps.grade(...)`, or pass `grader=` (your callable) or `grade=True` (conduct score) |
+| `grade` | `False` | Legacy: `True` writes the deterministic conduct score at simulation time. Rows come back ungraded by default; grade after with `data.grade(...)` or `zps.grade(...)` |
 | `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |
 | `output` | | JSONL path |
 
@@ -174,6 +176,7 @@ zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", un
 | Example | What it does |
 |---|---|
 | [`examples/agent-behavior`](examples/agent-behavior) | Start here if the platform is new to you. Runs a coding agent with bad habits against real tests, streams every turn to Zero Proof as OTLP spans plus a judge verdict, and fills a dashboard with behaviour worth looking at. No dependencies. |
+| [`examples/bring-your-own-agent`](examples/bring-your-own-agent) | Your own callable: the `agent(message) -> {steps, final_text}` contract, the `agent_failed` report when it raises or returns the wrong shape, and `eval_sourced` keeping a held-out score out of the reward. Offline, no key. |
 | [`examples/prime-intellect-rl`](examples/prime-intellect-rl) | Generates a GRPO-ready dataset with `simulate(mode="rl")` and checks it carries gradient before you spend GPU time on it. |
 | [`examples/schema`](examples/schema) | One row file in, six training targets out: eval, SFT, preference, GRPO prompts, OPSD hints, OPD. Migrates any legacy file first. Offline, no key. |
 | [`examples/grpo`](examples/grpo) | GRPO on Modal, end to end: prompts from the simulator, a verifiable tool-discipline reward, TRL `GRPOTrainer` with LoRA, reward and KL on the dashboard, pass@1 before and after on a holdout with the paired delta on the run page. One A10G, under fifteen minutes. |
@@ -251,7 +254,7 @@ rows, report = zps.optimize(data, mode="rl", enforce_band=False)  # rank, do not
 report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 ```
 
-`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter.
+`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter. Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
 
 The report also carries the reward-hack scan: `report["correlations"]` is corr(reward, feature) for reply length, tool-call count, and assistant turns, and `report["hygiene_warnings"]` names anything at or above `HACK_THRESHOLD` (0.3). Reward that tracks length or punishes tool use is a judge problem, so it is flagged, not pruned. The same scan, plus near-duplicate asks and length spread, runs in the publish gate. Standalone: `zps.reward_correlations(rows)`, `zps.dedupe_groups(rows)`, `zps.near_duplicate_prompts(rows)`, `zps.length_report(rows)`.
 
@@ -394,7 +397,7 @@ hosted GPU with warm replicas and burst under load.
 | `budget` | `1000` | Row cap |
 | `time_budget` | `None` | Seconds. Off by default; `None` or `0` disables |
 | `until` | `"compute"` | `"saturation"` also stops when coverage plateaus |
-| `grade` | `False` | Grade after, or pass `grader=` / `grade=True` |
+| `grade` | `False` | Legacy deterministic conduct score; grade after instead |
 | `llm_grade` | `False` | Extra LLM judge |
 | `output` | | JSONL path |
 | `advanced` | | Keys below |
@@ -459,7 +462,7 @@ Internals are grouped by stage and may move between releases.
 |---|---|
 | `generate/` | situation grid, writer, diversity selection, agent runners and adapters |
 | `score/` | conduct checks, judges, quality ranking, selection for SFT and RL |
-| `ingest/` | trace loading, OpenTelemetry rows, platform push and pull |
+| `ingest/` | trace loading, OpenTelemetry rows (`gen_ai.usage.*` sums into `row["usage"]`), platform push and pull |
 | `world/` | the mock tool environment |
 | `run/` | the engine behind `simulate()`: knob resolution (`config.py`), spec loading (`spec.py`), row helpers (`rows.py`), and the scheduler itself (`engine.py`: inputs, build, loop, finish) |
 | `simulation.py`, `data.py`, `export.py` | the `simulate()` entry point, its result object, and training export |

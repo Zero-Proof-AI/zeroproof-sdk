@@ -115,3 +115,25 @@ def test_save_meta_writes_pass_at_to_sidecar(tmp_path):
     assert meta["pass_at"]["headroom"] == pytest.approx(
         meta["pass_at"]["pass_at_k"] - meta["pass_at"]["pass_at_1"]
     )
+
+
+def test_uneven_groups_name_the_k_that_scores_them():
+    # A budget cut mid-group: three groups reached 4 repeats, one has 2.
+    rows = []
+    for prompt, labels in {
+        "a": [1, 0, 1, 1],
+        "b": [0, 0, 1, 0],
+        "c": [1, 1, 1, 1],
+        "d": [1, 0],
+    }.items():
+        rows += [{"prompt": prompt, "reward": r} for r in labels]
+    got = pass_at(rows)
+    assert got.k == 2 and got.pass_pow_k is None
+    assert "uneven (2 to 4 repeats)" in got.note and "k=4" in got.note and "3 group" in got.note
+    scored = pass_at(rows, k=4)
+    assert scored.n_groups_at_k == 3 and scored.pass_at_k is not None and scored.note == ""
+
+
+def test_even_groups_keep_the_plain_note():
+    rows = [{"prompt": p, "reward": r} for p in "ab" for r in (1, 0)]
+    assert pass_at(rows).note == "set repeats>=4 for pass^k and pass@k"

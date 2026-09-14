@@ -35,11 +35,29 @@ REFUND = '<tool_call>\n{"name": "create_refund", "arguments": {"order_id": "ORD-
 
 def test_first_turn_prefers_the_tool_step_then_the_assistant_message():
     _, p = _modules()
-    row = {"steps": [{"tool": "lookup_order", "arguments": {"order_id": "ORD-1"}}], "final_text": "done"}
-    assert json.loads(p.first_turn(row).split("\n")[1]) == {"name": "lookup_order", "arguments": {"order_id": "ORD-1"}}
-    row = {"steps": [], "messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Which order?"}]}
+    row = {
+        "steps": [{"tool": "lookup_order", "arguments": {"order_id": "ORD-1"}}],
+        "final_text": "done",
+    }
+    assert json.loads(p.first_turn(row).split("\n")[1]) == {
+        "name": "lookup_order",
+        "arguments": {"order_id": "ORD-1"},
+    }
+    row = {
+        "steps": [],
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "Which order?"},
+        ],
+    }
     assert p.first_turn(row) == "Which order?"
-    wire = {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "lookup_order", "arguments": '{"order_id": "ORD-2"}'}}]}
+    wire = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"function": {"name": "lookup_order", "arguments": '{"order_id": "ORD-2"}'}}
+        ],
+    }
     assert '"order_id": "ORD-2"' in p.first_turn({"messages": [wire]})
     assert p.first_turn({"final_text": " plain "}) == "plain"
 
@@ -47,8 +65,18 @@ def test_first_turn_prefers_the_tool_step_then_the_assistant_message():
 def test_dpo_rows_keep_contrast_and_drop_identical_first_turns():
     _, p = _modules()
     pairs = [
-        {"prompt": "check ORD-4017", "chosen": {"final_text": CALL}, "rejected": {"final_text": REFUND}, "margin": 1.0},
-        {"prompt": "check ORD-4017", "chosen": {"final_text": CALL}, "rejected": {"final_text": CALL}, "margin": 1.0},
+        {
+            "prompt": "check ORD-4017",
+            "chosen": {"final_text": CALL},
+            "rejected": {"final_text": REFUND},
+            "margin": 1.0,
+        },
+        {
+            "prompt": "check ORD-4017",
+            "chosen": {"final_text": CALL},
+            "rejected": {"final_text": CALL},
+            "margin": 1.0,
+        },
         {"prompt": "", "chosen": {"final_text": CALL}, "rejected": {"final_text": REFUND}},
     ]
     rows = p.dpo_rows(pairs, "SYS")
@@ -64,10 +92,21 @@ def test_dpo_rows_keep_contrast_and_drop_identical_first_turns():
 def test_sampled_pairs_pair_a_pass_with_a_fail_per_prompt():
     r, p = _modules()
     prompts = [
-        {"prompt": "please check ORD-4017 for me", "case": r.case_for("please check ORD-4017 for me"), "scenario_id": "a"},
-        {"prompt": "How tall is Kilimanjaro?", "case": r.case_for("How tall is Kilimanjaro?"), "scenario_id": "b"},
+        {
+            "prompt": "please check ORD-4017 for me",
+            "case": r.case_for("please check ORD-4017 for me"),
+            "scenario_id": "a",
+        },
+        {
+            "prompt": "How tall is Kilimanjaro?",
+            "case": r.case_for("How tall is Kilimanjaro?"),
+            "scenario_id": "b",
+        },
     ]
-    replies = [[CALL, REFUND, CALL, "Sure, refunding now."], ["About 5,895 m.", "About 5,895 m.", "5,895 metres.", "Nearly six kilometres."]]
+    replies = [
+        [CALL, REFUND, CALL, "Sure, refunding now."],
+        ["About 5,895 m.", "About 5,895 m.", "5,895 metres.", "Nearly six kilometres."],
+    ]
     rows, report = p.sampled_pairs(prompts, replies, system="SYS")
     # Prompt a has passes and fails; prompt b is all passes, so no contrast.
     assert report["trl_rows"] == len(rows) >= 1
@@ -79,7 +118,13 @@ def test_sampled_pairs_pair_a_pass_with_a_fail_per_prompt():
 def test_load_export_reads_export_preference_output(tmp_path):
     r, p = _modules()
     rows = r.reward_rows(
-        [{"prompt": "please check ORD-4017 for me", "case": r.case_for("please check ORD-4017 for me"), "scenario_id": "a"}],
+        [
+            {
+                "prompt": "please check ORD-4017 for me",
+                "case": r.case_for("please check ORD-4017 for me"),
+                "scenario_id": "a",
+            }
+        ],
         [[CALL, REFUND]],
     )
     pairs, _ = zps.build_preference_pairs(rows)
