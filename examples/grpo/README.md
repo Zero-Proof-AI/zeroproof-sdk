@@ -63,3 +63,36 @@ group-relative advantage, no value model, small KL to the reference
 before believing a number: `--steps 10` to check the reward curve moves at
 all, and a second seed on the prompts, since 40 holdout prompts is a wide
 interval. The dashboard shows both runs side by side.
+
+## More prompts, tighter intervals
+
+The template writer gives about seventy distinct prompts, so the holdout is
+fourteen and every pass@1 interval is a quarter wide. `prompts.jsonl` is a
+model-written set: Qwen2.5-7B-Instruct wrote six customer messages per
+template seed from two angles (plain, and six kinds of customer),
+`prompts.py` kept the ones still in their seed's category (the order id
+present, absent, or off topic, as `case_for` reads it) and not a
+near-duplicate, and every prompt carries its seed's `scenario_id` so the
+split stays by situation. 707 prompts from 67 situations (576 with an id,
+74 without, 57 off topic; the seeds skew the same way).
+
+```bash
+uv run --with modal modal run examples/grpo/write_prompts_modal.py     # rewrite the set, A10G, a few minutes
+uv run --with modal modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl
+uv run --with modal modal run examples/dpo/train_modal.py  --prompts-file examples/grpo/prompts.jsonl
+```
+
+On this set the holdout is 159 prompts from 14 situations. GRPO, 40 steps,
+same flags as above: pass@1 0.17 [0.12, 0.22] to 0.29 [0.23, 0.35], paired
+delta +0.12 [+0.06, +0.19], `moved`, `well_formed` flat at 1.0, reward
+climbing the same way as on the template set. The interval is a third of
+the width it was with fourteen holdout prompts, which is the point.
+
+DPO on the same set (`examples/dpo`, 60 steps, 8 samples per prompt for
+the pairs): 308 pairs from 193 of 548 train prompts with contrast, pass@1
+0.17 [0.13, 0.22] to 0.69 [0.63, 0.75], paired delta +0.49 [+0.37, +0.60],
+`moved`, `well_formed` flat. One round of on-policy pairs beat 40 GRPO
+steps here: with 308 pairs the offline method sees far more contrast per
+step than 8 samples a prompt give the online one. That is the comparison
+the interval finally makes readable, and the reason both scripts share
+one prompt set.

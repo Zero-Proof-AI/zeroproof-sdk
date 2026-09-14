@@ -3,6 +3,16 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `examples/grpo`: a model-written prompt set. `prompts.py` (writer chat
+  per template seed, array parsing, category and near-duplicate filter
+  through `case_for`, loader) and `write_prompts_modal.py` (Qwen2.5-7B-
+  Instruct on an A10G) produce `prompts.jsonl`, 707 prompts from 67
+  situations, checked in; both the GRPO and DPO scripts take
+  `--prompts-file`, so the holdout is over a hundred prompts instead of
+  fourteen and pass@1 intervals shrink accordingly.
+
 ## 0.28 (2026-09-14)
 
 - Judge verdicts: a complete JSON object in the reply decides on its own.

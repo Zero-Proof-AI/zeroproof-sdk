@@ -67,7 +67,7 @@ format is called out.
 
 | flag | default | what it does |
 |---|---|---|
-| `--steps` | 60 | optimizer steps (4 pairs a device, 2 accumulated) |
+| `--steps` | 60 | optimizer steps (2 pairs a device, 4 accumulated) |
 | `--beta` | 0.1 | how far from the reference the policy may move |
 | `--loss-type` | sigmoid | any `DPOConfig.loss_type`: `ipo`, `hinge`, `robust`, ... |
 | `--pair-samples` | 8 | replies per prompt when building on-policy pairs; a policy that rarely passes needs more |
@@ -83,6 +83,11 @@ pairs is thirty epochs, and the holdout still read pass@1 0.09 to 0.66,
 +0.57 [+0.38, +0.75], `moved`, with `well_formed` flat at 1.0. Few pairs is
 the usual DPO problem, hence the default of 8 samples per prompt now, and
 the `pair_report` in the summary says how many prompts had contrast.
+
+On the model-written set (`--prompts-file examples/grpo/prompts.jsonl`,
+holdout 159 prompts): 308 pairs from 193 prompts with contrast, pass@1
+0.17 [0.13, 0.22] to 0.69 [0.63, 0.75], +0.49 [+0.37, +0.60], `moved`.
+See the GRPO README for the set and the side-by-side.
 
 One round of on-policy pairs is what this example does. The pairs go stale
 as the policy moves; for more, sample again from the adapter and run a

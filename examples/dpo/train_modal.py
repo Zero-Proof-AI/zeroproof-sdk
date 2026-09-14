@@ -213,13 +213,17 @@ def train(
     dpo = DPOConfig(
         output_dir=os.path.join(out_dir, "checkpoints"),
         max_steps=steps,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
+        # 2 pairs a device, 4 accumulated: 8 pairs a step. Chosen and rejected
+        # both run through the policy and the reference, so a pair costs four
+        # sequences; checkpointing keeps a 1.5B model inside an A10G.
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        gradient_checkpointing=True,
         learning_rate=learning_rate,
         beta=beta,
         loss_type=loss_type,
-        max_length=1024,
-        max_prompt_length=768,
+        max_length=896,
+        max_prompt_length=704,
         bf16=True,
         logging_steps=1,
         save_strategy="no",
