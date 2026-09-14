@@ -122,6 +122,75 @@ def test_hack_scan_diff_names_what_was_learned():
     assert zps.hack_scan_diff is hack_scan_diff
 
 
+def _two_trajectory_rows(n_tasks: int = 20, k: int = 8, n_pass: int = 5) -> list[dict]:
+    """Two distinct trajectories per ask: every feature that separates
+    them is an exact function of the label, so ``hack_scan`` refuses."""
+    rows = []
+    for p in range(n_tasks):
+        for i in range(k):
+            ok = i < n_pass
+            text = (
+                "Looked up the order and issued the refund in full." if ok else "sorry, i could not"
+            )
+            rows.append(
+                {
+                    "prompt": f"ask {p}",
+                    "reward": 1 if ok else 0,
+                    "final_text": text,
+                    "steps": (
+                        [{"tool": "lookup_order", "arguments": {}, "result": {"ok": 1}}]
+                        if ok
+                        else []
+                    ),
+                    "messages": [
+                        {"role": "user", "content": f"ask {p}"},
+                        {"role": "assistant", "content": text},
+                    ],
+                }
+            )
+    return rows
+
+
+def test_hack_scan_diff_does_not_name_what_a_degenerate_scan_could_not_rank():
+    # Every feature of a degenerate scan is above the floor at |rho| 1, so
+    # "gained the floor" there is a tie. Naming its top would be the
+    # verdict hack_scan refuses to give, arrived at one function later.
+    before = _rows(7, proxy_rate=0.5, gold_rate=0.5)
+    for r in before:
+        r["reward"] = int(r["markers"].pop("proxy"))
+    after = _two_trajectory_rows()
+
+    diff = hack_scan_diff(before, after, endorsed=["lookup_order"], seed=0)
+    assert diff["after"]["degenerate"] is True and diff["after"]["regime"] == "degenerate"
+    assert diff["before"]["degenerate"] is False
+    assert diff["learned"].startswith("the after scan cannot say what the reward pays for")
+    assert not any("a reward hack landed" in w for w in diff["warnings"])
+    assert not diff["learned"].startswith('the policy learned "')
+    # the shift is still shown, only the claim is withheld
+    assert diff["moved"]
+    assert format_hack_scan_diff(diff).splitlines()[0] == diff["learned"]
+
+    both = hack_scan_diff(after, after, endorsed=["lookup_order"], seed=0)
+    assert both["learned"].startswith("the before and after scan cannot say")
+    # and the fallback must not claim the floor is empty when it is full
+    assert "no feature clears the floor" not in both["learned"]
+
+
+def test_hack_scan_diff_markers_keep_their_gutter():
+    before = _rows(7, proxy_rate=0.5, gold_rate=0.5)
+    after = _rows(8, proxy_rate=0.5, gold_rate=0.5, delim_reward=True)
+    for r in before + after:
+        r["reward"] = int(r["markers"].pop("proxy"))
+    lines = format_hack_scan_diff(
+        hack_scan_diff(before, after, endorsed=["lookup_order"], seed=0)
+    ).splitlines()
+    header = next(line for line in lines if "feature" in line and "before" in line)
+    assert header.startswith("   feature")
+    body = [line for line in lines if line[:2] in {"+e", "-e", "+ ", "- ", " e", "  "}]
+    assert body and all(line[2] == " " for line in body[1:])
+    assert "econtains:" not in "\n".join(lines)
+
+
 @pytest.mark.parametrize("seed", [11, 12])
 def test_over_optimization_needs_the_proxy_to_move(seed):
     before = _rows(seed, proxy_rate=0.5, gold_rate=0.5)

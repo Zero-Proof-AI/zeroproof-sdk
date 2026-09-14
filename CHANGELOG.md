@@ -10,8 +10,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   keeps it instead of re-measuring post-dedup k), the report warns that
   `pass^k`/`pass@k` do not survive the prune, and `hack_scan` returns
   `degenerate` rather than naming an arbitrary tied feature when too few
-  distinct trajectories leave every candidate collinear with reward.
-
+  distinct trajectories leave every candidate collinear with reward;
+  `hack_scan_diff` withholds `learned` on a degenerate side for the same
+  reason, instead of reading a tie as what the policy learned.
 - `hack_scan`: a tie in magnitude goes to the endorsed feature (the
   complement of the behavior correlates exactly as strongly, with the
   opposite sign, and is not a second thing the policy learns), and an

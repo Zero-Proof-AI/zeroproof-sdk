@@ -716,6 +716,11 @@ def hack_scan_diff(
     ``moved`` the largest shifts either way, and ``learned`` is the one
     line to read: the top gained feature, and whether it is endorsed.
     ``scan_kwargs`` reach both ``hack_scan`` calls.
+
+    When either side comes back ``degenerate``, every feature there is
+    above the floor at |rho| 1 and no feature can be said to have gained
+    it. ``learned`` says which side could not be read and why, and no
+    hack is claimed; the rows are still listed so the shift is visible.
     """
     a = hack_scan(before, endorsed=endorsed, top_features=None, **scan_kwargs)
     b = hack_scan(after, endorsed=endorsed, top_features=None, **scan_kwargs)
@@ -759,7 +764,19 @@ def hack_scan_diff(
     )
     moved = sorted(rows, key=lambda r: -abs(r["shift"]))[: max(0, int(top))]
     warnings: list[str] = []
-    if gained:
+    # A degenerate scan on either side has every feature at |rho| 1 and
+    # above the floor, so "gained the floor" is a tie and not a finding.
+    # Naming the top of it would be the verdict ``hack_scan`` refuses to
+    # give, arrived at one function later.
+    degenerate = [side for side, report in (("before", a), ("after", b)) if report["degenerate"]]
+    if degenerate:
+        learned = (
+            f"the {' and '.join(degenerate)} scan cannot say what the reward pays for: too "
+            "few distinct trajectories left its candidate features collinear with reward, so "
+            "what clears the floor there is a tie, not something the policy learned"
+        )
+        warnings.append(learned)
+    elif gained:
         g = gained[0]
         learned = (
             f'the policy learned "{g["name"]}" (within-ask rho {g["rho_before"]:+.2f} -> '
@@ -777,8 +794,12 @@ def hack_scan_diff(
     if a["regime"] != b["regime"]:
         warnings.append(f"regime {a['regime']} -> {b['regime']}")
     return {
-        "before": {k: a[k] for k in ("regime", "top_feature", "rho_max", "tau", "integrity")},
-        "after": {k: b[k] for k in ("regime", "top_feature", "rho_max", "tau", "integrity")},
+        "before": {
+            k: a[k] for k in ("regime", "top_feature", "rho_max", "tau", "integrity", "degenerate")
+        },
+        "after": {
+            k: b[k] for k in ("regime", "top_feature", "rho_max", "tau", "integrity", "degenerate")
+        },
         "gained": gained[: max(0, int(top))],
         "lost": lost[: max(0, int(top))],
         "moved": moved,
@@ -793,7 +814,7 @@ def format_hack_scan_diff(report: dict[str, Any]) -> str:
     lines = [
         report["learned"],
         f"regime {a['regime']} -> {b['regime']}; top {a['top_feature']!r} -> {b['top_feature']!r}",
-        f"  {'feature':<44}{'before':>8}{'after':>8}",
+        f"   {'feature':<43}{'before':>8}{'after':>8}",
     ]
     for r in report["moved"]:
         tag = (
@@ -805,7 +826,7 @@ def format_hack_scan_diff(report: dict[str, Any]) -> str:
         )
         mark = "e" if r["endorsed"] else " "
         lines.append(
-            f"{tag}{mark}{r['name'][:43]:<44}{r['rho_before']:>+8.3f}{r['rho_after']:>+8.3f}"
+            f"{tag}{mark} {r['name'][:42]:<43}{r['rho_before']:>+8.3f}{r['rho_after']:>+8.3f}"
         )
     for w in report.get("warnings") or []:
         lines.append(f"! {w}")
