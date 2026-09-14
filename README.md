@@ -104,6 +104,22 @@ data = zps.simulate(
 )
 ```
 
+`my_agent` is called once per rollout with the situation text and returns the
+steps it took and what it finally said:
+
+```python
+def my_agent(message: str) -> dict:
+    return {
+        "steps": [{"tool": "get_order", "arguments": {"id": "4412"}, "result": {"status": "ok"}}],
+        "final_text": "Order 4412 shipped yesterday.",
+    }
+```
+
+If it raises, the rollout is dropped and the run says so:
+`data.stopped_because == "agent_failed"` when no row survived, with the count
+and the first error in `data.search["agent_errors"]` and
+`data.search["first_agent_error"]`.
+
 Working in this repo: `uv sync`, then `uv run pytest` after `uv sync --extra dev`.
 
 One runtime dependency (`requests`), Python 3.10+. Installing from PyPI rather than a

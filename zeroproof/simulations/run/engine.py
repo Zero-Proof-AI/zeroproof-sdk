@@ -121,6 +121,12 @@ ALLOC_GAIN = 4.0
 _FINGERPRINT_STOPWORDS = {"the", "a", "an", "to", "for", "and", "of", "on"}
 
 
+def _agent_error_text(exc: BaseException) -> str:
+    """The dropped-row sentinel. Names the exception type so a TypeError
+    from a wrong signature reads differently from a RuntimeError inside."""
+    return f"<agent error: {type(exc).__name__}: {public_llm_error(exc)}>"
+
+
 class Run:
     """One ``simulate()`` call: inputs, build, loop, finish."""
 
@@ -591,8 +597,19 @@ class Run:
         try:
             raw = self.runner(prompt)
         except Exception as exc:
-            raw = {"steps": [], "final_text": f"<agent error: {public_llm_error(exc)}>"}
+            raw = {"steps": [], "final_text": _agent_error_text(exc)}
         raw = raw if isinstance(raw, dict) else {"steps": [], "final_text": str(raw)}
+        if "steps" not in raw and "final_text" not in raw:
+            # An OpenAI-style message or some other shape: the callable
+            # contract is {"steps": [...], "final_text": str}. Reported
+            # like a raise so the run does not end blaming the writer.
+            keys = sorted(str(k) for k in raw)
+            raw = {
+                "steps": [],
+                "final_text": _agent_error_text(
+                    TypeError(f"agent returned keys {keys} instead of steps and final_text")
+                ),
+            }
         if not assignment:
             assignment = self._realized_dims(raw.get("steps") or [], clean_faults(faults))
         semantic = self.data.semantic
@@ -659,13 +676,21 @@ class Run:
         t = {
             SCHEMA_KEY: SCHEMA_VERSION,
             "steps": [],
-            "final_text": f"<agent error: {public_llm_error(exc)}>",
+            "final_text": _agent_error_text(exc),
             "arm": (job[2] or {}).get("arm") or "unattributed",
             "prompt": job[0],
             "reward": None,
         }
         t["behavior_signature"] = behavior_signature(t)
         return t
+
+    def _note_lost(self, t: dict) -> None:
+        """A rollout that did not become a row: an agent error is counted."""
+        final = str((t or {}).get("final_text") or "")
+        if final.lower().startswith("<agent error"):
+            self.agent_errors += 1
+            if not self.first_agent_error:
+                self.first_agent_error = final[len("<agent error: ") :].rstrip(">")
 
     # -------------------------------------------------------- loop state
 
@@ -678,6 +703,10 @@ class Run:
         self.flat = 0
         self.round_index = 0
         self.empty_streak = 0
+        # Rollouts the agent callable failed to produce. Counted here so a
+        # run that drops every rollout says so instead of blaming the writer.
+        self.agent_errors = 0
+        self.first_agent_error = ""
         self.writer_idle = 0
         self.restart_count = 0
         # Starvation relief: when every situation slot is used but rows are
@@ -1169,6 +1198,7 @@ class Run:
             if isinstance(t, dict) and t.get("_skipped"):
                 continue
             if not _usable_rollout(t):
+                self._note_lost(t)
                 self.cap_lifted["lost"] += 1
                 note_stage(data, "rollout failure discarded")
                 continue
@@ -1644,6 +1674,7 @@ class Run:
             for t, job in zip(results, jobs_for):
                 if _usable_rollout(t):
                     continue
+                self._note_lost(t)
                 key = str(job[0])
                 if self.rerolls.get(key, 0) < c.repeat_count:
                     self.rerolls[key] = self.rerolls.get(key, 0) + 1
@@ -1963,6 +1994,21 @@ class Run:
             self._finish_traces()
         if gen.model is not None and gen.last_errors:
             data.search["writer_errors"] = dict(gen.last_errors)
+        if self.agent_errors:
+            # The callable raised (or returned nothing usable). The rows
+            # were built and dropped; without this the run reports zero
+            # rows and a stop reason that names the writer.
+            data.search["agent_errors"] = self.agent_errors
+            data.search["first_agent_error"] = self.first_agent_error
+            if "agent_errors" not in data.degraded:
+                data.degraded.append("agent_errors")
+            if not data.trajectories:
+                data.stopped_because = "agent_failed"
+                log.warning(
+                    "every rollout failed inside the agent (%d errors); first: %s",
+                    self.agent_errors,
+                    self.first_agent_error,
+                )
         if "generator_fallback" in data.degraded and getattr(gen, "model_produced", False):
             # the note was set while the first waves were still in flight;
             # every prompt in the model path is model-written or nothing
