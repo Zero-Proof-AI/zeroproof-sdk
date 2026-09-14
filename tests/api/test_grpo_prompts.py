@@ -169,3 +169,20 @@ def test_pass_by_category_reads_reward_and_tool_calls():
     out = p.pass_by_category(rows)
     assert out["with_id"] == {"pass_at_1": 0.5, "tool_call_rate": 0.5, "rows": 2}
     assert out["off_topic"] == {"pass_at_1": 1.0, "tool_call_rate": 0.0, "rows": 1}
+
+
+def test_balance_repeats_minority_categories_up_to_the_share():
+    r, p = _modules()
+    items = [_seed(r, f"check ORD-{1000 + i} please") for i in range(18)]
+    items += [_seed(r, f"I want a refund, lost the number {i}") for i in range(3)]
+    items += [_seed(r, f"Do you sell gift cards {i}?") for i in range(3)]
+    out = p.balance(items, 0.25)
+    s = p.summary(out)
+    assert s["with_id"] == 18
+    assert s["no_id"] / len(out) >= 0.25 and s["off_topic"] / len(out) >= 0.25
+    # a single minority prompt stops at the repeat cap, not at the share
+    capped = p.balance(items[:18] + [items[18]], 0.25)
+    assert p.summary(capped)["no_id"] == 6
+    assert out[: len(items)] == items, "originals first, repeats appended"
+    assert p.balance(items, 0.0) == items
+    assert p.balance([], 0.5) == []

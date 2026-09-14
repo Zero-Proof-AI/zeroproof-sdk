@@ -224,6 +224,37 @@ def pass_by_category(rows: list[dict[str, Any]]) -> dict[str, dict[str, float | 
     }
 
 
+def balance(
+    items: list[dict[str, Any]], min_share: float = 0.25, *, max_repeat: int = 6
+) -> list[dict[str, Any]]:
+    """Repeat the prompts of any category below ``min_share`` of the list
+    until it reaches that share (each prompt at most ``max_repeat`` times).
+
+    Why frequency and not reward: a group-relative update only learns from
+    a prompt when that prompt is sampled, and a preference round only pairs
+    the prompts it sampled. With 10% no-id prompts the with-id rows carry
+    the gradient and the policy learns "call the tool" before "unless there
+    is no id"; the stratified holdout showed no-id pass@1 falling 0.95 to
+    0.75 for both GRPO and DPO. Oversampling makes the minority visible to
+    the update at the rate it matters, without touching the reward. Order
+    is kept stable; the repeats are appended."""
+    if min_share <= 0 or not items:
+        return list(items)
+    by_cat: dict[str, list[dict[str, Any]]] = {}
+    for it in items:
+        by_cat.setdefault(category(it["case"]), []).append(it)
+    out = list(items)
+    for name in sorted(by_cat):
+        rows = by_cat[name]
+        share = len(rows) / len(out)
+        repeat = 1
+        while share < min_share and repeat < max_repeat:
+            out.extend(rows)
+            repeat += 1
+            share = len(rows) * repeat / len(out)
+    return out
+
+
 def summary(items: list[dict[str, Any]]) -> dict[str, Any]:
     cats = {"with_id": 0, "no_id": 0, "off_topic": 0}
     for it in items:
@@ -234,6 +265,7 @@ def summary(items: list[dict[str, Any]]) -> dict[str, Any]:
 __all__ = [
     "ANGLES",
     "WRITER_SYSTEM",
+    "balance",
     "category",
     "keep",
     "load_prompts",

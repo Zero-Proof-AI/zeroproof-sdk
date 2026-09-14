@@ -135,6 +135,7 @@ from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
+from .score.spec import Spec, Trait, load_spec, spec_version, stamp_spec
 from .score.stage import STAGES, format_stages, stage_of, stage_report, stamp_stage
 from .score.stats import compare_runs, decontaminate, marker_summary, metric_summary
 from .score.style import refusal_report, style_markers, style_report
@@ -177,9 +178,11 @@ __all__ = [
     "Rollout",
     "ScoredData",
     "SimulationData",
+    "Spec",
     "Task",
     "TrainerCallback",
     "TrainingRun",
+    "Trait",
     "Verifier",
     "adaptive_allocator",
     "agents",
@@ -243,6 +246,7 @@ __all__ = [
     "length_report",
     "list_runs",
     "llm_grade",
+    "load_spec",
     "load_traces",
     "local_model",
     "logprob_report",
@@ -290,9 +294,11 @@ __all__ = [
     "serve",
     "simulate",
     "simulate_from_traces",
+    "spec_version",
     "split_pseudo_production",
     "stage_of",
     "stage_report",
+    "stamp_spec",
     "stamp_stage",
     "style_markers",
     "style_report",

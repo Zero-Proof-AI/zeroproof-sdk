@@ -156,3 +156,47 @@ tool-call rate 0.00 to 0.25, off_topic 0.97 to 0.94. Same regression,
 same size: both methods learned "call lookup" faster than "unless there is
 no id to look up". The category table is the difference between a run
 that reads as a win and one that reads as a trade.
+
+## Closing it: `--balance`
+
+The reward already scores a tool call on a no-id prompt 0.0, so the fix
+is not the reward. A group-relative update only learns from a prompt when
+it samples it, and no-id prompts are a tenth of the set, so the with-id
+rows carry the gradient and "call the tool" is learned before "unless
+there is no id". `--balance 0.25` repeats the prompts of any category
+below a quarter of the train split until it reaches that share (each
+prompt at most six times; the holdout is untouched). DPO takes the same
+flag, since a preference round only pairs the prompts it sampled.
+
+```bash
+uv run --with modal modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl --steps 120 --balance 0.25
+uv run --with modal modal run examples/dpo/train_modal.py  --prompts-file examples/grpo/prompts.jsonl --balance 0.25
+```
+
+GRPO, 120 steps, same split, `--balance 0.25` (train split 857 rows: 446
+with an id, 177 without, 234 off topic):
+
+| category | rows | pass@1 before | after | after, unbalanced | tool-call rate after | unbalanced |
+|---|---|---|---|---|---|---|
+| with_id | 520 | 0.10 | 0.59 | 0.80 | 0.60 | 0.81 |
+| no_id | 60 | 0.95 | 0.88 | 0.75 | 0.08 | 0.23 |
+| off_topic | 72 | 0.96 | 0.93 | 0.96 | 0.00 | 0.01 |
+
+Overall 0.27 [0.21, 0.33] to 0.66 [0.60, 0.72], +0.34 [+0.18, +0.48].
+The invented-id rate on no-id prompts drops from 0.23 to 0.08 and the
+with-id gain slows, because at a fixed 120 steps fewer of them see
+with-id rows. That is the trade the group table makes visible; more steps
+buy the with-id half back, and the no-id half is the one the reward can
+never pay for on its own.
+
+DPO, one round, same split, `--balance 0.25`: overall 0.27 to 0.70, with_id
+0.10 to 0.64, no_id 0.94 to 0.74 with the tool-call rate at 0.22,
+off_topic 0.99 to 1.00. Balance did nothing for DPO, and that is the
+method: it learns only from prompts with a pass and a fail, and the base
+policy almost never invents an id on a no-id prompt, so repeating those
+prompts adds no pairs. The contrast exists after round one, which is what
+`examples/dpo --from-run` is for: round two samples the round-one policy,
+finds the invented ids, and pairs them against the replies that asked.
+GRPO samples every prompt every step, so frequency is its lever; DPO's is
+another round.
+ROUND2_PLACEHOLDER

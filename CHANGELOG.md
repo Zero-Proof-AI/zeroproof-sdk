@@ -16,6 +16,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## 0.32 (2026-09-14)
 
+- `examples/grpo` and `examples/dpo`: `--balance <share>` repeats the
+  prompts of any category below that share of the train split
+  (`prompts.balance`), so the no-id and off-topic prompts reach the
+  update at the rate they matter. The invented-id regression the
+  stratified holdout exposed is a sampling-frequency problem, not a
+  reward one for GRPO: the invented-id rate on no-id prompts drops 0.23
+  to 0.08 at 120 steps. One-round DPO does not move on it (no pairs
+  where the base never fails); a second round is DPO's lever.
 - A policy edit keeps the task grid (#98). The covering array is built in
   layers: a rule-free block over tools and situation axes, then one block
   per policy clause, rotated by the clause text. Editing, adding or
