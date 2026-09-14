@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.35 (2026-09-14)
 
 - `examples/dpo --constructed-negatives`: for every no-id or off-topic
   prompt the policy answered without a tool call, pair that reply
@@ -102,8 +102,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   to use it (rlhf-book ch. 12, constitutional AI). Folded into the judge
   version and stamped `judge_meta.privileged`; exports still never carry
   `privileged` (#134).
-
-## 0.33 (2026-09-14)
 
 ## 0.33 (2026-09-14)
 
