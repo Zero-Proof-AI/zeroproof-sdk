@@ -35,6 +35,7 @@ CLI_EXAMPLES = [
     "prime-intellect-rl/generate.py",
     "schema/migrate.py",
     "schema/project.py",
+    "verifiers/run.py",
 ]
 
 # Need the ``modal`` client, which is not a dev dependency. Compiled, not run.

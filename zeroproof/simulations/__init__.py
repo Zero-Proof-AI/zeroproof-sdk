@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging as _logging
 
-from . import data, schema, simulation
+from . import data, schema, simulation, verify
 from .data import SimulationData, conversation, grade, grade_llm, llm_grade, rank
 from .export import (
     export_dataset,
@@ -141,6 +141,7 @@ from .training import (
     train,
     training_run,
 )
+from .verify import Verifier, verifier
 from .world.sandbox import MockEnvironment
 
 # Library convention: emit under "zeroproof.simulations", never configure
@@ -167,6 +168,7 @@ __all__ = [
     "Task",
     "TrainerCallback",
     "TrainingRun",
+    "Verifier",
     "adaptive_allocator",
     "agents",
     "allocator_slot_counts",
@@ -275,5 +277,7 @@ __all__ = [
     "unpublish",
     "update_dataset",
     "validate",
+    "verifier",
+    "verify",
     "write_scene_brief",
 ]
