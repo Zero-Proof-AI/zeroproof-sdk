@@ -84,10 +84,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   (Bradley-Terry loss, the pairs DPO uses) and reports pair accuracy on the
   held-out pairs before and after plus the score threshold that separates
   them. `zps.reward_model(run)` is that run as a judge: it honors the judge
-  contract (`reward` 0/1 against the threshold, `score` raw), so it feeds
+  contract (`reward` 0/1 against the threshold, `rm_score` raw), so it feeds
   `data.grade(judge=)`, `evaluate`, `judge_trust` and
   `build_preference_pairs`. Gate route `POST /runs/{id}/score`.
-
 - With `grader=`, every mode judges rows as they land, on the judge pool
   beside the rollouts; only the tail is judged after the clock. Before this
   explore and sft judged everything in one pass after the run, which on a
