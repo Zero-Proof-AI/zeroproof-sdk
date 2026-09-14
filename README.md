@@ -298,8 +298,8 @@ report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 
 ```python
 scan = zps.hack_scan(scored.rows, endorsed=["tool:lookup_order", "marker:grounded"])
-scan["regime"]        # train | reward_hack | pool_exhausted | no_signal | unknown
-scan["top_feature"]   # e.g. 'contains:### done' when the judge pays for a delimiter
+scan["regime"]  # train | reward_hack | pool_exhausted | no_signal | unknown
+scan["top_feature"]  # e.g. 'contains:### done' when the judge pays for a delimiter
 print(zps.format_hack_scan(scan))
 ```
 
