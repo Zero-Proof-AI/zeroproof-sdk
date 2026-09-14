@@ -125,6 +125,7 @@ from .score.optimize import (
     trim_out_of_band,
     trim_unanimous_groups,
 )
+from .score.pairwise import judge_pairs, pairwise_judge
 from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
@@ -230,6 +231,7 @@ __all__ = [
     "inspect",
     "issue_delegated_credential",
     "judge_agreement",
+    "judge_pairs",
     "judge_trust",
     "leakage_report",
     "length_report",
@@ -250,6 +252,7 @@ __all__ = [
     "novelty",
     "open_ended_probes",
     "optimize",
+    "pairwise_judge",
     "pass_at",
     "policy_sections",
     "preflight",
