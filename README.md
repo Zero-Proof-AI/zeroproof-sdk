@@ -294,10 +294,10 @@ Training rows from `export_training` / `training_rows` carry a `loss_mask`, one 
 Two wire shapes come out of the exporters, and a trainer needs the second one:
 
 ```python
-zps.export_training(rows, "sft.jsonl")                  # OpenAI chat-completions wire (default)
-zps.export_training(rows, "sft.jsonl", format="trl")    # what TRL's SFTTrainer loads
-zps.export_preference(pairs, "dpo.jsonl", format="trl") # what TRL's DPOTrainer loads
-zps.to_trl(zps.training_rows(data), "training")         # same reshape on rows you already hold
+zps.export_training(rows, "sft.jsonl")  # OpenAI chat-completions wire (default)
+zps.export_training(rows, "sft.jsonl", format="trl")  # what TRL's SFTTrainer loads
+zps.export_preference(pairs, "dpo.jsonl", format="trl")  # what TRL's DPOTrainer loads
+zps.to_trl(zps.training_rows(data), "training")  # same reshape on rows you already hold
 ```
 
 `format="openai"` (the default) is the API wire row: the whole conversation in `messages`, `function.arguments` as a JSON string, and the ask alongside as `prompt`. `format="trl"` is what `trl.data_utils.maybe_apply_chat_template` accepts. For SFT that is conversational `{"messages": [...]}` with **no** `prompt` string column — TRL decides "is this conversational?" from the column set, and a `prompt` string next to `messages` makes it skip the chat template silently and train on the bare ask; the ask survives as `prompt_text`. For preference data it is `prompt` as the message list up to the first agent turn with `chosen`/`rejected` as the completions only, because the default shape (a `prompt` string with full conversations on both sides) raises `TypeError: string indices must be integers` inside TRL. In the TRL shape `function.arguments` is a dict, not a JSON string: HF chat templates render it with `| tojson`, so a pre-encoded string is quoted twice and the student learns to emit a string where an object belongs. The `tool_call_roundtrip` gate in the report names which of the two encodings it checked (`encoding: "json_string"` or `"dict"`), so `invalid: 0` says what it actually vouches for.
