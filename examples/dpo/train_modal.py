@@ -3,6 +3,7 @@
     modal run examples/dpo/train_modal.py                        # on-policy pairs, 60 steps, A10G
     modal run examples/dpo/train_modal.py --pairs pairs.jsonl    # pairs from zps.export_preference
     modal run examples/dpo/train_modal.py --loss-type ipo --beta 0.1
+    modal run examples/dpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl   # model-written set
 
 What happens:
 
@@ -323,11 +324,19 @@ def main(
     loss_type: str = "sigmoid",
     base_model: str = BASE_MODEL,
     seed: int = 0,
+    prompts_file: str = "",
 ):
     from pairs import load_export
     from reward import SYSTEM, build_prompts, split_holdout
 
-    items = build_prompts(prompts, seed=seed)
+    if prompts_file:
+        sys.path.insert(0, str(HERE.parent / "grpo"))
+        from prompts import load_prompts
+
+        items = load_prompts(prompts_file)
+        print(f"{len(items)} model-written prompts from {prompts_file}")
+    else:
+        items = build_prompts(prompts, seed=seed)
     train_items, held = split_holdout(items, holdout)
     print(f"{len(items)} prompts: {len(train_items)} train, {len(held)} holdout")
     pair_rows = load_export(pairs, system=SYSTEM) if pairs else None

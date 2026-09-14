@@ -1,0 +1,187 @@
+"""A model-written prompt set for the refund environment.
+
+The offline template writer in ``reward.build_prompts`` gives about seventy
+distinct prompts from four hundred situations, so the holdout is fifteen
+prompts and every pass@1 interval is a quarter wide. This module is the
+model writer: for each template seed, an instruct model writes several
+customer messages in the same situation (different tone, length, detail,
+kind of customer), the rule's ``case_for`` checks each one still belongs
+to its category (names the order id, names none, or is off topic), and
+near-duplicates are dropped. Every written prompt keeps its seed's
+``scenario_id``, so ``split_holdout`` never puts a paraphrase of a train
+situation into the holdout.
+
+The pure parts are here and unit-tested; ``write_prompts_modal.py`` runs
+the model. ``prompts.jsonl`` next to this file is one such set, checked in
+so the runs in the READMEs are reproducible.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+from reward import case_for
+
+WRITER_SYSTEM = (
+    "You write realistic opening messages that customers of an online store send "
+    "to its support assistant. Each message is the customer's first message in a "
+    "conversation. Vary the customers: tone (curt, polite, angry, confused, "
+    "chatty), length (one line to a short paragraph), and details (item, price, "
+    "dates, what went wrong). Never write the assistant's reply."
+)
+
+ANGLES = [
+    "Write {n} different messages a customer might send in this situation.",
+    "Write {n} more, each from a different kind of customer: a first-time buyer, "
+    "a business account, someone typing on a phone with typos, someone who already "
+    "contacted support once, a non-native English speaker, someone in a hurry.",
+]
+
+_ORD = re.compile(r"\bORD[-_ ]?\d{3,6}\b", re.I)
+_ARRAY = re.compile(r"\[.*\]", re.S)
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def category(case: dict[str, Any]) -> str:
+    """``with_id``, ``no_id`` (about an order, no id) or ``off_topic``."""
+    if case.get("order_id"):
+        return "with_id"
+    return "no_id" if case.get("in_domain") else "off_topic"
+
+
+def writer_messages(seed: dict[str, Any], angle: int = 0, n: int = 6) -> list[dict[str, str]]:
+    """The chat for one writer call: the seed situation, the category rule,
+    and the output format."""
+    cat = category(seed["case"])
+    if cat == "with_id":
+        rule = (
+            f"Every message must include the order id {seed['case']['order_id']} "
+            "exactly once, written as the customer would write it."
+        )
+    elif cat == "no_id":
+        rule = (
+            "The customer is asking about an order, refund, return, charge or "
+            "delivery but does not give any order id or order number, because "
+            "they do not know it or did not think to. Never include an id."
+        )
+    else:
+        rule = (
+            "The message is not about an order, refund, return, charge or "
+            "delivery at all: something unrelated the customer asks the store "
+            "anyway. Never include an order id."
+        )
+    ask = ANGLES[angle % len(ANGLES)].format(n=n)
+    user = (
+        f"Situation, as one customer put it: {seed['prompt']!r}\n\n"
+        f"{ask}\n{rule}\n"
+        f"Reply with a JSON array of exactly {n} strings and nothing else."
+    )
+    return [{"role": "system", "content": WRITER_SYSTEM}, {"role": "user", "content": user}]
+
+
+def parse_messages(text: str) -> list[str]:
+    """The strings in the first JSON array of the reply; a fallback reads
+    quoted or bulleted lines when the model wrapped the array in prose."""
+    m = _ARRAY.search(text or "")
+    if m:
+        try:
+            arr = json.loads(m.group(0))
+            if isinstance(arr, list):
+                return [str(s).strip() for s in arr if isinstance(s, str) and s.strip()]
+        except json.JSONDecodeError:
+            pass
+    out: list[str] = []
+    for line in (text or "").splitlines():
+        line = line.strip().lstrip("-*0123456789.) ").strip()
+        if len(line) > 2 and line[0] in "\"'" and line[-1] in "\"',":
+            out.append(line.strip("\"',").strip())
+    return out
+
+
+def _tokens(text: str) -> set[str]:
+    return set(_WORD.findall(text.lower()))
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def keep(
+    candidates: list[tuple[str, dict[str, Any]]],
+    *,
+    min_chars: int = 12,
+    max_chars: int = 700,
+    jaccard: float = 0.8,
+) -> list[dict[str, Any]]:
+    """Filter written messages: right length, same category as the seed (the
+    id present or absent as the rule demands), no exact or near duplicate of
+    an earlier keep. Each kept item is a prompt row with its seed's scenario."""
+    kept: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    token_sets: list[set[str]] = []
+    for text, seed in candidates:
+        text = " ".join(text.split())
+        if not (min_chars <= len(text) <= max_chars):
+            continue
+        case = case_for(text)
+        want = category(seed["case"])
+        if category(case) != want:
+            continue
+        if want == "with_id" and case["order_id"] != seed["case"]["order_id"]:
+            continue
+        key = _norm(text)
+        if key in seen:
+            continue
+        toks = _tokens(text)
+        if any(
+            len(toks & t) / max(1, len(toks | t)) >= jaccard for t in token_sets
+        ):
+            continue
+        seen.add(key)
+        token_sets.append(toks)
+        kept.append({"prompt": text, "case": case, "scenario_id": seed["scenario_id"], "seed": seed["prompt"]})
+    return kept
+
+
+def load_prompts(path: str) -> list[dict[str, Any]]:
+    """Prompt rows from a ``prompts.jsonl``; the case is re-read from the
+    text so an edited file still matches the reward."""
+    out: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            prompt = str(row.get("prompt") or "").strip()
+            if not prompt:
+                continue
+            out.append(
+                {
+                    "prompt": prompt,
+                    "case": case_for(prompt),
+                    "scenario_id": row.get("scenario_id") or prompt,
+                }
+            )
+    return out
+
+
+def summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    cats = {"with_id": 0, "no_id": 0, "off_topic": 0}
+    for it in items:
+        cats[category(it["case"])] += 1
+    return {"prompts": len(items), "scenarios": len({it["scenario_id"] for it in items}), **cats}
+
+
+__all__ = [
+    "ANGLES",
+    "WRITER_SYSTEM",
+    "category",
+    "keep",
+    "load_prompts",
+    "parse_messages",
+    "summary",
+    "writer_messages",
+]

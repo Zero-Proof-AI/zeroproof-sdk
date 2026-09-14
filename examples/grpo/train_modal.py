@@ -2,6 +2,7 @@
 
     modal run examples/grpo/train_modal.py                       # 200 prompts, 40 steps, A10G
     modal run examples/grpo/train_modal.py --steps 80 --gpu H100 --run-name refund-grpo-v2
+    modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl   # model-written set, ~80 holdout prompts
 
 What happens:
 
@@ -293,10 +294,17 @@ def main(
     beta: float = 0.04,
     base_model: str = BASE_MODEL,
     seed: int = 0,
+    prompts_file: str = "",
 ):
     from reward import build_prompts, split_holdout
 
-    items = build_prompts(prompts, seed=seed)
+    if prompts_file:
+        from prompts import load_prompts
+
+        items = load_prompts(prompts_file)
+        print(f"{len(items)} model-written prompts from {prompts_file}")
+    else:
+        items = build_prompts(prompts, seed=seed)
     train_items, held = split_holdout(items, holdout)
     with_id = sum(1 for p in items if p["case"]["order_id"])
     print(
