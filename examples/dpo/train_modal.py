@@ -113,6 +113,20 @@ def _sample(
     return out
 
 
+def _stamp(rows: list[dict]) -> list[dict]:
+    """``row["category"]`` (with_id, no_id, off_topic) on every graded row,
+    so ``run.delta(by="category")`` can split the target by kind of prompt."""
+    try:
+        sys.path.insert(0, "/root")
+        from prompts import category
+        from reward import case_for
+    except ImportError:
+        return rows
+    for row in rows:
+        row["category"] = category(case_for(str(row.get("prompt") or "")))
+    return rows
+
+
 def _by_category(rows: list[dict]) -> dict | None:
     """pass@1 and tool-call rate per prompt category, when prompts.py is
     mounted; a headline pass@1 hides which kind of prompt moved."""
@@ -211,7 +225,7 @@ def train(
     before_replies = _sample(
         model, tokenizer, holdout_prompts, n=eval_samples, max_new_tokens=max_completion_length
     )
-    before_rows = reward_rows(holdout_prompts, before_replies)
+    before_rows = _stamp(reward_rows(holdout_prompts, before_replies))
     before = zps.pass_at(before_rows)
     print(f"before: {before}")
 
@@ -298,7 +312,7 @@ def train(
     after_replies = _sample(
         policy, tokenizer, holdout_prompts, n=eval_samples, max_new_tokens=max_completion_length
     )
-    after_rows = reward_rows(holdout_prompts, after_replies)
+    after_rows = _stamp(reward_rows(holdout_prompts, after_replies))
     after = zps.pass_at(after_rows)
     print(f"after:  {after}")
     print(f"by category: before {_by_category(before_rows)}")
@@ -339,13 +353,21 @@ def train(
     delta = None
     if run is not None:
         delta = run.delta(
-            before_rows, after_rows, target="pass_at_1", must_not_regress=["well_formed"]
+            before_rows,
+            after_rows,
+            target="pass_at_1",
+            must_not_regress=["well_formed"],
+            by="category",
         )
         run.finish("done", summary=summary, adapter=f"zeroproof-dpo-runs:/{run_name}/adapter")
         summary["run_url"] = run.url
     else:
         delta = zps.delta_report(
-            before_rows, after_rows, target="pass_at_1", must_not_regress=["well_formed"]
+            before_rows,
+            after_rows,
+            target="pass_at_1",
+            must_not_regress=["well_formed"],
+            by="category",
         )
     print(zps.format_delta_report(delta))
     summary["delta_verdict"] = delta["target_verdict"]
