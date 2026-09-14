@@ -5,6 +5,13 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `zps.train(dataset_id, method="sft"|"grpo"|"dpo", steps=, epochs=,
+  holdout=, base_model=, wait=)` starts a hosted run on the platform's
+  trainer and returns the `TrainingRun` the dashboard draws; `run.refresh()`
+  / `run.wait()` follow it, then `run.adapter` and `run.training` (before,
+  after, rows, seconds). `zps.serve(name, run)` hosts the adapter on an
+  OpenAI-compatible endpoint and `zps.models()` lists them. README and
+  the character docs no longer say the SDK does not train (#77).
 - `mode="rl"` spends rollouts where the agent is inconsistent. Every
   prompt is probed with two rollouts; a prompt that splits is filled to k,
   a unanimous one stops once the run's own measured rates say a fresh

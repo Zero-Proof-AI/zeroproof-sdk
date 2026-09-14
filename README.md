@@ -341,7 +341,20 @@ zps.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_af
 
 ### Train, and watch it
 
-The SDK does not train. Your trainer does, on Modal, a GPU box, or a notebook, and reports to the platform, which draws the loss curve and the progress bar at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training). Three ways in, one record.
+Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO or DPO, LoRA on an A10G) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
+
+```python
+run = zps.train("ds_...", method="grpo", steps=40)  # or "sft" (epochs=), "dpo"
+run.wait()  # done or failed; run.url is the curve while it goes
+run.training["before"], run.training["after"]  # holdout pass@1 (SFT: loss)
+model = zps.serve("refund-v2", run)  # adapter on an OpenAI-compatible endpoint
+# model["endpoint"] + /chat/completions, model="refund-v2", bearer = your zp_ key
+zps.models()  # what the account hosts
+```
+
+`holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`).
+
+Your own trainer, three ways in:
 
 ```python
 # one line on a Transformers or TRL trainer
