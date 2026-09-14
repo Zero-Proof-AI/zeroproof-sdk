@@ -34,7 +34,10 @@ examples/*
 !examples/pass-at-k/
 
 # helpers, not the product
-/scripts/
+/scripts/*
+# ...except the golden-output harness, which every contributor needs to prove
+# an engine change left simulate() alone. See CONTRIBUTING.md.
+!/scripts/golden.py
 simulate.ipynb
 test.ipynb
 quick_tests.ipynb
