@@ -131,7 +131,24 @@ def simulate(
     one: pass that run (``SimulationData``), its rows, or its JSONL path.
     Every distinct prompt is rolled out again, ``repeat_count`` times,
     on its own ``scenario_id`` and ``scenario_dimensions`` and under the
-    same faults and world state, and nothing else is generated. A run
+    same faults and world state, and nothing else is generated.
+
+    ``repeat_count`` is k as *this* call resolves it — from this call's
+    ``mode`` and ``repeats`` / ``rollouts_per_request`` — never from the
+    pinned run. ``tasks=`` copies the prompts, not the topology. So a
+    base run made with ``repeats=4`` and re-run as
+    ``simulate(..., tasks=base)`` comes back at k=1 (the ``explore``
+    default), ``pass_at`` reports ``k=1`` with the k-way numbers
+    ``None``, and a before/after built that way compares k=4 against
+    k=1. Re-pass the repeats (and the mode) to keep the comparison
+    paired::
+
+        base = zps.simulate(agent, tools=TOOLS, system_prompt=P,
+                            mode="rl", repeats=4)
+        rerun = zps.simulate(agent, tools=TOOLS, system_prompt=EDITED,
+                             tasks=base, mode="rl", repeats=4)  # same k
+
+    A run
     otherwise draws its tasks from the grid by seed and, above
     ``concurrency: 1``, by completion order, so a re-run shares only part
     of its tasks with the first and ``compare_runs`` drops the rest;

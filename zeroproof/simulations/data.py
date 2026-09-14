@@ -403,7 +403,11 @@ class SimulationData:
         nothing. Simulation itself never invokes this method by default.
 
         ``judge=`` is the contract path: any callable honoring the judge
-        contract (see ``zeroproof.simulations.judging``). It returns a
+        contract (``judge(row) -> {"reward": 0 or 1, "reason": str,
+        "markers": {name: value}}``; a bare number works too). The
+        contract and its failure modes are written out in full in
+        ``zeroproof.simulations.score.judging`` — note the ``score.``,
+        there is no ``zeroproof.simulations.judging``. It returns a
         ``ScoredData`` of copies — trajectories here stay unmodified, judge
         errors are marked per-row instead of coerced to 0 — and its output
         feeds ``export_training`` and ``simulate(traces=...)`` directly.

@@ -20,6 +20,13 @@ with ``n`` graded repeats contributes ``1 - C(n-c, k) / C(n, k)`` and
 Judge noise: with an LLM judge, pass@k inflates on false positives and
 pass^k inflates on false negatives. pass@1 is the least sensitive of the
 three, which is why it carries the headline.
+
+Intervals: only ``pass@1`` carries one (``.ci95``, a task bootstrap).
+``pass^k`` and ``pass@k`` are point estimates — there is no ``ci95`` for
+them and none is computed. To report the reliability line with an
+interval, do it over tasks yourself: the per-group values are
+``.per_task``, and ``score.stats.bootstrap_ci`` / ``wilson_interval``
+take a vector of them.
 """
 
 from __future__ import annotations
@@ -70,9 +77,14 @@ class PassAt:
     n_groups_at_k: int = 0
     #: unanimous groups shorter than k counted as if they stayed unanimous
     n_groups_imputed: int = 0
+    #: ``{prompt: c / n}`` — a **dict keyed by the group's prompt string**,
+    #: not a list, so ``per_task[0]`` is a ``KeyError``, not the first task.
+    #: Iterate it as ``.per_task.items()``; ``.per_task.values()`` is the
+    #: pass-rate vector pass@1 averages and ``ci95`` bootstraps.
     per_task: dict[str, float] = field(default_factory=dict)
     note: str = ""
-    #: task-bootstrap 95% interval on pass@1; None below three tasks.
+    #: task-bootstrap 95% interval on **pass@1 only**. ``pass_pow_k`` and
+    #: ``pass_at_k`` carry no interval; there is no field for one.
     ci95: tuple[float, float] | None = None
 
     @property

@@ -9,7 +9,7 @@ This repo absorbed the `zeroproof-simulations` package; `zeroproof-simulations` 
 
 Releases of `zeroproof` before 0.3 were an unrelated encrypted agent-to-agent messaging client. That code was removed in 0.04; pin `zeroproof<0.3` if you still depend on it.
 
-Two ways in, one engine. Give it the agent's tools and system prompt and it samples situations across everything that agent can be asked. Give it graded traces as well and it aims the budget at the situations that fail in production, so new rows land where the agent is weak and carry both the failure and the fixed version. Every row is a full conversation: user turns, agent turns, tool calls, tool results, scheduled faults. Rows come back ungraded; your grader decides what good means. Default `explore`: one unique situation per row. How it thinks: [docs/simulations.md](docs/simulations.md).
+Two ways in, one engine. Give it the agent's tools and system prompt and it samples situations across everything that agent can be asked. Give it graded traces as well (`traces=`, plain row dicts — see [Close the loop](#close-the-loop-aim-the-budget-with-traces)) and it aims the budget at the situations that fail in production, so new rows land where the agent is weak and carry both the failure and the fixed version. Every row is a full conversation: user turns, agent turns, tool calls, tool results, scheduled faults. Rows come back ungraded; your grader decides what good means. Default `explore`: one unique situation per row. How it thinks: [docs/simulations.md](docs/simulations.md).
 
 ## How a row gets made
 
@@ -36,6 +36,58 @@ Stop when the row cap or the clock hits.
 pip install zeroproof   # or: uv add zeroproof
 ```
 
+### Start here: no key required
+
+This runs offline, in seconds, on nothing but the package. It is the
+fastest way to see a row and to check your agent and grader are wired up
+correctly before you spend a key on variety.
+
+```python
+import zeroproof.simulations as zps
+
+# 1. Your tools, in OpenAI function-calling shape. This is all `tools=` wants.
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_order",
+            "description": "Look up an order by id.",
+            "parameters": {
+                "type": "object",
+                "properties": {"order_id": {"type": "string"}},
+                "required": ["order_id"],
+            },
+        },
+    }
+]
+
+# 2. Your agent: one call per rollout, in with the situation text,
+#    out with the steps it took and what it finally said.
+def my_agent(message: str) -> dict:
+    return {
+        "steps": [{"tool": "get_order", "arguments": {"order_id": "4412"}, "result": {"status": "shipped"}}],
+        "final_text": "Order 4412 shipped yesterday.",
+    }
+
+# 3. simulator=False uses the built-in template writer: no model, no key.
+data = zps.simulate(
+    my_agent, tools=TOOLS, system_prompt="Help customers with orders.",
+    simulator=False, budget=20,
+)
+
+# 4. Your grader. Any callable row -> {"reward": 0 or 1, ...}.
+scored = data.grade(judge=lambda row: {"reward": int("4412" in row["final_text"])})
+print(scored.pass_at)
+```
+
+The bare `function` dict without the `{"type": "function", ...}` wrapper
+works too; both shapes are normalized. The template writer needs no model
+and runs in seconds, but the situations are less varied than a model writes,
+so it is for wiring up your agent and grader, not for a training set — for
+that, bring a model below.
+
+### Bring a model
+
 Bring your own model. Any OpenAI-compatible chat endpoint that returns tool
 calls works; it writes the situations and plays the agent, so both run on
 your key:
@@ -58,13 +110,20 @@ data = zps.simulate(
 
 ## Five calls
 
-Spec to gated dataset. Everything else in this README is one layer down.
+Agent to gated dataset. Everything else in this README is one layer down.
+`TOOLS` is the list from [Start here](#start-here-no-key-required);
+`POLICY` is the agent's system prompt.
 
 ```python
 import zeroproof.simulations as zps
 
 data = zps.simulate(
-    agent="openai:gpt-4.1-mini", spec="specs/github", mode="rl", situations=200, repeats=8
+    agent="openai:gpt-4.1-mini",
+    tools=TOOLS,
+    system_prompt=POLICY,
+    mode="rl",
+    situations=200,
+    repeats=8,
 )  # 1 generate
 scored = data.grade(judge=my_judge)  # 2 grade (0/1 per rollout)
 print(scored.pass_at)
@@ -82,8 +141,64 @@ Character training, the same loop aimed at how the model talks: a constitution i
 | `simulate` | the situations, the users, the world, k rollouts per ask | your spec or tools + system prompt |
 | `data.grade(judge=)` | 0/1 per rollout. `zps.grade(data)` uses the hosted judge instead | your judge callable, or a `VLLM_API_KEY` |
 | `pass_at` / `judge_trust` | pass@1 with an interval, headroom for RL, whether the judge can be trusted | graded rows, 30 to 100 hand labels as `gold_reward` |
-| `optimize(mode="rl")` | drops junk, duplicates, dead groups, out-of-band asks; flags reward hacks | graded rows |
+| `optimize(mode="rl")` | drops junk rows, duplicates, dead groups, and asks outside the *difficulty* band; flags reward hacks | graded rows |
 | `push_rows(gate=True)` | refuses ungraded or gradient-free RL data; stamps calibration | pruned rows |
+
+### The judge contract
+
+Rows come back ungraded; your judge decides what good means. A judge is
+any callable that takes a row and returns a verdict. LLM judge, rules
+engine, reward model, human-label lookup, HTTP call: the SDK does not care
+how the reward was produced, only that the result honors this contract.
+The same contract is what `grade`, `run_judge`, `evaluate`, `grader=`,
+`optimize` and a gated `push` all read, and what every `verify` verifier
+and `zps.reward_model(run)` already honors.
+
+```python
+judge(row) -> {"reward": 0 or 1}              # the minimum
+judge(row) -> {"reward": 0.7,                 # floats allowed
+               "reason": "...",               # optional, kept on the row
+               "markers": {"grounded": 1.0},  # optional, -> row["markers"]
+               "failure_class": "...",        # optional
+               ...anything else}              # kept as judge metadata
+judge(row) -> 0 or 1 or 0.7                   # a bare number works
+```
+
+**Failure modes.** Anything else — a missing `reward`, an unsupported
+type, an exception, a timeout — marks the row (`judge_status` of
+`missing_reward` / `invalid_result` / `error` / `timeout`) and sets
+`reward=None`. Nothing is silently scored zero, so a broken judge shows up
+as unjudged rows rather than as a policy that looks bad.
+
+**Marker polarity, the rule for every marker you define.** `1.0` is the
+good outcome; higher is better; a significant drop is the regression.
+`delta_report`, `must_not_regress=` and the run page all assume it. Name a
+marker for the behavior you *want* — `refund_correct`, not
+`false_refund_success` — or a fix reads as `DOWN` and listing the marker in
+`must_not_regress=` fails the report on the run that repaired the bug.
+More on the four marker families in
+[Markers: four families, one polarity](#markers-four-families-one-polarity).
+
+**The loop, closed in five lines.**
+
+```python
+import zeroproof.simulations as zps
+
+judge = lambda row: {"reward": int("sorry" not in row["final_text"])}
+scored = zps.run_judge(data.trajectories, judge)          # or data.grade(judge=judge)
+zps.export_dataset(scored.passes(), output="train.jsonl", system_prompt=POLICY, tools=TOOLS)
+# ...train externally, roll the tuned model on a holdout...
+evald = zps.evaluate(rollouts, judge, model="my-tuned-v1")
+nxt = zps.simulate(tools=TOOLS, system_prompt=POLICY, traces=evald.failed_traces())
+```
+
+The full contract, with every status and the rest of the loop, is the
+module docstring of `zeroproof.simulations.score.judging` — note the
+`score.`; there is no `zeroproof.simulations.judging`.
+
+Writing the judge is half of it; knowing whether to believe it is the
+other half. `zps.judge_trust(rows, judge=...)` and `zps.judge_probes(rows,
+judge)` are under [Trust the numbers](#trust-the-numbers).
 
 ### Verifiers: when the reward is a program, not a judge
 
@@ -92,7 +207,7 @@ For a verifiable task the reward is a checker, not an opinion (RLHF book ch. 7, 
 ```python
 from zeroproof.simulations.verify import MathEqual, CodeExec, JSONSchema, Regex, All
 
-data = zps.simulate(spec="specs/math", mode="rl", situations=200, repeats=8)
+data = zps.simulate(tools=MATH_TOOLS, system_prompt=MATH_POLICY, mode="rl", situations=200, repeats=8)
 scored = data.grade(judge=MathEqual())  # the verifier is the reward
 rows, _ = zps.optimize(scored, mode="rl")  # GRPO data, gradient checked
 ```
@@ -107,10 +222,9 @@ export VLLM_API_KEY=...
 ```
 
 No key at all: the situation writer also defaults to hosted Qwen, even when
-`agent=` is your own function. Pass `simulator=False` to use the built-in
-template writer instead. It needs no model and runs in seconds; the
-situations are less varied than a model writes, so it is for wiring up your
-agent and grader, not for a training set.
+`agent=` is your own function, so `simulator=False` is what makes a run
+fully offline — see [Start here](#start-here-no-key-required) above for the
+whole runnable block.
 
 ```python
 data = zps.simulate(
@@ -136,6 +250,12 @@ and the first error in `data.search["agent_errors"]` and
 off after `max(16, 2 * budget)` lost rollouts, so a dead endpoint costs a
 handful of calls, not hundreds.
 
+`data.search` is the run's own report dict, and its keys are written only
+when the run has something to say: these two appear only if the agent
+actually raised, and `search["groups"]` only on a run with repeats. A clean
+`explore` run with a working agent has neither, so read them with
+`data.search.get(...)` rather than concluding the attribute is missing.
+
 Working in this repo: `uv sync`, then `uv run pytest` after `uv sync --extra dev`.
 
 One runtime dependency (`requests`), Python 3.10+. Installing from PyPI rather than a
@@ -151,7 +271,7 @@ data = zps.simulate(tools=my_tools, system_prompt=my_system_prompt, output="roll
 data = zps.simulate(agent=my_agent)
 ```
 
-Pass `spec=` if you have a local tools-and-system-prompt folder. The generated datasets are on Hugging Face in the [Post-Training Foundational Datasets](https://huggingface.co/collections/zero-proof-ai/zeroproof-post-training-foundational-datasets-6aa0b9c040ff8591988696dc) collection, not stored in this repo: [agent-simulations](https://huggingface.co/datasets/zero-proof-ai/agent-simulations) by agent type, [tool-call-efficiency](https://huggingface.co/datasets/zero-proof-ai/tool-call-efficiency) (SFT, preference, GRPO and eval splits), and [tau2-simulated](https://huggingface.co/datasets/zero-proof-ai/tau2-simulated), among others.
+Pass `spec=` if you have a local tools-and-system-prompt folder of your own: a directory (or a JSON/YAML file) holding `tools` and `policy` / `system_prompt`, optionally with seed `situations`. No spec folders ship with this package, so every snippet here uses `tools=` + `system_prompt=` — the two are interchangeable, and `spec=` is only a way to keep them in a file. The generated datasets are on Hugging Face in the [Post-Training Foundational Datasets](https://huggingface.co/collections/zero-proof-ai/zeroproof-post-training-foundational-datasets-6aa0b9c040ff8591988696dc) collection, not stored in this repo: [agent-simulations](https://huggingface.co/datasets/zero-proof-ai/agent-simulations) by agent type, [tool-call-efficiency](https://huggingface.co/datasets/zero-proof-ai/tool-call-efficiency) (SFT, preference, GRPO and eval splits), and [tau2-simulated](https://huggingface.co/datasets/zero-proof-ai/tau2-simulated), among others.
 
 | Knob | Default | |
 |---|---|---|
@@ -161,6 +281,8 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `rollouts_per_request` | from mode | Repeats: reruns of one phrasing. Alias `repeats=` |
 | `fault_rate` | `0.5` | Broken tools. `0` off. Applied by the mock world, so a callable `agent=` that answers its own tool calls never sees one |
 | `simulator` | hosted Qwen | Situation writer. `False` uses the built-in template writer (no model, less variety); an `openai:`/`vllm:` spec runs it on your endpoint |
+| `traces` | `None` | Graded traces of the deployed agent — a list of plain row dicts or a JSONL path. Aims the coverage grid at the behaviors those traces show and keeps the sources out of the generated rows. See [Close the loop](#close-the-loop-aim-the-budget-with-traces) |
+| `tasks` | `None` | Re-run a previous run's task set instead of drawing a new one: that run, its rows, or its JSONL path. k is **not** inherited — see [Same tasks, new prompt](#trust-the-numbers) |
 | `logprobs` | `False` | Ask the rollout model for the log-probability of every token it generates. Each agent turn's step gets `logprob` and `n_tokens`, the row gets the totals. `"tokens"` keeps the per-token list. Model backends only |
 | `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off. `concurrency: 1` always runs this way |
 | `grade` | `False` | Legacy: `True` writes the deterministic conduct score at simulation time. Rows come back ungraded by default; grade after with `data.grade(...)` or `zps.grade(...)` |
@@ -206,6 +328,79 @@ rollouts saved. `data.pass_at` scores stopped unanimous groups as
 unanimous. `repeat_policy="fixed"` restores k rollouts for every prompt;
 `advanced={"probe": n}` changes the probe. rlhf-book ch. 6 (dynamic
 sampling) and ch. 7 (difficulty filtering), applied at generation time.
+
+## Close the loop: aim the budget with traces
+
+This is the second half of "two ways in, one engine" at the top of this
+file. Without `traces=`, the coverage grid comes from the agent's tools and
+policy alone — a cold start that samples the whole space evenly. With
+`traces=`, the grid is aimed at the tools, faults and worlds the deployed
+agent actually got wrong, so new rows land where the agent is weak.
+
+**A trace is a plain row dict.** Not an OTLP span, not a platform dataset
+id, not anything you have to ingest first. It is the same shape `grade()`
+returns and the same shape `simulate()` writes:
+
+```python
+traces = [
+    {
+        "prompt": "where is my order 4412",
+        "steps": [{"tool": "get_order", "arguments": {"order_id": "4412"}, "result": {"error": "timeout"}}],
+        "final_text": "Your order shipped yesterday.",
+        "reward": 0,
+    },
+    # ...
+]
+```
+
+`prompt` (or `messages`) and `steps` are what matter; `reward` is optional
+(ungraded traces still focus the grid, they just carry less signal), and a
+JSONL path works anywhere a list does. `load_traces` normalizes the common
+variants — `tool_trace`/`trace` for `steps`, `final`/`output`/`response`
+for `final_text`, OpenAI-style `messages` — so exports from other stacks
+usually drop straight in. OTLP ingest and platform datasets are *one* way
+to get rows into this shape, not a prerequisite for it.
+
+```python
+import zeroproof.simulations as zps
+
+traces = zps.load_traces("production.jsonl")        # or just pass the list
+print(zps.trace_report(traces, tools=TOOLS))        # what will this aim at?
+
+data = zps.simulate(
+    my_agent, tools=TOOLS, system_prompt=POLICY, traces=traces, mode="rl", repeats=4
+)
+```
+
+| Call | What it does |
+|---|---|
+| `load_traces(source)` | Normalize a JSONL path or any iterable of dicts to the canonical trace schema. Rows with neither an ask nor steps are dropped |
+| `trace_report(traces, tools=, policy=)` | Read this **before** you spend a budget: traces in, rows dropped, tools and faults observed, graded/ungraded counts, and `emphasis` — the exact axis values these traces move forward in the grid |
+| `mine_traces(rows)` | The counts behind that: `flaw_rows` is every row with an observed fault or a 0 label, the behaviors worth simulating more of |
+| `dimensions_from_traces(rows, tools, policy)` | The focused coverage axes themselves. `broaden=False` drops tools the traces never touched, so the budget stays near the flaws |
+| `simulate_from_traces(traces, ...)` | `simulate(agent, traces=...)` for callers who start from the traces. With no agent, tools or policy it reads the tool surface off the traces, so graded telemetry alone is enough to start |
+| `split_pseudo_production(rows, fraction=0.2)` | No production traces yet? Hold out a slice of a simulation run as stand-in production. Split by task, not by row, so the held-out slice is prompt-disjoint; every distinct flaw signature lands on the held-out side at least once |
+| `leakage_report(generated, sources)` | Did any generated prompt come back a near copy of a source trace? Cosine similarity at `threshold=0.9`, exact matches always flagged |
+| `drop_leaky_rows(rows, sources)` | The kept rows plus that report. Flagged rows are removed, not rewritten |
+
+**The leakage rule.** Source traces shape the grid and never enter the
+generated dataset; `simulate(traces=...)` already drops generated rows that
+near-copy a source. `leakage_report` / `drop_leaky_rows` are how you verify
+it, which is what makes it safe to hold traces out for evaluation:
+
+```python
+prod, train = zps.split_pseudo_production(scored.rows, fraction=0.2)
+data = zps.simulate(my_agent, tools=TOOLS, system_prompt=POLICY, traces=prod, mode="rl", repeats=4)
+print(zps.leakage_report(data.trajectories, prod)["n_leaky"])  # want 0
+rows, report = zps.drop_leaky_rows(data.trajectories, prod)
+```
+
+And the loop closes on itself: `evaluate(rollouts, judge).failed_traces()`
+hands the failures straight back to `simulate(traces=...)`.
+
+If your traces are already on the platform, `zps.cut(agent="my-agent")`
+does the whole cut in one line — see
+[Training data out of traces](#training-data-out-of-traces).
 
 ## Examples
 
@@ -287,9 +482,11 @@ zps.delete_dataset(v1["datasetId"])  # permanent
 Storage is private per account, 5 GB free. `parent=` records dataset
 lineage so iterations show as a family on the platform.
 
-`data.push` and `zps.push_file` run a publish gate first (`gate=False` skips it). Every graded row gets a `calibration` stamp: its task's pass rate over k repeats, k, and the policy that produced it, so a trainer can build a curriculum or retire solved tasks. An RL-shaped run (repeats of one ask) is refused with `PublishGateError` when it is ungraded or has no mixed group, because a grouped update would learn nothing from it. The report comes back as `entry["gate"]`, with warnings when out-of-band or unanimous asks are still present; `zps.optimize(data, mode="rl")` prunes those. `zps.publish_gate(rows)` runs the same check on any row list. The stamp is the schema's `Calibration` object: `zps.calibration_of(row)` reads it back typed, `from_row` carries it on `rollout.extra["calibration"]`, and `to_row` writes it out again. `k` is the repeats the grader saw, not the rows that survived: `optimize(mode="rl")` stamps its selection from the rows it was given, before its own dedupe and trims, and the gate keeps a carried stamp rather than re-measuring it on what is left. The gate's own `pass_at` block is still over the rows in front of it, and says so when the two differ.
+`data.push` and `zps.push_file` run a publish gate first (`gate=False` skips it). Every graded row gets a `calibration` stamp: its task's pass rate over k repeats, k, and the policy that produced it, so a trainer can build a curriculum or retire solved tasks. An RL-shaped run (repeats of one ask) is refused with `PublishGateError` when it is ungraded or has no mixed group, because a grouped update would learn nothing from it. The report comes back as `entry["gate"]`, with warnings when unanimous asks, or asks outside the difficulty band, are still present; `zps.optimize(data, mode="rl")` prunes those. `zps.publish_gate(rows)` runs the same check on any row list. The stamp is the schema's `Calibration` object: `zps.calibration_of(row)` reads it back typed, `from_row` carries it on `rollout.extra["calibration"]`, and `to_row` writes it out again. `k` is the repeats the grader saw, not the rows that survived: `optimize(mode="rl")` stamps its selection from the rows it was given, before its own dedupe and trims, and the gate keeps a carried stamp rather than re-measuring it on what is left. The gate's own `pass_at` block is still over the rows in front of it, and says so when the two differ.
 
-Training rows from `export_training` / `training_rows` carry a `loss_mask`, one 0/1 per message: 1 on the agent's turns, 0 on system, user, and tool-output turns. Tool output is the environment's text, not the policy's, so a trainer should not learn to predict it. `mask_mode="final"` trains only the last assistant turn, for conversations whose earlier agent turns were scripted or came from another policy; the export report counts `trained_messages` and `masked_messages`. `unroll=True` turns an N-turn conversation into N samples, the k-th ending at the k-th agent turn with loss on that turn only, so every earlier turn trains once with the context it actually had (rlhf-book ch. 4). `max_tool_output_chars=` caps each tool message, appends a `[... N chars of tool output truncated]` marker and counts the cut on the row and in the report, so context spent on tool output is a decision the export makes out loud (ch. 13).
+`export_dataset` and `export_training` are the same function object (`export_dataset is export_training`), not two exporters to choose between: same arguments, same file, same report. `export_dataset` is the name to write in new code — it exports a dataset, not a training run — and `export_training` is the older spelling, kept so nothing already written breaks. `training_rows` is the list-returning half of the same path, without writing a file.
+
+Training rows from `export_dataset` / `training_rows` carry a `loss_mask`, one 0/1 per message: 1 on the agent's turns, 0 on system, user, and tool-output turns. Tool output is the environment's text, not the policy's, so a trainer should not learn to predict it. `mask_mode="final"` trains only the last assistant turn, for conversations whose earlier agent turns were scripted or came from another policy; the export report counts `trained_messages` and `masked_messages`. `unroll=True` turns an N-turn conversation into N samples, the k-th ending at the k-th agent turn with loss on that turn only, so every earlier turn trains once with the context it actually had (rlhf-book ch. 4). `max_tool_output_chars=` caps each tool message, appends a `[... N chars of tool output truncated]` marker and counts the cut on the row and in the report, so context spent on tool output is a decision the export makes out loud (ch. 13).
 
 Two wire shapes come out of the exporters, and a trainer needs the second one:
 
@@ -311,7 +508,7 @@ rows, report = zps.optimize(data, mode="rl", enforce_band=False)  # rank, do not
 report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 ```
 
-`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts (`truncated="keep"` leaves them in as `overlong`, `"penalize"` keeps them as failures with the judged score under `reward_before_penalty`, DAPO's overlong handling), unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. The prune shrinks every group, so the k-way reliability numbers do not survive it: `pass_at` on the selection reports `pass^k` and `pass@k` as `n/a` where the graded rows had them, which is why the quickstart prints `pass_at` before this call. The report says so in `hygiene_warnings` when they were available before, and the carried `calibration` stamp keeps the graded per-task measurement. `optimize(mode="sft")` is rejection sampling (rlhf-book ch. 9): `select="top_per_prompt"` keeps each prompt's highest-reward completion above `min_reward` (default 1.0; lower it for a partial-credit grader), `"top_k_overall"` the best `k` across prompts, and the `random_*` rules are the matching chance controls. Exported groups carry `n0`/`n1` (fail/pass, partial credit splits at 0.5) and `reward_mean`/`reward_std`. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter. Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
+`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts (`truncated="keep"` leaves them in as `overlong`, `"penalize"` keeps them as failures with the judged score under `reward_before_penalty`, DAPO's overlong handling), unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band (`trim_out_of_band`: "out of band" means outside the [0.2, 0.8] *pass-rate* band, never off-topic — it does not read the prompt at all, so an on-topic ask the policy always solves is dropped and an odd one it solves half the time is kept), then keeps whole groups round-robin across fault kinds. The prune shrinks every group, so the k-way reliability numbers do not survive it: `pass_at` on the selection reports `pass^k` and `pass@k` as `n/a` where the graded rows had them, which is why the quickstart prints `pass_at` before this call. The report says so in `hygiene_warnings` when they were available before, and the carried `calibration` stamp keeps the graded per-task measurement. `optimize(mode="sft")` is rejection sampling (rlhf-book ch. 9): `select="top_per_prompt"` keeps each prompt's highest-reward completion above `min_reward` (default 1.0; lower it for a partial-credit grader), `"top_k_overall"` the best `k` across prompts, and the `random_*` rules are the matching chance controls. Exported groups carry `n0`/`n1` (fail/pass, partial credit splits at 0.5) and `reward_mean`/`reward_std`. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter. Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
 
 ### What will the policy learn?
 
@@ -439,23 +636,23 @@ zps.grounding_report(rows)  # grounded rate, and the invented values by tool and
 
 **Decontamination.** Word 8-gram overlap between a dataset's prompts and any evaluation source: row lists, JSONL paths, or platform dataset ids. A row is contaminated when it is an eval prompt verbatim or when one eval text covers at least 80% of its words (`overlap=`, the Llama 2 rule); one shared 8-gram is not enough, because situations written from the same templates share whole sentences without sharing the question. Short prompts match verbatim only. `fields=("prompt", "final_text")` also checks replies against eval answers and references. The report separates verbatim hits from near copies and counts hits per field, and returns the clean rows with the first offenders.
 
-**Intervals and comparison.** Every pass@1 carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. Tasks on one side only are dropped from a paired comparison; `note` says how many and `paired_share` is the fraction that paired, so a verdict over a quarter of the eval reads as one. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
+**Intervals and comparison.** Every pass@1 carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. pass^k and pass@k do not carry one — see [Output](#output). Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. Tasks on one side only are dropped from a paired comparison; `note` says how many and `paired_share` is the fraction that paired, so a verdict over a quarter of the eval reads as one. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
 
 **Same tasks, new prompt.** A run draws its tasks from the grid by seed and, above `concurrency: 1`, by completion order, so a second `simulate()` shares only part of its tasks with the first. To A/B a prompt edit, a model swap or another seed on exactly the same eval, pin the task set: `zps.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base)` re-runs every prompt of `base` (a run, its rows, or its JSONL path) on its own `scenario_id`, under the same faults and world state, and draws nothing new; it stops with `tasks_done` once every prompt has its rollouts, and `compare_runs(base.rows(), rerun.rows())` pairs every task.
+
+`tasks=` copies the prompts, not the topology. **k is resolved from *this* call's `mode` and `repeats`, never inherited from the pinned run**, so a base built with `mode="rl", repeats=4` and re-run as `simulate(..., tasks=base)` comes back at k=1 (the `explore` default): `pass_at` reports `k=1` with pass^k and pass@k `None`, and a before/after built that way silently compares k=4 against k=1. Re-pass the mode and the repeats:
+
+```python
+base  = zps.simulate(agent, tools=TOOLS, system_prompt=POLICY,  mode="rl", repeats=4)
+rerun = zps.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base, mode="rl", repeats=4)
+assert base.rollouts_per_request == rerun.rollouts_per_request  # cheap guard
+```
 
 **Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `eval_variance(run_1, run_2, run_3)` is the eval's own re-run standard deviation (three or more evaluations of the same model); passing it as `run_std=` makes any delta inside twice that band `within_noise`, and a target there reads `within_eval_noise` rather than moved, since re-running the eval moves it that much on its own (rlhf-book ch. 16). `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
 
 **Argument grounding.** A policy trained to call a tool learns to call it before it learns when not to; on the refund environment both GRPO and DPO learned to invent an order id on a quarter of the prompts that gave none while the headline rose. `mark_grounding(rows)` stamps `argument_grounding`: 1 when every string argument of every tool call appears in the prompt, the user and system turns, or an earlier tool result (rows with no calls count as grounded), else 0. No categories, any agent; `must_not_regress=["argument_grounding"]` fails the run that learned to invent, and `ungrounded_arguments(row)` / `grounding_report(rows)` name the values. `ignore_keys=` skips free-text arguments, `allow=` lists enums and defaults.
 
 **Trajectory flags.** Did the agent fake the work? `trace_markers(rows)` reads the trajectory rather than the prose (rlhf-book ch. 13, 14): `lie.tests_claimed` (tests said to pass when no test command ran or the last one failed), `lie.unverified_claim` ("I verified" with no tool calls), `lie.phantom_edit` ("I updated" with nothing written), `lie.ignored_failure` (the turn ended on a failed call and the reply never says so), `hack.test_edited`, `hack.test_weakened`, `hack.suppressed`, `hack.bypassed`, `risk.destructive`, `risk.secrets`, each with the fragment that raised it on `row["trace_flags"]`. The markers it stamps (`honest_claims`, `reported_failure`, `no_test_tampering`, `no_suppression`, `no_bypass`, `no_destructive`, `no_secrets`) are 1.0 when clean, so `must_not_regress=["honest_claims"]` fails a run that learned to overclaim, and `hack_scan` carries every fired flag as a `trace:` feature. `trace_flag_report(rows)` gives each flag's rate, examples, and its correlation with the reward, flagged when the judge pays for the fake. Reads, writes, deletes and commands are told apart by the tool's arguments and name; `kinds={"my_tool": "write"}` overrides.
-
-**Over-optimization, quick read.** `behavioral_markers(rows)` gives the presence rate of each over-optimization tic (boilerplate, self-reference, hedging, refusal, sycophancy) in one call: higher means the tic shows up more.
-
-```python
-zps.behavioral_markers(scored.rows)  # {"boilerplate": 0.31, "refusal": 0.04, ...}
-```
-
-For a before/after comparison use `style_markers` / `style_report` above, not these: those markers are 1.0 when the reply is clean (higher is better), which is the polarity `delta_report(must_not_regress=...)` expects. `behavioral_markers` is presence (higher is worse), so it reads a paired delta backwards. The two cover the same ch. 14 behaviors; `behavioral_markers` is deprecated in favor of `style_report` and warns when called.
 
 **Stage lineage.** The pipeline is a sequence of stages (rlhf-book ch. 3): SFT, reward modeling, RL, and the eval that judges the result. `stamp_stage(rows, "sft")` records which stage a row fed, and `stage_report(rows)` counts rows per stage and flags the one mistake it most needs caught: any task used in both `eval` and a training stage. `zps.stamp_stage`, `zps.stage_report`, `zps.stage_of`, `zps.STAGES` (`sft`, `rm`, `rl`, `eval`, `mid`).
 
@@ -466,6 +663,47 @@ spec = zps.load_spec("examples/character/constitution.json")
 scored = zps.stamp_spec(data.grade(judge=my_judge).rows, spec)
 zps.delta_report(before=before, after=scored, target="pass_at_1", must_not_regress=spec.behaviors())
 ```
+
+#### Markers: four families, one polarity
+
+A marker is a named behavior measurement on a row. Everything that reads
+markers — `marker_summary`, `delta_report`, `must_not_regress=`,
+`from_row`, the run page — reads one place, `row["markers"]`, and does not
+care which family put the value there. Four families write to it, and only
+one of them has the wrong polarity:
+
+| Family | How you get it | Polarity | Use it for |
+|---|---|---|---|
+| **Judge-emitted custom markers** | your own name and value, returned as `{"reward": ..., "markers": {"name": value}}` from a `judge=` / `grader=` / `run_judge` callable | **yours to choose — and it must be 1.0 = good** | Anything your product cares about. This is the family `delta_report` and `must_not_regress=` are built for |
+| `trace_markers` / `trace_flag_report` | `zps.trace_markers(rows)` stamps `honest_claims`, `reported_failure`, `no_test_tampering`, `no_suppression`, `no_bypass`, `no_destructive`, `no_secrets`, with the evidence on `row["trace_flags"]` | 1.0 = no flag fired, higher is better | Did the agent fake the work? Read from the trajectory, not the prose — see [Trajectory flags](#trust-the-numbers) above |
+| `style_markers` / `style_report` | `zps.style_markers(rows)` stamps `no_boilerplate`, `no_hedging`, `no_apology`, `no_sycophancy`, `answered` | 1.0 = clean reply, higher is better | Over-optimization drift in a paired before/after |
+| `behavioral_markers` / `mark_rows` / `STOCK_MARKERS` | `zps.behavioral_markers(rows)` -> `{"boilerplate": 0.31, "refusal": 0.04, ...}` | **presence: 1 = the tic appears, higher is worse** | A one-shot read of how often each tic occurs. Not a delta |
+
+> **Deprecated.** `behavioral_markers`, `mark_rows`, `row_markers` and
+> `STOCK_MARKERS` all live in
+> `zeroproof.simulations.score.markers`, which is deprecated and raises a
+> `DeprecationWarning` on first use. They are being consolidated onto
+> `score.style`. `style_markers` / `style_report` / `refusal_report` cover
+> the same rlhf-book ch. 14 behaviors with the delta-ready polarity.
+
+**Polarity is the rule for every marker you define, not a quirk of one
+function.** `1.0` is the good outcome; higher is better; a significant
+*drop* is the regression that `must_not_regress=` fails on. Name markers
+after the behavior you want:
+
+```python
+# Wrong: 1 means the bug happened.
+{"markers": {"false_refund_success": 1.0}}
+# delta_report prints DOWN when you fix it, and
+# must_not_regress=["false_refund_success"] FAILS the run that fixed it.
+
+# Right: 1 means the agent did the right thing.
+{"markers": {"refund_correctly_refused": 1.0}}
+```
+
+If you have already collected rows under an inverted name, flip the value
+(`1 - v`) and rename before you compare runs; `delta_report` has no way to
+know which direction a name means.
 
 ### Train, and watch it
 
@@ -586,9 +824,13 @@ hosted GPU with warm replicas and burst under load.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `agent` | hosted Qwen | Rollout model |
-| `spec` | | Local tools and system prompt path |
-| `tools`, `system_prompt` | from spec or agent | Tool list and agent system prompt |
+| `spec` | | Local tools and system prompt path. None ship with the package; `tools=` + `system_prompt=` is the same thing inline |
+| `tools`, `system_prompt` | from spec or agent | Tool list and agent system prompt. `tools` is OpenAI function-calling shape, `[{"type": "function", "function": {"name", "description", "parameters"}}]`; the bare `function` dict works too |
 | `situations` | | Distinct situations (N) |
+| `traces` | `None` | Graded traces (row dicts or a JSONL path) that aim the coverage grid at observed failures. [Close the loop](#close-the-loop-aim-the-budget-with-traces) |
+| `tasks` | `None` | Re-run a previous run's task set. Copies the prompts, not the topology: k comes from *this* call's `mode`/`repeats`, so re-pass them |
+| `grader` | `None` | A judge callable run beside the rollouts as they land; `mode="rl"` allocation then reads rewards instead of behavior signatures |
+| `execute` | `None` | `(tool, arguments) -> result`: your real world answers every tool call instead of the mock one |
 | `requests_per_situation` | from mode | Phrasings per situation (n). Alias `phrasings=` / `n=` |
 | `rollouts_per_request` | from mode | Repeats per phrasing (k). Alias `repeats=` |
 | `unique_situations` | on in `explore` | Unique situations only |
@@ -618,7 +860,11 @@ Each row, in `data.trajectories` and on disk: `prompt`, `messages`, `steps`, `fi
 
 What goes to disk is the whole row, not a summary of it: `data.rows` (the same list `output=` and `save()` write, callable as `data.rows()` too) carries everything the trajectory carries, so a saved run can still prove its own provenance. That includes how the situation was drawn (`scenario_dimensions`, `arm`, `selection_reason`, `behavior_signature`, `seed`), who graded it and how that went (`judge_name`, `judge_status`, `judge_meta`, `lineage`, `label_source`), and what was measured on it (`markers`, read by `marker_summary` and `delta_report`). Two things never ship, at any depth of the row: the teacher-only `privileged` block and its `principle` / `hidden_state` / `reference` / `rubric` fields, which would put the answer key one step from a training file, and `vector`, the raw embedding the diversity search keeps in memory for the length of the run. A privileged block nested inside a carried field or a tool result is dropped the same way, before `messages` is rebuilt from the steps.
 
-After grading, `data.pass_at` (also on the `ScoredData` from `judge=` and `evaluate`) gives pass@1, pass^k and pass@k off the same groups, one job each: pass@1 is the measurement headline (the agent runs once in production), pass^k is the reliability line (all k repeats pass), and pass@k minus pass@1 (`.headroom`) is what a grouped RL update has to learn from, the same asks `group_signal` counts as mixed. k is the smallest group of repeats; below `repeats=4` the k-way numbers are `None` with a note rather than a noisy figure. `.per_task` is the raw per-prompt pass-rate vector. With an LLM judge, pass@k inflates on false positives and pass^k on false negatives, so pass@1 stays the headline.
+After grading, `data.pass_at` (also on the `ScoredData` from `judge=` and `evaluate`) gives pass@1, pass^k and pass@k off the same groups, one job each: pass@1 is the measurement headline (the agent runs once in production), pass^k is the reliability line (all k repeats pass), and pass@k minus pass@1 (`.headroom`) is what a grouped RL update has to learn from, the same asks `group_signal` counts as mixed. k is the smallest group of repeats; below `repeats=4` the k-way numbers are `None` with a note rather than a noisy figure. With an LLM judge, pass@k inflates on false positives and pass^k on false negatives, so pass@1 stays the headline.
+
+`.per_task` is a **dict**, `{prompt: pass rate over that group's repeats}` — keyed by the prompt string, not indexed, so `per_task[0]` is a `KeyError` and not the first task. Iterate `.per_task.items()`; `.per_task.values()` is the pass-rate vector pass@1 averages.
+
+**Which of these carry an interval: pass@1, and only pass@1.** `pass_at(rows).ci95` is a bootstrap over tasks on pass@1. `pass_pow_k` and `pass_at_k` are point estimates with no interval attached and no field to hold one, so "the reliability line" is a bare number today. To report pass^k with an interval, bootstrap it yourself over the per-task values (`from zeroproof.simulations.score.stats import bootstrap_ci, wilson_interval`). What else in this file carries one: `metric_summary` / `marker_summary` over markers, `trace_flag_report` over each trajectory marker's clean share, `refusal_report` and `judge_trust` a Wilson interval, `compare_runs` / `delta_report` a bootstrap interval on the paired *difference*. If a number is not in that list and is not pass@1, assume it is a point estimate.
 
 ```python
 scored = data.grade(judge=my_judge)

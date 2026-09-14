@@ -12,9 +12,18 @@ Judge contract (minimal now, extensible later)::
     judge(trajectory) -> {"reward": 0 or 1}            # minimum
     judge(trajectory) -> {"reward": 0.7,               # floats allowed
                           "reason": "...",             # optional
+                          "markers": {"name": 1.0},    # optional
                           "failure_class": "...",      # optional
                           ...anything else}            # kept as metadata
     judge(trajectory) -> 0 or 1 or 0.7                 # bare number works
+
+``markers`` is lifted onto ``row["markers"]``, which is what
+``marker_summary``, ``delta_report`` and ``from_row`` read. Marker
+polarity is a convention the whole SDK depends on: **1.0 is the good
+outcome, higher is better, and a significant drop is the regression.**
+Name a marker for the behavior you want (``refund_correct``, not
+``false_refund_success``) or ``delta_report`` reads your improvement as a
+regression and ``must_not_regress=`` fails the run that fixed the bug.
 
 Anything else — missing reward, unsupported type, an exception — marks the
 row (``judge_status`` of ``missing_reward`` / ``invalid_result`` /

@@ -545,11 +545,20 @@ def trim_out_of_band(
     hi: float = DEFAULT_BAND[1],
     min_k: int = 2,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """Drop asks whose pass rate over k >= ``min_k`` rollouts sits outside
-    [``lo``, ``hi``]. The offline difficulty filter: an ask the policy
-    almost always or almost never passes carries little gradient per
-    rollout. Unanimous asks are ``trim_unanimous_groups``'s job and are
-    left alone here; singles always stay.
+    """Difficulty band filter. Nothing to do with topic or relevance.
+
+    "Out of band" here means outside the *difficulty* band ``[lo, hi]``
+    (default ``DEFAULT_BAND``, 0.2 to 0.8): an ask is dropped when its
+    pass rate over k >= ``min_k`` rollouts is too high (the policy almost
+    always solves it) or too low (it almost never does), because either
+    way it carries little gradient per rollout. It does not read the
+    prompt, the topic, or the tools; a perfectly on-topic ask is dropped
+    for being too easy, and an off-topic one the policy passes half the
+    time is kept. Junk rows are a separate filter (``is_incomplete_junk``,
+    applied by ``optimize``), and nothing here filters by topic at all.
+
+    Unanimous asks are ``trim_unanimous_groups``'s job and are left alone
+    here; singles always stay.
     """
     if not 0.0 <= lo <= hi <= 1.0:
         raise ValueError(f"band must satisfy 0 <= lo <= hi <= 1, got ({lo}, {hi})")

@@ -3,6 +3,17 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Docs only: fixed the `zeroproof.simulations.judging` module pointer (it is
+  `score.judging`), lifted the judge contract and marker-polarity rule into
+  the README, gave `traces=` and the close-the-loop toolkit a section,
+  replaced the `spec="specs/..."` snippets (no spec folder ships) with
+  `tools=` + `system_prompt=`, and corrected `.per_task` (a dict, not a
+  vector), the pass^k/pass@k interval claim, `tasks=` k inheritance,
+  `STOCK_MARKERS`, `export_dataset`/`export_training`, and
+  `trim_out_of_band`. No behavior change.
+
 ## 0.39 (2026-09-14)
 
 - `export_training(format="trl")`, `export_preference(format="trl")` and
@@ -142,6 +153,7 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   also runs `simulate()` twice in one process under contrasting latency.
   Golden captures move: a serial run now folds every batch whole, so a
   `scripts/golden.py` diff across this change is expected to differ.
+
 ## 0.36 (2026-09-14)
 
 - `training_rows(max_tool_output_chars=)` / `export_training(...)`: each

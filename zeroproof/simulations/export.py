@@ -589,6 +589,13 @@ def export_training(
 ) -> dict[str, Any]:
     """Write ``training_rows`` as JSONL. Never overwrites the source.
 
+    ``export_dataset`` is this same function object under the product
+    name — ``export_dataset is export_training`` — not a second exporter.
+    There is no behavioral difference to pick between: same arguments,
+    same file, same report. ``export_dataset`` is the name to write in
+    new code (it exports a dataset, not a training run); ``export_training``
+    is the older spelling and is kept so nothing written today breaks.
+
     With a path source and no ``output``, writes ``<name>.train.jsonl``
     next to it. ``validate=True`` refuses to write a dataset whose tool
     calls do not round-trip to structured arguments; pass ``validate=False``

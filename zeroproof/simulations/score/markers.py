@@ -20,6 +20,12 @@ are being consolidated; ``style`` is the delta-ready one.)
 ``mark_rows`` stamps the presence values onto each row's ``markers`` dict
 (as ``<name>`` = 0/1); ``detect`` / ``row_markers`` do one row; ``extra=``
 adds custom detectors. Report-only; nothing here changes a reward.
+
+``STOCK_MARKERS`` is the tuple of names this module detects, in order:
+``("boilerplate", "self_reference", "hedging", "refusal", "sycophancy")``.
+It is a plain tuple, so ``help(STOCK_MARKERS)`` shows ``tuple``'s own
+docstring rather than this one; ``detect`` and ``row_markers`` take any
+of these names and raise ``KeyError`` listing the tuple for anything else.
 """
 
 from __future__ import annotations
@@ -89,6 +95,15 @@ _COMPILED: dict[str, list[re.Pattern]] = {
     name: [re.compile(p, re.I) for p in pats] for name, pats in _PATTERNS.items()
 }
 
+#: The names this module detects, in ``_PATTERNS`` order: ``boilerplate``,
+#: ``self_reference``, ``hedging``, ``refusal``, ``sycophancy``. Every name
+#: is *presence* polarity — 1 means the over-optimization tic appears in the
+#: reply, so higher is worse. That is the opposite of what ``delta_report``
+#: and ``must_not_regress=`` expect; for a paired before/after use
+#: ``score.style.STYLE_MARKERS`` instead (1.0 = clean, higher is better).
+#: Pass any subset as ``names=`` to ``row_markers`` / ``mark_rows`` /
+#: ``behavioral_markers``. A tuple cannot carry a docstring, so this comment
+#: and the module docstring are where these names are written down.
 STOCK_MARKERS = tuple(_PATTERNS)
 
 

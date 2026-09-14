@@ -4,7 +4,8 @@ RLHF book ch. 13 (Tools, RLVR) and ch. 7 (Reasoning): the reward for a
 verifiable task is a checker, not an opinion. A verifier reads a rollout,
 decides pass or fail (or a partial score in [0, 1]), and says why.
 
-Every verifier honors the judge contract in ``zeroproof.simulations.judging``
+Every verifier honors the judge contract in
+``zeroproof.simulations.score.judging``
 (``callable(row) -> {"reward", "reason", ...}``), so a verifier drops
 straight into ``data.grade(judge=...)``, ``evaluate``, ``optimize`` and a
 gated ``push``. Nothing here talks to a model.
