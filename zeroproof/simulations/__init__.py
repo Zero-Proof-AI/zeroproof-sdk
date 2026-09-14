@@ -113,7 +113,7 @@ from .score.hygiene import (
     near_duplicate_prompts,
     reward_correlations,
 )
-from .score.judge_trust import format_judge_trust, judge_trust
+from .score.judge_trust import format_judge_trust, judge_probes, judge_trust
 from .score.judging import (
     ScoredData,
     build_preference_pairs,
@@ -272,6 +272,7 @@ __all__ = [
     "issue_delegated_credential",
     "judge_agreement",
     "judge_pairs",
+    "judge_probes",
     "judge_trust",
     "leakage_report",
     "length_report",

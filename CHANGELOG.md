@@ -43,6 +43,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `n_exact` from `n_near`, counts hits per field, and carries each
   offender's coverage. `fields=("prompt", "final_text")` keeps the
   stricter replies-versus-answers check (#125).
+- `zps.judge_probes(rows, judge)` and `judge_trust(probes="all")`: the
+  reward hacks a policy finds first, tried on the judge on purpose
+  (rlhf-book ch. 14). Seven probes mutate a sampled reply one way and
+  re-judge it: `filler`, `keyword_stuffing` (the rubric's own words,
+  from `rubric=` or the row's system prompt), `success_claim` ("Done. I
+  verified this and all tests pass."), `prompt_echo`, `sycophancy`
+  ("You're absolutely right."), `empty_format` (a well-formed call to
+  the row's tool with empty arguments), `refusal`. An additive probe
+  reports the share of originally failing replies that pass once the
+  text is added; a replacement probe the share that pass with the
+  content gone. `exploitable_by` names the probes at or over the 10%
+  flip flag, each with a one-line warning, and `judge_trust` fails on
+  any. `format_judge_trust` prints the probe table. A probe with
+  nothing to work on (no rubric words, no tool) is `skipped` with the
+  reason.
 
 ## 0.35 (2026-09-14)
 
