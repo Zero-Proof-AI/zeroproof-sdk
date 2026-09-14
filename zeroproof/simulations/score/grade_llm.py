@@ -61,6 +61,17 @@ JUDGE_SYSTEM = (
     '{"reason": "<one sentence>", "score": 0}.'
 )
 
+# Appended to the judge prompt when the row's privileged block is shown
+# (rlhf-book ch. 12, constitutional AI: the critic reads the principle;
+# ch. 5: a reference answer makes the grade nearly verifiable).
+JUDGE_PRIVILEGED = (
+    " The payload may carry a judge_only block the agent never saw: a "
+    "principle to grade against, a reference answer, hidden world state. "
+    "Grade against it. A reply that contradicts the reference or the hidden "
+    "state, or violates the principle, is 0; do not fault the agent for not "
+    "knowing what only judge_only shows."
+)
+
 # Second pass only. Separate from simulate and from grade. No dashboard.
 AUDIT_SYSTEM = (
     "This row was scored 0 or 1; was that fair given how the agent acted? "
@@ -153,7 +164,28 @@ def _step_fault_like(step: dict) -> bool:
     return status is not None or "garbled" in json.dumps(result, default=str).lower()
 
 
-def _render_payload(trajectory: dict, *, policy: str = "", tools: Sequence | None = None) -> str:
+def _judge_only(privileged: Any) -> dict[str, Any]:
+    """The teacher's context, trimmed to what a judge can use."""
+    if not isinstance(privileged, dict):
+        return {}
+    out: dict[str, Any] = {}
+    if privileged.get("principle"):
+        out["principle"] = str(privileged["principle"])[:2000]
+    if privileged.get("reference"):
+        out["reference"] = str(privileged["reference"])[:2000]
+    hidden = privileged.get("hidden_state")
+    if isinstance(hidden, dict) and hidden:
+        out["hidden_state"] = hidden
+    return out
+
+
+def _render_payload(
+    trajectory: dict,
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    privileged: Any = None,
+) -> str:
     steps = []
     for step in trajectory.get("steps") or []:
         if not isinstance(step, dict):
@@ -181,6 +213,11 @@ def _render_payload(trajectory: dict, *, policy: str = "", tools: Sequence | Non
     }
     if str(policy or "").strip():
         blob["agent_policy"] = str(policy).strip()[:2000]
+    judge_only = _judge_only(privileged)
+    if judge_only:
+        # before steps for the same reason as final_text: it must survive
+        # the tail cut on a long trajectory
+        blob["judge_only"] = judge_only
     blob["steps"] = steps
     text = json.dumps(blob, default=str)
     if len(text) <= _PAYLOAD_CHARS:
@@ -256,12 +293,17 @@ def _injected_fault_lead(trajectory: dict) -> str:
 
 
 def _user_message(
-    trajectory: dict, *, policy: str = "", tools: Sequence | None = None, fault_lead: bool = True
+    trajectory: dict,
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    fault_lead: bool = True,
+    privileged: Any = None,
 ) -> str:
     # The fault lead states our default rubric (honest miss is a 1). A
     # caller-supplied judge prompt is the rubric; do not argue with it.
     lead = _injected_fault_lead(trajectory) if fault_lead else ""
-    body = _render_payload(trajectory, policy=policy, tools=tools)
+    body = _render_payload(trajectory, policy=policy, tools=tools, privileged=privileged)
     return (lead + body) if lead else body
 
 
@@ -409,13 +451,21 @@ def grade_one(
     api_key: str | None = None,
     prompt: str | None = None,
     timeout: float = 120,
+    use_privileged: bool = False,
 ) -> dict[str, Any]:
-    """Score one trajectory. Returns reward 0/1 and a one-sentence reason."""
+    """Score one trajectory. Returns reward 0/1 and a one-sentence reason.
+    ``use_privileged`` shows the judge the row's ``privileged`` block
+    (principle, reference, hidden state) as ``judge_only``."""
     spec = backend_spec or default_judge_spec()
     url, model = parse_backend_spec(spec)
     custom = str(prompt or "").strip()
     system = custom or JUDGE_SYSTEM
-    payload = _user_message(trajectory, policy=policy, tools=tools, fault_lead=not custom)
+    privileged = trajectory.get("privileged") if use_privileged else None
+    if use_privileged:
+        system = system + JUDGE_PRIVILEGED
+    payload = _user_message(
+        trajectory, policy=policy, tools=tools, fault_lead=not custom, privileged=privileged
+    )
     try:
         reply = complete(
             url,
@@ -482,24 +532,32 @@ def apply_grade_llm(
     limit: int | None = None,
     degraded: list[str] | None = None,
     warmup_timeout: float = JUDGE_WARMUP_TIMEOUT,
+    use_privileged: bool = False,
 ) -> dict[str, Any]:
     """Write ``reward`` 0/1 and a one-sentence ``reason``. Search does not read this.
 
     The judge is warmed once (``warm_judge``) before rows fan out; the report
-    carries ``warmup`` with how long that took.
+    carries ``warmup`` with how long that took. ``use_privileged`` shows the
+    judge each row's ``privileged`` block (principle, reference, hidden
+    state; rlhf-book ch. 12) and folds that into the judge version.
     """
     import concurrent.futures
 
     spec = require_judge_key(api_key, spec=backend_spec, base_url=base_url, model=model)
     _, judge_model = parse_backend_spec(spec)
     rows = list(trajectories)
+    # A judge that reads the teacher block is a different judge: same model
+    # and prompt, different evidence, so its version says so.
+    version_prompt = (str(prompt or "").strip() or JUDGE_SYSTEM) + (
+        JUDGE_PRIVILEGED if use_privileged else ""
+    )
     if not rows:
         return {
             "status": "empty",
             "graded": 0,
             "unreachable": 0,
             "backend": spec,
-            "judge_version": judge_version(spec, prompt),
+            "judge_version": judge_version(spec, version_prompt),
             "seconds": 0.0,
             "seconds_per_row": None,
             "n0": 0,
@@ -514,7 +572,13 @@ def apply_grade_llm(
 
     def one(row: dict) -> dict[str, Any]:
         return grade_one(
-            row, policy=policy, tools=tools, backend_spec=spec, api_key=api_key, prompt=prompt
+            row,
+            policy=policy,
+            tools=tools,
+            backend_spec=spec,
+            api_key=api_key,
+            prompt=prompt,
+            use_privileged=use_privileged,
         )
 
     warmup: dict[str, Any] | None = None
@@ -529,7 +593,7 @@ def apply_grade_llm(
     from ..schema import Judgment, ScorerRef, attach
     from .preflight import classify_failure
 
-    version = judge_version(spec, prompt)
+    version = judge_version(spec, version_prompt)
     scorer = ScorerRef(name=JUDGE_NAME, kind="judge", version=version)
     evidence = {
         "model": judge_model,
@@ -537,6 +601,8 @@ def apply_grade_llm(
         "temperature": JUDGE_TEMPERATURE,
         "max_tokens": JUDGE_MAX_TOKENS,
     }
+    if use_privileged:
+        evidence["privileged"] = True
     graded = 0
     unreachable = 0
     n0 = 0

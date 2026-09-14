@@ -292,6 +292,7 @@ class SimulationData:
         concurrency: int = 32,
         llm_concurrency: int = 16,
         version: str | None = None,
+        use_privileged: bool = False,
     ):
         """Grade after simulation with the hosted judge or a custom callable.
 
@@ -327,7 +328,11 @@ class SimulationData:
             )
         if not callable(grader):
             return self.grade_llm(
-                spec=llm_spec, concurrency=llm_concurrency, api_key=api_key, path=path
+                spec=llm_spec,
+                concurrency=llm_concurrency,
+                api_key=api_key,
+                path=path,
+                use_privileged=use_privileged,
             )
 
         def score(t):
@@ -394,9 +399,12 @@ class SimulationData:
         path: str | None = None,
         limit: int | None = None,
         prompt: str | None = None,
+        use_privileged: bool = False,
     ):
         """Binary 0/1 situation grade. Default brain is the hosted judge
-        (Phi-4 unless ``ZEROPROOF_JUDGE`` is set), never the policy model."""
+        (Phi-4 unless ``ZEROPROOF_JUDGE`` is set), never the policy model.
+        ``use_privileged`` shows the judge each row's ``privileged`` block
+        (principle, reference, hidden state) the agent never saw."""
         require_judge_key(api_key, spec=spec, base_url=base_url, model=model)
         policy = str(self.profile.policy or "") if self.profile else ""
         tools = list(self.profile.tools) if self.profile else []
@@ -409,6 +417,7 @@ class SimulationData:
             model=model,
             api_key=api_key,
             prompt=prompt,
+            use_privileged=use_privileged,
             concurrency=concurrency,
             limit=limit,
             degraded=self.degraded,
@@ -689,6 +698,7 @@ def grade_llm(
     prompt: str | None = None,
     policy: str = "",
     tools: list | None = None,
+    use_privileged: bool = False,
 ):
     """Binary 0/1 situation grade. Default brain is hosted Qwen.
 
@@ -710,6 +720,7 @@ def grade_llm(
             path=path or output,
             limit=limit,
             prompt=prompt,
+            use_privileged=use_privileged,
         )
     from .score.quality import load_jsonl, write_jsonl
 
@@ -730,6 +741,7 @@ def grade_llm(
         prompt=prompt,
         concurrency=concurrency,
         limit=limit,
+        use_privileged=use_privileged,
     )
     dest = path or output or src
     if dest:
