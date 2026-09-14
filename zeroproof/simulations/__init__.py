@@ -118,6 +118,7 @@ from .score.judging import (
     normalize_judge_result,
     run_judge,
 )
+from .score.labels import annotator_agreement, attach_labels
 from .score.logprobs import logprob_report, mean_kl, staleness_report
 from .score.markers import STOCK_MARKERS, behavioral_markers, format_markers, mark_rows, row_markers
 from .score.optimize import (
@@ -204,8 +205,10 @@ __all__ = [
     "adaptive_allocator",
     "agents",
     "allocator_slot_counts",
+    "annotator_agreement",
     "argument_grounding",
     "attach_delta",
+    "attach_labels",
     "attach_rubric",
     "behavior_signature",
     "behavioral_markers",

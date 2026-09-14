@@ -37,6 +37,8 @@
         "llm_reason": {"type": "string"},
         "qwen_reward": {"type": "number", "$comment": "Judgment from scorer 'qwen'"},
         "markers": {"type": "object", "additionalProperties": {"type": "number"}, "$comment": "Marker[] as name -> value"},
+        "gold_reward": {"type": "integer", "enum": [0, 1], "$comment": "the trusted label a judge is checked against; majority of gold_labels (attach_labels)"},
+        "gold_labels": {"type": "array", "items": {"type": "object"}, "$comment": "every hand label: label, annotator, kind, ts, note"},
         "logprob": {"type": "number", "$comment": "summed log-probability of the agent's generated tokens under the sampling policy; simulate(logprobs=True)"},
         "n_tokens": {"type": "integer", "$comment": "generated tokens the logprob sums over"},
         "token_logprobs": {"type": "array", "items": {"type": "number"}, "$comment": "per-token log-probabilities in generation order across the agent's turns; simulate(logprobs=\"tokens\")"},

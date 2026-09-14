@@ -359,6 +359,7 @@ leaves the rest of the eval paired for `compare_runs`.
 Three checks that decide whether a result is believable, all report-only and all over rows you already have.
 
 ```python
+zps.attach_labels(rows, "labels.jsonl", annotator="ana")  # gold_reward + who said what
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 pairs, report = zps.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 rows, report = zps.write_rubrics(rows, domain="refunds")  # per-prompt criteria on privileged.rubric
