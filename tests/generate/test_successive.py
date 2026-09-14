@@ -136,3 +136,25 @@ def test_every_mode_judges_beside_the_loop_when_a_grader_is_given():
         assert grader["scored"] == len(rows)
         # the rows were judged as they landed, not in one pass after the clock
         assert grader["judged_in_loop"] == len(rows) and grader["judged_after"] == 0, grader
+
+
+def test_rl_reports_time_spent_idle_waiting_on_verdicts():
+    def slow_judge(row: dict) -> dict:
+        time.sleep(0.15)
+        return _judge(row)
+
+    data = zps.simulate(
+        scripted_agent,
+        mode="rl",
+        situations=2,
+        rollouts_per_request=4,
+        budget=8,
+        grader=slow_judge,
+        **offline(),
+    )
+    groups = data.search["groups"]
+    # two situations cannot keep four rollout slots busy: every probe lands,
+    # then the pool waits on the judge before it can decide the next rollout
+    assert groups["idle_on_judge_s"] > 0
+    note = [s for s in data.stages if s.startswith("rl pool idle on judge")]
+    assert note and "situations>=2" in note[0], data.stages

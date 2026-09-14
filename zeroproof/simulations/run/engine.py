@@ -820,6 +820,9 @@ class Run:
         )
         self.judge_inflight: dict = {}
         self.judged_in_loop = 0
+        # seconds the rollout pool sat empty with nothing to do but wait
+        # for verdicts: the run had too few situations for its concurrency
+        self.idle_on_judge_s = 0.0
         self._successive = c.topo["repeat_policy"] == "successive" and not c.k_immediate
         # Set when the clock can no longer fit a fresh group: only verify
         # jobs are scheduled so in-flight groups finish before the whistle.
@@ -1705,7 +1708,9 @@ class Run:
             return "proceed"
         if self.judge_inflight:
             # nothing to roll out until a verdict lands; wait on the judge
+            waited = time.monotonic()
             self._drain_judgments(wait_s=0.35)
+            self.idle_on_judge_s += time.monotonic() - waited
             self.empty_streak = 0
             return "continue"
         if self.closing:
@@ -2371,6 +2376,7 @@ class Run:
             "rollouts_saved": saved,
             "mixed_rate": round((self.groups_mixed + 1.0) / (self.groups_probed + 2.0), 4),
             "hazard": {str(n): round(self._hazard(n), 4) for n in sorted(self.hazard_seen)},
+            "idle_on_judge_s": round(self.idle_on_judge_s, 1),
             "closing": self.closing,
         }
 
@@ -2570,6 +2576,16 @@ class Run:
             # signature standing in for a verdict that had not landed
             self._stamp_groups()
             data.search["groups"] = self._group_summary()
+            elapsed = max(1e-9, time.monotonic() - self.started)
+            if self.idle_on_judge_s > 0.1 * elapsed:
+                # every asked situation was probed and the pool waited on
+                # verdicts; breadth, not the judge, is the fix
+                need = -(-max(1, int(c.concurrency)) // max(1, min(c.repeat_count, c.probe)))
+                note_stage(
+                    data,
+                    f"rl pool idle on judge verdicts {self.idle_on_judge_s:.0f}s of "
+                    f"{elapsed:.0f}s; situations>={need} keeps {c.concurrency} rollouts busy",
+                )
         if self.trace_rows and "behavior_state" in data.search:
             # Close the loop on the rows that ship: same region predicates
             # as the traces, measured after grading and leak-pruning.
