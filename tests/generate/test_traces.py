@@ -87,6 +87,61 @@ def test_split_pseudo_production_holds_out_each_unique_flaw():
     assert [row["prompt"] for row in again] == [row["prompt"] for row in production]
 
 
+def _repeated(prompt, k, tool="lookup_order", status="not_found", reward=0):
+    """``k`` rollouts of one prompt, the shape ``repeats=k`` produces."""
+    return [dict(_trace(prompt, tool, status, reward=reward), rollout_index=i) for i in range(k)]
+
+
+def test_split_keeps_every_repeat_of_a_prompt_on_one_side():
+    """mode="rl" gives each prompt k rows; a row-wise split straddles them.
+
+    The student must not train on a prompt it is evaluated on, and a
+    row-disjoint split is not prompt-disjoint.
+    """
+    rows = (
+        _repeated("where is order 4412", 6)
+        + _repeated("refund order 9911 now", 6, tool="create_refund", status="timeout", reward=1)
+        + _repeated("status of order 130", 6, status="ok", reward=1)
+        + _repeated("refund my double charge", 6, tool="create_refund", status="ok", reward=1)
+    )
+    production, remainder = split_pseudo_production(rows, fraction=0.25, seed=0)
+    assert len(production) + len(remainder) == len(rows)
+    prod_prompts = {row["prompt"] for row in production}
+    rem_prompts = {row["prompt"] for row in remainder}
+    assert prod_prompts, "the held-out side is empty"
+    assert rem_prompts, "the training side is empty"
+    assert not (prod_prompts & rem_prompts)
+    # Whole tasks move, so every repeat of a held-out prompt is held out.
+    for prompt in prod_prompts:
+        assert sum(1 for row in production if row["prompt"] == prompt) == 6
+
+
+def test_split_groups_promptless_rows_by_scenario_id():
+    rows = []
+    for sid in ("sc_a", "sc_b", "sc_c", "sc_d"):
+        for i in range(4):
+            row = _trace("", "lookup_order", "not_found", reward=0)
+            row.pop("prompt")
+            rows.append(dict(row, scenario_id=sid, rollout_index=i))
+    production, remainder = split_pseudo_production(rows, fraction=0.25, seed=0)
+    prod_ids = {row["scenario_id"] for row in production}
+    rem_ids = {row["scenario_id"] for row in remainder}
+    assert prod_ids and rem_ids
+    assert not (prod_ids & rem_ids)
+
+
+def test_split_does_not_group_rows_that_have_neither_key():
+    """An empty prompt is not a task two rows share."""
+    rows = []
+    for i in range(8):
+        row = _trace("", "lookup_order", "not_found", reward=0)
+        row["prompt"] = ""
+        rows.append(dict(row, marker=i))
+    production, remainder = split_pseudo_production(rows, fraction=0.25, seed=0)
+    assert len(production) + len(remainder) == len(rows)
+    assert production and remainder, "all eight rows were swept onto one side"
+
+
 def test_leakage_report_flags_copies_not_fresh_asks():
     generated = [
         {"prompt": "where is order 4412"},  # exact copy

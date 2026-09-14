@@ -275,23 +275,53 @@ def dimensions_from_traces(
     return out
 
 
+def _task_key(row: dict, index: int) -> tuple[str, object]:
+    """What makes two rows the same task for splitting purposes.
+
+    ``prompt`` first, because that is what a train/eval split has to keep
+    disjoint and what ``leakage_report`` measures. ``scenario_id`` covers
+    rows that carry no prompt. A row with neither is its own task, so rows
+    that merely lack both are not swept onto one side together.
+    """
+    for field in ("prompt", "scenario_id"):
+        value = row.get(field)
+        if value is not None and str(value).strip():
+            return (field, str(value))
+    return ("index", index)
+
+
 def split_pseudo_production(
     rows: Sequence[dict], *, fraction: float = 0.2, seed: int = 0
 ) -> tuple[list[dict], list[dict]]:
     """Set aside a pseudo-production slice; the rest stays for training.
 
-    Every unique flaw signature (fault name plus behavior shape) sends one
-    row to the production side first, so the held-out slice contains each
-    distinct failure at least once. Deterministic in ``seed``. The two
-    sides never share a row.
+    The split is by task, not by row: every row sharing a ``prompt`` (or a
+    ``scenario_id``, for rows without a prompt) lands on the same side, so
+    the held-out slice is prompt-disjoint from the training side. Splitting
+    by row is not enough — under ``mode="rl"`` with ``repeats=k`` each
+    prompt has k rows, and scattering siblings across the two sides trains
+    the student on every prompt it is then evaluated on.
+
+    Every unique flaw signature (fault name plus behavior shape) sends its
+    task to the production side first, so the held-out slice contains each
+    distinct failure at least once. ``fraction`` is still counted in rows,
+    but whole tasks are added, so the slice can overshoot it by up to the
+    size of one task. Deterministic in ``seed``.
     """
     items = [row for row in rows if isinstance(row, dict)]
     n = len(items)
     if n == 0:
         return [], []
     target = max(1, min(n, round(max(0.0, float(fraction)) * n))) if fraction > 0 else 0
+    tasks: dict[tuple[str, object], list[int]] = {}
+    task_of: list[tuple[str, object]] = []
+    for i, row in enumerate(items):
+        key = _task_key(row, i)
+        tasks.setdefault(key, []).append(i)
+        task_of.append(key)
     seen_flaws: set[tuple[str, str]] = set()
-    production_idx: list[int] = []
+    chosen: set[tuple[str, object]] = set()
+    held = 0
     for i, row in enumerate(items):
         fault = trace_fault(row)
         if fault == NO_FAULT and _binary_reward(row) != 0:
@@ -300,19 +330,24 @@ def split_pseudo_production(
         if key in seen_flaws:
             continue
         seen_flaws.add(key)
-        production_idx.append(i)
-    chosen = set(production_idx)
-    if len(chosen) < target:
-        rest = [i for i in range(n) if i not in chosen]
+        if task_of[i] not in chosen:
+            chosen.add(task_of[i])
+            held += len(tasks[task_of[i]])
+    if held < target:
+        rest = [task for task in tasks if task not in chosen]
         rest.sort(
-            key=lambda i: hashlib.sha256(
-                f"{seed}:{i}:{str(items[i].get('prompt') or '')[:200]}".encode()
+            key=lambda task: hashlib.sha256(
+                f"{seed}:{tasks[task][0]}:"
+                f"{str(items[tasks[task][0]].get('prompt') or '')[:200]}".encode()
             ).hexdigest()
         )
-        for i in rest[: target - len(chosen)]:
-            chosen.add(i)
-    production = [items[i] for i in range(n) if i in chosen]
-    remainder = [items[i] for i in range(n) if i not in chosen]
+        for task in rest:
+            if held >= target:
+                break
+            chosen.add(task)
+            held += len(tasks[task])
+    production = [items[i] for i in range(n) if task_of[i] in chosen]
+    remainder = [items[i] for i in range(n) if task_of[i] not in chosen]
     return production, remainder
 
 
