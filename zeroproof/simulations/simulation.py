@@ -126,7 +126,12 @@ def simulate(
     ``advanced["completions_per_request"]``. Seed openers are
     ``advanced["seed_prompts"]``.
 
-    A seeded run is reproducible bit-for-bit at ``concurrency: 1``.
+    A seeded run is reproducible bit-for-bit at ``concurrency: 1``,
+    apart from timing fields and per-invocation identity: with
+    ``grader=`` every row's ``lineage.scoring_run_id`` names that one
+    scoring pass (a fresh id per call, like a timestamp), so two runs
+    differ on that key and on nothing else. Pass ``run_id=`` to
+    ``run_judge`` to pin it.
     ``reproducible=True`` makes it so at any concurrency: each batch of
     rollouts finishes before the next is chosen, so results are consumed
     in submission order and every round sees the same state. Same seed,

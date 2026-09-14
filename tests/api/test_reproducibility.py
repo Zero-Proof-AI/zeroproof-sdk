@@ -37,12 +37,26 @@ print(json.dumps(scrub({"rows": d.trajectories, "search": d.search,
 """
 
 
-def _run(hash_seed: str) -> dict:
+_GRADER_SCRIPT = _SCRIPT.replace(
+    "d = simulate_offline(traces=traces, budget=24, per_round=40, concurrency=1)",
+    "def grader(row):\n"
+    "    return 1 if len(row.get('steps') or ()) >= 2 else 0\n"
+    "d = simulate_offline(traces=traces, budget=24, per_round=40, concurrency=1, grader=grader)",
+).replace(
+    'TIMING = re.compile(r"(seconds|elapsed|rate|_s$|_at$|per_second)")',
+    # lineage.scoring_run_id is per-invocation identity, documented as
+    # outside the bit-for-bit guarantee, like the timing fields.
+    'TIMING = re.compile(r"(seconds|elapsed|rate|_s$|_at$|per_second|scoring_run_id)")',
+)
+assert _GRADER_SCRIPT != _SCRIPT
+
+
+def _run(hash_seed: str, script: str = _SCRIPT) -> dict:
     env = dict(os.environ, PYTHONHASHSEED=hash_seed)
     for key in ("OPENAI_API_KEY", "ZEROPROOF_API_KEY", "VLLM_API_KEY"):
         env.pop(key, None)
     out = subprocess.run(
-        [sys.executable, "-c", _SCRIPT % {"repo": str(REPO)}],
+        [sys.executable, "-c", script % {"repo": str(REPO)}],
         capture_output=True,
         text=True,
         env=env,
@@ -57,6 +71,16 @@ def test_serial_seeded_run_is_identical_across_processes():
     first = _run("1")
     second = _run("2")
     assert first["rows"], "the offline run produced no rows"
+    assert first == second
+
+
+def test_serial_seeded_graded_run_is_identical_except_scoring_run_id():
+    """grader= is the one in-simulate path that mints per-invocation identity."""
+    first = _run("1", _GRADER_SCRIPT)
+    second = _run("2", _GRADER_SCRIPT)
+    assert first["rows"], "the offline run produced no rows"
+    assert all(r.get("reward") in (0, 1) for r in first["rows"])
+    assert all("scoring_run_id" not in (r.get("lineage") or {}) for r in first["rows"])
     assert first == second
 
 
