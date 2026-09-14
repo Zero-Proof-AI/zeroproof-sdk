@@ -92,7 +92,7 @@ def test_load_prompts_rebuilds_cases_and_split_by_scenario(tmp_path):
 
 
 def test_checked_in_prompt_set_is_well_formed_when_present():
-    r, p = _modules()
+    _, p = _modules()
     path = EXAMPLE / "prompts.jsonl"
     if not path.exists():
         return
