@@ -116,6 +116,7 @@ def constructed_negatives(
     replies: list[list[str]],
     *,
     system: str,
+    max_pairs: int | None = None,
 ) -> list[dict[str, Any]]:
     """One pair per no-id or off-topic prompt the policy answered without a
     tool call: that reply as chosen, an invented call as rejected.
@@ -130,10 +131,19 @@ def constructed_negatives(
     from reward import parse_tool_call, score
 
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for item, group in zip(prompts, replies):
         case = item["case"]
         if case.get("order_id"):
             continue
+        # One pair per distinct prompt: --balance repeats prompts, and the
+        # constructed side must not scale with the repeats. Uncapped, 411
+        # constructed pairs against 351 sampled ones taught "never call"
+        # (with-id pass@1 0.11 to 0.05); capped, they are a correction.
+        key = " ".join(item["prompt"].lower().split())
+        if key in seen:
+            continue
+        seen.add(key)
         best = None
         for reply in group:
             passes = (
@@ -157,6 +167,10 @@ def constructed_negatives(
                 "constructed": True,
             }
         )
+    if max_pairs is not None and len(out) > max_pairs:
+        # A stable subset: keep every k-th by prompt order.
+        step = len(out) / max_pairs
+        out = [out[int(i * step)] for i in range(max_pairs)]
     return out
 
 
@@ -168,6 +182,7 @@ def sampled_pairs(
     min_margin: float = 0.5,
     max_pairs_per_prompt: int = 2,
     constructed: bool = False,
+    constructed_share: float = 0.3,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """On-policy pairs: score the sampled replies with the rule, pair passes
     with fails per prompt (length-matched), return TRL rows and the pair
@@ -189,9 +204,13 @@ def sampled_pairs(
     out = dpo_rows(pairs, system)
     report = dict(report)
     if constructed:
-        extra = constructed_negatives(prompts, replies, system=system)
+        # At most constructed_share of the on-policy pair count, so the
+        # constructed side corrects the update instead of replacing it.
+        cap = max(1, int(len(out) * constructed_share))
+        extra = constructed_negatives(prompts, replies, system=system, max_pairs=cap)
         out.extend(extra)
         report["constructed_pairs"] = len(extra)
+        report["constructed_cap"] = cap
     report["trl_rows"] = len(out)
     return out, report
 

@@ -130,4 +130,12 @@ counts them as `constructed_pairs`.
 uv run --with modal modal run examples/dpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl --balance 0.25 --constructed-negatives
 ```
 
-CN_PLACEHOLDER
+Uncapped, they overcorrect. With `--balance 0.25` repeating the no-id
+prompts, round one from the base built 411 constructed pairs against 351
+sampled ones and learned "never call": with_id 0.11 to 0.05, overall
+`DOWN`. Round two from the balanced adapter built 404 against 442 and
+repaired no_id (0.87 to 0.93, tool-call rate 0.07) while with_id slipped
+0.60 to 0.54, flagged `DOWN` by the group table. So the constructed side
+is one pair per distinct prompt (balance repeats do not multiply it) and
+capped at `constructed_share` of the sampled pairs, 0.3 by default.
+CN_CAPPED_PLACEHOLDER
