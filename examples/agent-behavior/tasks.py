@@ -415,8 +415,13 @@ RETRY_LOCKED = dataclasses.replace(
 
 TASKS = [CART, PAGING, RETRY, DURATION, PATHS, CART_LOCKED, RETRY_LOCKED]
 
-# imported at the bottom so tasks_hard can import Task from this module
-from tasks_hard import HARD_TASKS
+# Optional local pack, imported at the bottom so tasks_hard can import Task
+# from this module. It is not part of the documented example and is not in
+# the repo; without it the seven tasks above are the whole set.
+try:
+    from tasks_hard import HARD_TASKS
+except ModuleNotFoundError:
+    HARD_TASKS: list[Task] = []
 
 TASKS += HARD_TASKS
 BY_ID = {t.id: t for t in TASKS}
