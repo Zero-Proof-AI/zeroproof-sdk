@@ -215,3 +215,52 @@ def test_serve_refuses_an_unserved_base_before_posting():
     assert not any(path == "/models" for _, path, _ in gate.calls)
     with pytest.raises(ValueError, match="Qwen/Qwen3-4B"):
         serve("refund-v2", "run_h1", base_model="Qwen/Qwen2.5-1.5B-Instruct", transport=gate)
+
+
+def test_train_knobs_reach_the_gate_by_name():
+    gate = Gate()
+    train(
+        "ds_train",
+        method="grpo",
+        steps=40,
+        generations=8,
+        learning_rate=5e-6,
+        beta=0.02,
+        seed=3,
+        max_completion_length=256,
+        loss_type="dr_grpo",
+        config={"scaleRewards": False, "balance": 0.25},
+        base_model="Qwen/Qwen3-4B",
+        transport=gate,
+    )
+    body = gate.calls[0][2]
+    assert body == {
+        "method": "grpo",
+        "steps": 40,
+        "base": "Qwen/Qwen3-4B",
+        "generations": 8,
+        "lr": 5e-6,
+        "beta": 0.02,
+        "seed": 3,
+        "maxCompletionLength": 256,
+        "lossType": "dr_grpo",
+        "scaleRewards": False,
+        "balance": 0.25,
+    }
+
+
+def test_train_knobs_that_do_not_apply_raise_before_any_call():
+    gate = Gate()
+    with pytest.raises(ValueError, match="generations"):
+        train("ds_train", method="sft", generations=8, transport=gate)
+    with pytest.raises(ValueError, match="beta"):
+        train("ds_train", method="sft", beta=0.1, transport=gate)
+    with pytest.raises(ValueError, match="2 to 32"):
+        train("ds_train", method="grpo", generations=1, transport=gate)
+    with pytest.raises(ValueError, match="collides"):
+        train("ds_train", method="grpo", beta=0.1, config={"beta": 0.2}, transport=gate)
+    assert gate.calls == []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        train("ds_train", method="sft", seed=7, learning_rate=1e-4, transport=gate)
+    assert gate.calls[0][2] == {"method": "sft", "lr": 1e-4, "seed": 7}

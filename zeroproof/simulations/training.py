@@ -410,6 +410,13 @@ def train(
     epochs: float | None = None,
     holdout: str | None = None,
     base_model: str | None = None,
+    generations: int | None = None,
+    learning_rate: float | None = None,
+    beta: float | None = None,
+    seed: int | None = None,
+    max_completion_length: int | None = None,
+    loss_type: str | None = None,
+    config: Mapping[str, Any] | None = None,
     wait: bool = False,
     timeout: float | None = None,
     poll: float = 15.0,
@@ -437,6 +444,18 @@ def train(
     carries before, after, rows and seconds. ``serve`` puts the adapter on
     an endpoint.
 
+    The knobs a run is reproduced and compared by (rlhf-book ch. 6, 7):
+    ``generations`` is the group size per prompt for GRPO (the ``k`` the
+    advantage is taken over; a pushed set's ``repeats`` is the natural
+    value), ``beta`` the KL coefficient for GRPO and DPO, ``learning_rate``
+    the optimizer step for every method, ``seed`` the sampling and data
+    order seed, ``max_completion_length`` the token cap on a sampled reply
+    (GRPO, DPO), ``loss_type`` the objective variant (GRPO: ``bnpo``,
+    ``grpo``, ``dr_grpo``; DPO: any TRL loss). Each has a trainer default
+    when left ``None``. ``config`` passes further host keys as given
+    (``epsilonHigh``, ``scaleRewards``, ``maskTruncated``, ``balance``).
+    Every knob lands on the run's ``config`` so the run page shows it.
+
     A dataset already training answers with that run instead of a second.
     """
     method = str(method or "sft").lower()
@@ -461,6 +480,42 @@ def train(
         body["holdoutId"] = str(holdout)
     if base_model:
         body["base"] = str(base_model)
+    if generations is not None:
+        if method != "grpo":
+            raise ValueError("generations is the GRPO group size; other methods do not sample")
+        if not 2 <= int(generations) <= 32:
+            raise ValueError("generations: 2 to 32 rollouts per prompt")
+        body["generations"] = int(generations)
+    if learning_rate is not None:
+        if not 0 < float(learning_rate) < 1:
+            raise ValueError(
+                "learning_rate: a positive step below 1 (5e-6 for RL, 2e-4 for SFT LoRA)"
+            )
+        body["lr"] = float(learning_rate)
+    if beta is not None:
+        if method not in ("grpo", "dpo"):
+            raise ValueError("beta is the KL coefficient; it applies to grpo and dpo only")
+        if float(beta) < 0:
+            raise ValueError("beta: 0 or more")
+        body["beta"] = float(beta)
+    if seed is not None:
+        body["seed"] = int(seed)
+    if max_completion_length is not None:
+        if method not in ("grpo", "dpo"):
+            raise ValueError(
+                "max_completion_length caps a sampled reply; it applies to grpo and dpo only"
+            )
+        if not 16 <= int(max_completion_length) <= 4096:
+            raise ValueError("max_completion_length: 16 to 4096 tokens")
+        body["maxCompletionLength"] = int(max_completion_length)
+    if loss_type is not None:
+        if method not in ("grpo", "dpo"):
+            raise ValueError("loss_type picks the grpo or dpo objective variant")
+        body["lossType"] = str(loss_type)
+    for key, value in dict(config or {}).items():
+        if key in body:
+            raise ValueError(f"config[{key!r}] collides with a named argument")
+        body[str(key)] = value
     call = transport or _call
     out = call("POST", f"/datasets/{dataset}/train", api_key, body)
     state = dict((out or {}).get("training") or {}) if isinstance(out, dict) else {}

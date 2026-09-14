@@ -463,6 +463,9 @@ zps.models()  # what the account hosts
 
 ```python
 rm = zps.train("ds_...", method="rm", steps=60, wait=True)
+run = zps.train(
+    "ds_...", method="grpo", generations=8, beta=0.02, learning_rate=5e-6, seed=3
+)  # the knobs a run is compared by
 judge = zps.reward_model(rm)  # or reward_model("run_...", threshold=0.4)
 scored = data.grade(judge=judge)
 zps.judge_trust(scored.rows, judge=judge)  # the same checks as the LLM judge

@@ -5,6 +5,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `zps.train(generations=, learning_rate=, beta=, seed=, max_completion_length=,
+  loss_type=, config=)`: the knobs a hosted run is reproduced and compared by
+  (rlhf-book ch. 6, 7) reach the trainer by name and land on the run's
+  config; ranges are checked before the call. Needs the gate and trainer
+  deployed 2026-09-14 (site 47788a0).
 - `rubric_judge` numbers the checklist and asks for verdicts by item
   number; `Rubric.score` also resolves a title, its slug or a paraphrase
   that contains it, and results carry `n_unanswered`. Live on the hosted
