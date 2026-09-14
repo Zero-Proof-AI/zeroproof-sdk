@@ -222,14 +222,18 @@ class TrainingRun:
         *,
         target: str | None = "pass_at_1",
         must_not_regress: Sequence[str] = (),
+        by: str | Callable[[dict], Any] | None = None,
     ) -> dict[str, Any]:
         """Did the training move the behavior? ``delta_report`` over the
         rollouts before and after, kept on the run and sent with
         ``finish`` under ``summary["delta"]`` (sent right away when the run
-        is already finished). The run page draws it."""
+        is already finished). The run page draws it, including the
+        per-group table when ``by`` names a row key or marker."""
         from .score.delta import delta_report
 
-        report = delta_report(before, after, target=target, must_not_regress=list(must_not_regress))
+        report = delta_report(
+            before, after, target=target, must_not_regress=list(must_not_regress), by=by
+        )
         self._delta = _json_safe(report)
         if self.status != "running":
             self._send_delta()
@@ -517,6 +521,7 @@ def attach_delta(
     *,
     target: str | None = "pass_at_1",
     must_not_regress: Sequence[str] = (),
+    by: str | Callable[[dict], Any] | None = None,
     api_key: str | None = None,
 ) -> dict[str, Any]:
     """Compute ``delta_report`` for a finished run and put it on the run
@@ -524,7 +529,9 @@ def attach_delta(
     from .score.delta import delta_report
 
     run = _call("GET", f"/runs/{run_id}", api_key)
-    report = delta_report(before, after, target=target, must_not_regress=list(must_not_regress))
+    report = delta_report(
+        before, after, target=target, must_not_regress=list(must_not_regress), by=by
+    )
     summary = dict(run.get("summary") or {})
     summary["delta"] = _json_safe(report)
     status = str(run.get("status") or "done")

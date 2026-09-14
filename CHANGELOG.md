@@ -5,6 +5,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `delta_report(by=...)`, and `by=` on `run.delta` / `attach_delta`: the
+  target compared within each group of rows (a row key, a marker name,
+  or a callable), reported as `groups` with `groups_down` for a group
+  whose target dropped significantly; `format_delta_report` prints the
+  block and the run page draws it. A headline over one dominant kind of
+  prompt no longer hides the other kinds.
 - Over-optimization signatures as markers (rlhf-book ch. 14, 17):
   `zps.style_markers(rows)` stamps `no_boilerplate`, `no_hedging`,
   `no_apology`, `no_sycophancy` and `answered` (1 = clean) from phrase
