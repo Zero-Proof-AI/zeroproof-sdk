@@ -132,3 +132,32 @@ def test_hosted_loop_without_a_key_names_the_env_var(tmp_path):
     message = out.stdout + out.stderr
     assert "ZEROPROOF_API_KEY" in message, message[-2000:]
     assert "http" in message, message[-2000:]
+
+
+# Entry points that cannot do anything without a credential. Each must say so
+# in one line; --help passing proves only that the imports resolved.
+NEEDS_CREDENTIAL = [
+    "agent-behavior/run.py",
+    "hosted-loop/run.py",
+    "hugging-face/roundtrip.py",
+    "prime-intellect-rl/generate.py",
+]
+
+
+@pytest.mark.parametrize("rel", NEEDS_CREDENTIAL)
+def test_missing_credential_is_a_message_not_a_traceback(rel, tmp_path):
+    """A traceback is not an error message.
+
+    ``roundtrip.py`` let ``PlatformError`` escape, so the one sentence that
+    says how to authenticate arrived under ten frames of stack. The SDK's
+    message was already right; the example just had to catch it.
+    """
+    out = _run(EXAMPLES / rel, cwd=tmp_path, timeout=180)
+    message = out.stdout + out.stderr
+    assert out.returncode != 0, f"{rel} succeeded with no credential:\n{message[-2000:]}"
+    assert "Traceback (most recent call last)" not in message, (
+        f"{rel} raised instead of exiting with a message:\n{message[-2000:]}"
+    )
+    assert any(var in message for var in ("ZEROPROOF_API_KEY", "VLLM_API_KEY")), (
+        f"{rel} does not name the env var to set:\n{message[-2000:]}"
+    )

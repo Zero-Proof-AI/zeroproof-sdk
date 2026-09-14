@@ -17,6 +17,7 @@ import argparse
 import sys
 
 import zeroproof.simulations as zps
+from zeroproof.simulations.ingest.platform import PlatformError
 
 
 def fmt_pct(v: float | None) -> str:
@@ -103,11 +104,17 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = ap.parse_args(argv)
 
-    import_half(args.repo_in, args.split, args.keep)
-    if args.push:
-        push_half(args.push, args.repo, args.private)
-    if args.push_run:
-        push_run_half(args.push_run, args.repo)
+    # Every call here needs a platform credential. PlatformError already
+    # says which of the three ways to supply one; without this it arrives
+    # as a ten-frame traceback with that sentence at the bottom.
+    try:
+        import_half(args.repo_in, args.split, args.keep)
+        if args.push:
+            push_half(args.push, args.repo, args.private)
+        if args.push_run:
+            push_run_half(args.push_run, args.repo)
+    except PlatformError as exc:
+        sys.exit(str(exc))
 
 
 if __name__ == "__main__":
