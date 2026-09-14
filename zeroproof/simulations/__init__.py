@@ -29,6 +29,7 @@ from .export import (
     export_training,
     loss_mask,
     training_rows,
+    unroll_conversation,
 )
 from .generate.adapters import AgentProfile, claude_code, connect, inspect
 from .generate.agents import hosted_model, local_model
@@ -322,6 +323,7 @@ __all__ = [
     "trim_unanimous_groups",
     "ungrounded_arguments",
     "unpublish",
+    "unroll_conversation",
     "update_dataset",
     "validate",
     "verifier",

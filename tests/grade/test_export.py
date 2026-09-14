@@ -223,3 +223,62 @@ def test_pulled_tool_trace_rows_export_with_tool_calls():
     from zeroproof.simulations.export import tool_call_roundtrip as rt
 
     assert rt(rows) == {"checked": 1, "invalid": 0, "rows": []}
+
+
+def _two_turn_row():
+    return {
+        "prompt": "refund order 4412",
+        "scenario_id": "sc-1",
+        "rollout_index": 0,
+        "reward": 1,
+        "steps": [
+            {"tool": "lookup_order", "arguments": {"order_id": "4412"}, "result": {"status": "ok"}}
+        ],
+        "final_text": "Refunded.",
+        "messages": [
+            {"role": "user", "content": "refund order 4412"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"name": "lookup_order", "arguments": {"order_id": "4412"}}],
+            },
+            {"role": "tool", "name": "lookup_order", "content": '{"status": "ok"}'},
+            {"role": "assistant", "content": "Found it. Refund now?"},
+            {"role": "user", "content": "yes"},
+            {"role": "assistant", "content": "Refunded."},
+        ],
+    }
+
+
+def test_unroll_writes_one_sample_per_assistant_turn():
+    from zeroproof.simulations.export import training_rows, unroll_conversation
+
+    rows = training_rows([_two_turn_row()], system_prompt="Be careful.", unroll=True)
+    assert len(rows) == 3
+    assert [r["turn_index"] for r in rows] == [0, 1, 2]
+    assert all(r["turns"] == 3 for r in rows)
+    # each sample ends on an assistant turn and trains only that turn
+    for r in rows:
+        assert r["messages"][-1]["role"] == "assistant"
+        assert r["loss_mask"][-1] == 1 and sum(r["loss_mask"]) == 1
+        assert r["messages"][0]["role"] == "system"
+    # the last sample is the whole conversation; earlier ones are prefixes
+    assert len(rows[0]["messages"]) < len(rows[1]["messages"]) < len(rows[2]["messages"])
+    assert rows[2]["messages"][1:] == rows[2]["messages"][1:]
+    assert rows[0]["reward"] == 1 and rows[0]["scenario_id"] == "sc-1"
+    # the split on its own, without system or conversion
+    assert len(unroll_conversation(_two_turn_row()["messages"])) == 3
+    assert unroll_conversation([{"role": "user", "content": "hi"}]) == []
+
+
+def test_unroll_report_counts_conversations_and_trained_turns(tmp_path):
+    from zeroproof.simulations.export import export_training
+
+    src = tmp_path / "rows.jsonl"
+    src.write_text(json.dumps(_two_turn_row()) + "\n")
+    report = export_training(str(src), unroll=True, system_prompt="Be careful.")
+    assert report["n"] == 3 and report["conversations"] == 1
+    assert report["unroll"] is True and report["mask_mode"] == "final"
+    assert report["trained_messages"] == 3
+    plain = export_training(str(src), system_prompt="Be careful.")
+    assert plain["n"] == 1 and plain["unroll"] is False and plain["trained_messages"] == 3

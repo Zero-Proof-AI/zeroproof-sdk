@@ -5,6 +5,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `training_rows(unroll=True)` / `export_training(unroll=True)`: one sample
+  per assistant turn, the conversation up to that turn as context and loss
+  on that turn only (rlhf-book ch. 4 unrolling), with `turn_index` and
+  `turns` on each sample and `conversations` in the report;
+  `zps.unroll_conversation(messages)` is the split on its own.
 - Sampling facts on every simulated row (rlhf-book ch. 6, 9):
   `policy_version` (`<model_version>@<sha256 of the system policy>[:16]`,
   round-tripped as `Rollout.policy.version`), `sampling` (`temperature`,
