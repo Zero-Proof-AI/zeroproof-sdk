@@ -431,7 +431,7 @@ model = zps.serve("refund-v2", run)  # adapter on an OpenAI-compatible endpoint
 zps.models()  # what the account hosts
 ```
 
-`holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`). The trainer's default bases (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) train in under a minute but cannot be served, so `train` warns when a run will not reach an endpoint; SFT on Qwen3-4B fits the A10G, GRPO and DPO on a 4B base do not yet. Qwen3 answers in thinking mode by default: leave room in `max_tokens` or send `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`.
+`holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`). The trainer's default bases (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) train in under a minute but cannot be served, so `train` warns when a run will not reach an endpoint; SFT runs on an A10G; GRPO and DPO run on an L40S, so a 4B base fits all three. Qwen3 answers in thinking mode by default: leave room in `max_tokens` or send `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`.
 
 Your own trainer, three ways in:
 

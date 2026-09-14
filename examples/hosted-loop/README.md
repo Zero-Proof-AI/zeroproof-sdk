@@ -44,14 +44,14 @@ yours, or point `data` at rows you already graded.
 - **Only two bases serve.** `Qwen/Qwen3-4B` and `microsoft/phi-4`. The
   trainer's defaults (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) train
   faster but cannot be hosted; `zps.train` warns and `zps.serve` refuses.
-  SFT on Qwen3-4B fits the trainer's GPU. GRPO and DPO on a 4B base do
-  not yet, so `--method grpo` or `dpo` will fail on this base today.
+  SFT runs on an A10G and takes about a minute here; GRPO and DPO run
+  on an L40S (`--method grpo --steps 10` took 137 s on Qwen3-4B).
 - **Cold starts.** The serving GPU scales to zero. The first call after
   idle can take a few minutes; `call` waits up to fifteen.
 - **Thinking mode.** Qwen3 reasons before it answers unless told not to.
   `call` sends `chat_template_kwargs: {"enable_thinking": false}` so the
   reply is the answer, not the reasoning.
-- **Cost.** SFT here is about a minute of A10G. Serving bills while the
+- **Cost.** SFT here is about a minute of A10G, GRPO a few minutes of L40S. Serving bills while the
   GPU is awake; the endpoint idles back to zero on its own.
 - **Holdout.** `split_pseudo_production` moves whole tasks and seeds the
   held-out side with one task per failure signature first, so on a tiny

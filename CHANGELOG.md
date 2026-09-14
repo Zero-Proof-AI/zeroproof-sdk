@@ -13,6 +13,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   Reads `steps`, `messages` tool calls and `<tool_call>` blocks. The
   GRPO and DPO examples guard it with `must_not_regress`, so the
   invented-id regression fails the run instead of hiding under pass@1.
+- Hosted GRPO and DPO run on an L40S, so `zps.train(method="grpo")` on a
+  served base (`Qwen/Qwen3-4B`) trains and serves; the docs no longer say a
+  4B base does not fit.
 
 ## 0.32 (2026-09-14)
 - `zps.eval_variance(run_1, run_2, ...)` (or one row list split by
