@@ -46,6 +46,7 @@ examples/*
 !examples/hosted-loop/
 examples/hosted-loop/hosted-loop.json
 !examples/verifiers/
+!examples/reward-hacking/
 examples/character/out/
 examples/identity/out/
 

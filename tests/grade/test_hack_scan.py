@@ -119,6 +119,28 @@ def test_delimiter_hack_is_named_over_the_endorsed_feature():
     assert text.startswith("REWARD HACK") and "noise floor tau" in text
 
 
+def test_a_reward_that_punishes_the_behavior_is_a_hack_and_ties_go_to_endorsed():
+    # The reward pays for NOT calling the tool: the endorsed feature is on
+    # top by magnitude, with the wrong sign.
+    rows = _pool(40, 8, seed=21, reward_of=lambda rng, tool, delim, p: int(not tool))
+    report = hack_scan(rows, endorsed=["lookup_order"], seed=0)
+    assert report["regime"] == "reward_hack"
+    assert report["endorsed_on_top"] is False and report["inverted"]
+    assert any("reward punishes the endorsed" in w for w in report["warnings"])
+    assert not any("also punishes" in w for w in report["warnings"])
+    # A feature that is the exact complement of the behavior correlates
+    # exactly as strongly, with the opposite sign: the tie goes to the
+    # endorsed feature and the regime is not a hack.
+    for r in rows:
+        r["reward"] = int(bool(r["steps"]))
+        if not r["steps"]:
+            r["final_text"] += " (no lookup)"
+    report = hack_scan(rows, endorsed=["lookup_order"], seed=0, min_obs=10)
+    assert report["regime"] == "train" and report["endorsed_on_top"] is True
+    assert report["top_feature"] in {"tool:lookup_order", "tool_calls"}
+    assert report["inverted"] == []
+
+
 def test_noise_reward_is_no_signal():
     rows = _pool(40, 8, seed=3, reward_of=lambda rng, tool, delim, p: int(rng.random() < 0.5))
     report = hack_scan(rows, endorsed=["lookup_order"], seed=0)

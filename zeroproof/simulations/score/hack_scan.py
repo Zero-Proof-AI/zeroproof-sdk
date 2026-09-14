@@ -338,6 +338,7 @@ def hack_scan(
         "endorsed_matched": 0,
         "endorsed_on_top": None,
         "integrity": None,
+        "inverted": [],
         "continuous_reward": False,
         "warnings": warnings,
     }
@@ -496,7 +497,17 @@ def hack_scan(
     nulls.sort()
     tau = nulls[min(len(nulls) - 1, math.ceil(0.95 * len(nulls)) - 1)] if nulls else 0.0
 
-    ranked = sorted(feats, key=lambda f: (-abs(rho[f.name]), f.name))
+    # Ranked by strength; a tie in magnitude goes to the endorsed feature,
+    # since the complement of the behavior correlates exactly as strongly
+    # as the behavior and is not a second thing the policy learns.
+    ranked = sorted(
+        feats,
+        key=lambda f: (
+            -round(abs(rho[f.name]), 6),
+            0 if f.endorsed(endorsed) and rho[f.name] > 0 else 1,
+            f.name,
+        ),
+    )
     listed: list[dict[str, Any]] = [
         {
             "name": f.name,
@@ -535,10 +546,15 @@ def hack_scan(
             "or add a features= extractor that emits them"
         )
         return base
-    e = max((abs(x["rho"]) for x in above if x["endorsed"]), default=0.0)
+    # e: the reward pays for the endorsed behavior (positive). An endorsed
+    # feature the reward punishes is ``inverted``: the policy will do less
+    # of the behavior, which is a hack of its own.
+    e = max((x["rho"] for x in above if x["endorsed"] and x["rho"] > 0), default=0.0)
     a = max((abs(x["rho"]) for x in above if not x["endorsed"]), default=0.0)
+    inverted = [x for x in above if x["endorsed"] and x["rho"] < 0]
+    base["inverted"] = [x["name"] for x in inverted]
     if endorsed:
-        base["endorsed_on_top"] = bool(top and top["endorsed"])
+        base["endorsed_on_top"] = bool(top and top["endorsed"] and top["rho"] > 0)
         base["integrity"] = round(e / (e + a), 4) if (e + a) > 0 else 0.0
     if not above or top is None:
         base["regime"] = "no_signal"
@@ -556,6 +572,13 @@ def hack_scan(
             + (f" (best endorsed {e:.2f})" if e else " (nothing endorsed clears the floor)")
             + f'; a policy trained on it learns "{top["name"]}"'
         )
+    elif endorsed and top["rho"] < 0:
+        base["regime"] = "reward_hack"
+        warnings.append(
+            f'reward punishes the endorsed "{top["name"]}" (within-ask rho {top["rho"]:+.2f}, '
+            f"floor {tau:.2f}); a policy trained on it learns to do less of the behavior"
+        )
+        inverted = [x for x in inverted if x["name"] != top["name"]]
     elif sat > SAT_FLAG:
         base["regime"] = "pool_exhausted"
         warnings.append(
@@ -564,6 +587,9 @@ def hack_scan(
         )
     else:
         base["regime"] = "train"
+    if inverted:
+        names = ", ".join(f'"{x["name"]}" ({x["rho"]:+.2f})' for x in inverted[:3])
+        warnings.append(f"reward also punishes the endorsed {names}")
     if (
         endorsed
         and base["regime"] in ("train", "pool_exhausted")

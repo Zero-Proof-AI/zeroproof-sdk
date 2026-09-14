@@ -3,6 +3,26 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `hack_scan`: a tie in magnitude goes to the endorsed feature (the
+  complement of the behavior correlates exactly as strongly, with the
+  opposite sign, and is not a second thing the policy learns), and an
+  endorsed feature the reward punishes is a `reward_hack` of its own,
+  reported as `inverted` with a "reward punishes" warning. Found on the
+  example: the honest reward's strongest feature was the shortcut
+  sentence at rho -1.0.
+- `examples/reward-hacking` and `docs/reward-hacking.md`: the detection
+  loop end to end, offline, in seconds. A scripted refund agent that
+  sometimes takes a shortcut, an honest judge that reads the trajectory
+  and a hackable one that reads the prose; `hack_scan`, `judge_probes`
+  and `trace_flag_report` on both, then a second agent that learned the
+  shortcut stands in for "after training" and `delta_report(proxy=)`
+  calls it over-optimized while `hack_scan_diff` names what it learned.
+  The doc is the recipe: what the book says, the five checks, the three
+  rules (endorse the behavior, fix the judge not the rows, keep the gold
+  away from the proxy).
+
 ## 0.38 (2026-09-14)
 
 - Examples audit (#168, #169, #170, #171, #172). Every example now has a
