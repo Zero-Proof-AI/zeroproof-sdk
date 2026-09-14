@@ -7,6 +7,7 @@ import itertools
 import json
 import os
 import re
+import threading
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -496,8 +497,32 @@ def _region_id(assignment: dict) -> str:
     return "sc-" + hashlib.sha256(payload.encode()).hexdigest()[:10]
 
 
+_COVERING_CACHE: dict[str, list[dict]] = {}
+_COVERING_CACHE_LOCK = threading.Lock()
+_COVERING_CACHE_MAX = 32
+
+
 def _covering_assignments(dimensions: dict[str, list[str]], strength: int) -> list[dict]:
-    """Greedy covering array: every strength-t tuple appears in at least one row."""
+    """Greedy covering array: every strength-t tuple appears in at least one row.
+
+    Pure in its inputs and expensive (the greedy scan is quadratic in the
+    uncovered set), and every writer wave builds a fresh generator that
+    asks for the same grid, so the result is memoized per process. Rows
+    are copied out: callers rewrite them.
+    """
+    key = json.dumps({"d": dimensions, "t": int(strength)}, sort_keys=True, default=str)
+    with _COVERING_CACHE_LOCK:
+        cached = _COVERING_CACHE.get(key)
+    if cached is None:
+        cached = _covering_assignments_uncached(dimensions, strength)
+        with _COVERING_CACHE_LOCK:
+            if len(_COVERING_CACHE) >= _COVERING_CACHE_MAX:
+                _COVERING_CACHE.clear()
+            _COVERING_CACHE[key] = cached
+    return [dict(row) for row in cached]
+
+
+def _covering_assignments_uncached(dimensions: dict[str, list[str]], strength: int) -> list[dict]:
     names = list(dimensions)
     t = max(1, min(int(strength), len(names)))
     uncovered: set[tuple] = set()
