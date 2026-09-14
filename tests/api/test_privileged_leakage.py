@@ -8,6 +8,12 @@ That is a property worth pinning: the failure mode is silent, it lands in
 a training file, and it is discovered only after a model has memorised the
 answer key.
 
+The guard is depth-independent since #149. ``export_row`` used to be an
+allowlist, which made nesting unreachable by accident -- no carrier for a
+nested privileged block was copied out -- and every test here was written
+flat because of it. The export now carries the whole row, so the tests
+below pin the nested case too.
+
 Each test names the boundary it guards. ``from_row``/``to_row``
 passthrough is deliberately excluded: carrying a source row's unknown keys
 back out is the wire round-trip identity, not a student-visible export,
@@ -59,8 +65,53 @@ def _privileged_row(
     }
 
 
+def _nested_privileged_row() -> dict:
+    """The same hostile upstream, one level down.
+
+    Written for #149. While ``export_row`` was an allowlist these keys
+    were unreachable: nothing that could hold a nested privileged block
+    (``lineage``, ``scenario_dimensions``, ``judge_meta``, a tool
+    ``result``) was copied out at all, so a top-level-only guard was
+    enough and every test here only ever built flat rows. The export now
+    carries the whole row, so the guard has to be as deep as the row is.
+    """
+    return {
+        "prompt": "refund order 4412",
+        "steps": [
+            {
+                "tool": "lookup_order",
+                "arguments": {"order_id": "4412"},
+                # a tool whose result quotes the teacher's answer key
+                "result": {"status": "ok", "rubric": f"{SECRET}_in_a_tool_result"},
+            }
+        ],
+        "final_text": "Refunded.",
+        "scenario_id": "sc-1",
+        "reward": 1.0,
+        "world_state": "exists",
+        "markers": {"grounded": 1.0},
+        "scenario_dimensions": {"tool": "lookup_order", "privileged": {"principle": SECRET}},
+        "lineage": {"source": "grade", "reference": f"{SECRET}_in_lineage"},
+        "judge_meta": {"trials": [{"n": 1, "hidden_state": {"answer": SECRET}}]},
+    }
+
+
 def _dump(value) -> str:
     return json.dumps(value, default=str, sort_keys=True)
+
+
+def _privileged_keys_in(value) -> list[str]:
+    """Every privileged key name reachable anywhere inside ``value``."""
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in (*PRIVILEGED_KEYS, "privileged", "rubric"):
+                found.append(str(key))
+            found.extend(_privileged_keys_in(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            found.extend(_privileged_keys_in(item))
+    return found
 
 
 def test_to_row_never_projects_the_privileged_block():
@@ -92,6 +143,53 @@ def test_engine_export_row_drops_privileged_keys():
     assert SECRET not in _dump(out)
     for key in PRIVILEGED_KEYS:
         assert key not in out
+
+
+def test_engine_export_row_drops_privileged_keys_at_any_depth():
+    """The export carries the whole row now (#149), so the block list is
+    applied to the whole row, not just its top level. A top-level-only
+    guard let the teacher's answer key ride out inside a carried
+    ``scenario_dimensions``, ``lineage``, ``judge_meta`` or tool result."""
+    row = _nested_privileged_row()
+    assert _privileged_keys_in(row), "fixture must actually nest something"
+    out = export_row(row)
+    assert SECRET not in _dump(out)
+    assert _privileged_keys_in(out) == []
+    # the rest of the row still survives: the guard scrubs, it does not
+    # drop the carrier
+    assert out["scenario_dimensions"] == {"tool": "lookup_order"}
+    assert out["lineage"] == {"source": "grade"}
+    assert out["markers"] == {"grounded": 1.0}
+    assert out["steps"][0]["result"] == {"status": "ok"}
+
+
+def test_export_row_rebuilds_messages_from_the_scrubbed_steps():
+    """``conversation()`` dumps each tool result into a message string, so
+    a key scrubbed after that has already stopped being a key. The scrub
+    has to happen before anything is derived from the row."""
+    row = _nested_privileged_row()
+    row.pop("messages", None)
+    out = export_row(row)
+    assert out["messages"], "the fixture should produce a conversation"
+    assert SECRET not in _dump(out["messages"])
+
+
+def test_saved_file_carries_no_nested_privileged_value(tmp_path):
+    """The bytes on disk, which is what the customer in #149 reads back."""
+    from zeroproof.simulations.data import SimulationData
+
+    data = SimulationData(trajectories=[_nested_privileged_row()])
+    dest = tmp_path / "rows.jsonl"
+    data.save(str(dest))
+    text = dest.read_text(encoding="utf-8")
+    assert SECRET not in text
+    for key in (*PRIVILEGED_KEYS, "privileged", "rubric"):
+        assert f'"{key}"' not in text
+    assert _privileged_keys_in(json.loads(text.splitlines()[0])) == []
+    # and the evidence #149 is about is still there
+    on_disk = json.loads(text.splitlines()[0])
+    assert on_disk["markers"] == {"grounded": 1.0}
+    assert on_disk["lineage"] == {"source": "grade"}
 
 
 def test_training_rows_carry_no_privileged_key_or_value():

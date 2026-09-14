@@ -151,8 +151,9 @@ def _split_holdout(rows: list[dict], fraction: float | None) -> tuple[list[dict]
     return train, held
 
 
-#: Keys that must never reach an exported row, whatever the source row
-#: carries. ``privileged`` and its three fields are the teacher's context
+#: Keys that must never reach an exported row, at any depth, whatever the
+#: source row carries (see ``_scrub``).
+#: ``privileged`` and its three fields are the teacher's context
 #: (see ``tests/api/test_privileged_leakage``); ``vector`` is the raw
 #: embedding the diversity search keeps in memory, big and meaningless
 #: once the run is over. Everything else on the row is evidence about the
@@ -176,6 +177,39 @@ _EXPORT_NEVER = frozenset(
 _EXPORT_NORMALIZED = frozenset({"world_state", "faults"})
 
 
+def _scrub(value: Any) -> Any:
+    """``value`` with every ``_EXPORT_NEVER`` key dropped at any depth.
+
+    A top-level filter was enough while the export was an allowlist,
+    because a carrier for nested privileged content (``lineage``,
+    ``scenario_dimensions``, a tool ``result``) was never copied out in
+    the first place. Now that the whole row rides out, the exclusion has
+    to be as deep as the row is.
+
+    Unchanged values are returned as they are, not copied, so the usual
+    case -- nothing privileged anywhere, and a long ``steps`` list -- is
+    one walk and no allocation. Only the containers on the path to a
+    dropped key are rebuilt.
+    """
+    if isinstance(value, dict):
+        out = {}
+        changed = False
+        for key, item in value.items():
+            if key in _EXPORT_NEVER:
+                changed = True
+                continue
+            clean = _scrub(item)
+            changed = changed or clean is not item
+            out[key] = clean
+        return out if changed else value
+    if isinstance(value, (list, tuple)):
+        items = [_scrub(item) for item in value]
+        if all(new is old for new, old in zip(items, value)):
+            return value
+        return items if isinstance(value, list) else tuple(items)
+    return value
+
+
 def export_row(row: dict) -> dict:
     """The row as it goes to disk: everything the trajectory carries.
 
@@ -186,6 +220,11 @@ def export_row(row: dict) -> dict:
     ``seed``, and the world with its ``world_state`` and ``faults``. Keys
     the rules below normalize keep the normalized value.
     """
+    # Scrub first, so nothing derived from the row can smuggle a blocked
+    # key back out: ``conversation()`` rebuilds ``messages`` by dumping
+    # each tool result to a string, and a key scrubbed after that has
+    # already stopped being a key.
+    row = _scrub(row)
     out: dict[str, Any] = {
         "prompt": row.get("prompt", ""),
         "messages": row.get("messages") or conversation(row),
