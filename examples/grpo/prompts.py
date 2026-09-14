@@ -173,6 +173,57 @@ def load_prompts(path: str) -> list[dict[str, Any]]:
     return out
 
 
+def split_holdout_stratified(
+    items: list[dict[str, Any]], fraction: float = 0.2, *, min_scenarios: int = 2
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split by scenario, category by category, so the holdout holds every
+    kind of prompt. A plain hash split over 67 scenarios put all of the
+    no-id situations in train once, and the holdout could not see a policy
+    that learned to always call the tool. Each category gives up
+    ``fraction`` of its scenarios (at least ``min_scenarios`` when it has
+    that many), chosen by a stable hash so the split is reproducible."""
+    import hashlib
+
+    by_cat: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for it in items:
+        by_cat.setdefault(category(it["case"]), {}).setdefault(str(it["scenario_id"]), []).append(
+            it
+        )
+    train: list[dict[str, Any]] = []
+    held: list[dict[str, Any]] = []
+    for cat_name in sorted(by_cat):
+        scenarios = by_cat[cat_name]
+        ranked = sorted(
+            scenarios, key=lambda sid: hashlib.sha256(f"{cat_name}:{sid}".encode()).hexdigest()
+        )
+        n_held = max(min(min_scenarios, len(ranked) - 1), round(len(ranked) * fraction))
+        n_held = min(n_held, max(0, len(ranked) - 1))
+        held_ids = set(ranked[:n_held])
+        for sid, rows in scenarios.items():
+            (held if sid in held_ids else train).extend(rows)
+    return train, held
+
+
+def pass_by_category(rows: list[dict[str, Any]]) -> dict[str, dict[str, float | int]]:
+    """pass@1 and the tool-call rate per prompt category over graded rows,
+    the breakdown a headline pass@1 hides when one category dominates."""
+    acc: dict[str, list[float]] = {}
+    for r in rows:
+        k = category(case_for(str(r.get("prompt") or "")))
+        a = acc.setdefault(k, [0.0, 0.0, 0.0])
+        a[0] += float(r.get("reward") or 0)
+        a[1] += 1.0 if "<tool_call>" in str(r.get("final_text") or "") else 0.0
+        a[2] += 1
+    return {
+        k: {
+            "pass_at_1": round(v[0] / v[2], 4),
+            "tool_call_rate": round(v[1] / v[2], 4),
+            "rows": int(v[2]),
+        }
+        for k, v in sorted(acc.items())
+    }
+
+
 def summary(items: list[dict[str, Any]]) -> dict[str, Any]:
     cats = {"with_id": 0, "no_id": 0, "off_topic": 0}
     for it in items:
@@ -187,6 +238,8 @@ __all__ = [
     "keep",
     "load_prompts",
     "parse_messages",
+    "pass_by_category",
+    "split_holdout_stratified",
     "summary",
     "writer_messages",
 ]

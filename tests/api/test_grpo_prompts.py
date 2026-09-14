@@ -116,3 +116,56 @@ def test_checked_in_prompt_set_is_well_formed():
     assert len({i["prompt"] for i in items}) == len(items)
     s = p.summary(items)
     assert min(s["with_id"], s["no_id"], s["off_topic"]) >= 20
+
+
+def test_stratified_split_keeps_every_category_in_the_holdout():
+    r, p = _modules()
+    items = []
+    for i in range(12):
+        items.append(
+            {
+                "prompt": f"check ORD-{1000 + i} please",
+                "case": r.case_for(f"check ORD-{1000 + i} please"),
+                "scenario_id": f"id{i}",
+            }
+        )
+    for i in range(3):
+        items.append(
+            {
+                "prompt": f"I want a refund, lost the number {i}",
+                "case": r.case_for("I want a refund, lost the number"),
+                "scenario_id": f"no{i}",
+            }
+        )
+    for i in range(3):
+        items.append(
+            {
+                "prompt": f"Do you sell gift cards {i}?",
+                "case": r.case_for("Do you sell gift cards?"),
+                "scenario_id": f"off{i}",
+            }
+        )
+    train, held = p.split_holdout_stratified(items, 0.2)
+    assert len(train) + len(held) == len(items)
+    held_cats = {p.category(i["case"]) for i in held}
+    assert held_cats == {"with_id", "no_id", "off_topic"}
+    assert {i["scenario_id"] for i in train} & {i["scenario_id"] for i in held} == set()
+    again = p.split_holdout_stratified(items, 0.2)
+    assert [i["prompt"] for i in again[1]] == [i["prompt"] for i in held]
+
+
+CALL_TEXT = (
+    '<tool_call>\n{"name": "lookup_order", "arguments": {"order_id": "ORD-1"}}\n</tool_call>'
+)
+
+
+def test_pass_by_category_reads_reward_and_tool_calls():
+    _, p = _modules()
+    rows = [
+        {"prompt": "check ORD-1001", "reward": 1, "final_text": CALL_TEXT},
+        {"prompt": "check ORD-1001", "reward": 0, "final_text": "Sure."},
+        {"prompt": "Do you sell gift cards?", "reward": 1, "final_text": "No."},
+    ]
+    out = p.pass_by_category(rows)
+    assert out["with_id"] == {"pass_at_1": 0.5, "tool_call_rate": 0.5, "rows": 2}
+    assert out["off_topic"] == {"pass_at_1": 1.0, "tool_call_rate": 0.0, "rows": 1}

@@ -55,6 +55,7 @@ image = (
     )
     .env({"HF_HOME": "/root/.cache/huggingface", "TOKENIZERS_PARALLELISM": "false"})
     .add_local_file(str(HERE / "reward.py"), "/root/reward.py")
+    .add_local_file(str(HERE / "prompts.py"), "/root/prompts.py")
     # From inside this repo the checkout's SDK rides along and shadows the
     # PyPI one, so an unreleased SDK change works here first.
     .add_local_python_source("zeroproof")
@@ -104,6 +105,17 @@ def _sample(
             out.append(decoded[i * n : (i + 1) * n])
     model.train()
     return out
+
+
+def _by_category(rows: list[dict]) -> dict | None:
+    """pass@1 and tool-call rate per prompt category, when prompts.py is
+    mounted; a headline pass@1 hides which kind of prompt moved."""
+    try:
+        sys.path.insert(0, "/root")
+        from prompts import pass_by_category
+    except ImportError:
+        return None
+    return pass_by_category(rows)
 
 
 @app.function(
@@ -269,6 +281,8 @@ def train(
     after_rows = reward_rows(holdout_prompts, after_replies)
     after = zps.pass_at(after_rows)
     print(f"after:  {after}")
+    print(f"by category: before {_by_category(before_rows)}")
+    print(f"             after  {_by_category(after_rows)}")
 
     adapter_dir = os.path.join(out_dir, "adapter")
     policy.save_pretrained(adapter_dir)
@@ -288,6 +302,8 @@ def train(
         "ci95_after": after.ci95,
         "holdout_prompts": len(holdout_prompts),
         "eval_samples": eval_samples,
+        "by_category_before": _by_category(before_rows),
+        "by_category_after": _by_category(after_rows),
     }
     delta = None
     if run is not None:
@@ -329,9 +345,14 @@ def main(
 
         items = load_prompts(prompts_file)
         print(f"{len(items)} model-written prompts from {prompts_file}")
+        from prompts import split_holdout_stratified
+
+        # By scenario within each category, so the holdout has no-id and
+        # off-topic prompts too; a plain hash split once left it with none.
+        train_items, held = split_holdout_stratified(items, holdout)
     else:
         items = build_prompts(prompts, seed=seed)
-    train_items, held = split_holdout(items, holdout)
+        train_items, held = split_holdout(items, holdout)
     with_id = sum(1 for p in items if p["case"]["order_id"])
     print(
         f"{len(items)} prompts ({with_id} name an order id): {len(train_items)} train, {len(held)} holdout"

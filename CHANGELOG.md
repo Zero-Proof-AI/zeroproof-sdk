@@ -5,6 +5,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `examples/grpo` and `examples/dpo`: the model-written set is split by
+  scenario within each prompt category (`split_holdout_stratified`); the
+  hash split had put every no-id situation in train, so the holdout
+  could not see a policy that always calls the tool. Both scripts report
+  `by_category_before` / `by_category_after` (pass@1 and tool-call rate
+  per category). `examples/dpo --from-run` merges a previous round's
+  adapter and samples fresh pairs from it: iterated on-policy DPO, with
+  the merged policy saved for serving or a further round.
 - `examples/grpo`: `--loss-type` (bnpo, TRL's default; grpo; dr_grpo),
   `--epsilon-high`, `--no-scale-rewards` and `--mask-truncated`, so
   Dr.GRPO and DAPO's clip and overlong mask are flags on the one trainer

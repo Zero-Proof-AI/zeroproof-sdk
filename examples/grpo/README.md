@@ -114,5 +114,21 @@ Dr.GRPO at the same 120 steps and learning rate: 0.17 [0.13, 0.22] to
 0.53 [0.46, 0.59], +0.34 [+0.27, +0.41], `moved`, behind the default. That
 is what dropping the std scaling does at a fixed learning rate: the
 advantages are smaller, so the steps are. Dr.GRPO's own recipe raises the
-learning rate to compensate; treat `--loss-type` as a knob to tune, not a
-free upgrade, and let the interval say which setting won.
+learning rate to compensate: at 1e-5 it reads 0.16 [0.11, 0.20] to 0.64
+[0.58, 0.70], +0.46 [+0.37, +0.55], closer but still behind. Treat
+`--loss-type` as a knob to tune, not a free upgrade, and let the interval
+say which setting won.
+
+## By category, and a split that was hiding one
+
+Headline pass@1 on this set is mostly the with-id case (576 of 707
+prompts). The first hash split by scenario put every no-id situation in
+train, so the holdout had 612 with-id rows, 24 off-topic and no no-id at
+all: a policy that learned to always call `lookup_order` would have scored
+0.85 and the holdout could not have said otherwise. `prompts.py` now
+splits by scenario within each category (`split_holdout_stratified`), and
+both scripts print and return `by_category_before` / `by_category_after`:
+pass@1 and the tool-call rate per category. On the old split the runs
+above did not regress off topic (GRPO 0.92 to 0.88 on 24 rows, DPO 0.92
+to 0.83, Dr.GRPO 0.83 to 0.96); the no-id case was simply unmeasured.
+STRAT_PLACEHOLDER
