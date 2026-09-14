@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.39 (2026-09-14)
 
 - `hack_scan`: a tie in magnitude goes to the endorsed feature (the
   complement of the behavior correlates exactly as strongly, with the
