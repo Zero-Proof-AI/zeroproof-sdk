@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from zeroproof.simulations.export import export_preference
 from zeroproof.simulations.score.judging import build_preference_pairs
 
@@ -123,3 +125,16 @@ def test_export_carries_pair_metadata(tmp_path):
         assert key in line, key
     assert line["same_policy"] is True
     assert line["chosen"][-1]["content"] == "Order 4412 shipped yesterday."
+
+
+def test_export_refuses_to_write_an_empty_pair_file(tmp_path):
+    rows = [_row("ask", 1, "Shipped."), _row("ask", 1, "Shipped yesterday.")]  # all pass
+    pairs, _ = build_preference_pairs(rows)
+    assert pairs == []
+    out = tmp_path / "prefs.jsonl"
+    with pytest.raises(ValueError, match="no_preference_pairs"):
+        export_preference(pairs, str(out))
+    assert not out.exists(), "a 0-byte JSONL crashes datasets downstream; no file is written"
+    report = export_preference(pairs, str(out), validate=False)
+    assert report["pairs"] == 0 and report["path"] is None
+    assert not out.exists()

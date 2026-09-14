@@ -217,3 +217,23 @@ def test_callback_finish_false_and_second_finish_merges_summary():
         last["summary"] == {"train_loss": 0.5, "pass_at_1_after": 0.3}
         and last["adapter"] == "vol:/a"
     )
+
+
+def test_delta_and_note_after_finish_are_sent_right_away():
+    t = Transport()
+    run = training_run("sft-v1", api_key="k", transport=t)
+    run.finish("done", summary={"train_loss": 1.0})
+    sent = len(t.calls)
+    before = [{"prompt": f"t{i}", "reward": i % 2} for i in range(8)]
+    after = [{"prompt": f"t{i}", "reward": 1 if i < 6 else 0} for i in range(8)]
+    report = run.delta(before, after, target="pass_at_1")
+    assert report["target"] == "pass_at_1"
+    method, path, body = t.calls[-1]
+    assert (method, path) == ("POST", "/runs/run_abc/finish")
+    assert body["status"] == "done", "a finished run stays finished"
+    assert body["summary"]["train_loss"] == 1.0, "what finish sent is kept"
+    assert body["summary"]["delta"]["target"] == "pass_at_1"
+    run.note(eval_pass=0.4)
+    body = t.calls[-1][2]
+    assert body["summary"]["eval_pass"] == 0.4 and "delta" in body["summary"]
+    assert len(t.calls) == sent + 2, "one send per call, none buffered"

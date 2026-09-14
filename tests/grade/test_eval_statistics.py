@@ -325,3 +325,18 @@ def test_delta_report_surfaces_dropped_tasks():
     assert "! pass_at_1: most tasks unpaired" in format_delta_report(report)
     targeted = delta_report(before, after, target="pass_at_1")
     assert sum("unpaired" in w for w in targeted["warnings"]) == 1
+
+
+def test_decontaminate_pulls_a_platform_dataset_id(monkeypatch):
+    pulled = []
+
+    def fake_pull(dataset_id, *args, **kwargs):
+        pulled.append(dataset_id)
+        return [{"prompt": "what is the capital of france", "answer": "Paris"}]
+
+    monkeypatch.setattr("zeroproof.simulations.ingest.platform.pull", fake_pull)
+    rows = [_row("what is the capital of france"), _row("refund order 4412")]
+    kept, report = decontaminate(rows, against="ds_eval")
+    assert pulled == ["ds_eval"]
+    assert [r["prompt"] for r in kept] == ["refund order 4412"]
+    assert report["n_exact"] == 1

@@ -157,3 +157,48 @@ def test_verifier_feeds_grade(monkeypatch):
     scored = run_judge(rows, ExactMatch(), source="grade")
     rewards = sorted(r.get("reward") for r in scored.rows)
     assert rewards == [0, 1]
+
+
+def test_weighted_never_invents_a_score_for_a_part_that_could_not_run():
+    # a rubric criterion with no reference is unjudged; the row is not a fail
+    w = Weighted([(ExactMatch(), 0.5), (Regex(r"</think>"), 0.5)])
+    out = w(row("<think>..</think>\nParis"))  # no reference anywhere on the row
+    assert out["reward"] is None
+    assert out["judge_meta"]["parts"] == {"ExactMatch": None, "Regex": 1}
+    assert "no reference" in out["reason"]
+    # with the reference present the same rubric scores as before
+    assert w(row("<think>..</think>\nParis", answer="Paris"))["reward"] == 1
+
+
+def test_as_verifier_wraps_a_plain_row_callable():
+    from zeroproof.simulations.verify import as_verifier
+
+    def short_reply(r):
+        return len(r["final_text"]) < 20
+
+    v = as_verifier(short_reply)
+    assert v.name == "short_reply"
+    assert v(row("ok"))["reward"] == 1 and v(row("x" * 30))["reward"] == 0
+    assert as_verifier(v) is v
+
+
+def test_numeric_without_a_number_in_the_reply_is_a_fail_not_unjudged():
+    out = Numeric()(row("no idea", answer=3))
+    assert out["reward"] == 0 and "no number" in out["reason"]
+    assert Numeric()(row("42"))["reward"] is None  # no reference: unjudged
+
+
+def test_json_field_walks_lists_and_checks_presence_without_a_reference():
+    doc = row('{"items": [{"sku": "a1"}]}')
+    assert JSONField("items.0.sku", equals="A1")(doc)["reward"] == 1  # case-insensitive
+    assert JSONField("items.1.sku", equals="A1")(doc)["reward"] == 0
+    assert JSONField("intent")(row('{"intent": "x"}'))["reward"] == 1  # present is enough
+    assert JSONField("intent")(row('{"other": 1}'))["reward"] == 0
+
+
+def test_json_valid_top_type_and_schema_field_types():
+    assert JSONValid(top_type=list)(row('{"a": 1}'))["reward"] == 0
+    schema = {"type": "object", "properties": {"amount": {"type": "number"}}}
+    assert JSONSchema(schema)(row('{"amount": "40"}'))["reward"] == 0
+    assert JSONSchema(schema)(row('{"amount": 40}'))["reward"] == 1
+    assert JSONSchema({"type": "array"})(row('{"a": 1}'))["reward"] == 0

@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import json
+from dataclasses import FrozenInstanceError
 
-from zeroproof.simulations.score.spec import Spec, load_spec, spec_version, stamp_spec
+import pytest
+
+from zeroproof.simulations.score.spec import (
+    Spec,
+    Trait,
+    load_spec,
+    spec_version,
+    stamp_spec,
+)
 
 CONSTITUTION = {
     "source": {"repo": "openai/model-spec", "file": "spec.md"},
@@ -79,3 +88,18 @@ def test_behaviors_feed_delta_must_not_regress():
     s = load_spec(CONSTITUTION)
     assert isinstance(Spec("x").behaviors(), list)
     assert s.behaviors() == ["be_warm", "no_syco"]
+
+
+def test_trait_defaults_and_what_the_version_hashes():
+    t = Trait(id="cite")
+    assert (t.name, t.principle, t.authority, t.examples) == ("", "", "should", ())
+    with pytest.raises(FrozenInstanceError):
+        t.id = "other"  # type: ignore[misc]
+    plain = Spec(id="s", traits=(Trait(id="cite", principle="Cite sources."),))
+    with_examples = Spec(
+        id="s", traits=(Trait(id="cite", principle="Cite sources.", examples=("e1",)),)
+    )
+    stronger = Spec(id="s", traits=(Trait(id="cite", principle="Cite sources.", authority="must"),))
+    assert plain.version == with_examples.version, "examples illustrate; they are not the contract"
+    assert plain.version != stronger.version, "authority is"
+    assert plain.principle("cite") == "Cite sources." and plain.principle("nope") is None

@@ -222,13 +222,19 @@ class Weighted(Verifier):
     def __call__(self, row: dict) -> dict[str, Any]:
         total_w = sum(w for _, w in self.pairs) or 1.0
         acc, detail = 0.0, {}
+        unjudged: str | None = None
         for v, w in self.pairs:
             r = v(row)
             s = r.get("reward")
+            detail[v.name] = s
             if s is None:
-                s = 0.0
+                # A part that could not run (no reference, bad config) is
+                # not a 0: the contract never invents a reward. Same as All.
+                unjudged = unjudged or f"{self.name}: {r.get('reason') or v.name}"
+                continue
             acc += float(s) * w
-            detail[v.name] = r.get("reward")
+        if unjudged is not None:
+            return _result(None, unjudged, verifier=self.name, parts=detail)
         score = round(acc / total_w, 4)
         score = int(score) if score in (0.0, 1.0) else score
         return _result(score, f"{self.name}: {score}", verifier=self.name, parts=detail)
