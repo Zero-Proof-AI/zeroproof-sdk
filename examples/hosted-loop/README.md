@@ -3,9 +3,17 @@
 Four calls from graded rows to a chat completion from the trained model,
 all on the platform. One key, one A10G run, no GPU of your own.
 
+What you will learn: the shape of a train set and a task-disjoint holdout
+on the platform, what `zps.train` returns and how to wait on it, what
+`zps.serve` gives you back, and how to call the served adapter. The rows
+are deliberately small; this is the wiring check, not a result. You need
+`ZEROPROOF_API_KEY` (or `zeroproof login`); no model key, since the rows
+come from the template writer and a scripted agent.
+
 ```bash
 pip install zeroproof
 zeroproof login                 # or export ZEROPROOF_API_KEY=...
+cd examples/hosted-loop
 python run.py                   # data -> train -> serve -> call
 python run.py train --method sft --epochs 2   # any step alone; state is in hosted-loop.json
 ```
@@ -19,7 +27,11 @@ python run.py train --method sft --epochs 2   # any step alone; state is in host
 | `serve` | `zps.serve("hosted-loop", run)` | a model row: `endpoint` (OpenAI-compatible base URL) and `name` (the model id to send) |
 | `call` | `POST {endpoint}/chat/completions` with the account key as bearer | the trained model's reply |
 
-A run from today, 24 train rows over 7 tasks:
+One run of `python run.py` with the defaults (`--seed 1 --budget 96`,
+SFT on `Qwen/Qwen3-4B`, one epoch): 24 train rows over 7 tasks, and a
+72-row holdout because the splitter seeds the held-out side by failure
+signature first (see below). The loss numbers are one run's; the
+platform trainer is not seeded, so yours will differ:
 
 ```
 == train

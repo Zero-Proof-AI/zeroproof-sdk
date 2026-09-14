@@ -209,18 +209,25 @@ sampling) and ch. 7 (difficulty filtering), applied at generation time.
 
 ## Examples
 
-| Example | What it does |
-|---|---|
-| [`examples/agent-behavior`](examples/agent-behavior) | Start here if the platform is new to you. Runs a coding agent with bad habits against real tests, streams every turn to Zero Proof as OTLP spans plus a judge verdict, and fills a dashboard with behaviour worth looking at. No dependencies. |
-| [`examples/hosted-loop`](examples/hosted-loop) | Push graded rows, `zps.train` SFT on Qwen3-4B, `zps.serve` the adapter, one chat completion from the endpoint. One key, one A10G minute; the wiring check for training on the platform. |
-| [`examples/bring-your-own-agent`](examples/bring-your-own-agent) | Your own callable: the `agent(message) -> {steps, final_text}` contract, the `agent_failed` report when it raises or returns the wrong shape, and `eval_sourced` keeping a held-out score out of the reward. Offline, no key. |
-| [`examples/prime-intellect-rl`](examples/prime-intellect-rl) | Generates a GRPO-ready dataset with `simulate(mode="rl")` and checks it carries gradient before you spend GPU time on it. |
-| [`examples/schema`](examples/schema) | One row file in, six training targets out: eval, SFT, preference, GRPO prompts, OPSD hints, OPD. Migrates any legacy file first. Offline, no key. |
-| [`examples/grpo`](examples/grpo) | GRPO on Modal, end to end: prompts from the simulator, a verifiable tool-discipline reward, TRL `GRPOTrainer` with LoRA, reward and KL on the dashboard, pass@1 before and after on a holdout with the paired delta on the run page. One A10G, under fifteen minutes. |
-| [`examples/verifiers`](examples/verifiers) | Verifiable rewards: math (`MathEqual`), an answer-and-format gate (`All`), code run against hidden tests (`CodeExec`), and a JSON-schema check, each feeding `grade`/`optimize`. Offline, no key. |
-| [`examples/pass-at-k`](examples/pass-at-k) | pass@1, pass^k and pass@k for one agent, with the per-ask histogram the mean hides and what each number tells you to do next. Offline, no key. |
-| [`examples/identity`](examples/identity) | Builds a leak-free SFT set that teaches a model a new name and maker, with Modal scripts to train a LoRA and evaluate it. No model calls to generate. |
-| [`examples/character`](examples/character) | Character training from a constitution: the OpenAI Model Spec's style traits become graded rows, preference pairs and SFT rows, with the judge checked against the spec's own labels and a before/after measurement. Offline by default. How-to: [docs/character-training.md](docs/character-training.md). |
+In the order a post-training run happens. The index at
+[`examples/README.md`](examples/README.md) has one line per example with
+what it needs and how long it takes; "offline" below means no key and no
+network.
+
+| Step | Example | What it does |
+|---|---|---|
+| Simulate and grade | [`examples/bring-your-own-agent`](examples/bring-your-own-agent) | Your own callable: the `agent(message) -> {steps, final_text}` contract, the `agent_failed` report when it raises or returns the wrong shape, and `eval_sourced` keeping a held-out score out of the reward. Offline. |
+| Simulate and grade | [`examples/agent-behavior`](examples/agent-behavior) | Start here if the platform is new to you. Runs a coding agent with bad habits against real tests, streams every turn to Zero Proof as OTLP spans plus a judge verdict, and fills a dashboard with behaviour worth looking at. Needs a key and a model endpoint; stdlib only. |
+| Simulate and grade | [`examples/verifiers`](examples/verifiers) | Verifiable rewards: math (`MathEqual`), an answer-and-format gate (`All`), code run against hidden tests (`CodeExec`), and a JSON-schema check, each feeding `grade`/`optimize`. Offline. |
+| Measure | [`examples/pass-at-k`](examples/pass-at-k) | pass@1 with its interval, pass^k and pass@k for one agent, the per-ask histogram the mean hides, and what each number tells you to do next. Offline. |
+| Select | [`examples/schema`](examples/schema) | One row file in, six training targets out: eval, SFT, preference, GRPO prompts, OPSD hints, OPD. Migrates any legacy file first. Offline. |
+| Select | [`examples/prime-intellect-rl`](examples/prime-intellect-rl) | Generates a GRPO-ready dataset with `simulate(mode="rl")` and checks it carries gradient before you spend GPU time on it, then exports prompts in the `verifiers` shape. Needs `VLLM_API_KEY`. |
+| Select | [`examples/character`](examples/character) | Character training from a constitution: the OpenAI Model Spec's style traits become graded rows, preference pairs and SFT rows, with the judge checked against the spec's own labels and a before/after measurement. Offline by default. How-to: [docs/character-training.md](docs/character-training.md). |
+| Train | [`examples/hosted-loop`](examples/hosted-loop) | Push graded rows, `zps.train` SFT on Qwen3-4B, `zps.serve` the adapter, one chat completion from the endpoint. One key, one A10G minute; the wiring check for training on the platform. |
+| Train | [`examples/identity`](examples/identity) | Builds a leak-free SFT set that teaches a model a new name and maker, with Modal scripts to train a LoRA and evaluate identity and leak rates. No model calls to generate. |
+| Train | [`examples/grpo`](examples/grpo) | GRPO on Modal, end to end: prompts from the simulator, a verifiable tool-discipline reward, TRL `GRPOTrainer` with LoRA, `HackMonitor`, reward and KL on the dashboard, pass@1 before and after on a holdout with the paired delta and per-category table on the run page. One A10G, under fifteen minutes. |
+| Train | [`examples/dpo`](examples/dpo) | DPO on the same environment: on-policy pairs from `build_preference_pairs`, TRL `DPOTrainer` with LoRA, the reward margin on the run page, iterated rounds with `--from-run`, constructed negatives where the policy never fails. One A10G, about ten minutes. |
+| Export | [`examples/hugging-face`](examples/hugging-face) | Rows to a Hub dataset repo you own, any Hub split onto your account with a profile, a run's adapter to a model repo. Needs a key and a connected Hugging Face account. |
 
 ## Sign in
 
@@ -388,14 +395,18 @@ and `holdout=` move the defaults, and any other keyword is a trace filter (`mode
 Three checks that decide whether a result is believable, all report-only and all over rows you already have.
 
 ```python
-zps.attach_labels(rows, "labels.jsonl", annotator="ana")  # gold_reward + who said what
+rows, report = zps.attach_labels(
+    rows, "labels.jsonl", annotator="ana"
+)  # gold_reward + who said what
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 data.grade(use_privileged=True)  # judge also reads privileged principle, reference, hidden state
 zps.run_judge(rows, likert_judge, scale=(1, 5))  # rating kept, reward = (r - 1) / 4
 pairs, report = zps.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 rows, report = zps.write_rubrics(rows, domain="refunds")  # per-prompt criteria on privileged.rubric
 scored = zps.run_judge(rows, zps.rubric_judge())  # a verdict per criterion; markers rubric:<item>
-zps.decontaminate(train_rows, against=[eval_rows])  # 8-gram overlap with the eval set
+clean, report = zps.decontaminate(
+    train_rows, against=[eval_rows]
+)  # 8-gram overlap with the eval set
 zps.style_markers(rows)  # no_boilerplate, no_hedging, no_apology, no_sycophancy, answered
 zps.style_report(rows)["warnings"]  # "reward pays for hedging (corr +0.41 ...)"
 zps.refusal_report(benign_rows)  # over-refusal rate with a Wilson interval
@@ -412,11 +423,11 @@ zps.mark_grounding(
 zps.grounding_report(rows)  # grounded rate, and the invented values by tool and key
 ```
 
-**Judge trust.** Label 30 to 100 rows by hand as `gold_reward` (0/1). The report gives agreement with a Wilson interval and Cohen's kappa, agreement on two task halves (tune the rubric on one, read the other), judge pass rate on short versus long replies within the same human label (length bias the humans rule out), and, with the judge callable, a re-judge of a sample as-is (consistency) and with neutral filler appended (a flip means the judge reads length). Disagreements come back as a review queue. `format_judge_trust(report)` prints it. `probes="all"` (or a list) tries the reward hacks a policy finds first on the judge on purpose: filler, the rubric's own words stuffed in, a claim of success with no evidence, the ask echoed back, a well-formed tool call with empty arguments, a sycophantic opener, a polite refusal. An additive probe is exploitable when failing replies start passing; a replacement probe when a reply with no content passes. `report["exploitable_by"]` names the holes at or over 10%, and a policy trained on this judge will find those same holes. Standalone: `zps.judge_probes(rows, judge, rubric=...)`. The gold set needs both passes and failures; with one class only the report says so and skips the kappa and length flags. With the hosted judge, call `zps.grade` once first (or `warm_judge`) so the cold start, two to three minutes, is not counted as timeouts.
+**Judge trust.** Label 30 to 100 rows by hand as `gold_reward` (0/1). The report gives agreement with a Wilson interval and Cohen's kappa, agreement on two task halves (tune the rubric on one, read the other), judge pass rate on short versus long replies within the same human label (length bias the humans rule out), and, with the judge callable, a re-judge of a sample as-is (consistency) and with neutral filler appended (a flip means the judge reads length). Disagreements come back as a review queue. `format_judge_trust(report)` prints it. `probes="all"` (or a list) tries the reward hacks a policy finds first on the judge on purpose: filler, the rubric's own words stuffed in, a claim of success with no evidence, the ask echoed back, a well-formed tool call with empty arguments, a sycophantic opener, a polite refusal. An additive probe is exploitable when failing replies start passing; a replacement probe when a reply with no content passes. `report["exploitable_by"]` names the holes at or over 10%, and a policy trained on this judge will find those same holes. Standalone: `zps.judge_probes(rows, judge, rubric=...)`. The gold set needs both passes and failures; with one class only the report says so and skips the kappa and length flags. With the hosted judge, call `zps.grade` once first (or `zeroproof.simulations.score.grade_llm.warm_judge`; it is not re-exported) so the cold start, two to three minutes, is not counted as timeouts.
 
 **Decontamination.** Word 8-gram overlap between a dataset's prompts and any evaluation source: row lists, JSONL paths, or platform dataset ids. A row is contaminated when it is an eval prompt verbatim or when one eval text covers at least 80% of its words (`overlap=`, the Llama 2 rule); one shared 8-gram is not enough, because situations written from the same templates share whole sentences without sharing the question. Short prompts match verbatim only. `fields=("prompt", "final_text")` also checks replies against eval answers and references. The report separates verbatim hits from near copies and counts hits per field, and returns the clean rows with the first offenders.
 
-**Intervals and comparison.** Every pass@1 now carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. Tasks on one side only are dropped from a paired comparison; `note` says how many and `paired_share` is the fraction that paired, so a verdict over a quarter of the eval reads as one. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
+**Intervals and comparison.** Every pass@1 carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. Tasks on one side only are dropped from a paired comparison; `note` says how many and `paired_share` is the fraction that paired, so a verdict over a quarter of the eval reads as one. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
 
 **Same tasks, new prompt.** A run draws its tasks from the grid by seed and, above `concurrency: 1`, by completion order, so a second `simulate()` shares only part of its tasks with the first. To A/B a prompt edit, a model swap or another seed on exactly the same eval, pin the task set: `zps.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base)` re-runs every prompt of `base` (a run, its rows, or its JSONL path) on its own `scenario_id`, under the same faults and world state, and draws nothing new; it stops with `tasks_done` once every prompt has its rollouts, and `compare_runs(base.rows(), rerun.rows())` pairs every task.
 
@@ -432,7 +443,7 @@ zps.grounding_report(rows)  # grounded rate, and the invented values by tool and
 zps.behavioral_markers(scored.rows)  # {"boilerplate": 0.31, "refusal": 0.04, ...}
 ```
 
-For a before/after comparison use `style_markers` / `style_report` above, not these: those markers are 1.0 when the reply is clean (higher is better), which is the polarity `delta_report(must_not_regress=...)` expects. `behavioral_markers` is presence (higher is worse), so it reads a paired delta backwards. The two cover the same ch. 14 behaviors and are being consolidated onto `style`.
+For a before/after comparison use `style_markers` / `style_report` above, not these: those markers are 1.0 when the reply is clean (higher is better), which is the polarity `delta_report(must_not_regress=...)` expects. `behavioral_markers` is presence (higher is worse), so it reads a paired delta backwards. The two cover the same ch. 14 behaviors; `behavioral_markers` is deprecated in favor of `style_report` and warns when called.
 
 **Stage lineage.** The pipeline is a sequence of stages (rlhf-book ch. 3): SFT, reward modeling, RL, and the eval that judges the result. `stamp_stage(rows, "sft")` records which stage a row fed, and `stage_report(rows)` counts rows per stage and flags the one mistake it most needs caught: any task used in both `eval` and a training stage. `zps.stamp_stage`, `zps.stage_report`, `zps.stage_of`, `zps.STAGES` (`sft`, `rm`, `rl`, `eval`, `mid`).
 
@@ -450,16 +461,19 @@ Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO, 
 
 ```python
 run = zps.train(
-    "ds_...", method="sft", base_model="Qwen/Qwen3-4B"
-)  # or "grpo" (steps=), "dpo", "rm"
+    "ds_...", method="sft", base_model="Qwen/Qwen3-4B", epochs=2
+)  # or "grpo" / "dpo" / "rm" with steps=
 run.wait()  # done or failed; run.url is the curve while it goes
 run.training["before"], run.training["after"]  # holdout pass@1 (SFT: loss)
+run.delta(
+    before_rows, after_rows, target="pass_at_1", by="category"
+)  # paired delta on the run page
 model = zps.serve("refund-v2", run)  # adapter on an OpenAI-compatible endpoint
 # model["endpoint"] + /chat/completions, model="refund-v2", bearer = your zp_ key
 zps.models()  # what the account hosts
 ```
 
-`holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`). The trainer's default bases (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) train in under a minute but cannot be served, so `train` warns when a run will not reach an endpoint; SFT runs on an A10G; GRPO and DPO run on an L40S, so a 4B base fits all three. Qwen3 answers in thinking mode by default: leave room in `max_tokens` or send `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`.
+`epochs=` sets SFT, `steps=` sets GRPO, DPO and RM; each method has a default. `run.delta` is `delta_report` (below) kept on the run and drawn on its page, including the per-group table when `by=` names a row key or marker; `zps.attach_delta(run_id, before, after)` does the same for a run that already finished. `holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`). The trainer's default bases (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) train in under a minute but cannot be served, so `train` warns when a run will not reach an endpoint; SFT runs on an A10G; GRPO and DPO run on an L40S, so a 4B base fits all three. Qwen3 answers in thinking mode by default: leave room in `max_tokens` or send `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`.
 
 `method="rm"` trains a reward model (rlhf-book ch. 5) on the set's pass-vs-fail pairs and reports pair accuracy on the held-out pairs before and after. `zps.reward_model(run)` is that model as a judge, with the judge contract (`reward` 0/1 against the run's threshold, `rm_score` raw), so it goes wherever a judge goes:
 
@@ -524,19 +538,21 @@ zps.publish("ds_...", agent="airline-support")  # or publish an existing one
 zps.catalog()  # every public card, by agent
 rows = zps.pull("ds_...")  # public sets need no key
 zps.unpublish("ds_...")
+```
 
 Hugging Face, both directions. Connect your account once on any dataset page, then:
 
 ```python
-zps.hf_status()                                               # connected? namespaces
-zps.hf_publish("ds_...", repo="airline-refunds", wait=True)   # rows -> a dataset repo you own
-zps.hf_publish_run("run_...", private=True)                   # a finished run's LoRA adapter -> a model repo
-row = zps.import_hf("tatsu-lab/alpaca", split="train", purpose="eval")   # any Hub split -> your account
-zps.profile(row["datasetId"])                                 # profiled before you train on it
+zps.hf_status()  # connected? namespaces
+zps.hf_publish("ds_...", repo="airline-refunds", wait=True)  # rows -> a dataset repo you own
+zps.hf_publish_run("run_...", private=True)  # a finished run's LoRA adapter -> a model repo
+row = zps.import_hf(
+    "tatsu-lab/alpaca", split="train", purpose="eval"
+)  # any Hub split -> your account
+zps.profile(row["datasetId"])  # profiled before you train on it
 ```
 
-Every push is one commit tagged `zp-<id>`, so `load_dataset(repo, split, revision="zp-ds_...")` pins the exact push; the repo's `zeroproof.json` maps each split to its ZeroProof dataset with history.
-```
+Every push is one commit tagged `zp-<id>`, so `load_dataset(repo, split, revision="zp-ds_...")` pins the exact push; the repo's `zeroproof.json` maps each split to its ZeroProof dataset with history. Worked example: [`examples/hugging-face`](examples/hugging-face).
 
 Cards live at https://zeroproofai.com/datasets, grouped by agent, with rows,
 size and the analyzer's numbers on each. A dataset must be finalized and
@@ -596,7 +612,16 @@ print(scored.pass_at)  # pass@1 0.61 | pass^8 0.32 | pass@8 0.88 | headroom 0.27
 ```
 
 `simulate(logprobs=True)` records, on every agent turn, the summed log-probability of the tokens the policy generated and how many there were (`step["logprob"]`, `step["n_tokens"]`, totals on the row). A trainer that updates on these rollouts later needs that number to form the importance ratio `exp(new_logprob - logprob)`; without it the update is off-policy and nothing says so. `zps.logprob_report(rows)` says how much was captured and whether reward tracks the policy's confidence, which on a fair judge it should not. Score the same rows under a reference model, put its summed logprob in `ref_logprob`, and `zps.mean_kl(rows)` gives the sampled KL per generated token, overall and per task; `zps.calibrate(rows, ref="ref_logprob")` writes it into each row's `calibration.mean_kl`. A turn the model cut at the token cap is marked `truncated`. Independently of `logprobs`, every agent step also records what its model call cost when the server reports it (`step["input_tokens"]`, `step["output_tokens"]`, summed into `row["usage"]`), which is what the platform counts per day.
-zps.staleness_report(rows, base_model="Qwen/Qwen3-4B")  # policy versions, stale rows, logprob coverage
+
+```python
+zps.logprob_report(rows)  # coverage, and whether reward tracks the policy's confidence
+zps.mean_kl(rows, ref="ref_logprob")  # sampled KL per generated token, overall and per task
+zps.staleness_report(
+    rows, base_model="Qwen/Qwen3-4B"
+)  # policy versions, stale rows, logprob coverage
+```
+
+`staleness_report` is the off-policy check (rlhf-book ch. 6): rows sampled by an older policy are usable only when they carry the sampler's version and its logprobs, so the importance ratio can be formed; rows whose `model_version` differs from `base_model` are `stale`.
 
 The default judge is not the policy. `zps.grade` grades with hosted Phi-4 (`ZEROPROOF_JUDGE` overrides; any `vllm:`/`openai:` spec or a bare URL works), while rollouts come from hosted Qwen, because a judge grading its own model's writing prefers it. When the judge and the rows' `model_version` are the same model anyway, the grade report says so (`self_judged`, `warnings`).
 

@@ -8,8 +8,17 @@ pick up an API key you have a dashboard with something on it worth looking at.
 The point is not the agent. The point is what two independent graders disagree
 about, which you can only see once the runs are in one place.
 
-Here is a real 60-run batch, grouped by whether the observable signals flagged
-the turn:
+What you will learn: how a trace becomes a row with a `scenario_id` and a
+`reward`, what an LLM judge misses that a counter over tool calls catches,
+and how to nominate a ground-truth score so the traces page ranks the
+other signals against it. You need `ZEROPROOF_API_KEY` and an
+OpenAI-compatible model endpoint with its token (`--dry-run` needs
+neither); about eight minutes for the default 40 runs.
+
+Here is one 60-run batch of `python run.py --runs 60` against the default
+model, judge on, grouped by whether the observable signals flagged the
+turn. Personas are sampled per run, so another batch gives other counts;
+the ordering of the rows is what repeats:
 
 | turns | n | judge score | held-out solved |
 |---|---|---|---|
@@ -34,6 +43,7 @@ not the number you would have given. Finding those is the job.
 export ZEROPROOF_API_KEY=zp_...     # your key, from the platform page
 export ZEROPROOF_MODEL_URL=...      # any OpenAI-compatible base URL, ending in /v1
 export ZEROPROOF_MODEL_KEY=...      # its bearer token
+cd examples/agent-behavior
 python run.py --runs 40 --days 3
 ```
 

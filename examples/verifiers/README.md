@@ -6,11 +6,15 @@ a partial score, with no model call. Every verifier honors the judge
 contract, so it plugs into `data.grade(judge=...)`, `evaluate`, `optimize`
 and a gated `push` exactly where an LLM judge would.
 
-```
+From the repo root:
+
+```bash
 python examples/verifiers/run.py
 ```
 
-No key, no model. The script shows math (`MathEqual`), an answer-and-format
+No key, no model, seconds. What you will learn: where a verifier reads the
+candidate and the gold, how to compose checks, and how a verifier's rows
+feed `optimize` and a gated `push` unchanged. The script shows math (`MathEqual`), an answer-and-format
 gate (`All([...])`), code execution against hidden tests (`CodeExec`), and a
 JSON-schema check (`JSONSchema`).
 

@@ -7,14 +7,22 @@ The agent in this example is a quant research assistant working in a Python repo
 that uses pandas and yfinance. Swap `spec.json` for your own tools and policy and
 the rest of the pipeline is unchanged.
 
+What you will learn: why GRPO needs uniform groups, the four numbers that say
+whether a dataset carries gradient, how an effort-negative reward gets gamed
+(and how the offline gate predicted it), and the prompt shape the `verifiers`
+library reads. You need `VLLM_API_KEY` for hosted Qwen on both roles; about
+three minutes for 800 rollouts. `diagnose.py` and `export_prompts.py` run
+offline on any graded row file.
+
 ## Run it
 
 ```bash
 pip install zeroproof
 export VLLM_API_KEY=...            # ask ZeroProof for a key
-uv run python generate.py --situations 100 --k 8
-uv run python diagnose.py data/rl.jsonl
-uv run python export_prompts.py data/rl.jsonl
+cd examples/prime-intellect-rl
+python generate.py --situations 100 --k 8
+python diagnose.py data/rl.jsonl
+python export_prompts.py data/rl.jsonl
 ```
 
 About three minutes for 800 rollouts.
@@ -64,7 +72,12 @@ user would type, and they make broken tasks. On the run below this removed 7 of
 
 ## Measured on this spec
 
-100 prompts, k=8, 800 rollouts, `Qwen3-4B-Instruct` on both roles.
+`generate.py --situations 100 --k 8` at the two fault rates below (the
+flag defaults to 0.15), then `diagnose.py` on each file: 100 prompts, k=8,
+800 rollouts, `Qwen3-4B-Instruct` on both roles, `conduct_grade` as the
+reward. The engine's seed is its default 0, but rollouts run concurrently,
+so the exact figures are one run's; the sign of the effort correlation is
+the part that holds.
 
 | `fault_rate` | live groups | within-group std | mean reward | effort corr |
 |---|---|---|---|---|

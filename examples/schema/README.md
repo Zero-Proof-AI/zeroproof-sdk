@@ -9,16 +9,26 @@ those four objects, which is why one dataset can feed all of them.
 These two scripts show the round trip and the projections. Both run offline
 with a scripted agent, so no key is needed, and both accept any JSONL the SDK
 ever wrote: a fresh run, a training export, a platform pull, an OTel ingest,
-or a file from the public Hugging Face set.
+or a file from the public Hugging Face set. What you will learn: which of
+the four objects each training target reads, and the two leaks the split
+makes impossible (model output in a shipped task file, the eval marker as
+the training reward). Seconds to run.
 
 ## Run it
 
 ```bash
 pip install zeroproof
+cd examples/schema
 python migrate.py                    # simulate 24 rows, stamp and split them
 python migrate.py old_run.jsonl      # or migrate any legacy file
 python project.py out/rows.v1.jsonl  # one file in, six targets out
 ```
+
+With the defaults (`--rows 24`, seed 0) `migrate.py` reports 24 rows over
+12 tasks, all already version 1, and `project.py` writes 9 train and 3
+holdout tasks into 6 eval, 3 SFT, 3 preference, 9 GRPO, 3 OPSD and 9 OPD
+rows. The counts are small because the scripted agent passes about half
+its tasks; the projections, not the counts, are the point.
 
 ## `migrate.py`
 

@@ -5,6 +5,15 @@ simulator, a reward that is a function rather than a judge, TRL's
 `GRPOTrainer` with a LoRA adapter, reward and KL on the training page as it
 runs, and a before/after on a holdout when it is done.
 
+What you will learn: a reward that is a function of the first reply, how a
+run reports into the platform through `zps.TrainerCallback` and
+`HackMonitor`, a paired pass@1 delta with an interval, why the holdout has
+to be stratified by prompt category, and how loss variants and prompt
+balance change the result. You need a Modal account and one A10G (under
+fifteen minutes at the default 40 steps, longer at 120);
+`ZEROPROOF_API_KEY` is optional and only decides whether the run page is
+drawn.
+
 ## Run it
 
 ```bash
@@ -65,6 +74,16 @@ all, and a second seed on the prompts, since 40 holdout prompts is a wide
 interval. The dashboard shows both runs side by side.
 
 ## More prompts, tighter intervals
+
+Every number from here on is from `train_modal.py` (or `../dpo/train_modal.py`
+where DPO is named) with the flags quoted and the defaults otherwise:
+`--seed 0`, 20% of scenarios held out, pass@1 on the holdout from four
+samples per prompt before and after, and the bracket is the paired
+bootstrap 95% interval from `run.delta`. The holdout split is a plain hash
+by scenario on the template set and `split_holdout_stratified` once
+`--prompts-file` is given (the section on categories below says why). A
+GPU run is not bit-reproducible; expect the same verdict, not the same
+third decimal.
 
 The template writer gives about seventy distinct prompts, so the holdout is
 fourteen and every pass@1 interval is a quarter wide. `prompts.jsonl` is a

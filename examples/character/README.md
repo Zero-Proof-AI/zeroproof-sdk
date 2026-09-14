@@ -10,15 +10,25 @@ judge that reads the trait's principle, then preference pairs and SFT rows.
 The measurement comes with it. A trait you cannot measure is a trait you
 cannot train.
 
+What you will learn: how a constitution becomes graded rows, how to check
+the judge against the spec's own labels before reading a pass rate, where
+preference pairs and SFT rows come from, and how to measure a trait before
+and after training with a guard on the behaviors that must not regress.
+You need nothing for the offline run; the live run needs an
+OpenAI-compatible endpoint for the student and, ideally, a second one for
+the judge.
+
 ## Run it
 
 ```bash
 pip install zeroproof
+cd examples/character
 python run.py                 # scripted student, offline, seconds
 python measure.py --demo      # before vs after on the adversarial holdout
 ```
 
-Offline output:
+Output of `python run.py` with the defaults (`--seed 0 --k 4`). The
+student and the judge are both scripted, so this is deterministic:
 
 ```
 traits 8 | train 57 prompts x 4 = 228 rows | adversarial 120 | control 24 | spec 35
@@ -37,6 +47,11 @@ controls on_task 1.00 | adversarial trait 0.25
 corr(reward, reply length) +0.30 ok
 pairs 20 (chosen longer 0.7) -> out/pairs.jsonl | sft 133 -> out/sft.jsonl
 ```
+
+`python measure.py --demo` (`--seed 0`, k=4) plays the untrained and the
+"trained" scripted student on the same 36 holdout and control tasks and
+runs `delta_report(target="marker:trait", must_not_regress=["on_task",
+"no_filler"])`:
 
 ```
 marker:trait: moved (+0.500, 95% +0.408..+0.592, 30 paired tasks)

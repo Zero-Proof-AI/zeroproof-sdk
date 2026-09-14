@@ -2,7 +2,10 @@
 
 Push a graded dataset to a Hub repo you own, pull any Hub split onto your
 account and read its numbers before you train on it, and push a finished
-training run's adapter as a model repo. One script, three calls.
+training run's adapter as a model repo. One script, three calls. You need
+`ZEROPROOF_API_KEY` and a Hugging Face account connected on the platform
+(the import half of the script works on a public repo without the
+connection); a minute end to end.
 
 | call | what moves | where it lands |
 |---|---|---|
@@ -25,6 +28,7 @@ token, the SDK never sees it). Then:
 ```bash
 pip install zeroproof
 zeroproof login                                   # or ZEROPROOF_API_KEY
+cd examples/hugging-face
 python roundtrip.py                               # import a public split, profile it, print the numbers
 python roundtrip.py --push ds_0123 --repo my-set  # also push one of your sets and print the tag
 ```
