@@ -3,6 +3,15 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `zps.reference_logprobs(rows, "vllm:<model>@<url>")`: scores every agent turn
+  under a reference model through `prompt_logprobs` on any vLLM-style
+  endpoint (the platform's served base by name, a hosted model, or
+  `run:<runId>`) and stamps `ref_logprob`, `ref_n_tokens`, `ref_model`, so
+  `mean_kl` has its other side (rlhf-book ch. 6, 8, 15). The report's
+  `token_count_gap` says whether the two tokenizers agree.
+
 ## 0.40 (2026-09-14)
 
 - Docs only: fixed the `zeroproof.simulations.judging` module pointer (it is

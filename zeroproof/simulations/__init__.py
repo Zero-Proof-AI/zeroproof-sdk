@@ -142,6 +142,7 @@ from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
+from .score.reference import reference_logprobs
 from .score.rubric import (
     Criterion,
     Rubric,
@@ -315,6 +316,7 @@ __all__ = [
     "rank",
     "rank_rows",
     "recommend",
+    "reference_logprobs",
     "refresh_delegated_credential",
     "refusal_report",
     "register_agent",

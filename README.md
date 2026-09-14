@@ -890,6 +890,9 @@ print(scored.pass_at)  # pass@1 0.61 | pass^8 0.32 | pass@8 0.88 | headroom 0.27
 
 ```python
 zps.logprob_report(rows)  # coverage, and whether reward tracks the policy's confidence
+zps.reference_logprobs(
+    data, "vllm:Qwen/Qwen3-4B@https://zeroproofai--zeroproof-serve-qwen3-4b.modal.run/v1"
+)  # ref_logprob on every row
 zps.mean_kl(rows, ref="ref_logprob")  # sampled KL per generated token, overall and per task
 zps.staleness_report(
     rows, base_model="Qwen/Qwen3-4B"
