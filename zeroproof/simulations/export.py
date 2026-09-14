@@ -124,7 +124,14 @@ def tool_call_roundtrip(rows: Sequence[dict]) -> dict[str, Any]:
     return {"checked": checked, "invalid": invalid, "rows": bad_rows[:20]}
 
 
-def _convert_messages(messages: Sequence[dict], *, system: str, strip_think: bool) -> list[dict]:
+def _convert_messages(
+    messages: Sequence[dict],
+    *,
+    system: str,
+    strip_think: bool,
+    max_tool_output_chars: int | None = None,
+    stats: dict[str, int] | None = None,
+) -> list[dict]:
     out: list[dict] = []
     if system:
         out.append({"role": "system", "content": system})
@@ -161,6 +168,17 @@ def _convert_messages(messages: Sequence[dict], *, system: str, strip_think: boo
                 entry["tool_calls"] = wire
             out.append(entry)
         elif role == "tool":
+            if max_tool_output_chars is not None and len(content) > int(max_tool_output_chars):
+                # Tool output eats context faster than anything else the
+                # trainer sees; cutting it is a decision the export makes
+                # out loud (rlhf-book ch. 13), never silently.
+                cap = max(0, int(max_tool_output_chars))
+                cut = len(content) - cap
+                marker = "[... " + str(cut) + " chars of tool output truncated]"
+                content = content[:cap] + chr(10) + marker
+                if stats is not None:
+                    stats["truncated"] = stats.get("truncated", 0) + 1
+                    stats["chars_cut"] = stats.get("chars_cut", 0) + cut
             entry = {"role": "tool", "content": content}
             if message.get("name"):
                 entry["name"] = str(message["name"])
@@ -220,6 +238,7 @@ def training_rows(
     strip_think: bool = True,
     mask_mode: str = "assistant",
     unroll: bool = False,
+    max_tool_output_chars: int | None = None,
 ) -> list[dict]:
     """Rows a trainer can consume directly. See the module docstring.
 
@@ -239,6 +258,13 @@ def training_rows(
     (the source row's prompt hash and rollout index); ``mask_mode`` is
     ignored, and no group fields are stamped, since samples of one
     conversation are not a GRPO group.
+
+    ``max_tool_output_chars`` caps each tool message at that many
+    characters, appending ``[... N chars of tool output truncated]`` and
+    counting the cut on the row as ``tool_output_truncated`` (messages)
+    and ``tool_output_chars_cut``. Tool output is masked from the loss
+    anyway; what it costs is context, and the cut is explicit rather than
+    silent (rlhf-book ch. 13). ``None`` cuts nothing.
     """
     if mask_mode not in MASK_MODES:
         raise ValueError(f"mask_mode must be one of {MASK_MODES}, got {mask_mode!r}")
@@ -274,9 +300,19 @@ def training_rows(
                 if isinstance(step, dict)
             ]
         messages = row.get("messages") or conversation(row)
+        cut_stats: dict[str, int] = {}
         entry: dict[str, Any] = {
-            "messages": _convert_messages(messages, system=system, strip_think=strip_think),
+            "messages": _convert_messages(
+                messages,
+                system=system,
+                strip_think=strip_think,
+                max_tool_output_chars=max_tool_output_chars,
+                stats=cut_stats,
+            ),
         }
+        if cut_stats.get("truncated"):
+            entry["tool_output_truncated"] = cut_stats["truncated"]
+            entry["tool_output_chars_cut"] = cut_stats["chars_cut"]
         # Train on the agent's turns only. Tool output is the environment's
         # text, not the policy's, and is masked from the loss (rlhf-book
         # ch. 13); system and user turns likewise. One entry per message.
@@ -389,6 +425,7 @@ def export_training(
     validate: bool = True,
     mask_mode: str = "assistant",
     unroll: bool = False,
+    max_tool_output_chars: int | None = None,
 ) -> dict[str, Any]:
     """Write ``training_rows`` as JSONL. Never overwrites the source.
 
@@ -404,6 +441,7 @@ def export_training(
         strip_think=strip_think,
         mask_mode=mask_mode,
         unroll=unroll,
+        max_tool_output_chars=max_tool_output_chars,
     )
     roundtrip = tool_call_roundtrip(rows)
     if validate and roundtrip["invalid"]:
@@ -429,6 +467,9 @@ def export_training(
         "tool_call_roundtrip": roundtrip,
         "mask_mode": "final (unrolled)" if unroll else mask_mode,
         "unrolled": unroll,
+        "max_tool_output_chars": max_tool_output_chars,
+        "tool_output_truncated": sum(int(r.get("tool_output_truncated") or 0) for r in rows),
+        "tool_output_chars_cut": sum(int(r.get("tool_output_chars_cut") or 0) for r in rows),
         "trained_messages": sum(sum(r["loss_mask"]) for r in rows),
         "masked_messages": sum(len(r["loss_mask"]) - sum(r["loss_mask"]) for r in rows),
     }

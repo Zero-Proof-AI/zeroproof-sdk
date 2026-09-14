@@ -13,6 +13,10 @@ from typing import Any
 
 from .agents import complete, local_model, parse_backend_spec, split_user_turns
 
+#: Claude Code tool results are kept to this many characters on the step;
+#: a longer one is cut and the step says so (result_truncated, result_chars).
+CLAUDE_CODE_RESULT_CHARS = 2000
+
 
 def _missing(extra: str, exc: Exception) -> ImportError:
     return ImportError(f"this adapter needs '{extra}' installed (underlying: {exc})")
@@ -402,7 +406,13 @@ def parse_claude_stream(stdout: str) -> dict:
             for block in (event.get("message") or {}).get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
                     call = pending.pop(str(block.get("tool_use_id")), {"tool": "", "arguments": {}})
-                    steps.append({**call, "result": str(block.get("content"))[:2000]})
+                    result = str(block.get("content"))
+                    step = {**call, "result": result[:CLAUDE_CODE_RESULT_CHARS]}
+                    if len(result) > CLAUDE_CODE_RESULT_CHARS:
+                        # say so on the step; a silent cut is a decision nobody made
+                        step["result_truncated"] = True
+                        step["result_chars"] = len(result)
+                    steps.append(step)
         elif kind == "result":
             final_text = str(event.get("result") or "")
     steps.extend({**call, "result": ""} for call in pending.values())
