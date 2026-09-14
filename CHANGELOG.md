@@ -5,6 +5,19 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `delta_report(proxy=)`, and `proxy=` on `run.delta` / `attach_delta`:
+  name the training reward's marker (e.g. `"marker:first_action"`) and
+  the report says whether the run over-optimized it (rlhf-book ch. 14):
+  `over_optimized` is true, the report fails, and a warning names both
+  intervals when the proxy moved up while the target did not, or the
+  proxy's interval sits entirely above the target's. `proxy_verdict`,
+  `proxy_delta`, `proxy_ci95` on the report; `format_delta_report`
+  prints the proxy line. `zps.hack_scan_diff(before, after, endorsed=)`
+  is the scan before training against the scan after on rollouts scored
+  by the same reward: `gained` (features that clear the floor only
+  after), `lost`, `moved`, and `learned`, the one line that names what
+  the update moved toward and whether it is endorsed;
+  `format_hack_scan_diff` prints it.
 - `zps.trace_markers(rows)`, `zps.trace_flags(row)`, `zps.trace_flag_report(rows)`:
   did the agent fake the work? Flags read from the trajectory rather
   than the prose (rlhf-book ch. 13, 14), a port of the agent-behavior

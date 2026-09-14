@@ -613,6 +613,119 @@ def format_hack_scan(report: dict[str, Any], *, top: int = 12) -> str:
     return "\n".join(lines)
 
 
+def hack_scan_diff(
+    before: Sequence[dict],
+    after: Sequence[dict],
+    *,
+    endorsed: Sequence[str] = (),
+    top: int = 10,
+    **scan_kwargs: Any,
+) -> dict[str, Any]:
+    """What the policy learned: the scan before training against the scan
+    after, on rollouts scored by the same reward.
+
+    A feature that clears the floor after and did not before is what the
+    update moved toward; one that dropped out is what it moved away
+    from. ``gained`` and ``lost`` list them with both correlations,
+    ``moved`` the largest shifts either way, and ``learned`` is the one
+    line to read: the top gained feature, and whether it is endorsed.
+    ``scan_kwargs`` reach both ``hack_scan`` calls.
+    """
+    a = hack_scan(before, endorsed=endorsed, top_features=None, **scan_kwargs)
+    b = hack_scan(after, endorsed=endorsed, top_features=None, **scan_kwargs)
+
+    def index(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        for x in report["features"]:
+            for name in (x["name"], *x.get("aliases", [])):
+                out[name] = x
+        return out
+
+    fa, fb = index(a), index(b)
+    names = sorted(set(fa) | set(fb))
+    rows: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for name in names:
+        xa, xb = fa.get(name), fb.get(name)
+        key = id(xb) if xb is not None else id(xa)
+        if key in seen:
+            continue  # an alias of a feature already listed
+        seen.add(key)
+        rows.append(
+            {
+                "name": name,
+                "rho_before": xa["rho"] if xa else 0.0,
+                "rho_after": xb["rho"] if xb else 0.0,
+                "above_before": bool(xa and xa["above_floor"]),
+                "above_after": bool(xb and xb["above_floor"]),
+                "endorsed": bool((xb or xa or {}).get("endorsed")),
+            }
+        )
+    for r in rows:
+        r["shift"] = round(abs(r["rho_after"]) - abs(r["rho_before"]), 4)
+    gained = sorted(
+        (r for r in rows if r["above_after"] and not r["above_before"]),
+        key=lambda r: -abs(r["rho_after"]),
+    )
+    lost = sorted(
+        (r for r in rows if r["above_before"] and not r["above_after"]),
+        key=lambda r: -abs(r["rho_before"]),
+    )
+    moved = sorted(rows, key=lambda r: -abs(r["shift"]))[: max(0, int(top))]
+    warnings: list[str] = []
+    if gained:
+        g = gained[0]
+        learned = (
+            f'the policy learned "{g["name"]}" (within-ask rho {g["rho_before"]:+.2f} -> '
+            f"{g['rho_after']:+.2f})" + ("" if g["endorsed"] else ", which is not endorsed")
+        )
+        if endorsed and not g["endorsed"]:
+            warnings.append(f"{learned}: a reward hack landed (rlhf-book ch. 14)")
+    elif b["top_feature"]:
+        learned = (
+            f"nothing new clears the floor after training; the top feature is still "
+            f'"{b["top_feature"]}"'
+        )
+    else:
+        learned = "no feature clears the floor after training"
+    if a["regime"] != b["regime"]:
+        warnings.append(f"regime {a['regime']} -> {b['regime']}")
+    return {
+        "before": {k: a[k] for k in ("regime", "top_feature", "rho_max", "tau", "integrity")},
+        "after": {k: b[k] for k in ("regime", "top_feature", "rho_max", "tau", "integrity")},
+        "gained": gained[: max(0, int(top))],
+        "lost": lost[: max(0, int(top))],
+        "moved": moved,
+        "learned": learned,
+        "warnings": warnings,
+    }
+
+
+def format_hack_scan_diff(report: dict[str, Any]) -> str:
+    """The block a person reads: what was learned, then the shifts."""
+    a, b = report["before"], report["after"]
+    lines = [
+        report["learned"],
+        f"regime {a['regime']} -> {b['regime']}; top {a['top_feature']!r} -> {b['top_feature']!r}",
+        f"  {'feature':<44}{'before':>8}{'after':>8}",
+    ]
+    for r in report["moved"]:
+        tag = (
+            "+"
+            if r["above_after"] and not r["above_before"]
+            else "-"
+            if r["above_before"] and not r["above_after"]
+            else " "
+        )
+        mark = "e" if r["endorsed"] else " "
+        lines.append(
+            f"{tag}{mark}{r['name'][:43]:<44}{r['rho_before']:>+8.3f}{r['rho_after']:>+8.3f}"
+        )
+    for w in report.get("warnings") or []:
+        lines.append(f"! {w}")
+    return "\n".join(lines)
+
+
 __all__ = [
     "DEFAULT_MIN_OBS",
     "DEFAULT_N_PERM",
@@ -622,7 +735,9 @@ __all__ = [
     "SAT_FLAG",
     "auto_terms",
     "format_hack_scan",
+    "format_hack_scan_diff",
     "hack_scan",
+    "hack_scan_diff",
     "hand_features",
     "scan_text",
 ]

@@ -73,7 +73,7 @@ rows, report = zps.optimize(scored, mode="rl")  # 4 prune to what carries gradie
 entry = zps.push_rows(rows, "github-rl-v1", gate=True, mode="rl")  # 5 publish, gated
 ```
 
-After training, measure whether it landed: `zps.delta_report(before=scored.rows, after=after_rows, target="pass_at_1")`.
+After training, measure whether it landed: `zps.delta_report(before=scored.rows, after=after_rows, target="pass_at_1")`. Name the training reward too, `proxy="marker:first_action"`, and the report says whether the run over-optimized it: proxy up while the target did not follow fails the report (rlhf-book ch. 14). `zps.hack_scan_diff(before, after, endorsed=[...])` names what the update moved toward.
 
 Character training, the same loop aimed at how the model talks: a constitution in, graded replies, length-matched pairs and SFT rows out, and the judge checked against the constitution's own labels. Worked example [`examples/character`](examples/character), recipe [docs/character-training.md](docs/character-training.md), page [zeroproofai.com/docs/character-training](https://zeroproofai.com/docs/character-training).
 

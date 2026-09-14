@@ -105,7 +105,7 @@ from .score.grounding import (
     mark_grounding,
     ungrounded_arguments,
 )
-from .score.hack_scan import format_hack_scan, hack_scan
+from .score.hack_scan import format_hack_scan, format_hack_scan_diff, hack_scan, hack_scan_diff
 from .score.hygiene import (
     HACK_THRESHOLD,
     dedupe_groups,
@@ -253,6 +253,7 @@ __all__ = [
     "format_delta_report",
     "format_hack_monitor",
     "format_hack_scan",
+    "format_hack_scan_diff",
     "format_judge_trust",
     "format_markers",
     "format_stages",
@@ -264,6 +265,7 @@ __all__ = [
     "grounding_report",
     "group_signal",
     "hack_scan",
+    "hack_scan_diff",
     "hf_publish",
     "hf_publish_run",
     "hf_status",

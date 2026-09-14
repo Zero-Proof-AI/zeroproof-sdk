@@ -12,6 +12,12 @@ regression and fails the report; any other metric that drops
 significantly is a warning (rlhf-book ch. 15: post-training on one thing
 forgets others, and on-policy data forgets less, which is only visible
 if you measure the others).
+
+``proxy`` names the metric the run was trained on (the training reward,
+kept on the rows as a marker) when it is not the target. Over-
+optimization is the two curves parting (rlhf-book ch. 14): the proxy
+moved up while the target did not follow, or the proxy's interval sits
+entirely above the target's. The report says so and fails.
 """
 
 from __future__ import annotations
@@ -78,6 +84,7 @@ def delta_report(
     markers: Sequence[str] | None = None,
     by: str | Callable[[dict], Any] | None = None,
     run_std: float | None = None,
+    proxy: str | None = None,
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
 ) -> dict[str, Any]:
@@ -85,6 +92,12 @@ def delta_report(
 
     ``target`` names the metric the run was meant to move (``"pass_at_1"``
     or ``"marker:<name>"``); the verdict on it is the headline.
+    ``proxy`` names the metric the run was actually trained on (the
+    training reward as a marker, e.g. ``"marker:first_action"``). When
+    the proxy moved up and the target did not, or the proxy's interval
+    sits entirely above the target's, the report is ``over_optimized``
+    and fails: the policy learned something the target does not credit
+    (rlhf-book ch. 14).
     ``must_not_regress`` lists metrics whose significant drop fails the
     report. Metric names for markers are the marker names; pass@1 is
     ``"pass_at_1"``. Tasks on one side only do not pair; their count is
@@ -154,6 +167,41 @@ def delta_report(
             target_verdict = "within_eval_noise"
     ok = not regressions and target_verdict not in {"moved_the_wrong_way"}
     warnings: list[str] = []
+
+    # proxy vs target: the book's over-optimization picture, as a verdict
+    proxy_key = _key(proxy) if proxy else None
+    proxy_result = results.get(proxy_key) if proxy_key else None
+    proxy_verdict: str | None = None
+    over_optimized = False
+    headline_for_proxy = target_result if target_result else results["pass_at_1"]
+    headline_name = target_key if target_result else "pass_at_1"
+    if proxy_key and proxy_result is None:
+        warnings.append(f"proxy {proxy!r} is not on both row sets")
+        proxy_verdict = "proxy_not_measured"
+    elif proxy_key and proxy_key == headline_name:
+        warnings.append(f"proxy {proxy!r} is the target itself; name the training reward instead")
+        proxy_verdict = "proxy_is_target"
+    elif proxy_result is not None:
+        proxy_verdict = {
+            "b_better": "moved",
+            "a_better": "moved_the_wrong_way",
+            "no_difference_detected": "no_change_detected",
+            "insufficient_data": "insufficient_data",
+        }[proxy_result["verdict"]]
+        proxy_up = proxy_result["verdict"] == "b_better" and proxy_key in loud
+        target_up = headline_for_proxy["verdict"] == "b_better" and headline_name in loud
+        pci, tci = proxy_result.get("ci95"), headline_for_proxy.get("ci95")
+        apart = bool(pci and tci and pci[0] > tci[1])
+        over_optimized = (proxy_up and not target_up) or (proxy_up and apart)
+        if over_optimized:
+            ok = False
+            tspan = f"{tci[0]:+.3f}..{tci[1]:+.3f}" if tci else "n/a"
+            pspan = f"{pci[0]:+.3f}..{pci[1]:+.3f}" if pci else "n/a"
+            warnings.append(
+                f"OVER-OPTIMIZED: {proxy_key} up {proxy_result['delta']:+.3f} (95% {pspan}) while "
+                f"{headline_name} {headline_for_proxy['delta']:+.3f} (95% {tspan}): the policy "
+                "learned something the target does not credit (rlhf-book ch. 14)"
+            )
     if noise is not None and target_verdict == "within_eval_noise" and target_result:
         warnings.append(
             f"{target_key}: {target_result['delta']:+.3f} is inside the eval's own re-run band "
@@ -205,6 +253,11 @@ def delta_report(
         "slipped": slipped,
         "within_noise": within_noise,
         "run_std": float(run_std) if run_std is not None else None,
+        "proxy": proxy_key,
+        "proxy_verdict": proxy_verdict,
+        "proxy_delta": proxy_result["delta"] if proxy_result else None,
+        "proxy_ci95": proxy_result["ci95"] if proxy_result else None,
+        "over_optimized": over_optimized,
         "metrics": results,
         "warnings": warnings,
         "by": (
@@ -228,6 +281,16 @@ def format_delta_report(report: dict[str, Any]) -> str:
             )
         else:
             lines.append(f"{report['target']}: {report['target_verdict']}")
+    if report.get("proxy"):
+        p = report["metrics"].get(report["proxy"])
+        if p and p.get("delta") is not None and p.get("ci95"):
+            lines.append(
+                f"proxy {report['proxy']}: {report['proxy_verdict']} "
+                f"({p['delta']:+.3f}, 95% {p['ci95'][0]:+.3f}..{p['ci95'][1]:+.3f})"
+                + ("  OVER-OPTIMIZED" if report.get("over_optimized") else "")
+            )
+        else:
+            lines.append(f"proxy {report['proxy']}: {report['proxy_verdict']}")
     lines.append("PASS" if report["ok"] else "FAIL")
     for name, r in report["metrics"].items():
         if r.get("delta") is None:
