@@ -146,11 +146,14 @@ def simulate(
     differ on that key and on nothing else. Pass ``run_id=`` to
     ``run_judge`` to pin it.
     ``reproducible=True`` makes it so at any concurrency: each batch of
-    rollouts finishes before the next is chosen, so results are consumed
-    in submission order and every round sees the same state. Same seed,
-    same concurrency, same agent gives the same rows; a slow rollout
-    holds its batch, so uneven latency costs throughput. It needs the
-    clock off, since a clock stop lands wherever the run happens to be.
+    rollouts finishes, and every verdict of the batch lands, before the
+    next is chosen, so results are consumed in submission order and
+    every round sees the same state. ``concurrency: 1`` schedules the
+    same way without the flag, so two same-seed serial runs in one
+    process return the same rows. Same seed, same concurrency, same
+    agent gives the same rows; a slow rollout holds its batch, so
+    uneven latency costs throughput. It needs the clock off, since a
+    clock stop lands wherever the run happens to be.
     Without the flag, which rows land before the cap depends on thread
     timing.
     """

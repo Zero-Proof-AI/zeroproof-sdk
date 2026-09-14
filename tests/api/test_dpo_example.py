@@ -189,6 +189,17 @@ def test_constructed_negatives_pair_the_ask_against_an_invented_call():
     assert fake.startswith("ORD-") and fake.lower() not in prompts[0]["prompt"].lower()
     assert p.invented_call(prompts[0]["prompt"]) == p.invented_call(prompts[0]["prompt"])
     assert all(row["constructed"] for row in out)
-    rows, report = p.sampled_pairs(prompts, replies, system="SYS", constructed=True)
+    rows, report = p.sampled_pairs(
+        prompts, replies, system="SYS", constructed=True, constructed_share=1.0
+    )
     assert report["constructed_pairs"] == 2 and report["trl_rows"] == len(rows)
     assert sum(1 for row in rows if row.get("constructed")) == 2
+    # Repeated prompts (--balance) give one constructed pair, not one per copy.
+    doubled = p.constructed_negatives(prompts + prompts, replies + replies, system="SYS")
+    assert len(doubled) == 2
+    assert len(p.constructed_negatives(prompts, replies, system="SYS", max_pairs=1)) == 1
+    _, rep = p.sampled_pairs(
+        prompts, replies, system="SYS", constructed=True, constructed_share=0.3
+    )
+    on_policy = rep["trl_rows"] - rep["constructed_pairs"]
+    assert rep["constructed_pairs"] <= max(1, int(0.3 * on_policy))

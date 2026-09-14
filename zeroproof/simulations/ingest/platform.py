@@ -20,6 +20,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from typing import Any
@@ -446,6 +447,85 @@ def profile(dataset_id: str, *, force: bool = False, api_key: str | None = None)
 def unpublish(dataset_id: str, *, api_key: str | None = None) -> dict:
     """Take a dataset off the public catalog. The data stays on your account."""
     return _call("POST", f"/datasets/{dataset_id}/unpublish", api_key)
+
+
+# ------------------------------------------------------- training data from traces
+
+
+def _trace_filter(agent: str | None, since: str, extra: dict[str, Any]) -> dict[str, str]:
+    """The trace filters a cut is made from, as the platform sends them."""
+    out = {k: str(v) for k, v in (extra or {}).items() if v is not None and v != ""}
+    if agent:
+        out["agent"] = str(agent).strip().lower()
+    out["from"] = str(since or "all")
+    return out
+
+
+def cuts(
+    agent: str | None = None,
+    *,
+    since: str = "all",
+    api_key: str | None = None,
+    **filters: Any,
+) -> dict:
+    """How your traces group into prompts, and what a cut would hold.
+
+    The numbers the platform's traces page shows above the runs table:
+    ``prompts`` seen, ``rl`` (the ones worth training on, with the train and
+    holdout counts), ``sft``, and ``more`` (prompts that need more runs).
+    Read it before ``cut()`` when you want to know what you would get.
+    """
+    query = urllib.parse.urlencode(_trace_filter(agent, since, filters))
+    return _call("GET", f"/traces/cuts?{query}", api_key)
+
+
+def cut(
+    agent: str | None = None,
+    *,
+    kind: str = "rl",
+    since: str = "all",
+    holdout: float | None = None,
+    band: tuple[float, float] | None = None,
+    name: str | None = None,
+    api_key: str | None = None,
+    **filters: Any,
+) -> dict:
+    """Cut training data out of your traces: the platform's "Make training
+    data" button, as one line.
+
+    Runs of the same prompt are grouped by ``zeroproof.scenario_id``.
+    ``kind="rl"`` keeps the prompts the agent passes some of the time and
+    not always (20% to 80% by default, RLHF book ch. 7); ``kind="sft"``
+    keeps the best run of every prompt that ever passed. Either way the
+    prompts are split into a train set and a held-out set, so a prompt you
+    measure on is never a prompt you trained on.
+
+    ``since`` is the trace window (``"all"``, ``"24h"``, ``"7d"``); any
+    other keyword is a trace filter, the same ones the traces page has
+    (``model=``, ``tool=``, ``evalSet=``, ``measure=``). ``band=(lo, hi)``
+    moves the pass-rate window and ``holdout=`` the split fraction.
+
+    Returns the gate's reply with the two sets pulled out::
+
+        made = zps.cut(agent="my-agent", kind="rl")
+        zps.pull(made["train"]["datasetId"], "train.jsonl")
+        made["holdout"]["datasetId"]   # measure on this, never train on it
+    """
+    body: dict[str, Any] = {
+        "filter": _trace_filter(agent, since, filters),
+        "kind": str(kind).strip().lower(),
+    }
+    if holdout is not None:
+        body["holdout"] = holdout
+    if band is not None:
+        body["lo"], body["hi"] = band
+    if name:
+        body["name"] = name
+    out = _call("POST", "/datasets/cut", api_key, body)
+    made = {str(m.get("role")): m for m in (out.get("made") or [])}
+    out["train"] = made.get("train")
+    out["holdout"] = made.get("holdout")
+    return out
 
 
 def catalog() -> dict:

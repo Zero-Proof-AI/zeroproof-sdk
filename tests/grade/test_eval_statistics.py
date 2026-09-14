@@ -131,28 +131,67 @@ def test_decontaminate_by_ngram_and_exact_match(tmp_path):
             final="please look up order ORD-4017 and tell me whether the refund has been issued yet",
         ),
     ]
+    # the default reads prompts only (rlhf-book ch. 16): verbatim, the
+    # paraphrase (14 of 16 words under one eval prompt), the short exact
     kept, report = decontaminate(rows, evals)
-    assert report["n_contaminated"] == 4 and len(kept) == 1
-    assert report["examples"][0]["field"] == "prompt"
-    assert report["examples"][-1]["field"] == "final_text"
-    assert report["n_eval_rows"] == 2 and report["ngram"] == 8
+    assert report["n_contaminated"] == 3 and len(kept) == 2
+    assert report["n_exact"] == 2 and report["n_near"] == 1
+    assert report["examples"][0]["field"] == "prompt" and report["examples"][0]["match"] == "exact"
+    assert report["examples"][1]["coverage"] == pytest.approx(14 / 16, abs=0.01)
+    assert report["by_field"] == {"prompt": 3} and report["fields"] == ["prompt"]
+    assert report["n_eval_rows"] == 2 and report["n_eval_texts"] == 2 and report["ngram"] == 8
+    # replies are opt-in: the fifth row's reply is an eval prompt verbatim
+    strict = decontaminate(rows, evals, fields=("prompt", "final_text"))[1]
+    assert strict["n_contaminated"] == 4 and strict["by_field"] == {"prompt": 3, "final_text": 1}
+    assert strict["examples"][-1]["field"] == "final_text"
 
     # The eval set's own replies are not a contamination source: shared tool
     # boilerplate between two replies says nothing about the eval question.
     evals_with_replies = [
         {"prompt": "an eval question nobody trained on", "final_text": "Issue 1 is open."}
     ]
-    _kept3, report3 = decontaminate(rows, evals_with_replies, n=3)
+    _kept3, report3 = decontaminate(rows, evals_with_replies, n=3, fields=("prompt", "final_text"))
     assert report3["n_contaminated"] == 0
     with_answer = [{"prompt": "another eval", "answer": "Issue 1 is open."}]
     # four rows carry the default reply; the fifth reply is the eval prompt text
-    assert decontaminate(rows, with_answer, n=3)[1]["n_contaminated"] == len(rows) - 1
+    strict_answer = decontaminate(rows, with_answer, n=3, fields=("prompt", "final_text"))[1]
+    assert strict_answer["n_contaminated"] == len(rows) - 1
+    assert decontaminate(rows, with_answer, n=3)[1]["n_contaminated"] == 0
 
     path = tmp_path / "eval.jsonl"
     path.write_text("".join(json.dumps(e) + "\n" for e in evals))
     _kept2, report2 = decontaminate(rows, [str(path)], n=15)
-    assert report2["n_contaminated"] == 3  # the paraphrase shares 14 words, not 15
+    assert report2["n_contaminated"] == 2  # the paraphrase shares 14 words, not 15
     assert zps.decontaminate(rows, evals)[1]["n"] == 5
+
+
+def test_decontaminate_counts_a_row_when_one_eval_text_covers_it():
+    # #125: template-written situations share whole sentences. Any shared
+    # 8-gram flagged every row of a set written from the same templates;
+    # the coverage rule needs one eval text to account for most of a row.
+    opener = "Hello, I am writing because I want to run a SQL query on the sales table today."
+    world = "The reference is ORD-77 and it should be right there in your system."
+    closer = "Let me know if you need anything else from me, and thanks in advance for the help."
+    evals = [
+        {"prompt": f"{opener} {world} I know your policy says you cannot do this."},
+        {"prompt": f"Hi there, can you check on invoice INV-9? {closer}"},
+    ]
+    rows = [
+        _row(f"{opener} {world} I know your policy says you cannot do this."),  # verbatim
+        _row(f"{opener} {world}"),  # two of three sentences of one eval prompt: a near copy
+        _row(f"{opener} Your system timed out on me last time, so please try again. {closer}"),
+        _row(f"Could you export last month's totals for me? {closer}"),
+    ]
+    kept, report = decontaminate(rows, evals)
+    assert report["n_contaminated"] == 2 and report["n_exact"] == 1 and report["n_near"] == 1
+    assert [e["index"] for e in report["examples"]] == [0, 1]
+    assert report["examples"][1]["coverage"] >= 0.8 and report["overlap"] == 0.8
+    assert len(kept) == 2
+    # the third row is covered by eval texts, but by two different ones
+    # (one sentence each), which is template phrasing and not the question
+    assert decontaminate(rows, evals, overlap=0.5)[1]["n_contaminated"] == 3
+    # any-n-gram, the free-form rule, flags every row here
+    assert decontaminate(rows, evals, overlap=0)[1]["n_contaminated"] == 4
 
 
 # ---------------------------------------------------------------- delta report

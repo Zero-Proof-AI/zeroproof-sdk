@@ -162,7 +162,7 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `fault_rate` | `0.5` | Broken tools. `0` off. Applied by the mock world, so a callable `agent=` that answers its own tool calls never sees one |
 | `simulator` | hosted Qwen | Situation writer. `False` uses the built-in template writer (no model, less variety); an `openai:`/`vllm:` spec runs it on your endpoint |
 | `logprobs` | `False` | Ask the rollout model for the log-probability of every token it generates. Each agent turn's step gets `logprob` and `n_tokens`, the row gets the totals. `"tokens"` keeps the per-token list. Model backends only |
-| `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off |
+| `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off. `concurrency: 1` always runs this way |
 | `grade` | `False` | Legacy: `True` writes the deterministic conduct score at simulation time. Rows come back ungraded by default; grade after with `data.grade(...)` or `zps.grade(...)` |
 | `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |
 | `output` | | JSONL path |
@@ -281,7 +281,7 @@ lineage so iterations show as a family on the platform.
 
 `data.push` and `zps.push_file` run a publish gate first (`gate=False` skips it). Every graded row gets a `calibration` stamp: its task's pass rate over k repeats, k, and the policy that produced it, so a trainer can build a curriculum or retire solved tasks. An RL-shaped run (repeats of one ask) is refused with `PublishGateError` when it is ungraded or has no mixed group, because a grouped update would learn nothing from it. The report comes back as `entry["gate"]`, with warnings when out-of-band or unanimous asks are still present; `zps.optimize(data, mode="rl")` prunes those. `zps.publish_gate(rows)` runs the same check on any row list. The stamp is the schema's `Calibration` object: `zps.calibration_of(row)` reads it back typed, `from_row` carries it on `rollout.extra["calibration"]`, and `to_row` writes it out again.
 
-Training rows from `export_training` / `training_rows` carry a `loss_mask`, one 0/1 per message: 1 on the agent's turns, 0 on system, user, and tool-output turns. Tool output is the environment's text, not the policy's, so a trainer should not learn to predict it. `mask_mode="final"` trains only the last assistant turn, for conversations whose earlier agent turns were scripted or came from another policy; the export report counts `trained_messages` and `masked_messages`. `unroll=True` turns an N-turn conversation into N samples, the k-th ending at the k-th agent turn with loss on that turn only, so every earlier turn trains once with the context it actually had (rlhf-book ch. 4).
+Training rows from `export_training` / `training_rows` carry a `loss_mask`, one 0/1 per message: 1 on the agent's turns, 0 on system, user, and tool-output turns. Tool output is the environment's text, not the policy's, so a trainer should not learn to predict it. `mask_mode="final"` trains only the last assistant turn, for conversations whose earlier agent turns were scripted or came from another policy; the export report counts `trained_messages` and `masked_messages`. `unroll=True` turns an N-turn conversation into N samples, the k-th ending at the k-th agent turn with loss on that turn only, so every earlier turn trains once with the context it actually had (rlhf-book ch. 4). `max_tool_output_chars=` caps each tool message, appends a `[... N chars of tool output truncated]` marker and counts the cut on the row and in the report, so context spent on tool output is a decision the export makes out loud (ch. 13).
 
 ### Prune before training
 
@@ -365,6 +365,24 @@ so editing the system prompt keeps every task except the ones for the
 clause that changed. Rewording one rule, adding one, or swapping the model
 leaves the rest of the eval paired for `compare_runs`.
 
+### Training data out of traces
+
+The platform's "Make training data" button, as one line:
+
+```python
+zps.cuts(agent="my-agent")  # what a cut would hold
+made = zps.cut(agent="my-agent", kind="rl")  # make it
+zps.pull(made["train"]["datasetId"], "train.jsonl")
+made["holdout"]["datasetId"]  # measure on this, never train on it
+```
+
+Runs of the same prompt are grouped by `zeroproof.scenario_id`. `kind="rl"` keeps the
+prompts the agent passes some of the time and not always (20% to 80% by default);
+`kind="sft"` keeps the best run of every prompt that ever passed. Either way the prompts
+are split into a train set and a held-out set. `since="7d"` narrows the window, `band=`
+and `holdout=` move the defaults, and any other keyword is a trace filter (`model=`,
+`tool=`, `evalSet=`).
+
 ### Trust the numbers
 
 Three checks that decide whether a result is believable, all report-only and all over rows you already have.
@@ -394,15 +412,15 @@ zps.mark_grounding(
 zps.grounding_report(rows)  # grounded rate, and the invented values by tool and key
 ```
 
-**Judge trust.** Label 30 to 100 rows by hand as `gold_reward` (0/1). The report gives agreement with a Wilson interval and Cohen's kappa, agreement on two task halves (tune the rubric on one, read the other), judge pass rate on short versus long replies within the same human label (length bias the humans rule out), and, with the judge callable, a re-judge of a sample as-is (consistency) and with neutral filler appended (a flip means the judge reads length). Disagreements come back as a review queue. `format_judge_trust(report)` prints it. The gold set needs both passes and failures; with one class only the report says so and skips the kappa and length flags. With the hosted judge, call `zps.grade` once first (or `warm_judge`) so the cold start, two to three minutes, is not counted as timeouts.
+**Judge trust.** Label 30 to 100 rows by hand as `gold_reward` (0/1). The report gives agreement with a Wilson interval and Cohen's kappa, agreement on two task halves (tune the rubric on one, read the other), judge pass rate on short versus long replies within the same human label (length bias the humans rule out), and, with the judge callable, a re-judge of a sample as-is (consistency) and with neutral filler appended (a flip means the judge reads length). Disagreements come back as a review queue. `format_judge_trust(report)` prints it. `probes="all"` (or a list) tries the reward hacks a policy finds first on the judge on purpose: filler, the rubric's own words stuffed in, a claim of success with no evidence, the ask echoed back, a well-formed tool call with empty arguments, a sycophantic opener, a polite refusal. An additive probe is exploitable when failing replies start passing; a replacement probe when a reply with no content passes. `report["exploitable_by"]` names the holes at or over 10%, and a policy trained on this judge will find those same holes. Standalone: `zps.judge_probes(rows, judge, rubric=...)`. The gold set needs both passes and failures; with one class only the report says so and skips the kappa and length flags. With the hosted judge, call `zps.grade` once first (or `warm_judge`) so the cold start, two to three minutes, is not counted as timeouts.
 
-**Decontamination.** Word 8-gram overlap between a dataset's prompts and replies and any evaluation source: row lists, JSONL paths, or platform dataset ids. Short prompts fall back to exact match. Returns the clean rows and the first offenders.
+**Decontamination.** Word 8-gram overlap between a dataset's prompts and any evaluation source: row lists, JSONL paths, or platform dataset ids. A row is contaminated when it is an eval prompt verbatim or when one eval text covers at least 80% of its words (`overlap=`, the Llama 2 rule); one shared 8-gram is not enough, because situations written from the same templates share whole sentences without sharing the question. Short prompts match verbatim only. `fields=("prompt", "final_text")` also checks replies against eval answers and references. The report separates verbatim hits from near copies and counts hits per field, and returns the clean rows with the first offenders.
 
 **Intervals and comparison.** Every pass@1 now carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. Tasks on one side only are dropped from a paired comparison; `note` says how many and `paired_share` is the fraction that paired, so a verdict over a quarter of the eval reads as one. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
 
 **Same tasks, new prompt.** A run draws its tasks from the grid by seed and, above `concurrency: 1`, by completion order, so a second `simulate()` shares only part of its tasks with the first. To A/B a prompt edit, a model swap or another seed on exactly the same eval, pin the task set: `zps.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base)` re-runs every prompt of `base` (a run, its rows, or its JSONL path) on its own `scenario_id`, under the same faults and world state, and draws nothing new; it stops with `tasks_done` once every prompt has its rollouts, and `compare_runs(base.rows(), rerun.rows())` pairs every task.
 
-**Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `eval_variance(run_1, run_2, run_3)` is the eval's own re-run standard deviation (three or more evaluations of the same model); passing it as `run_std=` makes any delta inside twice that band `within_noise`, and a target there reads `within_eval_noise` rather than moved, since re-running the eval moves it that much on its own (rlhf-book appendix C). `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
+**Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `eval_variance(run_1, run_2, run_3)` is the eval's own re-run standard deviation (three or more evaluations of the same model); passing it as `run_std=` makes any delta inside twice that band `within_noise`, and a target there reads `within_eval_noise` rather than moved, since re-running the eval moves it that much on its own (rlhf-book ch. 16). `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
 
 **Argument grounding.** A policy trained to call a tool learns to call it before it learns when not to; on the refund environment both GRPO and DPO learned to invent an order id on a quarter of the prompts that gave none while the headline rose. `mark_grounding(rows)` stamps `argument_grounding`: 1 when every string argument of every tool call appears in the prompt, the user and system turns, or an earlier tool result (rows with no calls count as grounded), else 0. No categories, any agent; `must_not_regress=["argument_grounding"]` fails the run that learned to invent, and `ungrounded_arguments(row)` / `grounding_report(rows)` name the values. `ignore_keys=` skips free-text arguments, `allow=` lists enums and defaults.
 
@@ -556,7 +574,7 @@ hosted GPU with warm replicas and burst under load.
 | `concurrency` | `32` | Parallel rollouts |
 | `stop_grace` | `5` | Seconds to wait for running rollouts and writer waves after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` / `writer_waves_abandoned` |
 | `embedder` | `"hash"` | Prompt selection |
-| `seed` | `0` | Reproducible draws. Bit-for-bit at `concurrency: 1` or with `reproducible=True`; otherwise which rows land before the cap depends on thread timing |
+| `seed` | `0` | Reproducible draws. Bit-for-bit at `concurrency: 1` or with `reproducible=True`, within a process and across processes; otherwise which rows land before the cap depends on thread timing |
 | `avg_turns` | `4` | Target conversation length |
 
 Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollouts_per_request`; `unique=` → `unique_situations`; `policy=` → `system_prompt`; `risk=` → `fault_rate`.

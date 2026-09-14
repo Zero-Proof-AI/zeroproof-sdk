@@ -50,7 +50,11 @@ def _run(policy, seed=7, **kw):
         repeats=2,
         per_round=40,
         concurrency=1,
-        advanced={"seed": seed},
+        # top-level, not advanced={"seed": ...}: simulate_offline passes
+        # seed=0 itself and an explicit knob overrides the advanced one,
+        # so the "reseeded" run below used to be the same seed and only
+        # the scheduler's timing noise made its task set differ.
+        seed=seed,
         **kw,
     )
 

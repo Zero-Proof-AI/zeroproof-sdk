@@ -135,3 +135,81 @@ def test_parallel_run_is_identical_with_reproducible_flag():
     first, second = run(11), run(97)
     assert len(first["rows"]) == 40
     assert first == second
+
+
+def test_serial_graded_reruns_in_one_process_are_identical():
+    """Two same-seed ``concurrency=1`` runs in one process: same rows.
+
+    The pass-at-k example's shape (rl mode, eight asks by eight repeats,
+    graded in the loop) drew different situations on a rerun. The 0.35 s
+    collect window took whatever had finished when the first rollout
+    landed: an instant agent had several of a batch done by then, a
+    slower one exactly one, and the idle rounds in between drifted the
+    counter that seeds selection. One run here answers at once and the
+    other sleeps on every rollout, the two collect patterns the window
+    told apart, so the test fails without round-synchronous scheduling
+    instead of passing on a quiet machine.
+    """
+    import re
+    import time
+
+    import zeroproof.simulations as zps
+    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from zeroproof.simulations.generate.agents import current_rollout
+
+    timing = re.compile(r"(seconds|elapsed|rate|_s$|_at$|per_second)")
+
+    def scrub(o):
+        if isinstance(o, dict):
+            return {k: scrub(v) for k, v in o.items() if not timing.search(str(k))}
+        if isinstance(o, (list, tuple)):
+            return [scrub(x) for x in o]
+        return o
+
+    def run(latency_s: float):
+        def careless(message: str) -> dict:
+            # Latency is not part of the agent's answer. A split group
+            # (every third repeat refunds without looking) makes the
+            # successive allocator's verify path run too.
+            if latency_s:
+                time.sleep(latency_s)
+            if getattr(current_rollout, "rollout_index", 0) % 3 == 1:
+                return {
+                    "steps": [
+                        {
+                            "tool": "create_refund",
+                            "arguments": {"order_id": "acct_1", "amount": 150},
+                            "result": {"status": "created", "id": "re_150"},
+                        }
+                    ],
+                    "final_text": "Refunded $150.",
+                }
+            return scripted_agent(message)
+
+        d = zps.simulate(
+            careless,
+            tools=TOOLS,
+            policy=POLICY,
+            situations=6,
+            repeats=8,
+            budget=48,
+            seed=2,
+            grade=True,
+            concurrency=1,
+            simulator=False,
+            time_budget=None,
+            mode="rl",
+        )
+        return scrub(
+            {
+                "rows": list(d.rows()),
+                "search": d.search,
+                "coverage": d.coverage,
+                "stopped": d.stopped_because,
+            }
+        )
+
+    first, second = run(0.0), run(0.02)
+    assert len(first["rows"]) == 48
+    assert len({r["prompt"] for r in first["rows"]}) == 6
+    assert first == second

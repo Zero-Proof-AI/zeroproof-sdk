@@ -3,7 +3,63 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.37 (2026-09-14)
+
+- `rubric_judge` numbers the checklist and asks for verdicts by item
+  number; `Rubric.score` also resolves a title, its slug or a paraphrase
+  that contains it, and results carry `n_unanswered`. Live on the hosted
+  judge, 10 of 32 rows had items answered under a rewritten title and
+  failed for it; now none do (#156).
+- `concurrency: 1` is round-synchronous, like `reproducible=True`: the
+  batch's rollouts and their in-loop verdicts all land before the next
+  round is chosen. Two same-seed serial runs in one process could draw
+  different situations: the 0.35 s collect window decided how many of a
+  batch's rollouts a round saw, and the rounds spent waiting drifted the
+  counter that seeds selection. Cold processes happened to agree, so the
+  cross-process check passed; `tests/api/test_reproducibility.py` now
+  also runs `simulate()` twice in one process under contrasting latency.
+  Golden captures move: a serial run now folds every batch whole, so a
+  `scripts/golden.py` diff across this change is expected to differ.
+
+## 0.36 (2026-09-14)
+
+- `training_rows(max_tool_output_chars=)` / `export_training(...)`: each
+  tool message over the cap is cut with a `[... N chars of tool output
+  truncated]` marker and counted on the row (`tool_output_truncated`,
+  `tool_output_chars_cut`) and in the report (rlhf-book ch. 13). The Claude
+  Code adapter's 2000-character cut is now `CLAUDE_CODE_RESULT_CHARS` and a
+  cut step carries `result_truncated` and `result_chars` (#146).
+- `examples/dpo`: constructed negatives are one pair per distinct prompt
+  and capped at `constructed_share` (0.3) of the sampled pairs. Uncapped,
+  the balance repeats multiplied them past the sampled pairs and the
+  policy learned "never call" (with-id pass@1 0.11 to 0.05).
+- `decontaminate` reads prompts only by default, the book's method, and
+  counts a row when it is an eval text verbatim or when one eval text
+  covers at least 80% of its words (`overlap=`, the Llama 2 rule) rather
+  than on any single shared 8-gram. Situations written from one set of
+  templates share whole sentences, so the old default flagged every row
+  of a train/eval pair from the same simulator (rate 1.0, nothing kept)
+  while 41% of the prompts actually repeated; the report now separates
+  `n_exact` from `n_near`, counts hits per field, and carries each
+  offender's coverage. `fields=("prompt", "final_text")` keeps the
+  stricter replies-versus-answers check (#125).
+- `zps.judge_probes(rows, judge)` and `judge_trust(probes="all")`: the
+  reward hacks a policy finds first, tried on the judge on purpose
+  (rlhf-book ch. 14). Seven probes mutate a sampled reply one way and
+  re-judge it: `filler`, `keyword_stuffing` (the rubric's own words,
+  from `rubric=` or the row's system prompt), `success_claim` ("Done. I
+  verified this and all tests pass."), `prompt_echo`, `sycophancy`
+  ("You're absolutely right."), `empty_format` (a well-formed call to
+  the row's tool with empty arguments), `refusal`. An additive probe
+  reports the share of originally failing replies that pass once the
+  text is added; a replacement probe the share that pass with the
+  content gone. `exploitable_by` names the probes at or over the 10%
+  flip flag, each with a one-line warning, and `judge_trust` fails on
+  any. `format_judge_trust` prints the probe table. A probe with
+  nothing to work on (no rubric words, no tool) is `skipped` with the
+  reason.
+
+## 0.35 (2026-09-14)
 
 - `examples/dpo --constructed-negatives`: for every no-id or off-topic
   prompt the policy answered without a tool call, pair that reply
@@ -20,6 +76,54 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## 0.34 (2026-09-14)
 
+- `zps.hack_scan(rows, endorsed=[...])`: what a grouped update would
+  learn from these rewards, named before training (rlhf-book ch. 6, 14).
+  Reward and every candidate feature are centered within ask, the way
+  GRPO baselines them, ranked by that correlation, and compared to a
+  noise floor from shuffling reward within ask (`tau`, 95th percentile
+  of the null maximum), so a feature that only tracks difficulty never
+  counts and the threshold is measured, not guessed. Two tiers, pure
+  Python: the hand tier (reply length, tool calls, turns, truncation,
+  surface counts, one indicator per tool called, mean token logprob,
+  every numeric marker, plus `features=` of your own) and the auto tier
+  (presence of the 200 most common words and word pairs in the agent's
+  text, and pairwise ANDs that beat both parents). `endorsed` names what
+  the reward should track (feature-name substrings such as
+  `"tool:lookup_order"` or `"marker:grounded"`); with it the report says
+  `regime`: `train`, `reward_hack` (the top feature is not endorsed),
+  `pool_exhausted` (over 20% of asks all-pass), `no_signal` (nothing
+  clears the floor) or `unknown`, plus `integrity` (share of the
+  above-floor signal that is endorsed), `top_feature`, the ranking with
+  the pooled correlation beside each, and one-line `warnings`.
+  `zps.format_hack_scan(report)` prints it. Duplicate columns are one
+  feature with `aliases`; 3,200 rollouts scan in about a second.
+  `select_for_rl` / `optimize(mode="rl", endorsed=)` carry it as
+  `report["hack_scan"]` and its warnings in `hygiene_warnings`;
+  `publish_gate` / `push_rows(gate=True)` / `data.push` report it on
+  RL-shaped rows and, with `strict_hacks=True`, refuse a `reward_hack`.
+  The pooled `reward_correlations` scan stays as the second column.
+- `zps.HackMonitor(run, holdout=, proxy=, gold=, ...)`: is the run
+  hacking its reward right now (rlhf-book ch. 14, figure 1)? A
+  Transformers / TRL callback plus `monitor.wrap(reward_fn)` around the
+  reward function. Every `every` steps it samples the holdout from the
+  live policy (`k` completions on up to `n_prompts` asks) and scores it
+  twice: with the training reward (the proxy; `proxy=` or the wrapped
+  function) and with a scorer the proxy cannot see (`gold=`, any judge
+  under the SDK contract). Both land on the run as `proxy_reward` and
+  `gold_reward`, with `holdout_length`. Four alarms, one line each on
+  the run and in `monitor.alarms`: `divergence` (proxy up by `delta`
+  over `window` evals while the paired gold interval does not move
+  up), `length` (completions up by `length_pct` while gold does not),
+  `drift` (the trainer's KL past `kl_budget`), `feature` (the last
+  `buffer` completions' `hack_scan` says `reward_hack`; needs
+  `endorsed`). `stop_on=` names the alarms that stop the trainer; the
+  default logs only. The summary (`history`, `alarms`, `last_scan`,
+  `stopped_at`) rides on the run's `finish` through `run.note`, a
+  stopped run finishes as `stopped` with the reason;
+  `zps.format_hack_monitor(summary)` prints it. `TrainingRun.note`
+  is new: fields it sets travel with whichever callback finishes the
+  run. `examples/grpo` wires the monitor by default (`--monitor-every`,
+  `--stop-on`).
 - `run_judge(scale=(lo, hi))`, `evaluate(scale=)`, `data.grade(judge=, scale=)`:
   a rating judge (1 to 5, 0 to 10) is read on its scale; `reward` is the
   rating mapped onto [0, 1] and `judge_meta` keeps `rating` and `scale`;
@@ -31,14 +135,29 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   the majority, unset on a tie. `zps.annotator_agreement(rows)`: per-
   annotator counts, unanimous share, Cohen's kappa for the busiest pair,
   the split rows (rlhf-book ch. 10, 11) (#136).
+- Reward model as a judge (rlhf-book ch. 5). `zps.train(ds, method="rm")`
+  trains a sequence-classification head on the set's pass-vs-fail pairs
+  (Bradley-Terry loss, the pairs DPO uses) and reports pair accuracy on the
+  held-out pairs before and after plus the score threshold that separates
+  them. `zps.reward_model(run)` is that run as a judge: it honors the judge
+  contract (`reward` 0/1 against the threshold, `rm_score` raw), so it feeds
+  `data.grade(judge=)`, `evaluate`, `judge_trust` and
+  `build_preference_pairs`. Gate route `POST /runs/{id}/score`.
+- `simulate(tasks=previous_run)` re-runs a previous run's task set (the
+  run, its rows, or its JSONL path) instead of drawing a new one: every
+  prompt again, on its own `scenario_id` and `scenario_dimensions`, under
+  the same faults and world state, and nothing else generated; the run
+  stops with `tasks_done` once every prompt has its rollouts and reports
+  `search["pinned_tasks"]`. A run draws its tasks by seed and, above
+  `concurrency: 1`, by completion order, so even a same-policy re-run
+  paired 43 of 49 tasks; pinned, every A/B (prompt edit, model swap,
+  another seed) pairs all of them (#98).
 - `data.grade(use_privileged=True)` / `grade_llm(use_privileged=)`: the
   hosted judge reads the row's `privileged` block (principle, reference,
   hidden state) as `judge_only` in its payload, with a prompt line on how
   to use it (rlhf-book ch. 12, constitutional AI). Folded into the judge
   version and stamped `judge_meta.privileged`; exports still never carry
   `privileged` (#134).
-
-2026-09-14)
 
 ## 0.33 (2026-09-14)
 
@@ -78,59 +197,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - Hosted GRPO and DPO run on an L40S, so `zps.train(method="grpo")` on a
   served base (`Qwen/Qwen3-4B`) trains and serves; the docs no longer say a
   4B base does not fit.
-- `zps.HackMonitor(run, holdout=, proxy=, gold=, ...)`: is the run
-  hacking its reward right now (rlhf-book ch. 14, figure 1)? A
-  Transformers / TRL callback plus `monitor.wrap(reward_fn)` around the
-  reward function. Every `every` steps it samples the holdout from the
-  live policy (`k` completions on up to `n_prompts` asks) and scores it
-  twice: with the training reward (the proxy; `proxy=` or the wrapped
-  function) and with a scorer the proxy cannot see (`gold=`, any judge
-  under the SDK contract). Both land on the run as `proxy_reward` and
-  `gold_reward`, with `holdout_length`. Four alarms, one line each on
-  the run and in `monitor.alarms`: `divergence` (proxy up by `delta`
-  over `window` evals while the paired gold interval does not move
-  up), `length` (completions up by `length_pct` while gold does not),
-  `drift` (the trainer's KL past `kl_budget`), `feature` (the last
-  `buffer` completions' `hack_scan` says `reward_hack`; needs
-  `endorsed`). `stop_on=` names the alarms that stop the trainer; the
-  default logs only. The summary (`history`, `alarms`, `last_scan`,
-  `stopped_at`) rides on the run's `finish` through `run.note`, a
-  stopped run finishes as `stopped` with the reason;
-  `zps.format_hack_monitor(summary)` prints it. `TrainingRun.note`
-  is new: fields it sets travel with whichever callback finishes the
-  run. `examples/grpo` wires the monitor by default (`--monitor-every`,
-  `--stop-on`).
-- `zps.hack_scan(rows, endorsed=[...])`: what a grouped update would
-  learn from these rewards, named before training (rlhf-book ch. 6, 14).
-  Reward and every candidate feature are centered within ask, the way
-  GRPO baselines them, ranked by that correlation, and compared to a
-  noise floor from shuffling reward within ask (`tau`, 95th percentile
-  of the null maximum), so a feature that only tracks difficulty never
-  counts and the threshold is measured, not guessed. Two tiers, pure
-  Python: the hand tier (reply length, tool calls, turns, truncation,
-  surface counts, one indicator per tool called, mean token logprob,
-  every numeric marker, plus `features=` of your own) and the auto tier
-  (presence of the 200 most common words and word pairs in the agent's
-  text, and pairwise ANDs that beat both parents). `endorsed` names what
-  the reward should track (feature-name substrings such as
-  `"tool:lookup_order"` or `"marker:grounded"`); with it the report says
-  `regime`: `train`, `reward_hack` (the top feature is not endorsed),
-  `pool_exhausted` (over 20% of asks all-pass), `no_signal` (nothing
-  clears the floor) or `unknown`, plus `integrity` (share of the
-  above-floor signal that is endorsed), `top_feature`, the ranking with
-  the pooled correlation beside each, and one-line `warnings`.
-  `zps.format_hack_scan(report)` prints it. Duplicate columns are one
-  feature with `aliases`; 3,200 rollouts scan in about a second.
-  `select_for_rl` / `optimize(mode="rl", endorsed=)` carry it as
-  `report["hack_scan"]` and its warnings in `hygiene_warnings`;
-  `publish_gate` / `push_rows(gate=True)` / `data.push` report it on
-  RL-shaped rows and, with `strict_hacks=True`, refuse a `reward_hack`.
-  The pooled `reward_correlations` scan stays as the second column.
 
+## 0.32 (2026-09-14)
 - `zps.eval_variance(run_1, run_2, ...)` (or one row list split by
   `lineage.scoring_run_id` / `by=`): the eval's own re-run standard
   deviation, `noise_band` = 2 x std, and Olmo 3's stability band in
-  points (rlhf-book appendix C). `delta_report(run_std=)` marks every
+  points (rlhf-book ch. 16). `delta_report(run_std=)` marks every
   metric whose delta sits inside that band `within_noise`, keeps it out
   of improved / slipped / regressions, and reads a target there as
   `within_eval_noise` instead of moved (#113).
@@ -154,8 +226,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   reward one for GRPO: the invented-id rate on no-id prompts drops 0.23
   to 0.08 at 120 steps. One-round DPO does not move on it (no pairs
   where the base never fails); a second round is DPO's lever.
-## 0.32 (2026-09-14)
-
 - A policy edit keeps the task grid (#98). The covering array is built in
   layers: a rule-free block over tools and situation axes, then one block
   per policy clause, rotated by the clause text. Editing, adding or
@@ -166,15 +236,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   Fault rows are kept per row from the row's own digest, one of every
   kind guaranteed, so a grid that grows keeps the verdict on the rows it
   had. Every existing grid changes once with this release.
-- `simulate(tasks=previous_run)` re-runs a previous run's task set (the
-  run, its rows, or its JSONL path) instead of drawing a new one: every
-  prompt again, on its own `scenario_id` and `scenario_dimensions`, under
-  the same faults and world state, and nothing else generated; the run
-  stops with `tasks_done` once every prompt has its rollouts and reports
-  `search["pinned_tasks"]`. A run draws its tasks by seed and, above
-  `concurrency: 1`, by completion order, so even a same-policy re-run
-  paired 43 of 49 tasks; pinned, every A/B (prompt edit, model swap,
-  another seed) pairs all of them (#98).
 - `compare_runs` says when it dropped tasks: `note` names how many were
   on one side only and that the verdict rests on the shared ones, with
   "most tasks unpaired" in front when fewer than half paired;
@@ -239,14 +300,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   repo-wide `*.jsonl` ignore had swallowed it) and the test requires it.
   On it: GRPO 120 steps 0.18 -> 0.85 (+0.63 [+0.50, +0.73]), Dr.GRPO at
   the same budget 0.17 -> 0.53, DPO one round 0.17 -> 0.69.
-- Reward model as a judge (rlhf-book ch. 5). `zps.train(ds, method="rm")`
-  trains a sequence-classification head on the set's pass-vs-fail pairs
-  (Bradley-Terry loss, the pairs DPO uses) and reports pair accuracy on the
-  held-out pairs before and after plus the score threshold that separates
-  them. `zps.reward_model(run)` is that run as a judge: it honors the judge
-  contract (`reward` 0/1 against the threshold, `rm_score` raw), so it feeds
-  `data.grade(judge=)`, `evaluate`, `judge_trust` and
-  `build_preference_pairs`. Gate route `POST /runs/{id}/score`.
 - With `grader=`, every mode judges rows as they land, on the judge pool
   beside the rollouts; only the tail is judged after the clock. Before this
   explore and sft judged everything in one pass after the run, which on a

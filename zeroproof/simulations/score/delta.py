@@ -100,7 +100,7 @@ def delta_report(
     should).
 
     ``run_std`` is the evaluation's own re-run standard deviation
-    (``eval_variance(...)["run_std"]``, rlhf-book appendix C). A metric
+    (``eval_variance(...)["run_std"]``, rlhf-book ch. 16). A metric
     whose delta is smaller than twice it is ``within_noise``: not
     improved, not slipped, not a regression, and a target there reads
     ``within_eval_noise`` rather than moved, because re-running the eval

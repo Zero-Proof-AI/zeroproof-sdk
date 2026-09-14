@@ -130,4 +130,35 @@ counts them as `constructed_pairs`.
 uv run --with modal modal run examples/dpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl --balance 0.25 --constructed-negatives
 ```
 
-CN_PLACEHOLDER
+Uncapped, they overcorrect. With `--balance 0.25` repeating the no-id
+prompts, round one from the base built 411 constructed pairs against 351
+sampled ones and learned "never call": with_id 0.11 to 0.05, overall
+`DOWN`. Round two from the balanced adapter built 404 against 442 and
+repaired no_id (0.87 to 0.93, tool-call rate 0.07) while with_id slipped
+0.60 to 0.54, flagged `DOWN` by the group table. So the constructed side
+is one pair per distinct prompt (balance repeats do not multiply it) and
+capped at `constructed_share` of the sampled pairs, 0.3 by default.
+
+Capped, round one from the base (98 constructed against 377 sampled
+pairs): overall 0.27 to 0.44, with_id 0.11 to 0.30, no_id 0.97 to 0.99
+with no tool calls at all, off_topic 0.92 to 0.99. The first DPO run on
+this set with no group moving the wrong way, and the slowest with-id gain
+of any: the constructed side costs with-id learning at a fixed 60 steps.
+The knob is `constructed_share`; the table says what each setting buys.
+
+Capped, round two from the balanced adapter (95 constructed against 444
+sampled): overall 0.62 to 0.77, with_id 0.56 to 0.75, no_id 0.73 to 0.69
+with the tool-call rate at 0.28, off_topic 0.94 to 0.98. Side by side,
+round two from the same adapter:
+
+| constructed share | with_id | no_id | tool calls on no_id |
+|---|---|---|---|
+| none | 0.56 to 0.91 | 0.82 to 0.26 | 0.63 |
+| 0.3 (default) | 0.56 to 0.75 | 0.73 to 0.69 | 0.28 |
+| uncapped | 0.60 to 0.54 | 0.87 to 0.93 | 0.07 |
+
+No setting wins both columns at this budget. The default holds the no-id
+line where a plain second round breaks it; the uncapped setting repairs
+no-id at with-id's expense. What the group table adds is that the choice
+is visible before the model ships, in the run's own numbers, instead of
+after.
