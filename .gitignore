@@ -59,6 +59,8 @@ zeroproof/simulations/_experimental/
 
 # editor config and local notes
 .cursor/
+# transient agent worktrees; .claude/ itself stays committable for project config
+.claude/worktrees/
 AUDIT_*.md
 dist/
 build/
