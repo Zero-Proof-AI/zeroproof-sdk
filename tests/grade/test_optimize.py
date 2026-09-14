@@ -139,11 +139,21 @@ def test_trim_unanimous_drops_dead_groups_keeps_singles():
 def test_select_for_rl_keeps_whole_groups():
     from zeroproof.simulations.score.optimize import select_for_rl
 
-    picked, report = select_for_rl(_grouped_rows(), target=4)
+    # The fixture repeats one identical trajectory per ask, which the
+    # duplicate gate would collapse; switch it off to test group selection.
+    picked, report = select_for_rl(_grouped_rows(), target=4, dedupe=False)
     prompts = [row["prompt"] for row in picked]
     assert prompts.count("mixed ask") == 4  # the group came whole
     assert report["unanimous_groups_dropped"] == 2
     assert report["signal"]["n_mixed"] == 1
+
+    # With the gate on, identical rollouts carrying different rewards are
+    # judge noise: the ask collapses to one row and is dropped as a dead
+    # group, not kept as a single.
+    deduped, dedup_report = select_for_rl(_grouped_rows(), target=4)
+    assert [row["prompt"] for row in deduped] == ["solo ask"]
+    assert dedup_report["duplicates"]["conflicting_rewards"] >= 1
+    assert dedup_report["collapsed_groups_dropped"] >= 1
 
 
 def test_select_for_sft_takes_only_passes_and_spreads_behaviors():

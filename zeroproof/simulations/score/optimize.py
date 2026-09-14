@@ -394,7 +394,7 @@ def select_for_sft(
         if not took:
             break
         round_i += 1
-    report = {
+    report: dict[str, Any] = {
         "n": len(rows),
         "n_eligible": len(eligible),
         "n_selected": len(selected),
@@ -404,6 +404,23 @@ def select_for_sft(
         "behaviors_covered": len({behavior_signature(r) for r in selected}),
         "target": goal,
     }
+    # Rejection sampling picks the best of N completions per prompt, and
+    # the published recipes use 10 to 30 (rlhf-book ch. 9); fewer makes
+    # the pick biased or noisy. With k=1 there is no pick at all, only a
+    # pass/fail filter, which is fine for a first SFT set but worth saying.
+    per_prompt: dict[str, int] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            key = " ".join(str(row.get("prompt") or "").lower().split())
+            per_prompt[key] = per_prompt.get(key, 0) + 1
+    max_k = max(per_prompt.values(), default=0)
+    report["completions_per_prompt_max"] = max_k
+    if 0 < max_k < 10:
+        report["note"] = (
+            f"at most {max_k} completion(s) per prompt; rejection-sampling selection "
+            "wants 10 to 30 so the pick is not biased (rlhf-book ch. 9). Raise "
+            "repeats= if you mean to choose among completions rather than filter."
+        )
     return selected, report
 
 
@@ -456,20 +473,55 @@ def select_for_rl(
     hi: float = DEFAULT_BAND[1],
     enforce_band: bool = True,
     has_tools: bool = True,
+    dedupe: bool = True,
+    drop_truncated: bool = True,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Whole mixed groups up to roughly ``target`` rows. Groups never split.
 
-    After the row gates, the unanimous trim, and (``enforce_band``) the
+    After the row gates, duplicate and truncated rollouts (``dedupe``,
+    ``drop_truncated``), the unanimous trim, and (``enforce_band``) the
     difficulty band, remaining asks are ranked by distance from p = 0.5
     and taken round-robin across observed fault kinds, so the dataset
     keeps a grounded spread of no-fault, miss, timeout, and already-done
     situations rather than one over-represented failure. The last group
     may overshoot ``target``; an RL update wants the complete group or
     none of it. ``enforce_band=False`` keeps out-of-band asks and only
-    ranks them last.
+    ranks them last. The report's ``correlations`` block is the
+    reward-hack scan over the selection: reward tracking reply length or
+    tool count is a judge problem, flagged in ``hygiene_warnings``.
     """
+    from .hygiene import (
+        dedupe_groups,
+        hygiene_warnings,
+        length_report,
+        reward_correlations,
+    )
+    from .hygiene import drop_truncated as _drop_truncated
+
     kept, base_report = filter_rl_rows(rows, has_tools=has_tools)
+    original_sizes: dict[str, int] = {}
+    for row in kept:
+        key = str(row.get("prompt") or "")
+        original_sizes[key] = original_sizes.get(key, 0) + 1
+    dup_report: dict[str, Any] = {"n_dropped": 0, "groups_affected": 0, "conflicting_rewards": 0}
+    if dedupe:
+        kept, dup_report = dedupe_groups(kept)
+    trunc_report: dict[str, Any] = {"n_dropped": 0}
+    if drop_truncated:
+        kept, trunc_report = _drop_truncated(kept)
     kept, trim_report = trim_unanimous_groups(kept)
+    # A group that hygiene shrank to one rollout, or to rollouts that all
+    # agree, has no contrast left. It is not a single (which always stays,
+    # since it never had a group) but a dead group, and goes the same way.
+    collapsed = {
+        prompt
+        for prompt, labels in _group_label_lists(kept).items()
+        if original_sizes.get(prompt, 0) >= 2 and len(set(labels)) == 1
+    }
+    if collapsed:
+        kept = [row for row in kept if str(row.get("prompt") or "") not in collapsed]
+        trim_report["n_groups_dropped"] += len(collapsed)
+    trim_report["collapsed_groups_dropped"] = len(collapsed)
     band_report: dict[str, Any] = {"n_groups_dropped": 0, "too_easy": 0, "too_hard": 0}
     if enforce_band:
         kept, band_report = trim_out_of_band(kept, lo=lo, hi=hi)
@@ -510,8 +562,9 @@ def select_for_rl(
     report = {
         "n": len(rows),
         "n_after_gates": base_report["n_kept"],
-        "n_after_trim": trim_report["n_kept"],
+        "n_after_trim": len(kept),
         "unanimous_groups_dropped": trim_report["n_groups_dropped"],
+        "collapsed_groups_dropped": trim_report["collapsed_groups_dropped"],
         "n_selected": len(selected),
         "groups_selected": picked_groups,
         "fault_kinds": {fault: len(prompts) for fault, prompts in fault_buckets.items()},
@@ -520,8 +573,17 @@ def select_for_rl(
         "enforce_band": bool(enforce_band),
         "band_groups_dropped": band_report["n_groups_dropped"],
         "band_dropped": {"too_easy": band_report["too_easy"], "too_hard": band_report["too_hard"]},
+        "duplicates": dup_report,
+        "truncated_dropped": trunc_report["n_dropped"],
+        "length": length_report(selected),
+        "correlations": reward_correlations(selected),
         "signal": group_signal(selected, lo=lo, hi=hi),
     }
+    report["hygiene_warnings"] = hygiene_warnings(
+        duplicates=dup_report,
+        lengths=report["length"],
+        correlations=report["correlations"],
+    )
     # A selection with no mixed group has no within-group contrast: GRPO
     # advantage is zero everywhere and the run trains nothing. That is a
     # grading or difficulty problem upstream, and it must not exit this

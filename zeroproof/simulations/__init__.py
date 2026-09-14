@@ -70,6 +70,13 @@ from .schema import (
     validate,
 )
 from .score.grading import behavior_signature, conduct_grade
+from .score.hygiene import (
+    HACK_THRESHOLD,
+    dedupe_groups,
+    length_report,
+    near_duplicate_prompts,
+    reward_correlations,
+)
 from .score.judging import (
     ScoredData,
     build_preference_pairs,
@@ -102,6 +109,7 @@ _logging.getLogger(__name__).addHandler(_logging.NullHandler())
 __all__ = [
     "DEFAULT_BAND",
     "FAILURE_CLASSES",
+    "HACK_THRESHOLD",
     "SCHEMA_VERSION",
     "AgentProfile",
     "Calibration",
@@ -130,6 +138,7 @@ __all__ = [
     "conversation",
     "dataset_report",
     "datasets",
+    "dedupe_groups",
     "delete_dataset",
     "dimensions_from_traces",
     "drop_leaky_rows",
@@ -148,10 +157,12 @@ __all__ = [
     "inspect",
     "issue_delegated_credential",
     "leakage_report",
+    "length_report",
     "llm_grade",
     "load_traces",
     "local_model",
     "mine_traces",
+    "near_duplicate_prompts",
     "normalize_judge_result",
     "novelty",
     "open_ended_probes",
@@ -169,6 +180,7 @@ __all__ = [
     "recommend",
     "refresh_delegated_credential",
     "resolve_topology",
+    "reward_correlations",
     "rows_from_otel",
     "run_judge",
     "scenario_regions",

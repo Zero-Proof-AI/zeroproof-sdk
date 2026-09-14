@@ -27,6 +27,13 @@ from dataclasses import asdict
 from typing import Any
 
 from ..schema import Calibration, PolicyRef
+from .hygiene import (
+    dedupe_groups,
+    hygiene_warnings,
+    length_report,
+    near_duplicate_prompts,
+    reward_correlations,
+)
 from .optimize import DEFAULT_BAND, _binary_label, _group_label_lists, group_signal
 from .passat import pass_at
 
@@ -160,6 +167,21 @@ def publish_gate(
             )
         if calibration["n_unstamped"]:
             warnings.append(f"{calibration['n_unstamped']} row(s) have no 0/1 reward")
+    # Hygiene is reported, never applied here: push uploads rows as they
+    # are, and the drops live in optimize / select_for_rl.
+    _kept, duplicates = dedupe_groups(rows)
+    near_dups = near_duplicate_prompts(rows)
+    lengths = length_report(rows)
+    correlations = reward_correlations(rows)
+    hygiene = hygiene_warnings(
+        duplicates=duplicates,
+        near_dups=near_dups,
+        lengths=lengths,
+        correlations=correlations,
+    )
+    if duplicates["n_dropped"]:
+        hygiene[0] = hygiene[0].replace(" dropped", " present; optimize(mode='rl') drops them", 1)
+    warnings.extend(hygiene)
     report = {
         "ok": refusal is None,
         "rl_shaped": rl,
@@ -167,6 +189,10 @@ def publish_gate(
         "band": [lo, hi],
         "signal": signal,
         "calibration": calibration,
+        "duplicates": duplicates,
+        "near_duplicate_prompts": near_dups,
+        "length": lengths,
+        "correlations": correlations,
         "warnings": warnings,
         "refusal": refusal,
     }

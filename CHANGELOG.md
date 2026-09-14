@@ -19,6 +19,18 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   (task pass rate, k, producing policy); RL-shaped rows that are
   ungraded or have no mixed group raise `PublishGateError`. Report on
   `entry["gate"]`. New `zps.publish_gate`, `zps.calibrate`.
+- Row hygiene: `select_for_rl` / `optimize(mode="rl")` drop duplicate
+  rollouts within an ask (`dedupe=False` keeps them) and truncated
+  rollouts (`drop_truncated=False`), and report the reward-hack scan
+  (`correlations`: reward vs reply length, tool calls, assistant turns;
+  flagged at `HACK_THRESHOLD` 0.3) plus a length report in
+  `hygiene_warnings`. The publish gate reports the same, plus
+  near-duplicate asks (token Jaccard 0.8), without dropping anything.
+  New `zps.dedupe_groups`, `zps.near_duplicate_prompts`,
+  `zps.length_report`, `zps.reward_correlations`.
+- Both judge prompts say reply length must not influence the score.
+  `select_for_sft` reports `completions_per_prompt_max` and notes when it
+  is under 10 (rejection sampling wants 10 to 30 per prompt).
 
 ## 0.17 (2026-09-13)
 
