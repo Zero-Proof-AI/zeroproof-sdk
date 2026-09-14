@@ -230,9 +230,11 @@ def reward_correlations(
     reward by accident: reply length, tool-call count, assistant turns,
     and the over-optimization signatures of rlhf-book ch. 14 (boilerplate,
     hedging, sycophancy, refusal phrases, 1 when present; see
-    ``score.style``). Any |corr| at or above ``threshold`` is flagged. A
-    negative tool-count correlation means the reward pays the policy to
-    do less; a positive phrase correlation means it pays for the tic."""
+    ``score.style``), plus every trajectory flag that fired on any row
+    (``lie.*``, ``hack.*``, ``risk.*``; see ``score.trace``). Any |corr|
+    at or above ``threshold`` is flagged. A negative tool-count
+    correlation means the reward pays the policy to do less; a positive
+    phrase or flag correlation means it pays for the tic or the fake."""
     from .style import STYLE_FEATURES, assistant_text, phrase_hits
 
     graded = [r for r in rows if isinstance(r, dict) and _binary_label(r) is not None]
@@ -245,6 +247,13 @@ def reward_correlations(
     }
     for name, plist in STYLE_FEATURES.items():
         features[name] = [1.0 if phrase_hits(t, plist) else 0.0 for t in texts]
+    from .trace import FLAGS, trace_flags
+
+    fired = [trace_flags(r) for r in graded]
+    for name in FLAGS:
+        column = [1.0 if name in flags else 0.0 for flags in fired]
+        if any(column):
+            features[name] = column
     corr = {name: pearson(values, labels) for name, values in features.items()}
     flagged = {
         name: value for name, value in corr.items() if value is not None and abs(value) >= threshold
