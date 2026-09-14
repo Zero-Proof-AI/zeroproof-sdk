@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.42 (2026-09-14)
 
 - `task_checklist(row)`: a reward with an outcome term the world can verify.
   The conduct grade gates it; the outcome comes from the task's grid
@@ -413,8 +413,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `prefers_rejected` with examples. `zps.pairwise_judge(spec)` is the
   hosted model judge with a length-neutral prompt.
   `export_preference(drop_ties=True)` leaves ties out and counts them (#114).
-
-2026-09-14)
 
 - `examples/grpo` and `examples/dpo`: `--balance <share>` repeats the
   prompts of any category below that share of the train split
