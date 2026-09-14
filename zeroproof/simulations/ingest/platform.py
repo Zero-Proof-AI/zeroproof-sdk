@@ -21,6 +21,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from typing import Any
 
 from zeroproof.auth import stored_api_key
@@ -256,6 +257,8 @@ def push_rows(
     purpose: str | None = None,
     agent: str | None = None,
     description: str | None = None,
+    endorsed: Sequence[str] = (),
+    strict_hacks: bool = False,
 ) -> dict:
     """Upload rows as JSONL to your Zero Proof Labs account.
 
@@ -266,6 +269,9 @@ def push_rows(
     ``mode`` is the simulation mode that made it, and is also recorded. ``gate=True`` runs ``publish_gate``
     first (calibration stamp; RL-shaped rows refused when ungraded or
     without a mixed group) and returns its report as ``entry["gate"]``.
+    ``endorsed`` names what the reward should track for the gate's
+    ``hack_scan``; ``strict_hacks=True`` refuses a set whose reward is
+    best explained by something else.
     ``SimulationData.push`` gates by default; this row-level entry point
     does not, because the caller may already have run ``optimize``.
     """
@@ -275,7 +281,7 @@ def push_rows(
     if gate:
         from ..score.publish_gate import publish_gate
 
-        gate_report = publish_gate(rows, mode=mode)
+        gate_report = publish_gate(rows, mode=mode, endorsed=endorsed, strict_hacks=strict_hacks)
     check(rows, where="push_rows")
     body: dict = {
         "name": name,

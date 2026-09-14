@@ -294,7 +294,18 @@ report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 
 `optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. `optimize(mode="sft")` is rejection sampling (rlhf-book ch. 9): `select="top_per_prompt"` keeps each prompt's highest-reward completion above `min_reward` (default 1.0; lower it for a partial-credit grader), `"top_k_overall"` the best `k` across prompts, and the `random_*` rules are the matching chance controls. Exported groups carry `n0`/`n1` (fail/pass, partial credit splits at 0.5) and `reward_mean`/`reward_std`. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter. Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
 
-The report also carries the reward-hack scan: `report["correlations"]` is corr(reward, feature) for reply length, tool-call count, and assistant turns, and `report["hygiene_warnings"]` names anything at or above `HACK_THRESHOLD` (0.3). Reward that tracks length or punishes tool use is a judge problem, so it is flagged, not pruned. The same scan, plus near-duplicate asks and length spread, runs in the publish gate. Standalone: `zps.reward_correlations(rows)`, `zps.dedupe_groups(rows)`, `zps.near_duplicate_prompts(rows)`, `zps.length_report(rows)`.
+### What will the policy learn?
+
+```python
+scan = zps.hack_scan(scored.rows, endorsed=["tool:lookup_order", "marker:grounded"])
+scan["regime"]  # train | reward_hack | pool_exhausted | no_signal | unknown
+scan["top_feature"]  # e.g. 'contains:### done' when the judge pays for a delimiter
+print(zps.format_hack_scan(scan))
+```
+
+A grouped update learns whatever separates reward *within* an ask; what only tracks which ask it is (difficulty) is baselined away. `hack_scan` asks the question the same way: reward and every candidate feature are centered within ask, ranked by that correlation, and compared to a noise floor from shuffling reward within ask (`tau`). Features come in two tiers, both pure Python: the hand tier (reply length, tool calls, turns, truncation, surface counts, one indicator per tool called, mean token logprob, every numeric marker, plus `features={"name": fn}` of your own) and the auto tier (the 200 most common words and word pairs in the agent's text, and pairwise ANDs that beat both parents), which is the tier that finds the shortcut nobody listed. `endorsed` names what the reward should track, as substrings of feature names; with it the scan can say `reward_hack` (the top feature is not endorsed, and the warning names what the policy would learn instead), `integrity` (share of the above-floor signal that is endorsed), and lists rivals. Without it the scan still ranks and floors.
+
+`optimize(mode="rl", endorsed=[...])` carries the scan as `report["hack_scan"]`, with its warnings in `report["hygiene_warnings"]` next to the older pooled `report["correlations"]` (reply length, tool calls, turns, flagged at `HACK_THRESHOLD` 0.3). A reward that tracks a shortcut is a judge problem, so it is flagged, not pruned. The publish gate reports the same on RL-shaped rows, plus near-duplicate asks and length spread; `data.push(endorsed=[...], strict_hacks=True)` refuses a `reward_hack`. Standalone: `zps.reward_correlations(rows)`, `zps.dedupe_groups(rows)`, `zps.near_duplicate_prompts(rows)`, `zps.length_report(rows)`.
 
 ### Curriculum: easy to hard, and retire the solved
 
@@ -359,8 +370,10 @@ leaves the rest of the eval paired for `compare_runs`.
 Three checks that decide whether a result is believable, all report-only and all over rows you already have.
 
 ```python
+zps.attach_labels(rows, "labels.jsonl", annotator="ana")  # gold_reward + who said what
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 data.grade(use_privileged=True)  # judge also reads privileged principle, reference, hidden state
+zps.run_judge(rows, likert_judge, scale=(1, 5))  # rating kept, reward = (r - 1) / 4
 pairs, report = zps.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 rows, report = zps.write_rubrics(rows, domain="refunds")  # per-prompt criteria on privileged.rubric
 scored = zps.run_judge(rows, zps.rubric_judge())  # a verdict per criterion; markers rubric:<item>
@@ -461,6 +474,24 @@ with zps.training_run("sft-v3", dataset="ds_...", total_steps=1000) as run:
         run.log(step, loss=loss, lr=scheduler.get_last_lr()[0])
     run.finish(summary={"final_loss": loss}, adapter="s3://.../adapter")  # failed on exception
 ```
+
+### Is it hacking the reward right now?
+
+```python
+monitor = zps.HackMonitor(
+    run,
+    holdout=holdout_rows,             # prompts or {"prompt": ..., <columns the reward reads>}
+    gold=zps.reward_model(rm_run),    # or the hosted judge, or a second rule; any judge callable
+    every=10, k=4,                    # sample the holdout from the live policy every 10 steps
+    endorsed=["tool:lookup_order"],   # what the reward should track
+    stop_on="divergence",             # or "length", "drift", "feature", "any"; default: log only
+)
+trainer = GRPOTrainer(model, reward_funcs=[monitor.wrap(rule_reward)], ...)
+trainer.add_callback(monitor)
+trainer.add_callback(zps.TrainerCallback(run))
+```
+
+Over-optimization looks like one picture (rlhf-book ch. 14): the training reward keeps climbing while the evaluation you care about flattens, read against KL. The monitor draws it during the run instead of after. `wrap` watches the reward function, so the monitor keeps the last completions with their rewards and runs `hack_scan` on them; every `every` steps it samples the holdout from the live policy and scores it with the training reward (the proxy) and with `gold`, a scorer the proxy cannot see. `proxy_reward`, `gold_reward` and `holdout_length` land on the run beside the loss curve. Four alarms, one line each on the run: `divergence` (proxy up by `delta` over the window while the paired gold interval does not move up), `length` (completions grow while gold does not), `drift` (KL past `kl_budget`), `feature` (the batch scan says `reward_hack`). `stop_on` names the ones that stop training; a stopped run finishes as `stopped` with the reason, and `run.note(...)` puts anything else on the run's summary. `zps.format_hack_monitor(monitor.summary())` prints the curve and the alarms. [`examples/grpo`](examples/grpo) runs it by default.
 
 Plain HTTP, for a stack that is not Python: `POST /runs {"name", "dataset_id", "base_model", "total_steps"}` returns `runId`; `POST /runs/{id}/log {"points": [{"step": 10, "loss": 1.2, "lr": 1e-4}], "total_steps"?}` in batches of up to 500; `POST /runs/{id}/finish {"status": "done|failed|stopped", "summary"?, "adapter"?}`. All with `X-Api-Key`. Points are buffered on the client and a send that fails is retried on the next flush; the dashboard never interrupts the trainer. `zps.get_run(id)["series"]` returns the points, oldest first.
 

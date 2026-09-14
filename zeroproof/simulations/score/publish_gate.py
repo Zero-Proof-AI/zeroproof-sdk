@@ -27,6 +27,7 @@ from dataclasses import asdict
 from typing import Any
 
 from ..schema import Calibration, PolicyRef
+from .hack_scan import hack_scan
 from .hygiene import (
     dedupe_groups,
     hygiene_warnings,
@@ -144,10 +145,15 @@ def publish_gate(
     policy: PolicyRef | dict | str | None = None,
     model: str | None = None,
     strict: bool = True,
+    endorsed: Sequence[str] = (),
+    strict_hacks: bool = False,
 ) -> dict[str, Any]:
     """Check, calibrate, and report. Raises ``PublishGateError`` when
     ``strict`` and the rows are RL-shaped but ungraded or carry no mixed
-    group. Never mutates anything except the ``calibration`` stamp.
+    group, or when ``strict_hacks`` and ``hack_scan`` (with ``endorsed``
+    naming what the reward should track) finds the reward best explained
+    by something else. Never mutates anything except the ``calibration``
+    stamp.
     """
     lo, hi = float(band[0]), float(band[1])
     rl = is_rl_shaped(rows, mode=mode)
@@ -156,6 +162,7 @@ def publish_gate(
     graded = calibration["n_stamped"]
     warnings: list[str] = []
     refusal: str | None = None
+    scan = hack_scan(rows, endorsed=endorsed) if rl else None
 
     if rl and graded == 0:
         refusal = (
@@ -167,6 +174,11 @@ def publish_gate(
             "no_mixed_groups: every ask is unanimous, so group-relative advantages "
             "are zero everywhere and the run would train nothing; regrade with a "
             "stricter rubric or raise difficulty before publishing"
+        )
+    elif strict_hacks and scan and scan["regime"] == "reward_hack":
+        refusal = (
+            f"reward_hack: {scan['warnings'][0]}; fix the judge (judge_trust, "
+            "endorsed=) before publishing, or push with strict_hacks=False"
         )
     if rl and not refusal:
         out_of_band = signal["n_mixed"] - signal["n_in_band"]
@@ -193,6 +205,7 @@ def publish_gate(
         near_dups=near_dups,
         lengths=lengths,
         correlations=correlations,
+        scan=scan if not refusal else None,
     )
     if duplicates["n_dropped"]:
         hygiene[0] = hygiene[0].replace(" dropped", " present; optimize(mode='rl') drops them", 1)
@@ -208,6 +221,7 @@ def publish_gate(
         "near_duplicate_prompts": near_dups,
         "length": lengths,
         "correlations": correlations,
+        "hack_scan": scan,
         "warnings": warnings,
         "refusal": refusal,
     }

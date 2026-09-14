@@ -44,8 +44,67 @@ from typing import Any
 _VALID_STATUSES = ("ok", "missing_reward", "invalid_result", "error", "timeout")
 
 
-def normalize_judge_result(raw: Any) -> dict[str, Any]:
-    """Coerce one judge return into the contract; never invent a reward."""
+def _scaled(value: float, scale: tuple[float, float]) -> tuple[float | int, dict[str, Any]]:
+    """A rating on ``scale`` (lo, hi) as a [0, 1] reward, with the raw
+    rating kept as judge_meta (rlhf-book ch. 11: ratings are metadata
+    worth keeping next to the normalized preference)."""
+    lo, hi = float(scale[0]), float(scale[1])
+    reward = (value - lo) / (hi - lo)
+    out: float | int = int(reward) if reward in (0.0, 1.0) else round(reward, 6)
+    return out, {"rating": value, "scale": [lo, hi]}
+
+
+def normalize_judge_result(raw: Any, *, scale: tuple[float, float] | None = None) -> dict[str, Any]:
+    """Coerce one judge return into the contract; never invent a reward.
+
+    ``scale=(lo, hi)`` reads the judge's number as a rating on that scale
+    (a 1 to 5 Likert, a 0 to 10 score): the row's ``reward`` is the
+    rating mapped onto [0, 1] and ``judge_meta`` keeps ``rating`` and
+    ``scale``. A rating outside the scale is a contract break, as a
+    reward outside [0, 1] is without one. A dict may carry the number as
+    ``rating`` instead of ``score`` when a scale is set.
+    """
+    if scale is not None:
+        lo, hi = float(scale[0]), float(scale[1])
+        if not hi > lo:
+            raise ValueError("scale must be (lo, hi) with hi > lo")
+        number: Any = raw
+        reason = ""
+        meta: dict[str, Any] = {}
+        if isinstance(raw, dict):
+            reason = str(raw.get("reason") or "")
+            number = raw.get("rating", raw.get("score", raw.get("reward")))
+            meta = {
+                k: v for k, v in raw.items() if k not in {"rating", "score", "reward", "reason"}
+            }
+            if number is None:
+                return {
+                    "reward": None,
+                    "reason": reason,
+                    "judge_status": "missing_reward",
+                    "judge_meta": {"returned_keys": sorted(map(str, raw))},
+                }
+        if isinstance(number, bool) or not isinstance(number, (int, float)):
+            return {
+                "reward": None,
+                "reason": reason,
+                "judge_status": "invalid_result",
+                "judge_meta": {"reward_type": type(number).__name__},
+            }
+        if not lo <= float(number) <= hi:
+            return {
+                "reward": None,
+                "reason": reason,
+                "judge_status": "invalid_result",
+                "judge_meta": {"rating_out_of_scale": float(number), "scale": [lo, hi]},
+            }
+        reward, rating_meta = _scaled(float(number), (lo, hi))
+        return {
+            "reward": reward,
+            "reason": reason,
+            "judge_status": "ok",
+            "judge_meta": {**meta, **rating_meta},
+        }
     if isinstance(raw, bool):
         return {"reward": int(raw), "reason": "", "judge_status": "ok", "judge_meta": {}}
     if isinstance(raw, (int, float)):
@@ -244,9 +303,11 @@ class ScoredData:
         return path
 
 
-def _score_one(judge: Callable, row: dict) -> dict[str, Any]:
+def _score_one(
+    judge: Callable, row: dict, scale: tuple[float, float] | None = None
+) -> dict[str, Any]:
     try:
-        return normalize_judge_result(judge(row))
+        return normalize_judge_result(judge(row), scale=scale)
     except Exception as exc:  # judge bugs mark the row, never crash the run
         return {
             "reward": None,
@@ -267,6 +328,7 @@ def run_judge(
     concurrency: int = 8,
     timeout: float | None = None,
     version: str | None = None,
+    scale: tuple[float, float] | None = None,
 ) -> ScoredData:
     """Score trajectories with any judge. Originals are left unmodified.
 
@@ -287,7 +349,7 @@ def run_judge(
     verdicts: list[dict[str, Any]]
     if concurrency > 1 and len(src_rows) > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = [pool.submit(_score_one, judge, r) for r in src_rows]
+            futures = [pool.submit(_score_one, judge, r, scale) for r in src_rows]
             verdicts = []
             for future in futures:
                 try:
@@ -302,7 +364,7 @@ def run_judge(
                         }
                     )
     else:
-        verdicts = [_score_one(judge, r) for r in src_rows]
+        verdicts = [_score_one(judge, r, scale) for r in src_rows]
     scored: list[dict] = []
     for i, (row, verdict) in enumerate(zip(src_rows, verdicts)):
         out = dict(row)
@@ -354,6 +416,7 @@ def evaluate(
     run_id: str | None = None,
     concurrency: int = 8,
     timeout: float | None = None,
+    scale: tuple[float, float] | None = None,
 ) -> ScoredData:
     """Judge held-out rollouts under the exact contract ``grade`` uses.
 
@@ -380,6 +443,7 @@ def evaluate(
         run_id=run_id,
         concurrency=concurrency,
         timeout=timeout,
+        scale=scale,
     )
     if eval_set is not None:
         wanted = {

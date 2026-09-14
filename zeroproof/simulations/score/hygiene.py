@@ -83,6 +83,11 @@ def tool_calls(row: dict) -> int:
     return sum(1 for s in steps if isinstance(s, dict) and s.get("tool"))
 
 
+def assistant_turns(row: dict) -> int:
+    """Assistant turns in the row's conversation."""
+    return sum(1 for m in _messages(row) if str(m.get("role") or "") == "assistant")
+
+
 def is_truncated(row: dict) -> bool:
     """A reply that stops without terminal punctuation, or one the grader
     already called truncated. Short replies are given the benefit of the
@@ -236,10 +241,7 @@ def reward_correlations(
     features = {
         "reply_length": [float(reply_length(r)) for r in graded],
         "tool_calls": [float(tool_calls(r)) for r in graded],
-        "assistant_turns": [
-            float(sum(1 for m in _messages(r) if str(m.get("role") or "") == "assistant"))
-            for r in graded
-        ],
+        "assistant_turns": [float(assistant_turns(r)) for r in graded],
     }
     for name, plist in STYLE_FEATURES.items():
         features[name] = [1.0 if phrase_hits(t, plist) else 0.0 for t in texts]
@@ -261,8 +263,10 @@ def hygiene_warnings(
     near_dups: dict[str, Any] | None = None,
     lengths: dict[str, Any] | None = None,
     correlations: dict[str, Any] | None = None,
+    scan: dict[str, Any] | None = None,
 ) -> list[str]:
-    """One line per finding a person should act on. Empty when clean."""
+    """One line per finding a person should act on. Empty when clean.
+    ``scan`` is a ``hack_scan`` report; its warnings are appended as is."""
     out: list[str] = []
     if duplicates and duplicates.get("n_dropped"):
         line = (
@@ -295,6 +299,8 @@ def hygiene_warnings(
                 f"reward {direction} {name.replace('_', ' ')} (corr {value:+.2f}); "
                 "check the judge before training"
             )
+    if scan:
+        out.extend(str(w) for w in scan.get("warnings") or [])
     return out
 
 
@@ -302,6 +308,7 @@ __all__ = [
     "DEFAULT_MAX_SPREAD",
     "HACK_THRESHOLD",
     "NEAR_DUP_JACCARD",
+    "assistant_turns",
     "dedupe_groups",
     "drop_truncated",
     "hygiene_warnings",

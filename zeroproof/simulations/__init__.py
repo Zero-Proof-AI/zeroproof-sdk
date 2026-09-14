@@ -79,6 +79,7 @@ from .ingest.traces import (
     split_pseudo_production,
     trace_report,
 )
+from .monitor import HackMonitor, format_hack_monitor
 from .schema import (
     SCHEMA_VERSION,
     Calibration,
@@ -103,6 +104,7 @@ from .score.grounding import (
     mark_grounding,
     ungrounded_arguments,
 )
+from .score.hack_scan import format_hack_scan, hack_scan
 from .score.hygiene import (
     HACK_THRESHOLD,
     dedupe_groups,
@@ -118,6 +120,7 @@ from .score.judging import (
     normalize_judge_result,
     run_judge,
 )
+from .score.labels import annotator_agreement, attach_labels
 from .score.logprobs import logprob_report, mean_kl, staleness_report
 from .score.markers import STOCK_MARKERS, behavioral_markers, format_markers, mark_rows, row_markers
 from .score.optimize import (
@@ -186,6 +189,7 @@ __all__ = [
     "Calibration",
     "Criterion",
     "Dataset",
+    "HackMonitor",
     "Judgment",
     "Marker",
     "MockEnvironment",
@@ -205,8 +209,10 @@ __all__ = [
     "adaptive_allocator",
     "agents",
     "allocator_slot_counts",
+    "annotator_agreement",
     "argument_grounding",
     "attach_delta",
+    "attach_labels",
     "attach_rubric",
     "behavior_signature",
     "behavioral_markers",
@@ -243,6 +249,8 @@ __all__ = [
     "format_benchmark",
     "format_curriculum",
     "format_delta_report",
+    "format_hack_monitor",
+    "format_hack_scan",
     "format_judge_trust",
     "format_markers",
     "format_stages",
@@ -253,6 +261,7 @@ __all__ = [
     "grade_llm",
     "grounding_report",
     "group_signal",
+    "hack_scan",
     "hf_publish",
     "hf_publish_run",
     "hf_status",

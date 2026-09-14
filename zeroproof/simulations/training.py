@@ -216,6 +216,32 @@ class TrainingRun:
     def fail(self, error: str) -> dict[str, Any]:
         return self.finish("failed", error=error)
 
+    def note(self, **fields: Any) -> None:
+        """Put fields on the run's summary ahead of ``finish``: whichever
+        callback finishes the run, the summary carries them. Sent right
+        away when the run is already finished."""
+        self._summary.update(_json_safe(dict(fields)))
+        if self.status == "running":
+            return
+        if self._delta is not None:
+            self._send_delta()
+        else:
+            self._resend_summary()
+
+    def _resend_summary(self) -> None:
+        try:
+            self._call(
+                "POST",
+                f"/runs/{self.run_id}/finish",
+                self._api_key,
+                {"status": self.status, "summary": dict(self._summary)},
+            )
+        except Exception as exc:
+            self.errors += 1
+            warnings.warn(
+                f"training run {self.run_id}: could not send summary ({exc})", stacklevel=2
+            )
+
     def delta(
         self,
         before: Sequence[dict],

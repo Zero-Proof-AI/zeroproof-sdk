@@ -587,6 +587,7 @@ def select_for_rl(
     has_tools: bool = True,
     dedupe: bool = True,
     drop_truncated: bool = True,
+    endorsed: Sequence[str] = (),
 ) -> tuple[list[dict], dict[str, Any]]:
     """Whole mixed groups up to roughly ``target`` rows. Groups never split.
 
@@ -598,10 +599,14 @@ def select_for_rl(
     situations rather than one over-represented failure. The last group
     may overshoot ``target``; an RL update wants the complete group or
     none of it. ``enforce_band=False`` keeps out-of-band asks and only
-    ranks them last. The report's ``correlations`` block is the
-    reward-hack scan over the selection: reward tracking reply length or
-    tool count is a judge problem, flagged in ``hygiene_warnings``.
+    ranks them last. The report's ``hack_scan`` block is the reward-hack
+    scan over the selection (``hack_scan``: what separates reward within
+    an ask, against a permutation floor; ``endorsed`` names what it
+    should be), ``correlations`` the older pooled scan. Reward tracking
+    a shortcut is a judge problem, flagged in ``hygiene_warnings``, not
+    pruned.
     """
+    from .hack_scan import hack_scan
     from .hygiene import (
         dedupe_groups,
         hygiene_warnings,
@@ -689,6 +694,7 @@ def select_for_rl(
         "truncated_dropped": trunc_report["n_dropped"],
         "length": length_report(selected),
         "correlations": reward_correlations(selected),
+        "hack_scan": hack_scan(selected, endorsed=endorsed),
         "signal": group_signal(selected, lo=lo, hi=hi),
         "eval_sourced": eval_sourced(selected),
     }
@@ -696,6 +702,7 @@ def select_for_rl(
         duplicates=dup_report,
         lengths=report["length"],
         correlations=report["correlations"],
+        scan=report["hack_scan"],
     )
     if report["eval_sourced"]:
         report["hygiene_warnings"].append(
@@ -870,6 +877,7 @@ def optimize(
     enforce_band: bool = True,
     select: str = "top_per_prompt",
     min_reward: float = 1.0,
+    endorsed: Sequence[str] = (),
 ) -> tuple[list[dict], dict[str, Any]]:
     """One call after grading: concentrate for the post-training target.
 
@@ -879,6 +887,9 @@ def optimize(
     ``select_for_sft``), anything else keeps whole mixed RL groups
     inside the difficulty ``band`` (default 20%-80% pass rate;
     ``enforce_band=False`` only ranks out-of-band asks last).
+    ``endorsed`` names what the reward should track (feature-name
+    substrings such as ``"tool:lookup_order"``), so the RL report's
+    ``hack_scan`` can call a shortcut a hack.
     Returns ``(rows, report)``; writes ``output`` when given, or
     ``<name>.<mode>.jsonl`` next to a path source. Never overwrites the
     source file unless ``output`` names it explicitly.
@@ -908,6 +919,7 @@ def optimize(
             hi=float(band[1]),
             enforce_band=enforce_band,
             has_tools=has_tools,
+            endorsed=endorsed,
         )
     report["mode"] = resolved
     dest = output
