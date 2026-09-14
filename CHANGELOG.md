@@ -5,7 +5,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
-<<<<<<< HEAD
 - `argument_grounding`: a marker for tool arguments that came from
   nowhere. `mark_grounding(rows)` stamps 1 when every string argument
   of every tool call appears in the prompt, the user and system turns,
@@ -17,7 +16,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - Hosted GRPO and DPO run on an L40S, so `zps.train(method="grpo")` on a
   served base (`Qwen/Qwen3-4B`) trains and serves; the docs no longer say a
   4B base does not fit.
-=======
 - `zps.HackMonitor(run, holdout=, proxy=, gold=, ...)`: is the run
   hacking its reward right now (rlhf-book ch. 14, figure 1)? A
   Transformers / TRL callback plus `monitor.wrap(reward_fn)` around the
@@ -40,7 +38,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   is new: fields it sets travel with whichever callback finishes the
   run. `examples/grpo` wires the monitor by default (`--monitor-every`,
   `--stop-on`).
->>>>>>> ed1a803 (monitor: HackMonitor watches a TRL run for reward hacking as it trains)
 - `zps.hack_scan(rows, endorsed=[...])`: what a grouped update would
   learn from these rewards, named before training (rlhf-book ch. 6, 14).
   Reward and every candidate feature are centered within ask, the way
@@ -68,7 +65,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   RL-shaped rows and, with `strict_hacks=True`, refuse a `reward_hack`.
   The pooled `reward_correlations` scan stays as the second column.
 
-## 0.32 (2026-09-14)
 - `zps.eval_variance(run_1, run_2, ...)` (or one row list split by
   `lineage.scoring_run_id` / `by=`): the eval's own re-run standard
   deviation, `noise_band` = 2 x std, and Olmo 3's stability band in
