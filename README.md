@@ -85,6 +85,20 @@ Character training, the same loop aimed at how the model talks: a constitution i
 | `optimize(mode="rl")` | drops junk, duplicates, dead groups, out-of-band asks; flags reward hacks | graded rows |
 | `push_rows(gate=True)` | refuses ungraded or gradient-free RL data; stamps calibration | pruned rows |
 
+### Verifiers: when the reward is a program, not a judge
+
+For a verifiable task the reward is a checker, not an opinion (RLHF book ch. 7, 13). `zeroproof.simulations.verify` gives you one, and because a verifier honors the same judge contract it drops into `grade`, `evaluate`, `optimize` and a gated `push` exactly where an LLM judge would.
+
+```python
+from zeroproof.simulations.verify import MathEqual, CodeExec, JSONSchema, Regex, All
+
+data = zps.simulate(spec="specs/math", mode="rl", situations=200, repeats=8)
+scored = data.grade(judge=MathEqual())  # the verifier is the reward
+rows, _ = zps.optimize(scored, mode="rl")  # GRPO data, gradient checked
+```
+
+The candidate is the rollout's `final_text`; the gold is read from the row's `privileged.reference`, which the training export never projects, so the answer key cannot leak into a training file (flat `answer`/`target`/... fields work too, or point at any column with `field=`). Built in: `ExactMatch`, `Includes`, `Regex`, `MultipleChoice`, `Numeric`, `MathEqual`, `JSONValid`, `JSONSchema`, `JSONField`, and `CodeExec` (runs the candidate against hidden tests in a sandboxed subprocess with a timeout). Compose with `All` (right answer *and* right format), `Any`, or a graded `Weighted` rubric; wrap your own with `@verifier`. Worked example: [`examples/verifiers`](examples/verifiers).
+
 Or use ZeroProof-hosted Qwen, which is the default when no `agent=` is given.
 Ask us for a `VLLM_API_KEY`; the endpoint is shared and rate limited.
 
@@ -202,6 +216,7 @@ sampling) and ch. 7 (difficulty filtering), applied at generation time.
 | [`examples/prime-intellect-rl`](examples/prime-intellect-rl) | Generates a GRPO-ready dataset with `simulate(mode="rl")` and checks it carries gradient before you spend GPU time on it. |
 | [`examples/schema`](examples/schema) | One row file in, six training targets out: eval, SFT, preference, GRPO prompts, OPSD hints, OPD. Migrates any legacy file first. Offline, no key. |
 | [`examples/grpo`](examples/grpo) | GRPO on Modal, end to end: prompts from the simulator, a verifiable tool-discipline reward, TRL `GRPOTrainer` with LoRA, reward and KL on the dashboard, pass@1 before and after on a holdout with the paired delta on the run page. One A10G, under fifteen minutes. |
+| [`examples/verifiers`](examples/verifiers) | Verifiable rewards: math (`MathEqual`), an answer-and-format gate (`All`), code run against hidden tests (`CodeExec`), and a JSON-schema check, each feeding `grade`/`optimize`. Offline, no key. |
 | [`examples/pass-at-k`](examples/pass-at-k) | pass@1, pass^k and pass@k for one agent, with the per-ask histogram the mean hides and what each number tells you to do next. Offline, no key. |
 | [`examples/identity`](examples/identity) | Builds a leak-free SFT set that teaches a model a new name and maker, with Modal scripts to train a LoRA and evaluate it. No model calls to generate. |
 | [`examples/character`](examples/character) | Character training from a constitution: the OpenAI Model Spec's style traits become graded rows, preference pairs and SFT rows, with the judge checked against the spec's own labels and a before/after measurement. Offline by default. How-to: [docs/character-training.md](docs/character-training.md). |

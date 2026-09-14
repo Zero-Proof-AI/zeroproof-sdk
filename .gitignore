@@ -42,6 +42,7 @@ examples/*
 !examples/character/
 !examples/hugging-face/
 !examples/bring-your-own-agent/
+!examples/verifiers/
 examples/character/out/
 
 # helpers, not the product
