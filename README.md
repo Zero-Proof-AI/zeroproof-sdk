@@ -360,6 +360,7 @@ Three checks that decide whether a result is believable, all report-only and all
 
 ```python
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
+pairs, report = zps.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 zps.decontaminate(train_rows, against=[eval_rows])  # 8-gram overlap with the eval set
 zps.style_markers(rows)  # no_boilerplate, no_hedging, no_apology, no_sycophancy, answered
 zps.style_report(rows)["warnings"]  # "reward pays for hedging (corr +0.41 ...)"
@@ -367,6 +368,10 @@ zps.refusal_report(benign_rows)  # over-refusal rate with a Wilson interval
 zps.compare_runs(run_a, run_b)  # paired delta with a 95% interval
 zps.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_after_fault"])
 zps.delta_report(before, after, target="pass_at_1", by="category")  # the target per kind of prompt
+noise = zps.eval_variance(eval_run_1, eval_run_2, eval_run_3)  # re-run std of the eval itself
+zps.delta_report(
+    before, after, target="pass_at_1", run_std=noise["run_std"]
+)  # inside the band = no verdict
 zps.mark_grounding(
     rows
 )  # markers["argument_grounding"]: every tool argument came from the conversation
@@ -379,7 +384,7 @@ zps.grounding_report(rows)  # grounded rate, and the invented values by tool and
 
 **Intervals and comparison.** Every pass@1 now carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. Tasks on one side only are dropped from a paired comparison; `note` says how many and `paired_share` is the fraction that paired, so a verdict over a quarter of the eval reads as one. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
 
-**Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
+**Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `eval_variance(run_1, run_2, run_3)` is the eval's own re-run standard deviation (three or more evaluations of the same model); passing it as `run_std=` makes any delta inside twice that band `within_noise`, and a target there reads `within_eval_noise` rather than moved, since re-running the eval moves it that much on its own (rlhf-book appendix C). `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
 
 **Argument grounding.** A policy trained to call a tool learns to call it before it learns when not to; on the refund environment both GRPO and DPO learned to invent an order id on a quarter of the prompts that gave none while the headline rose. `mark_grounding(rows)` stamps `argument_grounding`: 1 when every string argument of every tool call appears in the prompt, the user and system turns, or an earlier tool result (rows with no calls count as grounded), else 0. No categories, any agent; `must_not_regress=["argument_grounding"]` fails the run that learned to invent, and `ungrounded_arguments(row)` / `grounding_report(rows)` name the values. `ignore_keys=` skips free-text arguments, `allow=` lists enums and defaults.
 

@@ -396,6 +396,8 @@ export_dataset = export_training
 # loss; the two model names and same_policy tell a reviewer whether the pair
 # is on-policy; length_delta is the length-exploit check (rlhf-book ch. 8).
 _PAIR_KEYS = (
+    "tie",
+    "pairwise",
     "chosen_score",
     "rejected_score",
     "margin",
@@ -418,6 +420,7 @@ def export_preference(
     tools: Sequence[dict] | None = None,
     strip_think: bool = True,
     validate: bool = True,
+    drop_ties: bool = True,
 ) -> dict[str, Any]:
     """Write chosen/rejected pairs as DPO-style JSONL.
 
@@ -425,6 +428,8 @@ def export_preference(
     [...messages...]}`` in the same wire format as ``export_dataset``,
     with the roundtrip gate run over BOTH sides. Pairs come from
     ``ScoredData.select_for_preference()`` / ``build_preference_pairs``.
+    A pair ``judge_pairs`` marked ``tie`` carries no preference and is
+    left out (``ties_dropped`` in the report) unless ``drop_ties=False``.
     """
     from zeroproof.simulations import conversation
 
@@ -443,8 +448,12 @@ def export_preference(
         )
     system = str(system_prompt or "")
     out_rows: list[dict] = []
+    ties_dropped = 0
     for pair in pairs:
         if not isinstance(pair, dict):
+            continue
+        if drop_ties and pair.get("tie"):
+            ties_dropped += 1
             continue
         entry: dict[str, Any] = {"prompt": pair.get("prompt")}
         for side in ("chosen", "rejected"):
@@ -468,6 +477,8 @@ def export_preference(
             "validate=False."
         )
     report: dict[str, Any] = {"pairs": len(out_rows), "tool_call_roundtrip": roundtrip}
+    if ties_dropped:
+        report["ties_dropped"] = ties_dropped
     deltas = [r["length_delta"] for r in out_rows if isinstance(r.get("length_delta"), int)]
     if deltas:
         report["chosen_longer_frac"] = round(sum(1 for d in deltas if d > 0) / len(deltas), 3)

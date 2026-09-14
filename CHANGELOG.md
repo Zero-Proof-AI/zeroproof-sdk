@@ -15,6 +15,24 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   invented-id regression fails the run instead of hiding under pass@1.
 
 ## 0.32 (2026-09-14)
+- `zps.eval_variance(run_1, run_2, ...)` (or one row list split by
+  `lineage.scoring_run_id` / `by=`): the eval's own re-run standard
+  deviation, `noise_band` = 2 x std, and Olmo 3's stability band in
+  points (rlhf-book appendix C). `delta_report(run_std=)` marks every
+  metric whose delta sits inside that band `within_noise`, keeps it out
+  of improved / slipped / regressions, and reads a target there as
+  `within_eval_noise` instead of moved (#113).
+- `zps.judge_pairs(pairs, judge=None, swap=True)` asks a judge which side
+  of each preference pair is better, then again with A and B swapped
+  (rlhf-book ch. 5, 11). Each pair gets `pairwise` (winner, whether the
+  two orders agreed, reasons, judge) and `tie`; a pair decided
+  differently in the two orders is a tie with `position_consistent=False`.
+  Report: `position_flip_rate`, `tie_rate`, `agrees_with_scores`,
+  `prefers_rejected` with examples. `zps.pairwise_judge(spec)` is the
+  hosted model judge with a length-neutral prompt.
+  `export_preference(drop_ties=True)` leaves ties out and counts them (#114).
+
+2026-09-14)
 
 - `examples/grpo` and `examples/dpo`: `--balance <share>` repeats the
   prompts of any category below that share of the train split

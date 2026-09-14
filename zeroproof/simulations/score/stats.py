@@ -169,6 +169,111 @@ def marker_summary(
     }
 
 
+# ------------------------------------------------------------------ re-run variance
+
+
+#: Olmo 3's bands for the standard deviation of a benchmark across re-runs
+#: of one model, in points on a 0-100 scale (rlhf-book appendix C,
+#: "Evaluation Variance"): MMLU/MATH/PopQA sit near 0.2, GPQA/AlpacaEval
+#: above 1.2.
+VARIANCE_BANDS = (("very_stable", 0.35), ("stable", 0.7), ("high_variance", float("inf")))
+
+
+def _run_key(row: dict, by: str | None) -> str | None:
+    if by:
+        value = row.get(by)
+        if value is None and isinstance(row.get("lineage"), dict):
+            value = row["lineage"].get(by)
+        return str(value) if value not in (None, "") else None
+    lineage = row.get("lineage")
+    if isinstance(lineage, dict) and lineage.get("scoring_run_id"):
+        return str(lineage["scoring_run_id"])
+    return None
+
+
+def eval_variance(
+    *runs: Sequence[dict],
+    metric: str = "pass_at_1",
+    by: str | None = None,
+) -> dict[str, Any]:
+    """How much an evaluation moves when the same model is evaluated
+    again (rlhf-book appendix C, "Evaluation Variance").
+
+    Pass each re-run's rows as its own argument, or one row list whose
+    rows say which run they belong to: ``lineage.scoring_run_id`` (what
+    ``evaluate(run_id=)`` stamps) or a top-level or lineage key named by
+    ``by``. Each run's ``metric`` is a mean over tasks; the report is
+    those means, their mean, the sample standard deviation ``run_std``,
+    and ``noise_band`` = 2 x ``run_std``: a before/after delta inside it
+    is what re-running the eval does on its own. Hand ``run_std`` to
+    ``delta_report(run_std=)`` and it refuses to call such a delta a
+    change. ``stability`` places ``run_std`` on Olmo 3's bands in points.
+    Fewer than three runs is a difference, not a distribution; the report
+    says so and ``run_std`` is ``None`` below two.
+    """
+    if not runs:
+        raise ValueError("eval_variance needs at least one row list")
+    groups: list[list[dict]]
+    if len(runs) == 1:
+        split: dict[str, list[dict]] = {}
+        unkeyed = 0
+        for row in runs[0]:
+            if not isinstance(row, dict):
+                continue
+            key = _run_key(row, by)
+            if key is None:
+                unkeyed += 1
+                continue
+            split.setdefault(key, []).append(row)
+        groups = list(split.values())
+        labels = list(split)
+    else:
+        groups = [list(r) for r in runs]
+        labels = [f"run_{i + 1}" for i in range(len(groups))]
+        unkeyed = 0
+    means: dict[str, float | None] = {}
+    task_sets: list[set[str]] = []
+    for label, rows in zip(labels, groups):
+        per_task = task_means(rows, metric)
+        means[label] = round(_mean(list(per_task.values())), 4) if per_task else None
+        task_sets.append(set(per_task))
+    values = [v for v in means.values() if v is not None]
+    n = len(values)
+    mean = _mean(values) if values else None
+    std = (
+        (sum((v - mean) ** 2 for v in values) / (n - 1)) ** 0.5
+        if n >= 2 and mean is not None
+        else None
+    )
+    common = set.intersection(*task_sets) if task_sets else set()
+    stability = None
+    if std is not None:
+        points = std * 100
+        stability = next(name for name, cap in VARIANCE_BANDS if points < cap)
+    out: dict[str, Any] = {
+        "metric": metric,
+        "n_runs": n,
+        "means": means,
+        "mean": round(mean, 4) if mean is not None else None,
+        "run_std": round(std, 4) if std is not None else None,
+        "run_std_points": round(std * 100, 2) if std is not None else None,
+        "noise_band": round(2 * std, 4) if std is not None else None,
+        "stability": stability,
+        "tasks_in_every_run": len(common),
+        "notes": [],
+    }
+    if unkeyed:
+        out["notes"].append(f"{unkeyed} row(s) carried no run id and were left out")
+    if n < 3:
+        out["notes"].append(
+            f"{n} run(s): two is a difference, not a distribution; three or more re-runs "
+            "give a standard deviation worth reading"
+        )
+    if task_sets and any(s != common for s in task_sets):
+        out["notes"].append("runs do not cover the same tasks; means are not strictly comparable")
+    return out
+
+
 # ------------------------------------------------------------------ comparison
 
 
@@ -384,6 +489,7 @@ __all__ = [
     "bootstrap_ci",
     "compare_runs",
     "decontaminate",
+    "eval_variance",
     "marker_names",
     "marker_summary",
     "metric_summary",
