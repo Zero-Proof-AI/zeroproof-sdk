@@ -162,7 +162,7 @@ Pass `spec=` if you have a local tools-and-system-prompt folder. The generated d
 | `fault_rate` | `0.5` | Broken tools. `0` off. Applied by the mock world, so a callable `agent=` that answers its own tool calls never sees one |
 | `simulator` | hosted Qwen | Situation writer. `False` uses the built-in template writer (no model, less variety); an `openai:`/`vllm:` spec runs it on your endpoint |
 | `logprobs` | `False` | Ask the rollout model for the log-probability of every token it generates. Each agent turn's step gets `logprob` and `n_tokens`, the row gets the totals. `"tokens"` keeps the per-token list. Model backends only |
-| `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off |
+| `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off. `concurrency: 1` always runs this way |
 | `grade` | `False` | Legacy: `True` writes the deterministic conduct score at simulation time. Rows come back ungraded by default; grade after with `data.grade(...)` or `zps.grade(...)` |
 | `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |
 | `output` | | JSONL path |
@@ -574,7 +574,7 @@ hosted GPU with warm replicas and burst under load.
 | `concurrency` | `32` | Parallel rollouts |
 | `stop_grace` | `5` | Seconds to wait for running rollouts and writer waves after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` / `writer_waves_abandoned` |
 | `embedder` | `"hash"` | Prompt selection |
-| `seed` | `0` | Reproducible draws. Bit-for-bit at `concurrency: 1` or with `reproducible=True`; otherwise which rows land before the cap depends on thread timing |
+| `seed` | `0` | Reproducible draws. Bit-for-bit at `concurrency: 1` or with `reproducible=True`, within a process and across processes; otherwise which rows land before the cap depends on thread timing |
 | `avg_turns` | `4` | Target conversation length |
 
 Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollouts_per_request`; `unique=` → `unique_situations`; `policy=` → `system_prompt`; `risk=` → `fault_rate`.

@@ -3,6 +3,19 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `concurrency: 1` is round-synchronous, like `reproducible=True`: the
+  batch's rollouts and their in-loop verdicts all land before the next
+  round is chosen. Two same-seed serial runs in one process could draw
+  different situations: the 0.35 s collect window decided how many of a
+  batch's rollouts a round saw, and the rounds spent waiting drifted the
+  counter that seeds selection. Cold processes happened to agree, so the
+  cross-process check passed; `tests/api/test_reproducibility.py` now
+  also runs `simulate()` twice in one process under contrasting latency.
+  Golden captures move: a serial run now folds every batch whole, so a
+  `scripts/golden.py` diff across this change is expected to differ.
+
 ## 0.36 (2026-09-14)
 
 - `training_rows(max_tool_output_chars=)` / `export_training(...)`: each

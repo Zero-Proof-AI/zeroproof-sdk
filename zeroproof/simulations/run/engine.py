@@ -843,6 +843,15 @@ class Run:
         # One slot per requested rollout. Refill writers before the unused
         # pool hits zero: keep about two waves of prompts in the pipe.
         self.flight = max(1, int(c.concurrency))
+        # Round-synchronous scheduling: every rollout, writer wave and
+        # verdict of a round lands before the next round is chosen, so
+        # the loop runs the same number of rounds and folds the same
+        # batches whatever the thread timing. ``reproducible=True`` asks
+        # for it; a single slot gets it for free. Without it the 0.35 s
+        # collect window decided how many of one batch's rollouts a round
+        # saw, which drifted the round counter that seeds selection and
+        # made two same-seed runs in one process draw different situations.
+        self.sync = bool(c.reproducible) or self.flight == 1
         typical_n = min(c.completions_per_request, 3)
         self.writer_batch = max(1, c.scenarios_per_request * typical_n)
         self.writer_buffer = max(self.writer_batch * 2, min(self.flight * 2, 96))
@@ -1261,7 +1270,7 @@ class Run:
             else:
                 self.empty_streak = 0
                 self._submit(batch[:remaining])
-                if c.reproducible and self.inflight:
+                if self.sync and self.inflight:
                     # Round-synchronous: the batch finishes (or hits the
                     # hung-slot limit) before anything is collected, so
                     # results are consumed in submission order and each
@@ -1348,7 +1357,7 @@ class Run:
         c = self.c
         data = self.data
         gen = self.generator
-        if c.reproducible and self.scenario_futs:
+        if self.sync and self.scenario_futs:
             # Every launched writer wave lands before selection, in launch
             # order, so the pool does not depend on which wave returned first.
             concurrent.futures.wait(list(self.scenario_futs))
@@ -1803,9 +1812,15 @@ class Run:
         if left is not None:
             wait_s = max(0.1, min(wait_s, left))
         if self.inflight:
-            concurrent.futures.wait(
-                self.inflight, timeout=wait_s, return_when=concurrent.futures.FIRST_COMPLETED
-            )
+            if self.sync:
+                # Re-rolled rollouts land here too: take the whole set,
+                # bounded by the hung-slot limit and the clock.
+                wait_s = c.hung_slot_s if left is None else max(0.1, min(c.hung_slot_s, left))
+                concurrent.futures.wait(self.inflight, timeout=wait_s)
+            else:
+                concurrent.futures.wait(
+                    self.inflight, timeout=wait_s, return_when=concurrent.futures.FIRST_COMPLETED
+                )
         results, jobs_for = [], []
         now = time.monotonic()
         for fut in list(self.inflight):
@@ -2080,6 +2095,8 @@ class Run:
             "k": c.repeat_count,
         }
         if judged_async:
+            if self.sync:
+                self._settle_judgments()
             self._drain_judgments()
         if successive:
             data.search["groups"] = self._group_summary()
@@ -2199,6 +2216,20 @@ class Run:
 
         fut = self.judge_pool.submit(one)
         self.judge_inflight[fut] = (row, job)
+
+    def _settle_judgments(self) -> None:
+        """Round-synchronous runs: every verdict of the round lands before
+        the allocator reads any, so a group's next rollout is decided on
+        the same evidence in every run. Otherwise a verdict that landed a
+        few milliseconds later was folded a round later, and the verify
+        queue, the fresh-prompt check and the round counter all moved.
+        Bounded by the hung-slot limit and the clock, like a rollout."""
+        if not self.judge_inflight:
+            return
+        c = self.c
+        left = self._clock_left()
+        wait_s = c.hung_slot_s if left is None else max(0.1, min(c.hung_slot_s, left))
+        concurrent.futures.wait(list(self.judge_inflight), timeout=wait_s)
 
     def _drain_judgments(self, *, wait_s: float = 0.0) -> int:
         """Fold every verdict that has landed into its row and let the
