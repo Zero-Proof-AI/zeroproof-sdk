@@ -195,6 +195,7 @@ class Run:
         # before generation. Disclosed in search["seed_amplification"].
         self.seed_amp_report: dict | None = None
         self.profile = inspect(c.agent, tools=tools, system_prompt=policy)
+        self.profile.rubric = str(c.rubric or "")
         self.tools: list[dict] = list(self.profile.tools or [])
         self.policy: str = str(self.profile.policy or "")
         # Generation-only teacher guidance. profile.policy and export stay plain.

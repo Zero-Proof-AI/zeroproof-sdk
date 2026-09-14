@@ -674,6 +674,8 @@ class AgentProfile:
     constraints: dict = field(default_factory=dict)
     transport: str = "callable"
     name: str = ""
+    # what doing the job means, for the judge; empty means conduct floor only
+    rubric: str = ""
 
     @property
     def system_prompt(self) -> str:

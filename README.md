@@ -26,7 +26,7 @@ A situation is drawn across the world axes (from the agent's tools) and the huma
 3. **Write users.** A separate writer (same hosted model, different prompt, no agent policy) samples situations across tools, stance, history, and so on.
 4. **Pick the diverse ones.** Embeddings plus a bit of noise so the batch is not 200 copies of the same prompt.
 5. **Play the agent.** It talks, calls tools, gets results, talks again. All of that is stored: user text, agent text, tool calls, tool results, `final_text`.
-6. **Grade.** Rows come back ungraded. Grade after with `data.grade()` (hosted judge), `data.grade(judge=...)` (your judge), or `zps.grade(path)`. The legacy `grade=True` flag writes deterministic conduct rewards; avoid it for the rubric workflow.
+6. **Grade.** Rows come back ungraded. Grade after with `data.grade()` (hosted judge, against the spec's `rubric.md` or `rubric=`), `data.grade(judge=...)` (your judge), or `zps.grade(path)`. The legacy `grade=True` flag writes deterministic conduct rewards; avoid it for the rubric workflow.
 
 Stop when the row cap or the clock hits.
 
@@ -136,12 +136,14 @@ data = zps.simulate(
     situations=200,
     repeats=8,
 )  # 1 generate
-scored = data.grade(judge=my_judge)  # 2 grade (0/1 per rollout)
+scored = data.grade()  # 2 grade against specs/github/rubric.md (0/1 per rollout)
 print(scored.pass_at)
-zps.judge_trust(scored.rows, judge=my_judge)  # 3 trust the numbers
+zps.judge_trust(scored.rows)  # 3 trust the numbers
 rows, report = zps.optimize(scored, mode="rl")  # 4 prune to what carries gradient
 entry = zps.push_rows(rows, "github-rl-v1", gate=True, mode="rl")  # 5 publish, gated
 ```
+
+A spec folder is `spec.json` (tools and policy) plus `rubric.md`: what doing the job means, in prose. `grade()` scores against it. Without one it grades the conduct floor only (nothing invented, nothing skipped) and the report says so; pass `rubric=` to `simulate` or `grade` to supply one, `judge=` for your own callable.
 
 After training, measure whether it landed: `zps.delta_report(before=scored.rows, after=after_rows, target="pass_at_1")`. Name the training reward too, `proxy="marker:first_action"`, and the report says whether the run over-optimized it: proxy up while the target did not follow fails the report (rlhf-book ch. 14). `zps.hack_scan_diff(before, after, endorsed=[...])` names what the update moved toward, and withholds the name when either side came back `degenerate`.
 
@@ -283,6 +285,8 @@ import zeroproof.simulations as zps
 data = zps.simulate(tools=my_tools, system_prompt=my_system_prompt, output="rollout.jsonl")
 data = zps.simulate(agent=my_agent)
 ```
+
+Pass `spec=` if you have a local spec folder: tools, system prompt, and a `rubric.md`. The generated datasets are on Hugging Face in the [Post-Training Foundational Datasets](https://huggingface.co/collections/zero-proof-ai/zeroproof-post-training-foundational-datasets-6aa0b9c040ff8591988696dc) collection, not stored in this repo: [agent-simulations](https://huggingface.co/datasets/zero-proof-ai/agent-simulations) by agent type, [tool-call-efficiency](https://huggingface.co/datasets/zero-proof-ai/tool-call-efficiency) (SFT, preference, GRPO and eval splits), and [tau2-simulated](https://huggingface.co/datasets/zero-proof-ai/tau2-simulated), among others.
 
 Pass `spec=` if you have a local tools-and-system-prompt folder of your own: a directory (or a JSON/YAML file) holding `tools` and `policy` / `system_prompt`, optionally with seed `situations`. No spec folders ship with this package, so every snippet here uses `tools=` + `system_prompt=` — the two are interchangeable, and `spec=` is only a way to keep them in a file. The generated datasets are on Hugging Face in the [Post-Training Foundational Datasets](https://huggingface.co/collections/zero-proof-ai/zeroproof-post-training-foundational-datasets-6aa0b9c040ff8591988696dc) collection, not stored in this repo: [agent-simulations](https://huggingface.co/datasets/zero-proof-ai/agent-simulations) by agent type, [tool-call-efficiency](https://huggingface.co/datasets/zero-proof-ai/tool-call-efficiency) (SFT, preference, GRPO and eval splits), and [tau2-simulated](https://huggingface.co/datasets/zero-proof-ai/tau2-simulated), among others.
 

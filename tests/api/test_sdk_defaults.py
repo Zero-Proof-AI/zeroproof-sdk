@@ -31,6 +31,7 @@ def test_default_budget_is_500():
         "llm_grade",
         "traces",
         "grader",
+        "rubric",
         "strategy",
         "seeds",
         "scaffold",

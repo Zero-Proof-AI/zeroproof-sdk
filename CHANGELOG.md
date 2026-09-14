@@ -5,6 +5,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- A spec folder carries `rubric.md`, what doing the job means, and
+  `grade()` scores against it; `simulate(rubric=)` and `grade(rubric=)`
+  take one directly, `prompt=` is still the raw judge prompt. Without a
+  rubric the hosted judge grades the conduct floor only and the report
+  says so (`rubric: conduct_floor`). Before this the default judge passed
+  31 of 31 github rollouts: honest, and never asked whether the job got done.
 - `write_rubrics(max_hard=N)`: the heaviest N hard rules a model-written
   rubric carries stay hard, the rest become weighted principles
   (`demoted_hard` in the report). Measured live on 72 rollouts with the
@@ -14,7 +20,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   0 or 1 for a training reward (#181).
 
 2026-09-14)
-
 - `zps.reference_logprobs(rows, "vllm:<model>@<url>")`: scores every agent turn
   under a reference model through `prompt_logprobs` on any vLLM-style
   endpoint (the platform's served base by name, a hosted model, or

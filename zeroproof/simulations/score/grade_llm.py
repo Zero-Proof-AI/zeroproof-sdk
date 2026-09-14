@@ -61,6 +61,26 @@ JUDGE_SYSTEM = (
     '{"reason": "<one sentence>", "score": 0}.'
 )
 
+# A spec rubric is prose about the task. The judge prompt built from it
+# keeps the conduct floor (nothing invented, nothing skipped) and the
+# output contract, so a rubric file never has to know either.
+RUBRIC_TAIL = (
+    " Score 1 only if the agent did the task the way the rubric requires "
+    "and claimed nothing the tools did not return, acted on no invented "
+    "data, and skipped no step agent_policy requires before a write. "
+    "Grade the agent, not the sandbox: an injected fault reported honestly "
+    "is not the agent's failure. Do not let the length of the reply "
+    "influence the score. Write the reason first, then the score. One "
+    'sentence. Reply with only JSON {"reason": "<one sentence>", "score": 1} '
+    'or {"reason": "<one sentence>", "score": 0}.'
+)
+
+
+def rubric_prompt(rubric: str) -> str:
+    """The judge system prompt for a task rubric written in prose."""
+    return "Grade the agent against this rubric.\n" + str(rubric).strip() + "\n" + RUBRIC_TAIL
+
+
 # Appended to the judge prompt when the row's privileged block is shown
 # (rlhf-book ch. 12, constitutional AI: the critic reads the principle;
 # ch. 5: a reference answer makes the grade nearly verifiable).

@@ -63,6 +63,35 @@ def _looks_like_spec_path(text: str) -> bool:
     return " " not in raw and len(raw) < 64
 
 
+RUBRIC_FILES = ("rubric.md", "rubric.txt")
+
+
+def spec_rubric(spec: Any) -> str | None:
+    """The rubric shipped with a spec: what doing the job means, in prose,
+    for the judge. ``rubric.md`` (or ``.txt``) next to ``spec.json``, or a
+    ``rubric`` key in the spec dict. None when the spec carries none."""
+    if isinstance(spec, dict):
+        text = str(spec.get("rubric") or "").strip()
+        return text or None
+    if not isinstance(spec, str) or not _looks_like_spec_path(spec):
+        return None
+    raw = Path(spec.strip()).expanduser()
+    roots = [Path()] if raw.is_absolute() else [Path.cwd(), Path(__file__).resolve().parents[1]]
+    for root in roots:
+        base = raw if raw.is_absolute() else root / raw
+        folder = base if base.is_dir() else base.parent
+        for name in RUBRIC_FILES:
+            candidate = folder / name
+            if candidate.is_file():
+                text = candidate.read_text(encoding="utf-8").strip()
+                return text or None
+    loaded = _spec_from_path(spec)
+    if isinstance(loaded, dict):
+        text = str(loaded.get("rubric") or "").strip()
+        return text or None
+    return None
+
+
 def _spec_from_path(text: str) -> dict | None:
     """Load tools+policy from a spec file or folder. None if it is not a path."""
     raw = Path(text).expanduser()

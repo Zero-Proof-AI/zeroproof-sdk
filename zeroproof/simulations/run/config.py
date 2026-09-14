@@ -17,6 +17,7 @@ from typing import Any
 from ..generate.adapters import resolve_system_prompt
 from ..generate.diversity import adaptive_allocator
 from ..generate.scenarios import DEFAULT_FAULT_RATE
+from .spec import spec_rubric
 
 # Rows a saturation-bounded run may produce before the loop gives up.
 SATURATION_CAP = 50_000
@@ -324,6 +325,8 @@ class RunConfig:
     grader: Any
     llm_grade: bool
     llm_spec: Any
+    # what doing the job means, for the judge: rubric= or the spec's rubric.md
+    rubric: str | None
     # engine knobs
     concurrency: int
     dimensions: Any
@@ -372,6 +375,7 @@ def resolve_run_config(
     llm_grade: bool = False,
     traces: Any = None,
     grader: Any = None,
+    rubric: str | None = None,
     strategy: str = "auto",
     seeds: list | None = None,
     scaffold: str | None = None,
@@ -588,6 +592,7 @@ def resolve_run_config(
         grader=grader,
         llm_grade=llm_grade,
         llm_spec=llm_spec,
+        rubric=(str(rubric).strip() or None) if rubric else spec_rubric(spec),
         concurrency=concurrency,
         dimensions=dimensions,
         simulator=simulator,

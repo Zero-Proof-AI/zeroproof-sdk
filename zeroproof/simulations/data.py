@@ -7,6 +7,7 @@ import concurrent.futures
 import contextlib
 import hashlib
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,12 +17,14 @@ from .export import export_training
 from .generate.adapters import AgentProfile
 from .ingest.platform import push_rows
 from .schema import SCHEMA_KEY, SCHEMA_VERSION, check, stamp
-from .score.grade_llm import apply_grade_llm, require_judge_key
+from .score.grade_llm import apply_grade_llm, require_judge_key, rubric_prompt
 from .score.llm_judge import MISSING_JUDGE_KEY, apply_llm_grade, resolve_judge_key
 from .score.optimize import select_for_sft
 from .score.quality import rank as rank_source
 from .score.quality import rank_rows
 from .score.quality import summarize as summarize_quality
+
+log = logging.getLogger("zeroproof.simulations")
 
 
 def note_stage(data: SimulationData, stage: str) -> None:
@@ -391,6 +394,7 @@ class SimulationData:
         version: str | None = None,
         use_privileged: bool = False,
         scale: tuple[float, float] | None = None,
+        rubric: str | None = None,
     ):
         """Grade after simulation with the hosted judge or a custom callable.
 
@@ -432,6 +436,7 @@ class SimulationData:
         if not callable(grader):
             return self.grade_llm(
                 spec=llm_spec,
+                rubric=rubric,
                 concurrency=llm_concurrency,
                 api_key=api_key,
                 path=path,
@@ -503,6 +508,7 @@ class SimulationData:
         limit: int | None = None,
         prompt: str | None = None,
         use_privileged: bool = False,
+        rubric: str | None = None,
     ):
         """Binary 0/1 situation grade. Default brain is the hosted judge
         (Phi-4 unless ``ZEROPROOF_JUDGE`` is set), never the policy model.
@@ -511,6 +517,23 @@ class SimulationData:
         require_judge_key(api_key, spec=spec, base_url=base_url, model=model)
         policy = str(self.profile.policy or "") if self.profile else ""
         tools = list(self.profile.tools) if self.profile else []
+        # The rubric says what doing the job means. rubric= wins, then the
+        # spec's rubric.md; a full prompt= is taken as written. With none
+        # of them the judge grades the conduct floor only, and says so.
+        spec_rubric_text = str(getattr(self.profile, "rubric", "") or "") if self.profile else ""
+        if prompt:
+            rubric_source = "prompt"
+        elif rubric:
+            prompt, rubric_source = rubric_prompt(rubric), "rubric"
+        elif spec_rubric_text:
+            prompt, rubric_source = rubric_prompt(spec_rubric_text), "spec"
+        else:
+            rubric_source = "conduct_floor"
+            log.warning(
+                "grade(): no rubric, grading the conduct floor only (nothing invented, "
+                "nothing skipped); pass rubric= or add rubric.md to the spec so the "
+                "task itself is scored"
+            )
         report = apply_grade_llm(
             self.trajectories,
             policy=policy,
@@ -525,6 +548,12 @@ class SimulationData:
             limit=limit,
             degraded=self.degraded,
         )
+        report["rubric"] = rubric_source
+        if rubric_source == "conduct_floor":
+            report["note"] = (
+                "conduct floor only: pass rubric= or add rubric.md to the spec "
+                "so the task itself is scored"
+            )
         self._rewrite(path)
         return report
 

@@ -36,7 +36,12 @@ def test_data_grade_is_the_optional_qwen_followup(monkeypatch):
         ]
     )
     report = data.grade()
-    assert report == {"status": "judged", "graded": 1}
+    assert report == {
+        "status": "judged",
+        "graded": 1,
+        "rubric": "conduct_floor",
+        "note": "conduct floor only: pass rubric= or add rubric.md to the spec so the task itself is scored",
+    }
     assert seen["rows"] is data.trajectories
     assert seen["key"] is None
     assert data.trajectories[0]["reward"] == 1
