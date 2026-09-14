@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.37 (2026-09-14)
 
 - `concurrency: 1` is round-synchronous, like `reproducible=True`: the
   batch's rollouts and their in-loop verdicts all land before the next
