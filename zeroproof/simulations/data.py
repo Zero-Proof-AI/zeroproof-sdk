@@ -7,6 +7,7 @@ import concurrent.futures
 import contextlib
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -473,6 +474,8 @@ class SimulationData:
         gate: bool = True,
         purpose: str = "train",
         holdout: float | None = None,
+        endorsed: Sequence[str] = (),
+        strict_hacks: bool = False,
     ) -> dict:
         """Upload this run to your Zero Proof Labs account as a dataset.
 
@@ -495,6 +498,10 @@ class SimulationData:
         and an RL-shaped run that is ungraded or has no mixed group is
         refused with ``PublishGateError``. The gate report is returned as
         ``entry["gate"]``. ``gate=False`` uploads rows as they are.
+        ``endorsed`` names what the reward should track (feature-name
+        substrings, e.g. ``"tool:lookup_order"``) for the gate's
+        ``hack_scan``; ``strict_hacks=True`` refuses a set whose reward
+        is best explained by something else.
         """
         from .ingest.platform import publish as _publish
         from .score.publish_gate import publish_gate
@@ -512,6 +519,8 @@ class SimulationData:
                     "name": str(getattr(profile, "name", "") or ""),
                     "prompt_hash": _prompt_hash(str(getattr(profile, "policy", "") or "")),
                 },
+                endorsed=endorsed,
+                strict_hacks=strict_hacks,
             )
         train_rows, holdout_rows = _split_holdout(rows, holdout)
         entry = push_rows(

@@ -16,6 +16,32 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - Hosted GRPO and DPO run on an L40S, so `zps.train(method="grpo")` on a
   served base (`Qwen/Qwen3-4B`) trains and serves; the docs no longer say a
   4B base does not fit.
+- `zps.hack_scan(rows, endorsed=[...])`: what a grouped update would
+  learn from these rewards, named before training (rlhf-book ch. 6, 14).
+  Reward and every candidate feature are centered within ask, the way
+  GRPO baselines them, ranked by that correlation, and compared to a
+  noise floor from shuffling reward within ask (`tau`, 95th percentile
+  of the null maximum), so a feature that only tracks difficulty never
+  counts and the threshold is measured, not guessed. Two tiers, pure
+  Python: the hand tier (reply length, tool calls, turns, truncation,
+  surface counts, one indicator per tool called, mean token logprob,
+  every numeric marker, plus `features=` of your own) and the auto tier
+  (presence of the 200 most common words and word pairs in the agent's
+  text, and pairwise ANDs that beat both parents). `endorsed` names what
+  the reward should track (feature-name substrings such as
+  `"tool:lookup_order"` or `"marker:grounded"`); with it the report says
+  `regime`: `train`, `reward_hack` (the top feature is not endorsed),
+  `pool_exhausted` (over 20% of asks all-pass), `no_signal` (nothing
+  clears the floor) or `unknown`, plus `integrity` (share of the
+  above-floor signal that is endorsed), `top_feature`, the ranking with
+  the pooled correlation beside each, and one-line `warnings`.
+  `zps.format_hack_scan(report)` prints it. Duplicate columns are one
+  feature with `aliases`; 3,200 rollouts scan in about a second.
+  `select_for_rl` / `optimize(mode="rl", endorsed=)` carry it as
+  `report["hack_scan"]` and its warnings in `hygiene_warnings`;
+  `publish_gate` / `push_rows(gate=True)` / `data.push` report it on
+  RL-shaped rows and, with `strict_hacks=True`, refuse a `reward_hack`.
+  The pooled `reward_correlations` scan stays as the second column.
 
 ## 0.32 (2026-09-14)
 - `zps.eval_variance(run_1, run_2, ...)` (or one row list split by
@@ -45,6 +71,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   reward one for GRPO: the invented-id rate on no-id prompts drops 0.23
   to 0.08 at 120 steps. One-round DPO does not move on it (no pairs
   where the base never fails); a second round is DPO's lever.
+## 0.32 (2026-09-14)
+
 - A policy edit keeps the task grid (#98). The covering array is built in
   layers: a rule-free block over tools and situation axes, then one block
   per policy clause, rotated by the clause text. Editing, adding or
