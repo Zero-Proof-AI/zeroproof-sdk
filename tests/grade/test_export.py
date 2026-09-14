@@ -134,7 +134,11 @@ def test_export_refuses_unparseable_tool_arguments():
     report = export_training([bad], system_prompt=POLICY, tools=TOOLS, validate=False)
     assert report["tool_call_roundtrip"]["invalid"] == 1
     clean = training_rows([ROW], system_prompt=POLICY, tools=TOOLS)
-    assert tool_call_roundtrip(clean) == {"checked": 1, "invalid": 0, "rows": []}
+    gate = tool_call_roundtrip(clean)
+    assert (gate["checked"], gate["invalid"], gate["rows"]) == (1, 0, [])
+    # The gate names the encoding it checked, so the report cannot be read
+    # as a clean bill of health for a trainer that needs the other one.
+    assert gate["encoding"] == "json_string"
 
 
 def _graded(prompt: str, reward: int, tier: str = "ordinary") -> dict:
@@ -222,4 +226,5 @@ def test_pulled_tool_trace_rows_export_with_tool_calls():
     assert json.loads(calls[0]["function"]["arguments"]) == {"path": "paging.py"}
     from zeroproof.simulations.export import tool_call_roundtrip as rt
 
-    assert rt(rows) == {"checked": 1, "invalid": 0, "rows": []}
+    gate = rt(rows)
+    assert (gate["checked"], gate["invalid"], gate["rows"]) == (1, 0, [])

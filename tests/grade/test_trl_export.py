@@ -1,0 +1,220 @@
+"""The TRL export shape (issue #152).
+
+TRL is not installed here, so these are structural checks against the two
+rules that actually broke a customer's run:
+
+* ``trl.data_utils.is_conversational`` decides by the *column set* — an
+  example whose supported keys are anything other than one of TRL's known
+  combinations is treated as non-conversational, no chat template is
+  applied, and nothing raises. ``_is_conversational`` below mirrors that
+  rule; it is a copy of TRL's, not an import, on purpose.
+* ``maybe_apply_chat_template`` indexes ``prompt`` as a message list for
+  conversational preference data, so a ``prompt`` string with
+  conversational sides raises ``TypeError: string indices must be
+  integers``. That is a shape a test can assert without TRL.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from zeroproof.simulations.export import (
+    export_preference,
+    export_training,
+    to_trl,
+    tool_call_roundtrip,
+    training_rows,
+)
+from zeroproof.simulations.score.judging import build_preference_pairs
+
+POLICY = "Read before you write. Say what you did."
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        },
+    }
+]
+
+#: The column sets TRL's ``is_conversational`` accepts.
+_SUPPORTED = {"prompt", "chosen", "rejected", "completion", "messages"}
+_SHAPES = [
+    {"messages"},
+    {"prompt"},
+    {"prompt", "completion"},
+    {"prompt", "chosen", "rejected"},
+    {"chosen", "rejected"},
+]
+
+
+def _is_conversational(example: dict) -> bool:
+    keys = {k for k in example if k in _SUPPORTED}
+    if keys not in _SHAPES:
+        return False
+    key = "messages" if "messages" in keys else sorted(keys)[0]
+    turns = example[key]
+    return (
+        isinstance(turns, list)
+        and bool(turns)
+        and isinstance(turns[0], dict)
+        and "role" in turns[0]
+        and "content" in turns[0]
+    )
+
+
+def _row(prompt: str, reward: int, final: str, path: str = "src/app/handlers.py") -> dict:
+    return {
+        "prompt": prompt,
+        "reward": reward,
+        "judge_status": "ok",
+        "model_version": "student",
+        "steps": [
+            {"tool": "read_file", "arguments": {"path": path}, "result": {"ok": True}},
+        ],
+        "final_text": final,
+    }
+
+
+def _rows() -> list[dict]:
+    return [
+        _row("read the handler file", 1, "Read it; the bug is on line 40."),
+        _row("read the handler file", 0, "I could not find anything."),
+    ]
+
+
+def _calls(messages) -> list[dict]:
+    return [c for m in messages for c in (m.get("tool_calls") or [])]
+
+
+# ---------------------------------------------------------------- sft shape
+
+
+def test_default_sft_rows_keep_the_openai_wire_shape():
+    """The default is unchanged: prompt string, arguments as JSON string."""
+    row = training_rows(_rows()[:1], system_prompt=POLICY, tools=TOOLS)[0]
+    assert isinstance(row["prompt"], str)
+    assert isinstance(_calls(row["messages"])[0]["function"]["arguments"], str)
+
+
+def test_trl_sft_rows_drop_the_prompt_string_column(tmp_path):
+    """Bug 2: a ``prompt`` string beside ``messages`` makes TRL skip the
+    chat template and train on the bare ask, silently."""
+    out = tmp_path / "sft.jsonl"
+    report = export_training(_rows(), str(out), system_prompt=POLICY, tools=TOOLS, format="trl")
+    assert report["format"] == "trl"
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert rows
+    for row in rows:
+        assert "prompt" not in row, "a prompt string here breaks TRL's sniffing"
+        assert _is_conversational(row)
+        # the ask is not lost, only renamed out of TRL's way
+        assert row["prompt_text"] == "read the handler file"
+        assert row["messages"][0] == {"role": "system", "content": POLICY}
+
+
+def test_default_sft_rows_are_not_conversational_to_trl():
+    """The regression the default shape hides: same rows, no template."""
+    row = training_rows(_rows()[:1], system_prompt=POLICY, tools=TOOLS)[0]
+    assert not _is_conversational(row)
+
+
+# --------------------------------------------------------------- dpo shape
+
+
+def test_trl_preference_rows_are_prompt_plus_completions(tmp_path):
+    """Bug 1: prompt must be a message list and the sides the completion."""
+    pairs, _ = build_preference_pairs(_rows())
+    assert pairs
+    out = tmp_path / "dpo.jsonl"
+    report = export_preference(pairs, str(out), system_prompt=POLICY, format="trl")
+    assert report["format"] == "trl"
+    row = json.loads(out.read_text().splitlines()[0])
+    assert isinstance(row["prompt"], list)
+    assert [m["role"] for m in row["prompt"]] == ["system", "user"]
+    # completion only: no prompt turns repeated on either side
+    for side in ("chosen", "rejected"):
+        assert row[side][0]["role"] == "assistant"
+        assert all(m["role"] != "user" for m in row[side])
+    assert _is_conversational(row)
+    assert row["chosen"][-1]["content"] == "Read it; the bug is on line 40."
+    assert row["rejected"][-1]["content"] == "I could not find anything."
+    assert row["margin"] == 1.0, "pair metadata survives the reshape"
+
+
+def test_default_preference_rows_are_the_shape_trl_chokes_on(tmp_path):
+    """The default is unchanged, and this records why it is not TRL's."""
+    pairs, _ = build_preference_pairs(_rows())
+    out = tmp_path / "dpo.jsonl"
+    report = export_preference(pairs, str(out), system_prompt=POLICY)
+    assert report["format"] == "openai"
+    row = json.loads(out.read_text().splitlines()[0])
+    assert isinstance(row["prompt"], str)
+    assert row["chosen"][0]["role"] == "system", "prompt turns repeated on the side"
+    # TRL sniffs this as conversational from the column set and then indexes
+    # the prompt as a message list: TypeError, string indices must be integers.
+    assert _is_conversational(row) and not isinstance(row["prompt"], list)
+
+
+def test_preference_pairs_without_a_completion_are_dropped_not_written():
+    """A side with no assistant turn is no preference, so it is counted."""
+    pair = {
+        "prompt": "ask",
+        "chosen": {"messages": [{"role": "user", "content": "ask"}]},
+        "rejected": {"messages": [{"role": "user", "content": "ask"}]},
+    }
+    with pytest.raises(ValueError, match="no_preference_pairs"):
+        export_preference([pair], format="trl")
+    report = export_preference([pair], format="trl", validate=False)
+    assert report["pairs"] == 0
+    assert report["no_completion_dropped"] == 1
+
+
+# --------------------------------------------------- tool-call arguments
+
+
+def test_trl_tool_call_arguments_are_dicts_not_json_strings():
+    """Bug 3: HF chat templates render arguments with ``| tojson``."""
+    rows = to_trl(training_rows(_rows(), system_prompt=POLICY, tools=TOOLS), "training")
+    call = _calls(rows[0]["messages"])[0]
+    assert call["function"]["arguments"] == {"path": "src/app/handlers.py"}
+    assert call["type"] == "function" and call["id"].startswith("call_")
+
+
+def test_roundtrip_gate_names_the_encoding_it_checked():
+    """Bug 3's second half: the gate used to vouch for the trainer path it
+    never checked. ``invalid: 0`` now comes with the encoding."""
+    wire = training_rows(_rows(), system_prompt=POLICY, tools=TOOLS)
+    trl = to_trl(wire, "training")
+
+    openai_gate = tool_call_roundtrip(wire)
+    assert openai_gate["encoding"] == "json_string"
+    assert openai_gate["invalid"] == 0
+
+    # The same rows, checked as a chat-template trainer needs them: the
+    # JSON strings are exactly what would be double-encoded.
+    as_dicts = tool_call_roundtrip(wire, format="trl")
+    assert as_dicts["encoding"] == "dict"
+    assert as_dicts["invalid"] == as_dicts["checked"] > 0
+
+    trl_gate = tool_call_roundtrip(trl, format="trl")
+    assert (trl_gate["encoding"], trl_gate["invalid"]) == ("dict", 0)
+    assert trl_gate["checked"] == openai_gate["checked"]
+
+
+def test_unknown_format_is_refused():
+    for call in (
+        lambda: export_training(_rows(), format="hf"),
+        lambda: export_preference([], format="hf"),
+        lambda: tool_call_roundtrip([], format="hf"),
+        lambda: to_trl([], "sft"),
+    ):
+        with pytest.raises(ValueError):
+            call()

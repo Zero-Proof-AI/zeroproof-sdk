@@ -243,6 +243,21 @@ def test_stamped_rows_are_type_checked():
     ]
 
 
+def test_structureless_rows_are_reported_at_every_version():
+    # "0 validation failures" is read as a guarantee, so an empty dict must
+    # not pass, and an unstamped dict is not a training sample just because
+    # it predates the stamp.
+    for kind in ("row", "training", "preference"):
+        assert schema.validate({}, kind) == ["empty_row"]
+    assert schema.validate({"prompt": "ask"}, "training") == ["messages_missing"]
+    assert schema.validate({"prompt": "ask"}, "preference") == [
+        "chosen_missing",
+        "rejected_missing",
+    ]
+    # ... and a version-0 row that IS a training sample still passes.
+    assert schema.validate({"messages": [{"role": "user", "content": "ask"}]}, "training") == []
+
+
 def test_check_names_the_boundary_and_the_rows():
     with pytest.raises(ValueError, match=r"schema_invalid in here: 1:not_a_dict"):
         schema.check([{"schema_version": "1"}, "bad"], where="here")

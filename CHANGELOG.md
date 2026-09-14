@@ -5,6 +5,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## 0.39 (2026-09-14)
 
+- `export_training(format="trl")`, `export_preference(format="trl")` and
+  `zps.to_trl(rows, kind)`: the shape TRL actually loads — conversational
+  SFT rows with no `prompt` string column beside `messages` (it made
+  `is_conversational` return False, so `SFTTrainer` trained on the bare
+  ask with no error; the ask is now `prompt_text`), DPO rows as prompt
+  messages plus completion-only sides, and tool-call `arguments` as dicts
+  rather than JSON strings for HF chat templates. The default stays the
+  OpenAI wire shape, and `tool_call_roundtrip` now reports the `encoding`
+  it checked. `validate({})` is `["empty_row"]`, and
+  `validate(row, "training" | "preference")` checks the shape at every
+  schema version (#152).
 - Trust layer: the `calibration` stamp is now measured before
   `optimize(mode="rl")` prunes and carried onto the selection (the gate
   keeps it instead of re-measuring post-dedup k), the report warns that

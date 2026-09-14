@@ -13,7 +13,31 @@ target model emits thinking tokens. ``training_rows`` closes that gap:
 * strips ``<think>`` blocks from assistant turns, so a thinking rollout
   model never teaches a non-thinking student to emit them.
 
-The result trains any chat-template model. No field is model-specific.
+Two wire shapes come out of here, and they are not the same shape:
+
+``format="openai"`` (the default)
+    The OpenAI chat-completions wire row. ``messages`` is the whole
+    conversation, ``function.arguments`` is a JSON **string**, and the
+    row keeps ``prompt`` (the ask, as text) beside it for grouping and
+    slicing. This is what an API replay, an eval harness, or a custom
+    collator wants, and it is what every previous version emitted.
+
+``format="trl"``
+    What ``trl`` (and anything else that calls
+    ``maybe_apply_chat_template``) actually accepts. For SFT the row is
+    conversational ``{"messages": [...]}`` with **no** ``prompt`` string
+    column — TRL's ``is_conversational`` sniffs the column set, and a
+    ``prompt`` string next to ``messages`` makes it decide the row is
+    not conversational, apply no chat template, and train on the bare
+    ask; the ask survives as ``prompt_text``. For preference data the
+    row is TRL's conversational DPO triple: ``prompt`` is the message
+    list up to the first assistant turn, and ``chosen``/``rejected`` are
+    the **completions only**. In both, ``function.arguments`` is a
+    **dict**, because HF chat templates render it with ``| tojson`` and
+    a pre-encoded string comes out quoted twice.
+
+``to_trl`` performs that reshape on rows you already built, and the
+round-trip gate reports which of the two encodings it checked.
 """
 
 from __future__ import annotations
@@ -96,13 +120,44 @@ def _wire_arguments(arguments: Any) -> str:
     return json.dumps(value or {}, separators=(",", ": "), default=str)
 
 
-def tool_call_roundtrip(rows: Sequence[dict]) -> dict[str, Any]:
-    """Check every tool call in exported rows parses back to a dict.
+#: The wire shapes the exporters can emit. See the module docstring.
+EXPORT_FORMATS = ("openai", "trl")
 
-    Guards the training run, not the export: arguments that survive as
-    strings get re-quoted by chat templates and teach the model to emit
-    string-wrapped arguments, which then spiral on tool rejections.
+#: What ``tool_call_roundtrip`` says it checked, per format. The gate is
+#: only as good as the encoding it was pointed at, so the report names it
+#: instead of reading as a clean bill of health for every consumer.
+_ENCODINGS = {
+    "openai": "json_string",
+    "trl": "dict",
+}
+_ENCODING_NOTES = {
+    "json_string": (
+        "arguments parse back to a dict from their JSON string (OpenAI wire). "
+        "A chat-template trainer needs dicts: export format='trl' for that."
+    ),
+    "dict": "arguments are dicts, as HF chat templates render them (| tojson).",
+}
+
+
+def tool_call_roundtrip(rows: Sequence[dict], *, format: str = "openai") -> dict[str, Any]:
+    """Check every tool call in exported rows carries structured arguments.
+
+    Guards the training run, not the export. Which check that is depends
+    on where the rows are going, so the report names the encoding it
+    validated:
+
+    * ``format="openai"`` (``encoding: "json_string"``): arguments must
+      parse back to a dict. Arguments that survive as un-parseable
+      strings get re-quoted by chat templates and teach the model to emit
+      string-wrapped arguments, which then spiral on tool rejections.
+    * ``format="trl"`` (``encoding: "dict"``): arguments must already
+      *be* dicts. A JSON string here is valid OpenAI wire and still wrong
+      for a chat template, which would render it quoted twice, so it
+      counts as invalid rather than passing on a technicality.
     """
+    if format not in EXPORT_FORMATS:
+        raise ValueError(f"format must be one of {EXPORT_FORMATS}, got {format!r}")
+    encoding = _ENCODINGS[format]
     checked = invalid = 0
     bad_rows: list[int] = []
     for i, row in enumerate(rows):
@@ -112,16 +167,25 @@ def tool_call_roundtrip(rows: Sequence[dict]) -> dict[str, Any]:
                 fn = call.get("function") if isinstance(call.get("function"), dict) else {}
                 checked += 1
                 raw = fn.get("arguments")
-                try:
-                    parsed = json.loads(raw) if isinstance(raw, str) else raw
-                except ValueError:
-                    parsed = None
+                if encoding == "dict":
+                    parsed = raw
+                else:
+                    try:
+                        parsed = json.loads(raw) if isinstance(raw, str) else raw
+                    except ValueError:
+                        parsed = None
                 if not isinstance(parsed, dict):
                     invalid += 1
                     row_bad = True
         if row_bad:
             bad_rows.append(i)
-    return {"checked": checked, "invalid": invalid, "rows": bad_rows[:20]}
+    return {
+        "checked": checked,
+        "invalid": invalid,
+        "rows": bad_rows[:20],
+        "encoding": encoding,
+        "checked_for": _ENCODING_NOTES[encoding],
+    }
 
 
 def _convert_messages(
@@ -193,6 +257,101 @@ def _convert_messages(
         elif role in {"user", "system"}:
             out.append({"role": role, "content": content})
     return out
+
+
+def _trl_messages(messages: Sequence[dict]) -> list[dict]:
+    """The same turns with tool-call ``arguments`` as dicts.
+
+    HF chat templates render arguments with ``| tojson``, so a string
+    that is already JSON comes out quoted twice and the student learns to
+    emit a string where the template expects an object. An argument blob
+    that does not decode to a dict is left exactly as it was, so the
+    round-trip gate reports it instead of this quietly dropping it.
+    """
+    out: list[dict] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        entry = dict(message)
+        calls = entry.get("tool_calls")
+        if not calls:
+            out.append(entry)
+            continue
+        wire: list[dict] = []
+        for call in calls:
+            call = dict(call) if isinstance(call, dict) else {}
+            fn = dict(call.get("function") or {})
+            fn["arguments"] = _decoded_arguments(fn.get("arguments"))
+            call["function"] = fn
+            wire.append(call)
+        entry["tool_calls"] = wire
+        out.append(entry)
+    return out
+
+
+def _first_assistant(messages: Sequence[dict]) -> int:
+    for i, message in enumerate(messages):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            return i
+    return -1
+
+
+def _trl_training_row(row: dict) -> dict:
+    """One ``training_rows`` row as TRL conversational SFT.
+
+    The ``prompt`` string moves to ``prompt_text``. TRL's
+    ``is_conversational`` decides by column set, and ``prompt`` (a string)
+    next to ``messages`` (a list) is not a shape it knows: it returns
+    False, ``maybe_apply_chat_template`` hands the row back untouched with
+    no ``text`` key and no error, and ``SFTTrainer`` trains on the bare
+    ask instead of the conversation. Silently. Hence the rename.
+    """
+    out = dict(row)
+    out["messages"] = _trl_messages(row.get("messages") or [])
+    prompt = out.pop("prompt", None)
+    if isinstance(prompt, str) and prompt:
+        out["prompt_text"] = prompt
+    return out
+
+
+def _trl_preference_row(row: dict) -> dict | None:
+    """One ``export_preference`` row as TRL conversational DPO, or None.
+
+    TRL wants ``prompt`` as the message list up to the first assistant
+    turn and ``chosen``/``rejected`` as the completion only; handing it a
+    ``prompt`` string with full conversations on both sides raises
+    ``TypeError: string indices must be integers``. A side with nothing
+    after the split point is no completion at all, so the pair is dropped
+    and counted rather than written as an empty preference.
+    """
+    chosen = _trl_messages(row.get("chosen") or [])
+    rejected = _trl_messages(row.get("rejected") or [])
+    ci, ri = _first_assistant(chosen), _first_assistant(rejected)
+    if ci < 1 or ri < 1:
+        return None
+    out = dict(row)
+    out["prompt"] = chosen[:ci]
+    out["chosen"] = chosen[ci:]
+    out["rejected"] = rejected[ri:]
+    return out
+
+
+def to_trl(rows: Sequence[dict], kind: str = "training") -> list[dict]:
+    """Rows from ``training_rows`` / ``export_preference`` in TRL's shape.
+
+    ``kind="training"`` reshapes SFT rows, ``kind="preference"`` DPO
+    pairs; see the module docstring for what each shape is and why it
+    differs from the default OpenAI wire rows. Equivalent to passing
+    ``format="trl"`` to the exporters, for callers that already hold
+    rows. Preference pairs whose chosen or rejected side has no
+    completion after the prompt prefix are dropped.
+    """
+    if kind not in ("training", "preference"):
+        raise ValueError(f"kind must be 'training' or 'preference', got {kind!r}")
+    if kind == "training":
+        return [_trl_training_row(r) for r in rows if isinstance(r, dict)]
+    out = [_trl_preference_row(r) for r in rows if isinstance(r, dict)]
+    return [r for r in out if r is not None]
 
 
 MASK_MODES = ("assistant", "final")
@@ -426,6 +585,7 @@ def export_training(
     mask_mode: str = "assistant",
     unroll: bool = False,
     max_tool_output_chars: int | None = None,
+    format: str = "openai",
 ) -> dict[str, Any]:
     """Write ``training_rows`` as JSONL. Never overwrites the source.
 
@@ -433,7 +593,21 @@ def export_training(
     next to it. ``validate=True`` refuses to write a dataset whose tool
     calls do not round-trip to structured arguments; pass ``validate=False``
     to export anyway and read the report instead.
+
+    ``format="openai"`` (the default) writes the OpenAI chat-completions
+    wire row: the full ``messages`` list, ``function.arguments`` as a JSON
+    string, and the ask carried alongside as ``prompt``.
+
+    ``format="trl"`` writes what ``trl`` can actually load: conversational
+    SFT rows (``messages`` only, arguments as dicts, the ask under
+    ``prompt_text``). TRL decides "is this conversational?" from the
+    column set, so a ``prompt`` string beside ``messages`` makes it skip
+    the chat template without an error and train on the bare ask — which
+    is why the TRL rows do not carry one. The report says which format
+    and which argument encoding the round-trip gate checked.
     """
+    if format not in EXPORT_FORMATS:
+        raise ValueError(f"format must be one of {EXPORT_FORMATS}, got {format!r}")
     rows = training_rows(
         source,
         system_prompt=system_prompt,
@@ -443,7 +617,9 @@ def export_training(
         unroll=unroll,
         max_tool_output_chars=max_tool_output_chars,
     )
-    roundtrip = tool_call_roundtrip(rows)
+    if format == "trl":
+        rows = to_trl(rows, "training")
+    roundtrip = tool_call_roundtrip(rows, format=format)
     if validate and roundtrip["invalid"]:
         raise ValueError(
             f"tool_call_roundtrip_invalid: {roundtrip['invalid']} of "
@@ -459,6 +635,7 @@ def export_training(
         dest = str(path.with_name(path.stem + ".train" + (path.suffix or ".jsonl")))
     report: dict[str, Any] = {
         "n": len(rows),
+        "format": format,
         "with_system": sum(
             1 for r in rows if r["messages"] and r["messages"][0]["role"] == "system"
         ),
@@ -513,18 +690,36 @@ def export_preference(
     strip_think: bool = True,
     validate: bool = True,
     drop_ties: bool = True,
+    format: str = "openai",
 ) -> dict[str, Any]:
     """Write chosen/rejected pairs as DPO-style JSONL.
 
-    Each line: ``{"prompt": ..., "chosen": [...messages...], "rejected":
-    [...messages...]}`` in the same wire format as ``export_dataset``,
-    with the roundtrip gate run over BOTH sides. Pairs come from
-    ``ScoredData.select_for_preference()`` / ``build_preference_pairs``.
-    A pair ``judge_pairs`` marked ``tie`` carries no preference and is
-    left out (``ties_dropped`` in the report) unless ``drop_ties=False``.
+    With ``format="openai"`` (the default) each line is ``{"prompt":
+    "<the ask, as text>", "chosen": [...messages...], "rejected":
+    [...messages...]}`` in the same wire format as ``export_dataset``:
+    both sides are the whole conversation, prompt turns included, and
+    tool-call arguments are JSON strings.
+
+    With ``format="trl"`` each line is TRL's conversational preference
+    triple: ``prompt`` is the message list up to the first assistant turn
+    and ``chosen``/``rejected`` are the **completions only**, with
+    arguments as dicts. The default shape is not loadable by
+    ``trl.data_utils.maybe_apply_chat_template`` — a ``prompt`` string
+    with conversational sides raises ``TypeError: string indices must be
+    integers`` — so pass ``format="trl"`` when a TRL trainer is the
+    consumer. Pairs whose chosen or rejected side has no completion after
+    the prompt prefix are dropped (``no_completion_dropped``).
+
+    The roundtrip gate runs over BOTH sides and names the encoding it
+    checked. Pairs come from ``ScoredData.select_for_preference()`` /
+    ``build_preference_pairs``. A pair ``judge_pairs`` marked ``tie``
+    carries no preference and is left out (``ties_dropped`` in the
+    report) unless ``drop_ties=False``.
     """
     from zeroproof.simulations import conversation
 
+    if format not in EXPORT_FORMATS:
+        raise ValueError(f"format must be one of {EXPORT_FORMATS}, got {format!r}")
     entries = [p for p in pairs if isinstance(p, dict)]
     not_pairs = [
         i
@@ -558,9 +753,14 @@ def export_preference(
             if pair.get(key) is not None:
                 entry[key] = pair[key]
         out_rows.append(stamp(entry))
+    no_completion_dropped = 0
+    if format == "trl":
+        reshaped = to_trl(out_rows, "preference")
+        no_completion_dropped = len(out_rows) - len(reshaped)
+        out_rows = reshaped
     check(out_rows, "preference", where="export_preference")
     both_sides = [{"messages": r[side]} for r in out_rows for side in ("chosen", "rejected")]
-    roundtrip = tool_call_roundtrip(both_sides)
+    roundtrip = tool_call_roundtrip(both_sides, format=format)
     if validate and roundtrip["invalid"]:
         raise ValueError(
             f"tool_call_roundtrip_invalid: {roundtrip['invalid']} of "
@@ -568,9 +768,15 @@ def export_preference(
             "back to structured arguments. Fix the rows or pass "
             "validate=False."
         )
-    report: dict[str, Any] = {"pairs": len(out_rows), "tool_call_roundtrip": roundtrip}
+    report: dict[str, Any] = {
+        "pairs": len(out_rows),
+        "format": format,
+        "tool_call_roundtrip": roundtrip,
+    }
     if ties_dropped:
         report["ties_dropped"] = ties_dropped
+    if no_completion_dropped:
+        report["no_completion_dropped"] = no_completion_dropped
     deltas = [r["length_delta"] for r in out_rows if isinstance(r.get("length_delta"), int)]
     if deltas:
         report["chosen_longer_frac"] = round(sum(1 for d in deltas if d > 0) / len(deltas), 3)
@@ -596,11 +802,13 @@ def export_preference(
 
 
 __all__ = [
+    "EXPORT_FORMATS",
     "MASK_MODES",
     "export_dataset",
     "export_preference",
     "export_training",
     "loss_mask",
+    "to_trl",
     "tool_call_roundtrip",
     "training_rows",
 ]

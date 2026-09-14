@@ -291,6 +291,17 @@ lineage so iterations show as a family on the platform.
 
 Training rows from `export_training` / `training_rows` carry a `loss_mask`, one 0/1 per message: 1 on the agent's turns, 0 on system, user, and tool-output turns. Tool output is the environment's text, not the policy's, so a trainer should not learn to predict it. `mask_mode="final"` trains only the last assistant turn, for conversations whose earlier agent turns were scripted or came from another policy; the export report counts `trained_messages` and `masked_messages`. `unroll=True` turns an N-turn conversation into N samples, the k-th ending at the k-th agent turn with loss on that turn only, so every earlier turn trains once with the context it actually had (rlhf-book ch. 4). `max_tool_output_chars=` caps each tool message, appends a `[... N chars of tool output truncated]` marker and counts the cut on the row and in the report, so context spent on tool output is a decision the export makes out loud (ch. 13).
 
+Two wire shapes come out of the exporters, and a trainer needs the second one:
+
+```python
+zps.export_training(rows, "sft.jsonl")                  # OpenAI chat-completions wire (default)
+zps.export_training(rows, "sft.jsonl", format="trl")    # what TRL's SFTTrainer loads
+zps.export_preference(pairs, "dpo.jsonl", format="trl") # what TRL's DPOTrainer loads
+zps.to_trl(zps.training_rows(data), "training")         # same reshape on rows you already hold
+```
+
+`format="openai"` (the default) is the API wire row: the whole conversation in `messages`, `function.arguments` as a JSON string, and the ask alongside as `prompt`. `format="trl"` is what `trl.data_utils.maybe_apply_chat_template` accepts. For SFT that is conversational `{"messages": [...]}` with **no** `prompt` string column — TRL decides "is this conversational?" from the column set, and a `prompt` string next to `messages` makes it skip the chat template silently and train on the bare ask; the ask survives as `prompt_text`. For preference data it is `prompt` as the message list up to the first agent turn with `chosen`/`rejected` as the completions only, because the default shape (a `prompt` string with full conversations on both sides) raises `TypeError: string indices must be integers` inside TRL. In the TRL shape `function.arguments` is a dict, not a JSON string: HF chat templates render it with `| tojson`, so a pre-encoded string is quoted twice and the student learns to emit a string where an object belongs. The `tool_call_roundtrip` gate in the report names which of the two encodings it checked (`encoding: "json_string"` or `"dict"`), so `invalid: 0` says what it actually vouches for.
+
 ### Prune before training
 
 ```python

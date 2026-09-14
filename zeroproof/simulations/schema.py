@@ -338,15 +338,26 @@ def validate(
     """Problems with one row, empty when it is fine. Never raises.
 
     Stamped rows must carry the required fields with the right types.
-    Unstamped rows are version 0 and only have to be dicts: nothing that
-    works today is rejected here.
+    Unstamped ``kind="row"`` rows are version 0 and only have to be
+    non-empty dicts: nothing that works today is rejected there.
+
+    Two things are reported regardless of version, because "0 validation
+    failures" is read as a guarantee and neither case is one:
+
+    * an empty dict, which carries no prompt, no messages, no verdict;
+    * a ``training`` or ``preference`` row with no ``messages`` or no
+      ``chosen``/``rejected``. Those two kinds ask "is this a training
+      sample", and an unstamped dict with no conversation in it is not
+      one whatever version it claims.
     """
     if not isinstance(row, dict):
         return ["not_a_dict"]
+    if not row:
+        return ["empty_row"]
     version = version_of(row)
     if version not in KNOWN_VERSIONS:
         return [f"unknown_schema_version:{version}"]
-    if version == "0":
+    if version == "0" and kind == "row":
         return []
     problems: list[str] = []
     if kind == "row":

@@ -28,6 +28,8 @@ from .export import (
     export_preference,
     export_training,
     loss_mask,
+    to_trl,
+    tool_call_roundtrip,
     training_rows,
 )
 from .generate.adapters import AgentProfile, claude_code, connect, inspect
@@ -342,6 +344,8 @@ __all__ = [
     "style_markers",
     "style_report",
     "to_row",
+    "to_trl",
+    "tool_call_roundtrip",
     "trace_flag_report",
     "trace_flags",
     "trace_markers",
