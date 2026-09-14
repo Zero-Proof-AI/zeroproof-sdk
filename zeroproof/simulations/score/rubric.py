@@ -182,6 +182,29 @@ class Rubric:
             lines.append(f"{i}. [{tag}, weight {c.weight:g}] {c.title}:{desc}".rstrip(":"))
         return "\n".join(lines)
 
+    def _resolve(self, results: Mapping[str, Any]) -> dict[str, Any]:
+        """Verdicts keyed by criterion slug. A key may be the item number
+        (1-based, as the judge is asked to answer), the title, its slug,
+        or a paraphrase that starts with or contains the title; the judge
+        rewrites titles often enough that exact matching left items
+        unanswered."""
+        slugs = [c.slug for c in self.criteria]
+        by_key: dict[str, Any] = {}
+        for key, value in results.items():
+            text = str(key).strip()
+            number = text.rstrip(".)")
+            if number.isdigit() and 1 <= int(number) <= len(slugs):
+                by_key[slugs[int(number) - 1]] = value
+                continue
+            slug = _slug(text)
+            if slug in slugs:
+                by_key[slug] = value
+                continue
+            matches = [s for s in slugs if s.startswith(slug) or slug.startswith(s) or s in slug]
+            if len(matches) == 1:
+                by_key[matches[0]] = value
+        return by_key
+
     def score(self, results: Mapping[str, Any]) -> dict[str, Any]:
         """Reward from one verdict per criterion (keyed by title or slug;
         a truthy value means the reply meets a hard rule or principle, or
@@ -193,9 +216,7 @@ class Rubric:
         reward is 1 minus the pitfall share. Criteria the judge did not
         answer count as not met (and not exhibited) and are listed.
         """
-        by_key: dict[str, Any] = {}
-        for key, value in results.items():
-            by_key[_slug(str(key))] = value
+        by_key = self._resolve(results)
         met: list[str] = []
         missed: list[str] = []
         hard_failed: list[str] = []
@@ -296,8 +317,9 @@ RUBRIC_JUDGE_SYSTEM = (
     "true when the reply meets it; a pitfall is true when the reply exhibits "
     "the mistake. Judge only what the record shows; a claim the tools did not "
     "return does not meet anything. The length of the reply must not influence "
-    "any item. Reply with one JSON object and nothing else: "
-    '{"criteria": {"<item title>": true | false, ...}, "reason": "<one sentence>"}.'
+    "any item. Answer every item, keyed by its number. Reply with one JSON "
+    'object and nothing else: {"criteria": {"1": true | false, "2": ..., ...}, '
+    '"reason": "<one sentence>"}.'
 )
 RUBRIC_JUDGE_MAX_TOKENS = 400
 
@@ -398,7 +420,7 @@ def score_with_rubric(
     """A judge result from per-criterion verdicts, for a judge you wrote
     yourself: reward, markers, breakdown."""
     breakdown = rubric.score(results)
-    by_slug = {_slug(str(k)): _truthy(v) for k, v in results.items()}
+    by_slug = {k: _truthy(v) for k, v in rubric._resolve(results).items()}
     markers: dict[str, float] = {}
     for c in rubric.criteria:
         value = by_slug.get(c.slug, False)
@@ -415,6 +437,7 @@ def score_with_rubric(
         "missed": breakdown["missed"],
         "pitfalls_hit": breakdown["pitfalls_hit"],
         "unanswered": breakdown["unanswered"],
+        "n_unanswered": len(breakdown["unanswered"]),
     }
 
 

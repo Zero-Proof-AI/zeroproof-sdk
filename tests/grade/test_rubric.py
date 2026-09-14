@@ -182,6 +182,17 @@ def test_rubric_judge_scores_per_criterion_and_lifts_markers(monkeypatch):
     assert judge.__name__.startswith("phi@")
 
 
+def test_score_resolves_numbers_and_paraphrased_titles():
+    rubric = R.Rubric.from_dict(CRITERIA)
+    numbered = rubric.score({"1": True, "2": True, "3.": False, "4": False})
+    assert numbered["reward"] == 0.75 and numbered["unanswered"] == []
+    loose = rubric.score({"Looks the order up first": True, "states the status": True})
+    assert loose["reward"] == 0.75 and "Looks the order up" in loose["met"]
+    out = R.score_with_rubric(rubric, {"1": True, "2": False, "3": True, "4": True})
+    assert out["markers"]["rubric:invents_an_id"] == 0.0 and out["n_unanswered"] == 0
+    assert "1." in rubric.checklist()
+
+
 def test_parse_criteria_reply_accepts_dict_and_list_forms():
     d, reason = R.parse_criteria_reply('ok {"criteria": {"A": "yes", "B": 0}, "reason": "r"}')
     assert d == {"A": True, "B": False} and reason == "r"
