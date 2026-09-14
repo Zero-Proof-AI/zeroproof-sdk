@@ -61,18 +61,29 @@ TOOLS = [
     }
 ]
 
+
 # 2. Your agent: one call per rollout, in with the situation text,
 #    out with the steps it took and what it finally said.
 def my_agent(message: str) -> dict:
     return {
-        "steps": [{"tool": "get_order", "arguments": {"order_id": "4412"}, "result": {"status": "shipped"}}],
+        "steps": [
+            {
+                "tool": "get_order",
+                "arguments": {"order_id": "4412"},
+                "result": {"status": "shipped"},
+            }
+        ],
         "final_text": "Order 4412 shipped yesterday.",
     }
 
+
 # 3. simulator=False uses the built-in template writer: no model, no key.
 data = zps.simulate(
-    my_agent, tools=TOOLS, system_prompt="Help customers with orders.",
-    simulator=False, budget=20,
+    my_agent,
+    tools=TOOLS,
+    system_prompt="Help customers with orders.",
+    simulator=False,
+    budget=20,
 )
 
 # 4. Your grader. Any callable row -> {"reward": 0 or 1, ...}.
@@ -185,7 +196,7 @@ More on the four marker families in
 import zeroproof.simulations as zps
 
 judge = lambda row: {"reward": int("sorry" not in row["final_text"])}
-scored = zps.run_judge(data.trajectories, judge)          # or data.grade(judge=judge)
+scored = zps.run_judge(data.trajectories, judge)  # or data.grade(judge=judge)
 zps.export_dataset(scored.passes(), output="train.jsonl", system_prompt=POLICY, tools=TOOLS)
 # ...train externally, roll the tuned model on a holdout...
 evald = zps.evaluate(rollouts, judge, model="my-tuned-v1")
@@ -207,7 +218,9 @@ For a verifiable task the reward is a checker, not an opinion (RLHF book ch. 7, 
 ```python
 from zeroproof.simulations.verify import MathEqual, CodeExec, JSONSchema, Regex, All
 
-data = zps.simulate(tools=MATH_TOOLS, system_prompt=MATH_POLICY, mode="rl", situations=200, repeats=8)
+data = zps.simulate(
+    tools=MATH_TOOLS, system_prompt=MATH_POLICY, mode="rl", situations=200, repeats=8
+)
 scored = data.grade(judge=MathEqual())  # the verifier is the reward
 rows, _ = zps.optimize(scored, mode="rl")  # GRPO data, gradient checked
 ```
@@ -345,7 +358,9 @@ returns and the same shape `simulate()` writes:
 traces = [
     {
         "prompt": "where is my order 4412",
-        "steps": [{"tool": "get_order", "arguments": {"order_id": "4412"}, "result": {"error": "timeout"}}],
+        "steps": [
+            {"tool": "get_order", "arguments": {"order_id": "4412"}, "result": {"error": "timeout"}}
+        ],
         "final_text": "Your order shipped yesterday.",
         "reward": 0,
     },
@@ -364,8 +379,8 @@ to get rows into this shape, not a prerequisite for it.
 ```python
 import zeroproof.simulations as zps
 
-traces = zps.load_traces("production.jsonl")        # or just pass the list
-print(zps.trace_report(traces, tools=TOOLS))        # what will this aim at?
+traces = zps.load_traces("production.jsonl")  # or just pass the list
+print(zps.trace_report(traces, tools=TOOLS))  # what will this aim at?
 
 data = zps.simulate(
     my_agent, tools=TOOLS, system_prompt=POLICY, traces=traces, mode="rl", repeats=4
@@ -643,7 +658,7 @@ zps.grounding_report(rows)  # grounded rate, and the invented values by tool and
 `tasks=` copies the prompts, not the topology. **k is resolved from *this* call's `mode` and `repeats`, never inherited from the pinned run**, so a base built with `mode="rl", repeats=4` and re-run as `simulate(..., tasks=base)` comes back at k=1 (the `explore` default): `pass_at` reports `k=1` with pass^k and pass@k `None`, and a before/after built that way silently compares k=4 against k=1. Re-pass the mode and the repeats:
 
 ```python
-base  = zps.simulate(agent, tools=TOOLS, system_prompt=POLICY,  mode="rl", repeats=4)
+base = zps.simulate(agent, tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=4)
 rerun = zps.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base, mode="rl", repeats=4)
 assert base.rollouts_per_request == rerun.rollouts_per_request  # cheap guard
 ```
