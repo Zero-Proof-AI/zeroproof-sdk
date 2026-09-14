@@ -42,6 +42,8 @@ examples/*
 !examples/character/
 !examples/hugging-face/
 !examples/bring-your-own-agent/
+!examples/hosted-loop/
+examples/hosted-loop/hosted-loop.json
 !examples/verifiers/
 examples/character/out/
 

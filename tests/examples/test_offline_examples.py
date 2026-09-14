@@ -24,6 +24,7 @@ EXAMPLES = REPO / "examples"
 CLI_EXAMPLES = [
     "agent-behavior/run.py",
     "bring-your-own-agent/run.py",
+    "hosted-loop/run.py",
     "character/from_model_spec.py",
     "character/measure.py",
     "character/run.py",
@@ -147,6 +148,14 @@ def test_agent_behavior_task_pack_is_self_contained():
 def test_example_that_needs_a_key_says_which_one(tmp_path):
     """Fail fast, name the env var, link to where the key comes from."""
     out = _run(EXAMPLES / "agent-behavior/run.py", "--runs", "1", cwd=tmp_path)
+    assert out.returncode != 0
+    message = out.stdout + out.stderr
+    assert "ZEROPROOF_API_KEY" in message, message[-2000:]
+    assert "http" in message, message[-2000:]
+
+
+def test_hosted_loop_without_a_key_names_the_env_var(tmp_path):
+    out = _run(EXAMPLES / "hosted-loop/run.py", cwd=tmp_path)
     assert out.returncode != 0
     message = out.stdout + out.stderr
     assert "ZEROPROOF_API_KEY" in message, message[-2000:]

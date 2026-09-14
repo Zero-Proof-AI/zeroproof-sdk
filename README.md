@@ -212,6 +212,7 @@ sampling) and ch. 7 (difficulty filtering), applied at generation time.
 | Example | What it does |
 |---|---|
 | [`examples/agent-behavior`](examples/agent-behavior) | Start here if the platform is new to you. Runs a coding agent with bad habits against real tests, streams every turn to Zero Proof as OTLP spans plus a judge verdict, and fills a dashboard with behaviour worth looking at. No dependencies. |
+| [`examples/hosted-loop`](examples/hosted-loop) | Push graded rows, `zps.train` SFT on Qwen3-4B, `zps.serve` the adapter, one chat completion from the endpoint. One key, one A10G minute; the wiring check for training on the platform. |
 | [`examples/bring-your-own-agent`](examples/bring-your-own-agent) | Your own callable: the `agent(message) -> {steps, final_text}` contract, the `agent_failed` report when it raises or returns the wrong shape, and `eval_sourced` keeping a held-out score out of the reward. Offline, no key. |
 | [`examples/prime-intellect-rl`](examples/prime-intellect-rl) | Generates a GRPO-ready dataset with `simulate(mode="rl")` and checks it carries gradient before you spend GPU time on it. |
 | [`examples/schema`](examples/schema) | One row file in, six training targets out: eval, SFT, preference, GRPO prompts, OPSD hints, OPD. Migrates any legacy file first. Offline, no key. |
