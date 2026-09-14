@@ -369,6 +369,19 @@ zps.delta_report(before, after, target="pass_at_1", by="category")  # the target
 
 **Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
 
+**Over-optimization markers.** RL against a judge drifts toward what the judge rewards (rlhf-book ch. 14): boilerplate openers, self-reference, hedging, refusal creep, sycophancy. `behavioral_markers(rows)` gives the rate of each over the rollouts; `mark_rows(rows)` stamps them onto `row["markers"]` so `delta_report` compares them before and after training. They are the qualitative signatures KL cannot see.
+
+```python
+zps.behavioral_markers(scored.rows)  # {"boilerplate": 0.31, "refusal": 0.04, ...}
+after = zps.mark_rows(evaluate(after_rows, judge=my_judge).rows)
+zps.delta_report(
+    before=zps.mark_rows(scored.rows),
+    after=after,
+    target="pass_at_1",
+    must_not_regress=["refusal", "sycophancy"],
+)
+```
+
 ### Train, and watch it
 
 Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO or DPO, LoRA on an A10G) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).

@@ -112,6 +112,7 @@ from .score.judging import (
     run_judge,
 )
 from .score.logprobs import logprob_report, mean_kl
+from .score.markers import STOCK_MARKERS, behavioral_markers, format_markers, mark_rows, row_markers
 from .score.optimize import (
     DEFAULT_BAND,
     filter_rl_rows,
@@ -154,6 +155,7 @@ __all__ = [
     "FAILURE_CLASSES",
     "HACK_THRESHOLD",
     "SCHEMA_VERSION",
+    "STOCK_MARKERS",
     "AgentProfile",
     "Calibration",
     "Dataset",
@@ -175,6 +177,7 @@ __all__ = [
     "allocator_slot_counts",
     "attach_delta",
     "behavior_signature",
+    "behavioral_markers",
     "build_dimensions",
     "build_preference_pairs",
     "calibrate",
@@ -206,6 +209,7 @@ __all__ = [
     "format_curriculum",
     "format_delta_report",
     "format_judge_trust",
+    "format_markers",
     "format_trace_report",
     "from_row",
     "get_run",
@@ -229,6 +233,7 @@ __all__ = [
     "local_model",
     "logprob_report",
     "loss_mask",
+    "mark_rows",
     "marker_summary",
     "mean_kl",
     "metric_summary",
@@ -259,6 +264,7 @@ __all__ = [
     "resolve_topology",
     "retire_solved",
     "reward_correlations",
+    "row_markers",
     "rows_from_otel",
     "run_judge",
     "scenario_regions",
