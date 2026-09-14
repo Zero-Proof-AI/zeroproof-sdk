@@ -77,6 +77,7 @@ def delta_report(
     must_not_regress: Sequence[str] = (),
     markers: Sequence[str] | None = None,
     by: str | Callable[[dict], Any] | None = None,
+    run_std: float | None = None,
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
 ) -> dict[str, Any]:
@@ -97,6 +98,13 @@ def delta_report(
     warned about; it does not flip ``ok``, which stays the
     ``must_not_regress`` contract (name the group's metric there if it
     should).
+
+    ``run_std`` is the evaluation's own re-run standard deviation
+    (``eval_variance(...)["run_std"]``, rlhf-book appendix C). A metric
+    whose delta is smaller than twice it is ``within_noise``: not
+    improved, not slipped, not a regression, and a target there reads
+    ``within_eval_noise`` rather than moved, because re-running the eval
+    moves it that much on its own.
     """
     names = (
         list(markers)
@@ -112,9 +120,23 @@ def delta_report(
         return name if name == "pass_at_1" or name.startswith("marker:") else f"marker:{name}"
 
     guarded = {_key(m) for m in must_not_regress}
-    regressions = [m for m in metrics if m in guarded and results[m]["verdict"] == "a_better"]
-    slipped = [m for m in metrics if m not in guarded and results[m]["verdict"] == "a_better"]
-    improved = [m for m in metrics if results[m]["verdict"] == "b_better"]
+    noise = 2.0 * float(run_std) if run_std is not None else None
+    within_noise: list[str] = []
+    for m in metrics:
+        r = results[m]
+        r["within_noise"] = (
+            noise is not None and r.get("delta") is not None and abs(r["delta"]) < noise
+        )
+        if r["within_noise"]:
+            within_noise.append(m)
+    loud = {m for m in metrics if not results[m]["within_noise"]}
+    regressions = [
+        m for m in metrics if m in guarded and m in loud and results[m]["verdict"] == "a_better"
+    ]
+    slipped = [
+        m for m in metrics if m not in guarded and m in loud and results[m]["verdict"] == "a_better"
+    ]
+    improved = [m for m in metrics if m in loud and results[m]["verdict"] == "b_better"]
     target_key = _key(target) if target else None
     target_result = results.get(target_key) if target_key else None
     if target_result is None and target_key:
@@ -128,8 +150,15 @@ def delta_report(
             "no_difference_detected": "no_change_detected",
             "insufficient_data": "insufficient_data",
         }[target_result["verdict"]]
+        if target_result["within_noise"] and target_verdict in {"moved", "moved_the_wrong_way"}:
+            target_verdict = "within_eval_noise"
     ok = not regressions and target_verdict not in {"moved_the_wrong_way"}
     warnings: list[str] = []
+    if noise is not None and target_verdict == "within_eval_noise" and target_result:
+        warnings.append(
+            f"{target_key}: {target_result['delta']:+.3f} is inside the eval's own re-run band "
+            f"(2 x run_std = {noise:.3f}); re-running the eval moves it that much"
+        )
     for m in regressions:
         r = results[m]
         warnings.append(
@@ -174,6 +203,8 @@ def delta_report(
         "improved": improved,
         "regressions": regressions,
         "slipped": slipped,
+        "within_noise": within_noise,
+        "run_std": float(run_std) if run_std is not None else None,
         "metrics": results,
         "warnings": warnings,
         "by": (
@@ -210,6 +241,8 @@ def format_delta_report(report: dict[str, Any]) -> str:
             "no_difference_detected": "flat",
             "insufficient_data": "n/a",
         }[r["verdict"]]
+        if r.get("within_noise"):
+            tag = "noise"
         pair = "paired" if r["paired"] else "unpaired"
         lines.append(
             f"  {name:<28} {r['mean_a']:.3f} -> {r['mean_b']:.3f}  {r['delta']:+.3f} "

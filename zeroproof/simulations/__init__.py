@@ -132,7 +132,13 @@ from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
 from .score.spec import Spec, Trait, load_spec, spec_version, stamp_spec
 from .score.stage import STAGES, format_stages, stage_of, stage_report, stamp_stage
-from .score.stats import compare_runs, decontaminate, marker_summary, metric_summary
+from .score.stats import (
+    compare_runs,
+    decontaminate,
+    eval_variance,
+    marker_summary,
+    metric_summary,
+)
 from .score.style import refusal_report, style_markers, style_report
 from .simulation import resolve_topology, simulate
 from .training import (
@@ -208,6 +214,7 @@ __all__ = [
     "delta_report",
     "dimensions_from_traces",
     "drop_leaky_rows",
+    "eval_variance",
     "evaluate",
     "export_dataset",
     "export_preference",
