@@ -388,18 +388,13 @@ zps.grounding_report(rows)  # grounded rate, and the invented values by tool and
 
 **Argument grounding.** A policy trained to call a tool learns to call it before it learns when not to; on the refund environment both GRPO and DPO learned to invent an order id on a quarter of the prompts that gave none while the headline rose. `mark_grounding(rows)` stamps `argument_grounding`: 1 when every string argument of every tool call appears in the prompt, the user and system turns, or an earlier tool result (rows with no calls count as grounded), else 0. No categories, any agent; `must_not_regress=["argument_grounding"]` fails the run that learned to invent, and `ungrounded_arguments(row)` / `grounding_report(rows)` name the values. `ignore_keys=` skips free-text arguments, `allow=` lists enums and defaults.
 
-**Over-optimization markers.** RL against a judge drifts toward what the judge rewards (rlhf-book ch. 14): boilerplate openers, self-reference, hedging, refusal creep, sycophancy. `behavioral_markers(rows)` gives the rate of each over the rollouts; `mark_rows(rows)` stamps them onto `row["markers"]` so `delta_report` compares them before and after training. They are the qualitative signatures KL cannot see.
+**Over-optimization, quick read.** `behavioral_markers(rows)` gives the presence rate of each over-optimization tic (boilerplate, self-reference, hedging, refusal, sycophancy) in one call: higher means the tic shows up more.
 
 ```python
 zps.behavioral_markers(scored.rows)  # {"boilerplate": 0.31, "refusal": 0.04, ...}
-after = zps.mark_rows(evaluate(after_rows, judge=my_judge).rows)
-zps.delta_report(
-    before=zps.mark_rows(scored.rows),
-    after=after,
-    target="pass_at_1",
-    must_not_regress=["refusal", "sycophancy"],
-)
 ```
+
+For a before/after comparison use `style_markers` / `style_report` above, not these: those markers are 1.0 when the reply is clean (higher is better), which is the polarity `delta_report(must_not_regress=...)` expects. `behavioral_markers` is presence (higher is worse), so it reads a paired delta backwards. The two cover the same ch. 14 behaviors and are being consolidated onto `style`.
 
 **Benchmark across seeds.** `pass_at(rows).ci95` is the interval over which tasks you picked; it does not see that the model is stochastic and the same eval re-run gives a different number (rlhf-book ch. 16). `benchmark_report(seed_runs)` takes several graded runs of one frozen eval and reports pass@1 mean and SD across seeds, the spread, and the tasks that flip seed to seed, so you know whether a before/after delta clears the run-to-run noise. `run_benchmark(eval_set, judge=, rollout=, seeds=5)` drives the seed loop for you; pass `decontaminate_against=train_rows` to fold an 8-gram leak check into the scorecard.
 

@@ -2,20 +2,24 @@
 
 RL against a judge drifts toward what the judge rewards: boilerplate openers,
 self-reference, hedging, refusal creep, sycophancy. These are qualitative and
-cheap to detect, and the point is to watch them move. Each marker is a
-regex detector over the rollout's final text returning 0 or 1; the value
-lands in the row's ``markers`` dict, the same field ``marker_summary`` and
-``delta_report`` already read, so:
+cheap to detect. ``behavioral_markers(rows)`` gives the *presence rate* of
+each: a fraction where higher means the tic shows up more, i.e. worse.
 
-    before = data.grade(judge=my_judge).rows
-    # ... train, roll out again ...
-    after = mark_rows(evaluate(after_rows, judge=my_judge).rows)
-    zps.delta_report(before=mark_rows(before), after=after,
-                     must_not_regress=["refusal", "sycophancy"])
+    zps.behavioral_markers(scored.rows)   # {"refusal": 0.04, "boilerplate": 0.31, ...}
 
-``behavioral_markers(rows)`` is the one-shot rate per marker; ``mark_rows``
-stamps them onto rows for the paired before/after comparison. Report-only;
-nothing here changes a reward.
+Polarity, and which module to use with ``delta_report``: these markers are
+**presence** (1 = the signature appears, higher = worse). ``delta_report``
+and ``must_not_regress=`` expect the opposite convention (higher = better,
+flag a significant *drop*), so for a before/after comparison use
+``style_markers`` / ``style_report`` from ``score.style``, whose markers are
+1.0 when the reply is clean. Use ``behavioral_markers`` here for a quick
+one-shot read of how often each tic occurs; use ``style_*`` when the number
+feeds a paired delta. (The two modules cover the same ch. 14 behaviors and
+are being consolidated; ``style`` is the delta-ready one.)
+
+``mark_rows`` stamps the presence values onto each row's ``markers`` dict
+(as ``<name>`` = 0/1); ``detect`` / ``row_markers`` do one row; ``extra=``
+adds custom detectors. Report-only; nothing here changes a reward.
 """
 
 from __future__ import annotations
