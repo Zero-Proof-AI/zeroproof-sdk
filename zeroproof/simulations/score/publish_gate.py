@@ -8,7 +8,9 @@ N samples; curricula need that per-prompt difficulty stored with the data).
 * ``calibrate`` writes the measured difficulty on every graded row: the
   per-task pass rate over its k rollouts, the sample count, and the
   policy that produced them. That is the schema's ``Calibration`` record,
-  flattened onto the row as ``calibration``.
+  flattened onto the row as ``calibration``. ``carry_calibration`` is the
+  same stamp written from rows that have since been pruned, which is what
+  ``optimize(mode="rl")`` uses so the number survives its own hygiene.
 * ``publish_gate`` refuses an RL-shaped dataset that could not train
   anything: ungraded rows, or no mixed group anywhere. It reports what a
   grouped update would see (pass@1, headroom, band counts) and warns
@@ -23,10 +25,10 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
-from ..schema import Calibration, PolicyRef
+from ..schema import Calibration, PolicyRef, calibration_of
 from .hack_scan import hack_scan
 from .hygiene import (
     dedupe_groups,
@@ -67,6 +69,50 @@ def _task_id(row: dict) -> str:
     return str(row.get("task_id") or row.get("scenario_id") or row.get("prompt") or "")
 
 
+def _identified(ref: PolicyRef) -> bool:
+    """Whether a ``PolicyRef`` names anything at all."""
+    return bool(ref.name or ref.model or ref.prompt_hash or ref.version)
+
+
+def carry_calibration(
+    graded: Sequence[dict],
+    kept: Sequence[dict],
+    *,
+    policy: PolicyRef | dict | str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Stamp ``kept`` with the difficulty measured on ``graded``, in place.
+
+    Hygiene shrinks a group without changing how often the policy passed
+    that ask: the measurement is the k rollouts the grader saw, and
+    dropping five identical trajectories does not make the task harder.
+    Stamping the survivors from the survivors would put the post-dedup k
+    and its pass rate under a field that means the policy's pass rate over
+    k repeats, so ``optimize(mode="rl")`` carries the pre-hygiene numbers
+    onto the rows that leave and ``calibrate`` keeps a carried stamp
+    instead of recomputing it.
+    """
+    student = policy_ref(policy, model=model)
+    groups = _group_label_lists(graded)
+    stamped = 0
+    for row in kept:
+        if not isinstance(row, dict):
+            continue
+        labels = groups.get(str(row.get("prompt") or ""))
+        if not labels:
+            continue
+        row["calibration"] = asdict(
+            Calibration(
+                task_id=_task_id(row),
+                student=student,
+                n=len(labels),
+                pass_rate=sum(labels) / len(labels),
+            )
+        )
+        stamped += 1
+    return {"n_tasks": len(groups), "n_rows": len(kept), "n_stamped": stamped}
+
+
 def calibrate(
     rows: Sequence[dict],
     *,
@@ -83,6 +129,12 @@ def calibrate(
     ``ref`` (a key holding the reference model's summed logprob, or rows
     scored under it) fills ``mean_kl`` per task from the captured
     logprobs; see ``mean_kl``.
+
+    A row whose carried stamp counts more repeats than these rows hold
+    keeps it (``n_carried`` in the report): ``optimize(mode="rl")`` drops
+    duplicate trajectories, and recomputing here would report the
+    post-dedup k as the policy's pass rate over k repeats. The producing
+    policy and ``mean_kl`` are still filled in from this call.
     """
     student = policy_ref(policy, model=model)
     groups = _group_label_lists(rows)
@@ -94,19 +146,33 @@ def calibrate(
         kl_report = mean_kl(rows, ref)
         kl_per_task = dict(kl_report["per_task"])
     stamped = 0
+    carried = 0
     for row in rows:
         if not isinstance(row, dict) or _binary_label(row) is None:
             continue
         labels = groups.get(str(row.get("prompt") or ""))
         if not labels:
             continue
-        record = Calibration(
-            task_id=_task_id(row),
-            student=student,
-            n=len(labels),
-            pass_rate=sum(labels) / len(labels),
-            mean_kl=kl_per_task.get(_task_id(row)),
-        )
+        kl = kl_per_task.get(_task_id(row))
+        existing = calibration_of(row)
+        if existing is not None and existing.n > len(labels):
+            # The group shrank after it was measured (dedupe, the
+            # unanimous trim, the band). The carried pass rate is the one
+            # the policy earned; only identity and KL are refreshed here.
+            record = replace(
+                existing,
+                student=student if _identified(student) else existing.student,
+                mean_kl=kl if kl is not None else existing.mean_kl,
+            )
+            carried += 1
+        else:
+            record = Calibration(
+                task_id=_task_id(row),
+                student=student,
+                n=len(labels),
+                pass_rate=sum(labels) / len(labels),
+                mean_kl=kl,
+            )
         row["calibration"] = asdict(record)
         stamped += 1
     rates = pass_at(rows)
@@ -114,6 +180,7 @@ def calibrate(
         "n_tasks": len(groups),
         "n_rows": len(rows),
         "n_stamped": stamped,
+        "n_carried": carried,
         "n_unstamped": len(rows) - stamped,
         "student": asdict(student),
         "pass_at": rates.to_dict(),
@@ -194,6 +261,14 @@ def publish_gate(
             )
         if calibration["n_unstamped"]:
             warnings.append(f"{calibration['n_unstamped']} row(s) have no 0/1 reward")
+        if calibration["n_carried"]:
+            k = calibration["pass_at"]["k"]
+            warnings.append(
+                f"{calibration['n_carried']} row(s) keep the calibration measured before "
+                f"optimize(mode='rl') pruned their ask; the stamp is the graded pass rate "
+                f"over k repeats, this report's pass_at is over the {k} row(s) per ask "
+                "that remain"
+            )
     # Hygiene is reported, never applied here: push uploads rows as they
     # are, and the drops live in optimize / select_for_rl.
     _kept, duplicates = dedupe_groups(rows)
@@ -230,4 +305,11 @@ def publish_gate(
     return report
 
 
-__all__ = ["PublishGateError", "calibrate", "is_rl_shaped", "policy_ref", "publish_gate"]
+__all__ = [
+    "PublishGateError",
+    "calibrate",
+    "carry_calibration",
+    "is_rl_shaped",
+    "policy_ref",
+    "publish_gate",
+]

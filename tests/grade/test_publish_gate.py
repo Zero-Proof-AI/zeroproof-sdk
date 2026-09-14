@@ -187,3 +187,92 @@ def test_calibration_task_id_prefers_scenario_id_over_prompt_text():
     bare = _rows({"p": [1, 0]})
     calibrate(bare)
     assert bare[0]["calibration"]["task_id"] == "p"
+
+
+def _two_trajectory_rows(n_tasks: int = 12, k: int = 8, n_pass: int = 6) -> list[dict]:
+    """An agent with two trajectories: the good one passes, the other
+    fails, and the repeats of each are byte-identical. This is the shape
+    ``dedupe_groups`` collapses from k=8 to k=2."""
+    rows = []
+    for t in range(n_tasks):
+        prompt = f"refund order ord_{t:03d}"
+        for i in range(k):
+            passed = i < n_pass
+            rows.append(
+                {
+                    "task_id": f"task_{t:03d}",
+                    "prompt": prompt,
+                    "reward": 1 if passed else 0,
+                    "final_text": (
+                        f"Looked up ord_{t:03d} and issued the refund."
+                        if passed
+                        else "Sorry, I could not do that."
+                    ),
+                    "steps": (
+                        [{"tool": "create_refund", "arguments": {}, "result": {"ok": 1}}]
+                        if passed
+                        else []
+                    ),
+                }
+            )
+    return rows
+
+
+def test_optimize_carries_the_graded_calibration_past_its_own_dedupe():
+    # The stamp means "this task's pass rate over its k repeats". Dedupe
+    # drops identical trajectories, which changes neither number, so the
+    # graded measurement has to survive it rather than be recomputed on
+    # whatever is left.
+    rows = _two_trajectory_rows()
+    graded = zps.pass_at(rows)
+    assert graded.k == 8 and graded.pass_at_1 == pytest.approx(0.75)
+
+    picked, report = zps.optimize(rows, mode="rl")
+    assert report["duplicates"]["n_dropped"] == 12 * 6  # 8 rollouts -> 2 distinct
+    assert report["calibration"]["n_stamped"] == len(picked)
+    assert zps.pass_at(picked).k == 2  # the rows themselves can no longer say
+
+    stamp = zps.calibration_of(picked[0])
+    assert stamp is not None
+    assert (stamp.n, stamp.pass_rate) == (8, pytest.approx(0.75))
+
+
+def test_publish_gate_keeps_a_carried_stamp_and_says_the_report_is_over_fewer_rows():
+    rows = _two_trajectory_rows()
+    picked, _report = zps.optimize(rows, mode="rl")
+    gate = publish_gate(picked, mode="rl", policy={"name": "qwen-v3"})
+
+    assert gate["calibration"]["n_carried"] == len(picked)
+    stamp = zps.calibration_of(picked[0])
+    assert stamp is not None and (stamp.n, stamp.pass_rate) == (8, pytest.approx(0.75))
+    assert stamp.student.name == "qwen-v3"  # the gate still fills the policy in
+    # The report's own pass_at is over the pruned rows, and says so.
+    assert gate["calibration"]["pass_at"]["k"] == 2
+    assert any("keep the calibration measured before" in w for w in gate["warnings"])
+
+
+def test_calibrate_recomputes_when_nothing_was_pruned():
+    # Only a group that visibly shrank keeps its old stamp; a re-gate of
+    # the same rows must still measure them.
+    rows = _rows({"a": [1, 0, 1, 1]})
+    calibrate(rows)
+    assert zps.calibration_of(rows[0]).pass_rate == pytest.approx(0.75)
+    for row in rows:
+        row["reward"] = 0
+    report = calibrate(rows)
+    assert report["n_carried"] == 0
+    assert zps.calibration_of(rows[0]).pass_rate == 0.0
+
+
+def test_optimize_warns_that_the_k_way_numbers_do_not_survive_the_prune():
+    rows = _two_trajectory_rows()
+    _picked, report = zps.optimize(rows, mode="rl")
+    assert any("pass^k / pass@k do not survive the prune" in w for w in report["hygiene_warnings"])
+    # Nothing to warn about when the groups come through intact.
+    varied = [
+        dict(row, final_text=f"{row['final_text']} note {i}")
+        for i, row in enumerate(_rows({f"ask {t}": [1, 0, 1, 0, 1, 0, 1, 0] for t in range(6)}))
+    ]
+    _kept, clean = zps.optimize(varied, mode="rl")
+    assert clean["duplicates"]["n_dropped"] == 0
+    assert not any("pass^k / pass@k" in w for w in clean["hygiene_warnings"])

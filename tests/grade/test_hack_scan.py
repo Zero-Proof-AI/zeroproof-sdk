@@ -292,6 +292,72 @@ def test_select_for_rl_and_publish_gate_carry_the_scan():
     assert zps.publish_gate([_row("a", 1, text="x")])["hack_scan"] is None
 
 
+def test_two_distinct_trajectories_refuse_a_verdict_instead_of_naming_one():
+    # The agent emits one passing reply and one failing reply and nothing
+    # else, so every feature that tells them apart is an exact function
+    # of the label: they all land at |rho| 1 and the ranking is a sort by
+    # feature name. Picking the alphabetical winner would hand a
+    # researcher "frac:upper" as the thing the judge pays for.
+    rows = []
+    for p in range(20):
+        for i in range(8):
+            passed = i < 5
+            rows.append(
+                _row(
+                    f"ask {p}",
+                    1 if passed else 0,
+                    text=(
+                        f"Looked up order {p} and issued the refund in full."
+                        if passed
+                        else "sorry, i could not do that"
+                    ),
+                    tool="lookup_order" if passed else None,
+                )
+            )
+    report = hack_scan(rows, endorsed=["lookup_order"], seed=0)
+    assert report["regime"] == "degenerate"
+    assert report["degenerate"] is True
+    assert report["top_feature"] is None
+    assert report["integrity"] is None and report["endorsed_on_top"] is None
+    assert report["distinct_per_ask"] == 2
+    assert len(report["collinear"]) >= 2
+    assert all(
+        abs(x["rho"]) >= 0.999 for x in report["features"] if x["name"] in report["collinear"]
+    )
+    assert any("too few distinct trajectories" in w for w in report["warnings"])
+    assert format_hack_scan(report).startswith("DEGENERATE")
+    # The publish gate must not turn a refusal into a hack verdict.
+    gate = zps.publish_gate(rows, mode="rl", endorsed=["lookup_order"], strict_hacks=True)
+    assert gate["ok"] and gate["hack_scan"]["regime"] == "degenerate"
+    assert any("too few distinct trajectories" in w for w in gate["warnings"])
+
+
+def test_a_varied_pool_still_names_a_hack_when_two_names_share_one_behavior():
+    # Collinearity alone is not degeneracy: with eight distinct rollouts
+    # per ask, two features at |rho| 1 are two names for the delimiter
+    # the judge actually pays for, and the scan must still say so.
+    rows = _pool(30, 8, seed=2, reward_of=lambda rng, tool, delim, p: int(delim))
+    report = hack_scan(rows, endorsed=["lookup_order"], seed=0)
+    assert report["distinct_per_ask"] >= 4
+    assert report["degenerate"] is False
+    assert report["regime"] == "reward_hack"
+    assert "#" in report["top_feature"]
+
+
+def test_the_endorsed_marker_does_not_run_into_the_feature_name():
+    rows = _pool(40, 8, seed=1, reward_of=lambda rng, tool, delim, p: int(tool))
+    lines = format_hack_scan(hack_scan(rows, endorsed=["lookup_order"], seed=0)).splitlines()
+    header = next(line for line in lines if "feature" in line and "within" in line)
+    marked = [line for line in lines if line[:2] in {"*e", " e", "* ", "  "} and line[3:4].strip()]
+    endorsed_lines = [line for line in lines if line[:2] in {"*e", " e"}]
+    assert endorsed_lines and "*etool" not in "\n".join(lines)
+    # the two marker columns keep their own gutter, so every name starts
+    # in the same place the header's does
+    assert header.startswith("   feature")
+    assert all(line.startswith(("*e ", " e ", "*  ", "   ")) for line in marked)
+    assert any(line.startswith("*e tool_calls ") for line in endorsed_lines)
+
+
 def test_scan_is_fast_enough_without_numpy():
     rows = _pool(400, 8, seed=10, reward_of=lambda rng, tool, delim, p: int(delim))
     started = time.perf_counter()

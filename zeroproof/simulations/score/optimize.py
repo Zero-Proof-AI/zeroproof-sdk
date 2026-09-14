@@ -618,6 +618,14 @@ def select_for_rl(
     should be), ``correlations`` the older pooled scan. Reward tracking
     a shortcut is a judge problem, flagged in ``hygiene_warnings``, not
     pruned.
+
+    Selected rows are stamped in place with the ``calibration`` measured
+    on the rows as they arrived, before dedupe and the trims: the pass
+    rate over the k repeats the grader saw is the task's difficulty, and
+    re-measuring it on the survivors would report the post-dedup k under
+    that name. ``publish_gate`` keeps the carried stamp. The k-way
+    reliability numbers do not survive the prune, and ``hygiene_warnings``
+    says so when they were available before it.
     """
     from .hack_scan import hack_scan
     from .hygiene import (
@@ -628,6 +636,7 @@ def select_for_rl(
         reward_correlations,
     )
     from .hygiene import drop_truncated as _drop_truncated
+    from .publish_gate import carry_calibration
 
     if truncated not in TRUNCATED_POLICIES:
         raise ValueError(
@@ -754,6 +763,7 @@ def select_for_rl(
         "hack_scan": hack_scan(selected, endorsed=endorsed),
         "signal": group_signal(selected, lo=lo, hi=hi),
         "eval_sourced": eval_sourced(selected),
+        "calibration": carry_calibration(rows, selected),
     }
     report["hygiene_warnings"] = hygiene_warnings(
         duplicates=dup_report,
@@ -764,6 +774,20 @@ def select_for_rl(
     if report["eval_sourced"]:
         report["hygiene_warnings"].append(
             _eval_sourced_warning(report["eval_sourced"], "selected row(s)")
+        )
+    # Dedupe and the trims shrink every group, so the selection can no
+    # longer report the k-way reliability numbers the graded rows could:
+    # pass^k and pass@k need k repeats of an ask and hygiene just removed
+    # them. The published rows cannot measure their own reliability, so
+    # the loss is said out loud here rather than turning up as "n/a".
+    before, after = pass_at(rows), pass_at(selected)
+    if before.pass_at_k is not None and after.pass_at_k is None:
+        report["hygiene_warnings"].append(
+            f"pass^k / pass@k do not survive the prune: the graded rows scored k="
+            f"{before.k}, the selection leaves {after.k} rollout(s) per ask, so "
+            "pass_at on these rows reports them as n/a. pass@1 and the carried "
+            "calibration stamp still hold the graded measurement; take the k-way "
+            "numbers from pass_at before optimize"
         )
     # A selection with no mixed group has no within-group contrast: GRPO
     # advantage is zero everywhere and the run trains nothing. That is a

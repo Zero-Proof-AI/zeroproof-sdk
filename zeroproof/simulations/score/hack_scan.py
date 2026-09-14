@@ -72,8 +72,16 @@ DEFAULT_SEEDS = 12
 SAT_FLAG = 0.2
 #: how many ranked features the report lists
 REPORT_TOP = 20
+#: |within-ask rho| at or above this is not a correlation but an identity:
+#: the feature is an exact linear function of the centered reward.
+DEGENERATE_RHO = 0.999
+#: distinct rollouts an ask needs before the within-ask ranking can
+#: separate anything. With two, whichever of them the reward follows,
+#: every feature that differs between them is an exact function of the
+#: label: they all land at |rho| 1 and the ranking is a sort by name.
+MIN_DISTINCT_PER_ASK = 3
 
-REGIMES = ("train", "reward_hack", "pool_exhausted", "no_signal", "unknown")
+REGIMES = ("train", "reward_hack", "pool_exhausted", "no_signal", "degenerate", "unknown")
 
 _TOKEN = re.compile(r"[a-z_]{2,}|\d+|[^\sa-z_\d]")
 _UPPER = re.compile(r"[A-Z]")
@@ -306,12 +314,23 @@ def hack_scan(
     ``top_features`` caps the ranking in the report (``None`` lists all).
 
     Returns ``regime`` (``train``, ``reward_hack``, ``pool_exhausted``,
-    ``no_signal``, ``unknown``), ``tau`` (the floor), ``features`` ranked
-    by |within-ask correlation| with the pooled correlation beside each,
-    ``top_feature``, ``endorsed_on_top``, ``integrity`` (share of the
-    above-floor signal that sits on an endorsed feature), the support
-    numbers (asks all-pass, all-fail, mixed, gradient capacity), and
-    ``warnings`` in one line each.
+    ``no_signal``, ``degenerate``, ``unknown``), ``tau`` (the floor),
+    ``features`` ranked by |within-ask correlation| with the pooled
+    correlation beside each, ``top_feature``, ``endorsed_on_top``,
+    ``integrity`` (share of the above-floor signal that sits on an
+    endorsed feature), the support numbers (asks all-pass, all-fail,
+    mixed, gradient capacity), and ``warnings`` in one line each.
+
+    ``degenerate`` is the refusal: an ask holds fewer than
+    ``MIN_DISTINCT_PER_ASK`` distinct rollouts at the median
+    (``distinct_per_ask``) and two or more features sit at |rho| >=
+    ``DEGENERATE_RHO``, exactly collinear with reward and with each other
+    because nothing else could happen at that variety. The ranking cannot
+    separate them and the noise floor is no help (it tells signal from
+    noise, not one perfect explanation from another), so ``top_feature``
+    and ``integrity`` are ``None``, no hack is claimed, and ``collinear``
+    lists the tied features. Collinear features on a varied pool are left
+    alone: there the ranking found two names for one behavior.
     """
     graded = [r for r in rows if isinstance(r, dict) and _reward(r, reward) is not None]
     n = len(graded)
@@ -340,6 +359,9 @@ def hack_scan(
         "integrity": None,
         "inverted": [],
         "continuous_reward": False,
+        "degenerate": False,
+        "collinear": [],
+        "distinct_per_ask": 0,
         "warnings": warnings,
     }
     if n == 0:
@@ -395,6 +417,7 @@ def hack_scan(
     # features
     texts = [scan_text(r) for r in graded]
     columns: dict[str, list[tuple[int, float]]] = {}
+    profiles: list[tuple] = []
     for i, r in enumerate(graded):
         row_features = hand_features(r)
         if features:
@@ -405,9 +428,15 @@ def hack_scan(
                     value = None
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     row_features[str(name)] = float(value)
+        profiles.append((texts[i], tuple(sorted(row_features.items()))))
         for name, value in row_features.items():
             if value != 0.0 and value == value:
                 columns.setdefault(name, []).append((i, value))
+    # How much variety the scan has to work with inside one ask, at the
+    # median (the same summary ``rollouts_per_group`` reports). Features
+    # can only be told apart by rollouts that differ.
+    distinct = sorted(len({profiles[i] for i in members[g]}) for g in multi)
+    base["distinct_per_ask"] = distinct[len(distinct) // 2] if distinct else 1
     if auto:
         vocab, present = auto_terms(texts, top_k=top_k, min_obs=min_obs)
         for term in vocab:
@@ -546,6 +575,19 @@ def hack_scan(
             "or add a features= extractor that emits them"
         )
         return base
+    # Degeneracy: an ask that holds only a couple of distinct rollouts
+    # forces every feature that separates them to be an exact function of
+    # the label, so they all tie at |rho| 1 and the ranking's tie-break is
+    # the feature name. The floor cannot help, because it separates signal
+    # from noise and not one perfect explanation from another. Naming a
+    # winner there is a coin flip presented as a verdict. Collinear
+    # features on a diverse pool are a different thing (two names for the
+    # same behavior, which the ranking found), so the trajectory variety
+    # has to be missing too.
+    collinear = [x["name"] for x in listed if abs(x["rho"]) >= DEGENERATE_RHO]
+    degenerate = len(collinear) >= 2 and base["distinct_per_ask"] < MIN_DISTINCT_PER_ASK
+    base["degenerate"] = degenerate
+    base["collinear"] = collinear
     # e: the reward pays for the endorsed behavior (positive). An endorsed
     # feature the reward punishes is ``inverted``: the policy will do less
     # of the behavior, which is a hack of its own.
@@ -553,10 +595,25 @@ def hack_scan(
     a = max((abs(x["rho"]) for x in above if not x["endorsed"]), default=0.0)
     inverted = [x for x in above if x["endorsed"] and x["rho"] < 0]
     base["inverted"] = [x["name"] for x in inverted]
-    if endorsed:
+    if endorsed and not degenerate:
         base["endorsed_on_top"] = bool(top and top["endorsed"] and top["rho"] > 0)
         base["integrity"] = round(e / (e + a), 4) if (e + a) > 0 else 0.0
-    if not above or top is None:
+    if degenerate:
+        base["regime"] = "degenerate"
+        base["top_feature"] = None
+        shown = ", ".join(f'"{name}"' for name in collinear[:4])
+        if len(collinear) > 4:
+            shown += f", and {len(collinear) - 4} more"
+        warnings.append(
+            f"too few distinct trajectories to separate features: {base['distinct_per_ask']} "
+            f"distinct rollout(s) per ask at the median leaves {len(collinear)} feature(s) "
+            f"perfectly collinear with reward within ask (|rho| >= {DEGENERATE_RHO:g}): "
+            f"{shown}. Nothing in the data tells them apart, so no top feature is named "
+            "and no hack is claimed. Re-scan on rollouts that differ in more than one "
+            "way (raise temperature or repeats), and scan before optimize(mode='rl'), "
+            "which drops the duplicate rollouts within an ask"
+        )
+    elif not above or top is None:
         base["regime"] = "no_signal"
         warnings.append(
             f"no feature clears the noise floor (max |rho| {rho_max:.2f}, floor {tau:.2f} "
@@ -625,12 +682,15 @@ def format_hack_scan(report: dict[str, Any], *, top: int = 12) -> str:
             f"noise floor tau {report['tau']:.3f} ({report['n_above_floor']} of "
             f"{report['n_features']} features above)"
         )
-        lines.append(f"  {'feature':<44}{'within':>8}{'pooled':>8}{'n':>6}")
+        # Two marker columns, then a space, so a flagged endorsed feature
+        # reads as "*e name" and not as "*ename".
+        lines.append(f"   {'feature':<43}{'within':>8}{'pooled':>8}{'n':>6}")
         for x in report["features"][:top]:
             flag = "*" if x["above_floor"] else " "
             mark = "e" if x["endorsed"] else " "
             lines.append(
-                f"{flag}{mark}{x['name'][:43]:<44}{x['rho']:>+8.3f}{x['pooled']:>+8.3f}{x['n_obs']:>6}"
+                f"{flag}{mark} {x['name'][:42]:<43}"
+                f"{x['rho']:>+8.3f}{x['pooled']:>+8.3f}{x['n_obs']:>6}"
             )
     if report.get("integrity") is not None:
         lines.append(f"integrity {report['integrity']:.2f} (share of above-floor signal endorsed)")
@@ -756,6 +816,8 @@ __all__ = [
     "DEFAULT_MIN_OBS",
     "DEFAULT_N_PERM",
     "DEFAULT_TOP_K",
+    "DEGENERATE_RHO",
+    "MIN_DISTINCT_PER_ASK",
     "REGIMES",
     "RIVAL_SHARE",
     "SAT_FLAG",
