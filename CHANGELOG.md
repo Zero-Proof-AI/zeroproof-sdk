@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.40 (2026-09-14)
 
 - Docs only: fixed the `zeroproof.simulations.judging` module pointer (it is
   `score.judging`), lifted the judge contract and marker-polarity rule into
@@ -13,9 +13,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   vector), the pass^k/pass@k interval claim, `tasks=` k inheritance,
   `STOCK_MARKERS`, `export_dataset`/`export_training`, and
   `trim_out_of_band`. No behavior change.
-
-## 0.39 (2026-09-14)
-
 - `export_training(format="trl")`, `export_preference(format="trl")` and
   `zps.to_trl(rows, kind)`: the shape TRL actually loads — conversational
   SFT rows with no `prompt` string column beside `messages` (it made
@@ -35,6 +32,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   distinct trajectories leave every candidate collinear with reward;
   `hack_scan_diff` withholds `learned` on a degenerate side for the same
   reason, instead of reading a tie as what the policy learned.
+
+## 0.39 (2026-09-14)
+
 - `hack_scan`: a tie in magnitude goes to the endorsed feature (the
   complement of the behavior correlates exactly as strongly, with the
   opposite sign, and is not a second thing the policy learns), and an
