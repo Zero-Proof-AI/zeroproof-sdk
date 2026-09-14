@@ -399,6 +399,14 @@ print(zps.format_benchmark(zps.benchmark_report(runs, name="telecom-holdout")))
 
 **Stage lineage.** The pipeline is a sequence of stages (rlhf-book ch. 3): SFT, reward modeling, RL, and the eval that judges the result. `stamp_stage(rows, "sft")` records which stage a row fed, and `stage_report(rows)` counts rows per stage and flags the one mistake it most needs caught: any task used in both `eval` and a training stage. `zps.stamp_stage`, `zps.stage_report`, `zps.stage_of`, `zps.STAGES` (`sft`, `rm`, `rl`, `eval`, `mid`).
 
+**Model spec as an object.** A spec or constitution is a living, versioned document (rlhf-book ch. 17). `load_spec(constitution)` wraps the `{source, traits: [{id, name, principle, authority}]}` shape (what the character example writes) into a `Spec` whose `version` is a content hash, so any edit to a principle changes it. `spec.behaviors()` are the trait ids, ready for `delta_report(must_not_regress=...)`; `stamp_spec(rows, spec)` tags a run with the spec version it targeted, so you can ask whether adherence held from one spec or model version to the next.
+
+```python
+spec = zps.load_spec("examples/character/constitution.json")
+scored = zps.stamp_spec(data.grade(judge=my_judge).rows, spec)
+zps.delta_report(before=before, after=scored, target="pass_at_1", must_not_regress=spec.behaviors())
+```
+
 ### Train, and watch it
 
 Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO or DPO, LoRA on an A10G) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
