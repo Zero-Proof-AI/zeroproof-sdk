@@ -465,29 +465,49 @@ def retarget_regions(
 
 
 def _prefer_success(assignments: list[dict], *, success_share: float = SUCCESS_SHARE) -> list[dict]:
-    """Keep every fault type once, then flip the rest to success."""
+    """Keep every fault type once, then flip the rest to success.
+
+    Which fault rows survive is decided row by row from the row's own
+    content, never from its position in the list or the list's length, so
+    a grid that grows (a policy gains a rule) keeps the verdict on every
+    row it already had. The one-per-kind floor is taken from the rule-free
+    rows when the grid has any, since those never move with the policy.
+    """
     if not assignments:
         return []
     faults = [
         row for row in assignments if str(row.get("tool_condition") or "success") != "success"
     ]
-    keep: list[dict] = []
-    seen: set[str] = set()
-    for row in faults:
-        cond = str(row.get("tool_condition"))
-        if cond not in seen:
-            seen.add(cond)
-            keep.append(row)
-    cap = max(len(keep), round(len(assignments) * (1.0 - success_share)))
-    for row in faults:
-        if row not in keep and len(keep) < cap:
-            keep.append(row)
-    keep_ids = {id(row) for row in keep}
+    if not faults:
+        return list(assignments)
+    share = max(0.0, min(1.0, 1.0 - float(success_share)))
+
+    def digest(row: dict) -> str:
+        return hashlib.sha256(json.dumps(row, sort_keys=True, default=str).encode()).hexdigest()
+
+    floor: dict[str, str] = {}
+    for pool in (
+        [row for row in faults if str(row.get(STABLE_AXIS) or RULE_FREE) == RULE_FREE],
+        faults,
+    ):
+        found: dict[str, str] = {}
+        for row in pool:
+            cond = str(row.get("tool_condition"))
+            if cond in floor:
+                continue
+            key = digest(row)
+            if cond not in found or key < found[cond]:
+                found[cond] = key
+        floor.update(found)
+    keep_ids = set(floor.values())
     out: list[dict] = []
     for row in assignments:
-        if str(row.get("tool_condition") or "success") != "success" and id(row) not in keep_ids:
-            row = dict(row)
-            row["tool_condition"] = "success"
+        if str(row.get("tool_condition") or "success") != "success":
+            key = digest(row)
+            drawn = (int(key[:8], 16) + 1) / float(16**8 + 2)
+            if key not in keep_ids and drawn >= share:
+                row = dict(row)
+                row["tool_condition"] = "success"
         out.append(row)
     return out
 
@@ -496,6 +516,13 @@ def _region_id(assignment: dict) -> str:
     payload = json.dumps(assignment, sort_keys=True)
     return "sc-" + hashlib.sha256(payload.encode()).hexdigest()[:10]
 
+
+# The axis whose values are the policy's clauses. Its rows are built so a
+# policy edit touches only the rows of the rule that changed.
+STABLE_AXIS = "rule"
+# The rule value of a row that targets no clause: the rule-free block, and
+# the whole grid when there is no policy.
+RULE_FREE = "unspecified"
 
 _COVERING_CACHE: dict[str, list[dict]] = {}
 _COVERING_CACHE_LOCK = threading.Lock()
@@ -523,6 +550,70 @@ def _covering_assignments(dimensions: dict[str, list[str]], strength: int) -> li
 
 
 def _covering_assignments_uncached(dimensions: dict[str, list[str]], strength: int) -> list[dict]:
+    """Covering array whose rows survive a policy edit.
+
+    The ``rule`` axis is the policy's own clauses, and a prompt edit is the
+    most common change between two runs a team wants paired. A plain greedy
+    array over every axis re-rolls almost entirely when one value joins an
+    axis, so the array is built in layers that do not see each other:
+
+    - a rule-free block: every strength-t tuple over the other axes, which
+      depends on the tools and nothing else;
+    - one block per rule: every (t-1)-tuple over the other axes paired with
+      that rule, rotated by the rule's text so rules do not all meet the
+      same combinations.
+
+    Adding, removing or rewording one rule changes that rule's block only.
+    Together the layers still cover every strength-t tuple, and every
+    ``(rule, value)`` pair sits in the rule's own block. Grids without a
+    ``rule`` axis, or at strength 1, use the greedy array directly.
+    """
+    names = list(dimensions)
+    t = max(1, min(int(strength), len(names)))
+    if STABLE_AXIS not in dimensions or t < 2 or len(names) < 2:
+        return _greedy_covering(dimensions, t)
+    others = {name: list(dimensions[name]) for name in names if name != STABLE_AXIS}
+    rows: list[dict] = []
+
+    def ordered(row: dict) -> dict:
+        return {name: row[name] for name in names}
+
+    for row in _greedy_covering(others, t):
+        row[STABLE_AXIS] = RULE_FREE
+        rows.append(ordered(row))
+    rules = [str(rule) for rule in dimensions[STABLE_AXIS] if str(rule) != RULE_FREE]
+    for rule in rules:
+        for row in _rule_block(others, rule, t - 1):
+            row[STABLE_AXIS] = rule
+            rows.append(ordered(row))
+    return rows
+
+
+def _rule_block(others: dict[str, list[str]], rule: str, strength: int) -> list[dict]:
+    """The rows one rule owns: every ``strength``-tuple over the other axes.
+
+    At strength 1 this is a diagonal walk, each axis rotated by a digest of
+    the rule text, so the block is a function of the rule and the axes
+    alone. Higher strengths fall back to the greedy array.
+    """
+    if strength > 1:
+        return _greedy_covering(others, strength)
+    width = max((len(values) for values in others.values()), default=0)
+    block: list[dict] = []
+    for j in range(width):
+        row: dict = {}
+        for axis, values in others.items():
+            if not values:
+                continue
+            digest = hashlib.sha256(f"{rule}:{axis}:rule-block".encode()).hexdigest()
+            offset = int(digest[:8], 16) % len(values)
+            row[axis] = values[(j + offset) % len(values)]
+        block.append(row)
+    return block
+
+
+def _greedy_covering(dimensions: dict[str, list[str]], strength: int) -> list[dict]:
+    """Greedy covering array: every strength-t tuple appears in at least one row."""
     names = list(dimensions)
     t = max(1, min(int(strength), len(names)))
     uncovered: set[tuple] = set()

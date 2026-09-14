@@ -190,6 +190,11 @@ def compare_runs(
     so. ``verdict`` is one of ``"b_better"``, ``"a_better"``,
     ``"no_difference_detected"``: the last means the interval covers zero,
     not that the runs are equal.
+
+    Tasks on one side only are dropped from a paired comparison, and
+    ``note`` says how many, since a verdict over a quarter of the tasks is
+    not a verdict over the eval. ``paired_share`` is the shared fraction
+    of every task either run saw.
     """
     ma = task_means(a, metric)
     mb = task_means(b, metric)
@@ -233,12 +238,28 @@ def compare_runs(
         verdict = "a_better"
     else:
         verdict = "no_difference_detected"
+    n_only_a = len(set(ma) - set(mb))
+    n_only_b = len(set(mb) - set(ma))
+    n_all = len(set(ma) | set(mb))
+    paired_share = (len(shared) / n_all) if n_all else None
+    if not paired:
+        note = f"fewer than {min_paired} shared tasks; unpaired task means, weaker test"
+    elif n_only_a or n_only_b:
+        note = (
+            f"{n_only_a} tasks only in a and {n_only_b} only in b were dropped; "
+            f"the verdict rests on the {len(shared)} shared"
+        )
+        if paired_share is not None and paired_share < 0.5:
+            note = "most tasks unpaired: " + note
+    else:
+        note = ""
     return {
         "metric": metric,
         "paired": paired,
         "n_paired": len(shared),
-        "n_only_a": len(set(ma) - set(mb)),
-        "n_only_b": len(set(mb) - set(ma)),
+        "n_only_a": n_only_a,
+        "n_only_b": n_only_b,
+        "paired_share": paired_share,
         "n_used": n_used,
         "mean_a": _mean(list(ma.values())) if ma else None,
         "mean_b": _mean(list(mb.values())) if mb else None,
@@ -246,11 +267,7 @@ def compare_runs(
         "ci95": ci,
         "p_value": p_value,
         "verdict": verdict,
-        "note": (
-            ""
-            if paired
-            else f"fewer than {min_paired} shared tasks; unpaired task means, weaker test"
-        ),
+        "note": note,
     }
 
 

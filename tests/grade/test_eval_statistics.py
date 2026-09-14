@@ -249,3 +249,40 @@ def test_judge_trust_says_when_gold_has_one_class_only():
     assert report["ok"] is True  # nothing the labels can support was flagged
     mixed = rows + [_row(f"u{i}", 0, "Short.", gold=0) for i in range(6)]
     assert judge_trust(mixed)["gold_degenerate"] is False
+
+
+# ---------------------------------------------------------------- dropped tasks (#98)
+
+
+def test_compare_runs_says_when_it_dropped_tasks():
+    a = _run({f"t{i}": 0.5 for i in range(12)} | {f"a{i}": 0.5 for i in range(30)})
+    b = _run({f"t{i}": 0.5 for i in range(12)} | {f"b{i}": 0.5 for i in range(30)})
+    out = compare_runs(a, b)
+    assert out["paired"] and out["n_paired"] == 12
+    assert out["n_only_a"] == 30 and out["n_only_b"] == 30
+    assert out["paired_share"] == pytest.approx(12 / 72)
+    assert out["note"].startswith("most tasks unpaired")
+    assert "30 tasks only in a and 30 only in b were dropped" in out["note"]
+    assert "12 shared" in out["note"]
+    # A few dropped tasks is still worth a note, without the headline.
+    t_only = _run({f"t{i}": 0.5 for i in range(12)})
+    few = compare_runs(t_only, _run({f"t{i}": 0.5 for i in range(12)} | {"z": 0.5}))
+    assert (
+        few["note"]
+        == "0 tasks only in a and 1 only in b were dropped; the verdict rests on the 12 shared"
+    )
+    assert few["paired_share"] == pytest.approx(12 / 13)
+    # Fully paired runs keep an empty note and a share of one.
+    same = compare_runs(a, a)
+    assert same["note"] == "" and same["paired_share"] == 1.0
+
+
+def test_delta_report_surfaces_dropped_tasks():
+    before = _run({f"t{i}": 0.5 for i in range(12)} | {f"a{i}": 0.5 for i in range(30)})
+    after = _run({f"t{i}": 0.5 for i in range(12)} | {f"b{i}": 0.5 for i in range(30)})
+    report = delta_report(before, after)
+    assert report["n_paired_tasks"] == 12 and report["n_unpaired_tasks"] == 60
+    assert any(w.startswith("pass_at_1: most tasks unpaired") for w in report["warnings"])
+    assert "! pass_at_1: most tasks unpaired" in format_delta_report(report)
+    targeted = delta_report(before, after, target="pass_at_1")
+    assert sum("unpaired" in w for w in targeted["warnings"]) == 1

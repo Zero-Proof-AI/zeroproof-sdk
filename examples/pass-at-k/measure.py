@@ -107,9 +107,11 @@ def scripted_agent(message: str) -> dict:
     }
 
 
-def simulate_rows(asks: int = 12, k: int = 8, seed: int = 0) -> list[dict]:
+def simulate_rows(asks: int = 12, k: int = 8, seed: int = 0, *, concurrency: int = 4) -> list[dict]:
     """``asks`` situations, ``k`` repeats each, graded by the built-in
-    conduct grader. Offline: template writer, scripted agent."""
+    conduct grader. Offline: template writer, scripted agent. Which asks
+    a seed draws is reproducible at ``concurrency=1`` only; higher
+    concurrency lets completion order steer later draws."""
     data = zps.simulate(
         scripted_agent,
         tools=TOOLS,
@@ -119,7 +121,7 @@ def simulate_rows(asks: int = 12, k: int = 8, seed: int = 0) -> list[dict]:
         budget=asks * k,
         seed=seed,
         grade=True,
-        concurrency=4,
+        concurrency=concurrency,
         simulator=False,
         time_budget=None,
         mode="rl",

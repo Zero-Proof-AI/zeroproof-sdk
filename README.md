@@ -347,6 +347,13 @@ otherwise; ingested traces are eval until training data is cut from them. Holdou
 `scenario_id`, so a task is wholly on one side, and the same task lands
 on the same side every run.
 
+A task's identity is its cell in the coverage grid: the tools, the
+situation axes, and at most one clause of the policy. Each clause owns its
+own block of cells and the cells that pair the other axes carry no clause,
+so editing the system prompt keeps every task except the ones for the
+clause that changed. Rewording one rule, adding one, or swapping the model
+leaves the rest of the eval paired for `compare_runs`.
+
 ### Trust the numbers
 
 Three checks that decide whether a result is believable, all report-only and all over rows you already have.
@@ -366,7 +373,7 @@ zps.delta_report(before, after, target="pass_at_1", by="category")  # the target
 
 **Decontamination.** Word 8-gram overlap between a dataset's prompts and replies and any evaluation source: row lists, JSONL paths, or platform dataset ids. Short prompts fall back to exact match. Returns the clean rows and the first offenders.
 
-**Intervals and comparison.** Every pass@1 now carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
+**Intervals and comparison.** Every pass@1 now carries a 95% interval from a bootstrap over tasks (`pass_at(rows).ci95`), and `metric_summary` / `marker_summary` do the same for markers. Markers come from the judge: return `{"reward": ..., "markers": {"name": value}}` from a `grader=` or `run_judge` callable and they land on `row["markers"]`, which is what `marker_summary`, `delta_report` and `from_row` read. `compare_runs` pairs the tasks two runs share, bootstraps the paired difference, and adds a sign-flip permutation p-value; fewer than five shared tasks falls back to an unpaired test and says so. Tasks on one side only are dropped from a paired comparison; `note` says how many and `paired_share` is the fraction that paired, so a verdict over a quarter of the eval reads as one. The verdict `no_difference_detected` means the interval covers zero, not that the runs are equal.
 
 **Before and after.** `delta_report` runs `compare_runs` on pass@1 and every marker both row sets share. `target=` names the metric the training was meant to move and gives the headline; `must_not_regress=` names the behaviors whose significant drop fails the report; any other significant drop is a warning. `format_delta_report(report)` prints one line per metric. `by=` names a row key, a marker, or a callable that groups rows (a prompt category, a tool, a persona); the report then carries `groups`, the target compared within each group, and `groups_down` for any group whose target dropped significantly while the headline moved. A headline over one dominant kind of prompt cannot hide the other kinds that way.
 
@@ -382,6 +389,15 @@ zps.delta_report(
     must_not_regress=["refusal", "sycophancy"],
 )
 ```
+
+**Benchmark across seeds.** `pass_at(rows).ci95` is the interval over which tasks you picked; it does not see that the model is stochastic and the same eval re-run gives a different number (rlhf-book ch. 16). `benchmark_report(seed_runs)` takes several graded runs of one frozen eval and reports pass@1 mean and SD across seeds, the spread, and the tasks that flip seed to seed, so you know whether a before/after delta clears the run-to-run noise. `run_benchmark(eval_set, judge=, rollout=, seeds=5)` drives the seed loop for you; pass `decontaminate_against=train_rows` to fold an 8-gram leak check into the scorecard.
+
+```python
+runs = [evaluate(roll(seed=s), judge=my_judge).rows for s in range(5)]
+print(zps.format_benchmark(zps.benchmark_report(runs, name="telecom-holdout")))
+```
+
+**Stage lineage.** The pipeline is a sequence of stages (rlhf-book ch. 3): SFT, reward modeling, RL, and the eval that judges the result. `stamp_stage(rows, "sft")` records which stage a row fed, and `stage_report(rows)` counts rows per stage and flags the one mistake it most needs caught: any task used in both `eval` and a training stage. `zps.stamp_stage`, `zps.stage_report`, `zps.stage_of`, `zps.STAGES` (`sft`, `rm`, `rl`, `eval`, `mid`).
 
 ### Train, and watch it
 
