@@ -15,6 +15,16 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   and capped at `constructed_share` (0.3) of the sampled pairs. Uncapped,
   the balance repeats multiplied them past the sampled pairs and the
   policy learned "never call" (with-id pass@1 0.11 to 0.05).
+- `decontaminate` reads prompts only by default, the book's method, and
+  counts a row when it is an eval text verbatim or when one eval text
+  covers at least 80% of its words (`overlap=`, the Llama 2 rule) rather
+  than on any single shared 8-gram. Situations written from one set of
+  templates share whole sentences, so the old default flagged every row
+  of a train/eval pair from the same simulator (rate 1.0, nothing kept)
+  while 41% of the prompts actually repeated; the report now separates
+  `n_exact` from `n_near`, counts hits per field, and carries each
+  offender's coverage. `fields=("prompt", "final_text")` keeps the
+  stricter replies-versus-answers check (#125).
 
 ## 0.35 (2026-09-14)
 

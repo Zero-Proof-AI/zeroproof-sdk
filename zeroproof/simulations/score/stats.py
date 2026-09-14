@@ -418,68 +418,105 @@ def decontaminate(
     against: Sequence[Any] | Any,
     *,
     n: int = 8,
-    fields: Sequence[str] = ("prompt", "final_text"),
+    fields: Sequence[str] = ("prompt",),
+    overlap: float = 0.8,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """Drop rows that share any word ``n``-gram with an evaluation set.
+    """Drop rows whose prompt overlaps an evaluation set (rlhf-book ch. 16).
 
     ``against`` is one or more evaluation sources: row lists, JSONL paths,
     or platform dataset ids (``ds_...``). Evaluation prompts, answers and
-    references contribute n-grams (not the eval set's own replies); a
-    training row is contaminated when any of
-    its ``fields`` shares an n-gram, or, for text shorter than ``n`` words,
-    matches an evaluation prompt exactly after normalization. Returns the
-    clean rows and a report with the first offenders.
+    references are the texts (not the eval set's own replies). A training
+    row is contaminated when one of its ``fields`` is an evaluation text
+    verbatim (after normalization), or when one evaluation text covers at
+    least ``overlap`` of its words with shared word ``n``-grams (the
+    Llama 2 rule: 80% of tokens). Texts shorter than ``n`` words match
+    verbatim only. The default field is the prompt, the book's method;
+    add ``"final_text"`` to ask the stricter question of whether replies
+    reproduce eval answers or references.
+
+    One shared n-gram is the book's test for free-form sets. Situations
+    written from templates share whole sentences that say nothing about
+    which question was asked, so any-n-gram flags every row of a
+    template-written set; the coverage rule counts a row when one eval
+    text accounts for most of it. ``overlap=0`` restores any-n-gram.
+    Returns the clean rows and a report: verbatim hits (``n_exact``) apart
+    from near copies (``n_near``), hits per field, the eval text count,
+    and the first offenders with their coverage.
     """
     sources = (
         against
         if isinstance(against, (list, tuple)) and not (against and isinstance(against[0], dict))
         else [against]
     )
-    eval_ngrams: set[tuple[str, ...]] = set()
-    eval_exact: set[str] = set()
+    texts: dict[str, int] = {}
     n_eval = 0
+    index: dict[tuple[str, ...], set[int]] = {}
     for source in sources:
         for row in _load_rows(source):
             n_eval += 1
             for text in _eval_texts(row):
                 words = _words(text)
-                eval_ngrams |= _ngrams(words, n)
-                if words:
-                    eval_exact.add(_norm(text))
+                if not words or _norm(text) in texts:
+                    continue
+                tid = texts[_norm(text)] = len(texts)
+                for gram in _ngrams(words, n):
+                    index.setdefault(gram, set()).add(tid)
+    threshold = max(0.0, min(1.0, float(overlap)))
     kept: list[dict] = []
     flagged: list[dict[str, Any]] = []
+    by_field: dict[str, int] = {}
     for i, row in enumerate(rows):
         if not isinstance(row, dict):
             continue
-        hit: tuple[str, str] | None = None
+        hit: dict[str, Any] | None = None
         for field in fields:
             text = str(row.get(field) or "")
             words = _words(text)
             if not words:
                 continue
+            if _norm(text) in texts:
+                hit = {"field": field, "match": "exact", "coverage": 1.0}
+                break
             if len(words) < n:
-                if _norm(text) in eval_exact:
-                    hit = (field, "exact")
-            else:
-                grams = _ngrams(words, n)
-                shared = grams & eval_ngrams
-                if shared:
-                    hit = (field, " ".join(next(iter(shared))))
-            if hit:
+                continue
+            covered: dict[int, set[int]] = {}
+            first: dict[int, int] = {}
+            for start_i in range(len(words) - n + 1):
+                for tid in index.get(tuple(words[start_i : start_i + n]), ()):
+                    covered.setdefault(tid, set()).update(range(start_i, start_i + n))
+                    first.setdefault(tid, start_i)
+            if not covered:
+                continue
+            best = max(covered, key=lambda t: (len(covered[t]), -t))
+            coverage = len(covered[best]) / len(words)
+            if threshold <= 0 or coverage >= threshold:
+                hit = {
+                    "field": field,
+                    "match": " ".join(words[first[best] : first[best] + n])[:120],
+                    "coverage": round(coverage, 3),
+                }
                 break
         if hit:
-            flagged.append({"index": i, "field": hit[0], "match": hit[1][:120]})
+            flagged.append({"index": i, **hit})
+            by_field[hit["field"]] = by_field.get(hit["field"], 0) + 1
         else:
             kept.append(row)
     total = sum(1 for r in rows if isinstance(r, dict))
+    n_exact = sum(1 for f in flagged if f["match"] == "exact")
     return kept, {
         "n": total,
         "n_kept": len(kept),
         "n_contaminated": len(flagged),
         "contamination_rate": (len(flagged) / total) if total else 0.0,
+        # verbatim reuse of an eval text, and near copies under the coverage rule
+        "n_exact": n_exact,
+        "n_near": len(flagged) - n_exact,
         "n_eval_rows": n_eval,
+        "n_eval_texts": len(texts),
         "ngram": n,
+        "overlap": threshold,
         "fields": list(fields),
+        "by_field": by_field,
         "examples": flagged[:20],
     }
 
