@@ -137,3 +137,22 @@ def test_uneven_groups_name_the_k_that_scores_them():
 def test_even_groups_keep_the_plain_note():
     rows = [{"prompt": p, "reward": r} for p in "ab" for r in (1, 0)]
     assert pass_at(rows).note == "set repeats>=4 for pass^k and pass@k"
+
+
+def test_unanimous_short_groups_count_as_unanimous_when_asked():
+    # successive allocation: two prompts split and ran to k=4, two were
+    # unanimous after 2 and stopped; one mixed group was cut at 3
+    groups = {"a": [1, 0, 1, 1], "b": [0, 1, 0, 0], "c": [1, 1], "d": [0, 0], "e": [1, 0, 1]}
+    rows = [{"prompt": p, "reward": r} for p, labels in groups.items() for r in labels]
+    skip = pass_at(rows, k=4)
+    assert skip.n_groups_at_k == 2 and skip.n_groups_imputed == 0
+    got = pass_at(rows, k=4, unanimous_short=True)
+    assert got.n_groups_at_k == 4 and got.n_groups_imputed == 2
+    # c contributes 1.0 to both, d contributes 0.0; e stays out (mixed, short)
+    from math import comb
+
+    a_at = 1 - comb(1, 4) / comb(4, 4) if comb(1, 4) else 1.0
+    b_at = 1 - comb(3, 4) / comb(4, 4) if comb(3, 4) else 1.0
+    assert got.pass_at_k == pytest.approx((a_at + b_at + 1.0 + 0.0) / 4)
+    assert got.pass_pow_k == pytest.approx((0.0 + 0.0 + 1.0 + 0.0) / 4)
+    assert got.pass_at_1 == pytest.approx((0.75 + 0.25 + 1.0 + 0.0 + 2 / 3) / 5)

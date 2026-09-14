@@ -645,6 +645,12 @@ class SimulationData:
         (``PassAt``). Ungraded runs report ``None`` with a note."""
         from .score.passat import pass_at
 
+        if getattr(self, "repeat_policy", None) == "successive" and self.rollouts_per_request:
+            # groups are uneven on purpose: unanimous prompts stopped
+            # early and count as unanimous, split prompts ran to k
+            return pass_at(
+                self.trajectories, k=int(self.rollouts_per_request), unanimous_short=True
+            )
         return pass_at(self.trajectories)
 
 

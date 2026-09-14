@@ -12,6 +12,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   situations, checked in; both the GRPO and DPO scripts take
   `--prompts-file`, so the holdout is over a hundred prompts instead of
   fourteen and pass@1 intervals shrink accordingly.
+- `mode="rl"` spends rollouts where the agent is inconsistent. Every
+  prompt is probed with two rollouts; a prompt that splits is filled to k,
+  a unanimous one stops once the run's own measured rates say a fresh
+  prompt is the better bet. `grader=` runs beside the rollouts so the
+  allocation reads rewards. A `time_budget` finishes the groups in flight
+  instead of cutting them. `repeat_policy="fixed"` is the old behavior.
 
 ## 0.29 (2026-09-14)
 

@@ -68,6 +68,8 @@ class PassAt:
     n_groups: int
     n_rows: int
     n_groups_at_k: int = 0
+    #: unanimous groups shorter than k counted as if they stayed unanimous
+    n_groups_imputed: int = 0
     per_task: dict[str, float] = field(default_factory=dict)
     note: str = ""
     #: task-bootstrap 95% interval on pass@1; None below three tasks.
@@ -89,6 +91,7 @@ class PassAt:
             "headroom": self.headroom,
             "n_groups": self.n_groups,
             "n_groups_at_k": self.n_groups_at_k,
+            "n_groups_imputed": self.n_groups_imputed,
             "n_rows": self.n_rows,
             "note": self.note,
             "ci95": list(self.ci95) if self.ci95 else None,
@@ -114,6 +117,7 @@ def pass_at(
     *,
     k: int | None = None,
     min_k: int = 4,
+    unanimous_short: bool = False,
 ) -> PassAt:
     """pass@1, pass^k and pass@k from graded rows, grouped by prompt.
 
@@ -127,6 +131,12 @@ def pass_at(
     Below ``min_k`` repeats the ``k``-way numbers are ``None`` with a
     ``note`` instead of a number too noisy to act on. Pass ``k=`` to
     choose the draw size yourself.
+
+    ``unanimous_short=True`` counts a unanimous group shorter than ``k``
+    as if it stayed unanimous (pass^k and pass@k equal to its pass rate,
+    1 or 0). That is the assumption a successive-allocation run stopped
+    on, and leaving those groups out would score only the prompts that
+    split and inflate the headroom. Mixed short groups still stay out.
     """
     from .optimize import _group_label_lists
 
@@ -152,6 +162,11 @@ def pass_at(
         raise ValueError("k must be at least 1")
 
     eligible = [labels for labels in groups.values() if len(labels) >= resolved_k]
+    imputed = (
+        [labels for labels in groups.values() if len(labels) < resolved_k and len(set(labels)) == 1]
+        if unanimous_short
+        else []
+    )
     note = ""
     pass_pow_k: float | None = None
     pass_at_k: float | None = None
@@ -169,11 +184,15 @@ def pass_at(
                 f"to the smallest, so pass k={sizes[-1]} to score the {reached} "
                 f"group(s) that reached it, or finish the cut groups"
             )
-    elif not eligible:
+    elif not eligible and not imputed:
         note = f"no group has {resolved_k} graded repeats"
     else:
         pow_vals = [_pass_pow_k_group(len(g), sum(g), resolved_k) for g in eligible]
         at_vals = [_pass_at_k_group(len(g), sum(g), resolved_k) for g in eligible]
+        for g in imputed:
+            unanimous_value = float(g[0])
+            pow_vals.append(unanimous_value)
+            at_vals.append(unanimous_value)
         pass_pow_k = sum(pow_vals) / len(pow_vals)
         pass_at_k = sum(at_vals) / len(at_vals)
         if uneven:
@@ -187,7 +206,8 @@ def pass_at(
         pass_at_k=pass_at_k,
         n_groups=len(groups),
         n_rows=n_rows,
-        n_groups_at_k=len(eligible) if pass_at_k is not None else 0,
+        n_groups_at_k=(len(eligible) + len(imputed)) if pass_at_k is not None else 0,
+        n_groups_imputed=len(imputed) if pass_at_k is not None else 0,
         per_task=per_task,
         note=note,
         ci95=bootstrap_ci(list(per_task.values())),

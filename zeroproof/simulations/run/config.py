@@ -36,7 +36,7 @@ DEAD_AGENT_MIN_ERRORS = 16
 _MODE_PRESETS: dict[str, dict[str, Any]] = {
     "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
     "sft": {"n_req": 3, "k": 1, "repeat_policy": "adaptive"},
-    "rl": {"n_req": 1, "k": 8, "repeat_policy": "adaptive"},
+    "rl": {"n_req": 1, "k": 8, "repeat_policy": "successive"},
     "adaptive": {"n_req": 1, "k": 1, "repeat_policy": "adaptive"},
 }
 
@@ -97,6 +97,9 @@ def _merge_advanced(advanced: dict | None, passed: dict) -> tuple[dict, dict]:
     """Split silent aliases from advanced knobs. Unknown names error."""
     cfg = dict(advanced or {})
     aliases: dict[str, Any] = {}
+    # repeat_policy written into advanced= is topology, not a writer knob
+    if "repeat_policy" in cfg:
+        aliases["repeat_policy"] = cfg.pop("repeat_policy")
     for key, val in passed.items():
         if key in _ALIAS_NAMES:
             aliases[key] = val
@@ -150,6 +153,8 @@ def resolve_topology(
     if policy_name in {"unique"}:
         policy_name = "none"
         new_cards = True
+    if policy_name is not None and policy_name not in {"none", "adaptive", "successive", "fixed"}:
+        raise ValueError("repeat_policy= must be none, adaptive, successive, or fixed")
     if mode_name in _MODE_PRESETS and policy_name is None:
         policy_name = _MODE_PRESETS[mode_name]["repeat_policy"]
     if policy_name == "none":
@@ -237,6 +242,9 @@ class RunConfig:
     n_req: int
     unique_cards: bool
     k_immediate: bool
+    # successive allocation (rl): rollouts a prompt gets before the run
+    # decides whether it splits; the structural minimum is 2
+    probe: int
     # Round-synchronous scheduling: same seed, same concurrency, same
     # agent gives the same rows. Costs throughput under uneven latency.
     reproducible: bool
@@ -401,8 +409,17 @@ def resolve_run_config(
             n_req = int(adapt["n_req"])
         if not topo["k_explicit"]:
             repeat_count = int(adapt["k"])
-    # Adaptive defers extra k so verify can react to behavior.
-    k_immediate = bool(topo["k_explicit"] or topo["mode"] == "rl")
+    # Adaptive defers extra k so verify can react to behavior. Successive
+    # (the rl default) probes every prompt and spends the rest of k on the
+    # prompts that split; ``repeat_policy="fixed"`` is the old all-k-at-once.
+    repeat_policy_name = topo["repeat_policy"]
+    if repeat_policy_name == "fixed":
+        k_immediate = True
+    elif repeat_policy_name == "successive":
+        k_immediate = False
+    else:
+        k_immediate = bool(topo["k_explicit"] or topo["mode"] == "rl")
+    probe = max(1, int(cfg.pop("probe", 2)))
 
     out_path = Path(output).expanduser() if output else None
     if texture is not None:
@@ -489,6 +506,7 @@ def resolve_run_config(
         n_req=n_req,
         unique_cards=unique_cards,
         k_immediate=k_immediate,
+        probe=probe,
         reproducible=bool(reproducible),
         budget=budget,
         cap=int(cap),

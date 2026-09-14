@@ -61,6 +61,15 @@ def test_resolve_topology_defaults_and_aliases():
     assert zps.resolve_topology(mode="rl", repeats=16)["k"] == 16
 
 
+def test_repeat_policy_names_are_checked():
+    import pytest
+
+    assert zps.resolve_topology(mode="rl")["repeat_policy"] == "successive"
+    assert zps.resolve_topology(mode="rl", repeat_policy="fixed")["repeat_policy"] == "fixed"
+    with pytest.raises(ValueError, match="repeat_policy"):
+        zps.resolve_topology(mode="rl", repeat_policy="sometimes")
+
+
 def test_unique_situations_defaults_n_k_unless_set():
     base = zps.resolve_topology(unique_situations=True)
     assert base["n_req"] == 1 and base["k"] == 1
@@ -171,9 +180,20 @@ def test_mode_sft_rl_explore_change_n_and_k():
     rl = zps.simulate(scripted_agent, mode="rl", budget=16, **offline())
     assert rl.mode == "rl"
     assert rl.rollouts_per_request == 8
+    assert rl.repeat_policy == "successive"
     prompts = [t["prompt"] for t in rl.trajectories]
-    assert len(set(prompts)) == 2
+    # successive: every prompt is probed first, so a 16-row budget opens
+    # more than two prompts; a deterministic agent never splits, so the
+    # run reports no mixed group and the budget cut the rest
+    assert len(set(prompts)) > 2
+    assert rl.search["groups"]["k"] == 8 and rl.search["groups"]["mixed"] == 0
     assert rl.allocator.get("explore", 0) + rl.allocator.get("expand", 0) >= 1
+
+    fixed = zps.simulate(
+        scripted_agent, mode="rl", budget=16, **offline(advanced={"repeat_policy": "fixed"})
+    )
+    assert fixed.repeat_policy == "fixed"
+    assert len({t["prompt"] for t in fixed.trajectories}) == 2
 
     explore = zps.simulate(scripted_agent, mode="explore", budget=10, **offline())
     assert explore.repeat_policy == "none"
@@ -241,7 +261,13 @@ def test_unique_situations_keeps_new_cards_unless_n_k_set():
     assert plain.rollouts_per_request == 1
     assert len({t["prompt"] for t in plain.trajectories}) == len(plain.trajectories)
 
-    rl = zps.simulate(scripted_agent, mode="rl", rollouts_per_request=5, budget=10, **offline())
+    rl = zps.simulate(
+        scripted_agent,
+        mode="rl",
+        rollouts_per_request=5,
+        budget=10,
+        **offline(advanced={"repeat_policy": "fixed"}),
+    )
     assert rl.rollouts_per_request == 5
     assert rl.requests_per_situation == 1
     prompts = [t["prompt"] for t in rl.trajectories]
@@ -249,6 +275,11 @@ def test_unique_situations_keeps_new_cards_unless_n_k_set():
     from collections import Counter
 
     assert set(Counter(prompts).values()) == {5}
+    # the rl default is successive: k is the ceiling, the probe opens more
+    # prompts first and a deterministic agent never earns the rest
+    succ = zps.simulate(scripted_agent, mode="rl", rollouts_per_request=5, budget=10, **offline())
+    assert succ.rollouts_per_request == 5 and succ.repeat_policy == "successive"
+    assert max(Counter(t["prompt"] for t in succ.trajectories).values()) <= 5
 
     alias = zps.simulate(scripted_agent, unique=True, budget=8, **offline())
     assert alias.unique_situations is True

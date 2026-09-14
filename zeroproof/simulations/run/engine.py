@@ -756,6 +756,29 @@ class Run:
         self.prompt_rollouts: dict[str, int] = {}
         self.verify_queue: list[tuple] = []
         self.allocator_counts: dict[str, int] = {"explore": 0, "expand": 0, "verify": 0}
+        # Successive allocation (rl): one label per finished rollout of a
+        # prompt (reward when the row carries one, behavior signature
+        # otherwise), the prompt's state, and the run's own mixed rate.
+        self.group_labels: dict[str, list] = {}
+        self.group_state: dict[str, str] = {}
+        self.group_job: dict[str, tuple] = {}
+        self.groups_probed = 0
+        self.groups_mixed = 0
+        # Empirical hazard: of the groups that were unanimous after n
+        # rollouts and got another, how many split on it. Laplace's
+        # 1/(n+2) is only the prior before the run has seen any.
+        self.hazard_seen: dict[int, int] = {}
+        self.hazard_split: dict[int, int] = {}
+        self.rollout_durations: list[float] = []
+        # Judge in the loop: verdicts run beside the rollouts, never in
+        # front of them. A row's allocation decision waits for its verdict.
+        self.judge_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1, int(c.concurrency))
+        )
+        self.judge_inflight: dict = {}
+        # Set when the clock can no longer fit a fresh group: only verify
+        # jobs are scheduled so in-flight groups finish before the whistle.
+        self.closing = False
         # streaming output
         self.written = 0
         self.stream_started = False
@@ -870,7 +893,12 @@ class Run:
             return
         if prompt in self.used:
             return
-        k_now = c.repeat_count if c.k_immediate else 1
+        if c.k_immediate:
+            k_now = c.repeat_count
+        elif c.topo["repeat_policy"] == "successive":
+            k_now = min(c.repeat_count, c.probe)
+        else:
+            k_now = 1
         start = self.prompt_rollouts.get(prompt, 0)
         for i in range(k_now):
             jobs.append((prompt, start + i, meta, row))
@@ -1148,6 +1176,7 @@ class Run:
                 data.stopped_because = "time_budget"
                 break
             gen.novelty_parents = [] if not c.mutate_failures else self.failing_rows[-10:]
+            self._update_closing(left)
             remaining = c.cap - len(data.trajectories) - len(self.inflight)
             take = min(max(0, self.flight - len(self.inflight)), max(0, remaining))
             unused = self._refill_pool(remaining, take)
@@ -1228,6 +1257,12 @@ class Run:
             data.row_seconds.append(time.monotonic() - self.started)
             record_turns(self.turn_stats, t)
             self._flush_output("rollout")
+        if self.judge_inflight and c.stop_grace_s > 0:
+            concurrent.futures.wait(list(self.judge_inflight), timeout=c.stop_grace_s)
+        self._drain_judgments()
+        if self.judge_inflight:
+            data.search["abandoned_judgments"] = len(self.judge_inflight)
+            self.judge_inflight.clear()
         abandoned = len(self.inflight)
         if abandoned:
             # Threads cannot be killed; the pool is told to start nothing
@@ -1471,6 +1506,10 @@ class Run:
                 if self.prompt_rollouts.get(prompt, 0) < c.repeat_count:
                     still.append((prompt, meta, row))
             self.verify_queue[:] = still
+        if self.closing:
+            # The clock is nearly out: finish the groups in flight, open
+            # none. A fresh group started now would be cut mid-group.
+            return batch
         stratified = _stratified_prompts(
             [row["text"] for row in selected], take, gen, used_situations=self.used_situations
         )
@@ -1577,6 +1616,22 @@ class Run:
         if self.inflight or self.scenario_futs:
             self.empty_streak = 0
             return "proceed"
+        if self.judge_inflight:
+            # nothing to roll out until a verdict lands; wait on the judge
+            self._drain_judgments(wait_s=0.35)
+            self.empty_streak = 0
+            return "continue"
+        if self.closing:
+            data.stopped_because = "time_budget"
+            return "break"
+        if (
+            c.topo["repeat_policy"] == "successive"
+            and not c.k_immediate
+            and self._resume_stopped(remaining)
+        ):
+            self.empty_streak = 0
+            note_stage(data, "resumed stopped groups: nothing fresh to open")
+            return "continue"
         self.empty_streak += 1
         if (
             not self.cap_lifted["lifted"]
@@ -1674,7 +1729,8 @@ class Run:
             job = self.inflight[fut]
             if fut.done():
                 self.inflight.pop(fut, None)
-                self.inflight_started.pop(fut, None)
+                started_at = self.inflight_started.pop(fut, now)
+                self.rollout_durations.append(max(0.0, now - started_at))
                 try:
                     results.append(fut.result())
                     jobs_for.append(job)
@@ -1871,9 +1927,19 @@ class Run:
             for t in self.failing_rows
             if t["scenario_id"] in region_index
         ]
+        successive = c.topo["repeat_policy"] == "successive" and not c.k_immediate
+        judged_async = successive and c.grader is not None
         for t, job in zip(results, jobs_for):
             prompt = str(t.get("prompt") or job[0] or "")
-            if not prompt or self.prompt_rollouts.get(prompt, 0) >= c.repeat_count:
+            if not prompt:
+                continue
+            if judged_async:
+                self._submit_judgment(t, job)
+                continue
+            if successive:
+                self._successive_update(prompt, t, job)
+                continue
+            if self.prompt_rollouts.get(prompt, 0) >= c.repeat_count:
                 continue
             want_verify = mutation_worthy(t)
             if not want_verify and c.topo["mode"] == "adaptive" and not c.k_immediate:
@@ -1927,6 +1993,10 @@ class Run:
             "n_req": c.n_req,
             "k": c.repeat_count,
         }
+        if judged_async:
+            self._drain_judgments()
+        if successive:
+            data.search["groups"] = self._group_summary()
         space_rate = (fresh + sum(new_cell.values()) + new_shape) / max(1, len(results))
         self.last_batch_size = len(results)
         record_coverage(
@@ -1946,6 +2016,253 @@ class Run:
             data.stopped_because = "saturation"
             return True
         return False
+
+    # ------------------------------------------- successive allocation
+
+    def _successive_update(self, prompt: str, t: dict, job: tuple) -> None:
+        """Fold one finished rollout into its group and decide whether the
+        prompt gets another.
+
+        The label is the row's binary ``reward`` when a grader ran, else
+        its behavior signature. A group with two labels has split: it is
+        filled to k, that is where a grouped update's gradient lives. A
+        group that is still unanimous after n rollouts gets one more only
+        while the chance the next rollout differs beats what a fresh
+        prompt offers per rollout. Both sides are measured on this run:
+        the hazard is how often a group unanimous after n split on its
+        next rollout (Laplace's 1/(n+2) only as the prior), and the fresh
+        side is the run's own mixed rate over its probe size. Nothing here
+        is a tuned constant: the probe (2, the least that can show a
+        split), k, and the run's measurements decide. rlhf-book ch. 6
+        (dynamic sampling) and ch. 7 (difficulty filtering), applied at
+        generation time.
+        """
+        c = self.c
+        k = c.repeat_count
+        reward = t.get("reward")
+        label = (
+            int(reward)
+            if reward in (0, 1) and not isinstance(reward, bool)
+            else str(t.get("behavior_signature") or "")
+        )
+        labels = self.group_labels.setdefault(prompt, [])
+        was_unanimous = len(labels) >= 1 and len(set(labels)) == 1
+        n_prev = len(labels)
+        labels.append(label)
+        self.group_job[prompt] = job
+        n_done = len(labels)
+        if was_unanimous and n_prev >= max(1, min(k, c.probe)):
+            # this rollout was a continuation of a unanimous group: it is
+            # one observation of the hazard at n_prev
+            self.hazard_seen[n_prev] = self.hazard_seen.get(n_prev, 0) + 1
+            if len(set(labels)) > 1:
+                self.hazard_split[n_prev] = self.hazard_split.get(n_prev, 0) + 1
+        n_sched = self.prompt_rollouts.get(prompt, 0)
+        probe = max(1, min(k, c.probe))
+        state = self.group_state.get(prompt, "probing")
+        if n_done == probe:
+            self.groups_probed += 1
+        if len(set(labels)) > 1:
+            if state != "mixed":
+                self.groups_mixed += 1
+                self.group_state[prompt] = "mixed"
+            self._queue_verify(prompt, job, k - n_sched)
+            if n_done >= k:
+                self.group_state[prompt] = "mixed"
+            return
+        if n_sched >= k:
+            self.group_state[prompt] = "complete" if n_done >= k else state
+            return
+        if n_done < n_sched:
+            # more of this prompt's probe is still in flight; decide when
+            # it lands
+            self.group_state[prompt] = state
+            return
+        p_next = self._hazard(n_done)
+        mixed_rate = (self.groups_mixed + 1.0) / (self.groups_probed + 2.0)
+        if not self._fresh_available() or p_next > mixed_rate / probe:
+            self.group_state[prompt] = "probing"
+            self._queue_verify(prompt, job, 1)
+        else:
+            self.group_state[prompt] = "stopped_unanimous"
+
+    _JUDGE_KEYS = (
+        "reward",
+        "reason",
+        "judge_status",
+        "judge_name",
+        "failure_class",
+        "markers",
+        "lineage",
+    )
+
+    def _submit_judgment(self, row: dict, job: tuple) -> None:
+        """Hand a landed rollout to the caller's grader on the judge pool.
+        The successive allocator then reads its reward, the signal a
+        grouped update trains on, instead of a behavior signature. The
+        rollout scheduler never waits on the judge: a slow judge delays
+        one prompt's decision, not the run. Rows judged here are not
+        judged again at the end."""
+        from ..score.judging import run_judge
+
+        grader = self.c.grader
+
+        def one() -> dict:
+            scored = run_judge([row], grader, source="grade")
+            return scored.rows[0] if scored.rows else {}
+
+        fut = self.judge_pool.submit(one)
+        self.judge_inflight[fut] = (row, job)
+
+    def _drain_judgments(self, *, wait_s: float = 0.0) -> int:
+        """Fold every verdict that has landed into its row and let the
+        allocator decide on it. Returns how many landed."""
+        if not self.judge_inflight:
+            return 0
+        if wait_s > 0:
+            concurrent.futures.wait(
+                list(self.judge_inflight),
+                timeout=wait_s,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+        landed = 0
+        for fut in [f for f in list(self.judge_inflight) if f.done()]:
+            row, job = self.judge_inflight.pop(fut)
+            try:
+                verdict = fut.result()
+            except Exception:
+                verdict = {}
+            for key in self._JUDGE_KEYS:
+                if key in verdict:
+                    row[key] = verdict[key]
+            prompt = str(row.get("prompt") or job[0] or "")
+            if prompt:
+                self._successive_update(prompt, row, job)
+            landed += 1
+        return landed
+
+    def _resume_stopped(self, remaining: int) -> int:
+        """Nothing fresh can be opened and rows are still owed: the
+        unanimous groups the search stopped earlier are the best use of
+        what is left, so each gets its next rollout back. Returns how
+        many were resumed."""
+        if remaining <= 0:
+            return 0
+        k = self.c.repeat_count
+        resumed = 0
+        for prompt, state in list(self.group_state.items()):
+            if state != "stopped_unanimous" or self.prompt_rollouts.get(prompt, 0) >= k:
+                continue
+            job = self.group_job.get(prompt)
+            if job is None:
+                continue
+            self.group_state[prompt] = "probing"
+            self._queue_verify(prompt, job, 1)
+            resumed += 1
+        return resumed
+
+    def _hazard(self, n: int) -> float:
+        """Chance the next rollout of a group unanimous after ``n`` splits
+        it: the run's own count at that n, with Laplace's 1/(n+2) as a
+        one-observation prior. A run where continuations never split
+        learns quickly that a unanimous group is a consistent cell."""
+        prior = 1.0 / (n + 2.0)
+        seen = self.hazard_seen.get(n, 0)
+        split = self.hazard_split.get(n, 0)
+        return (split + prior) / (seen + 1.0)
+
+    def _queue_verify(self, prompt: str, job: tuple, count: int) -> None:
+        meta = job[2] if len(job) > 2 else {}
+        sel = job[3] if len(job) > 3 else {}
+        for _ in range(max(0, int(count))):
+            self.verify_queue.append(
+                (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})
+            )
+
+    def _fresh_available(self) -> bool:
+        """Can the run still open a new prompt? When it cannot, finishing
+        a unanimous group costs nothing else."""
+        c = self.c
+        if self.closing:
+            return False
+        if (
+            c.n_situations_target
+            and not self.cap_lifted["lifted"]
+            and len(self.used_situations) >= c.n_situations_target
+        ):
+            return False
+        return bool(self._available()) or self.generator.model is not None
+
+    def _update_closing(self, left: float | None) -> None:
+        """Stop opening groups when the clock cannot fit one more rollout
+        round trip after the ones in flight. The estimate is the median of
+        recent rollout durations, so it is the agent's own pace."""
+        if self.closing or left is None or not self.rollout_durations:
+            return
+        if self.c.topo["repeat_policy"] != "successive" or self.c.k_immediate:
+            return
+        recent = sorted(self.rollout_durations[-20:])
+        est = recent[len(recent) // 2]
+        if left < 2.0 * est:
+            self.closing = True
+            note_stage(self.data, "closing: finishing groups before the clock")
+
+    def _group_rows(self) -> dict[str, list[dict]]:
+        by_prompt: dict[str, list[dict]] = {}
+        for row in self.data.trajectories:
+            prompt = str(row.get("prompt") or "")
+            if prompt:
+                by_prompt.setdefault(prompt, []).append(row)
+        return by_prompt
+
+    @staticmethod
+    def _row_label(row: dict) -> Any:
+        reward = row.get("reward")
+        if reward in (0, 1) and not isinstance(reward, bool):
+            return int(reward)
+        return str(row.get("behavior_signature") or "")
+
+    def _group_verdict(self, prompt: str, rows: list[dict]) -> str:
+        """mixed, stopped_unanimous, complete, or partial, read from the
+        stored rows so the summary and the stamp cannot disagree. Rows that
+        land during shutdown never pass through ``_successive_update``."""
+        k = self.c.repeat_count
+        n = len(rows)
+        if len({self._row_label(r) for r in rows}) > 1:
+            return "mixed" if n >= k else "partial"
+        if self.group_state.get(prompt) == "stopped_unanimous":
+            return "stopped_unanimous"
+        return "complete" if n >= k else "partial"
+
+    def _group_summary(self) -> dict:
+        c = self.c
+        k = c.repeat_count
+        counts = {"mixed": 0, "stopped_unanimous": 0, "complete": 0, "partial": 0}
+        saved = 0
+        groups = self._group_rows()
+        for prompt, rows in groups.items():
+            verdict = self._group_verdict(prompt, rows)
+            counts[verdict] += 1
+            if verdict == "stopped_unanimous":
+                saved += max(0, k - len(rows))
+        return {
+            "k": k,
+            "probe": max(1, min(k, c.probe)),
+            "groups": len(groups),
+            **counts,
+            "rollouts_saved": saved,
+            "mixed_rate": round((self.groups_mixed + 1.0) / (self.groups_probed + 2.0), 4),
+            "hazard": {str(n): round(self._hazard(n), 4) for n in sorted(self.hazard_seen)},
+            "closing": self.closing,
+        }
+
+    def _stamp_groups(self) -> None:
+        """Mark rows of groups the budget or clock cut short, so a reader
+        can tell a cut group from one the search stopped on purpose."""
+        for prompt, rows in self._group_rows().items():
+            if self._group_verdict(prompt, rows) == "partial":
+                for row in rows:
+                    row["group_cut"] = True
 
     def _axis_gaps(self) -> list[str]:
         """Prose nudges for the writer about axes the rows so far miss."""
@@ -1989,6 +2306,7 @@ class Run:
         self._flush_output("stopped")
         self.scenario_pool.shutdown(wait=False, cancel_futures=True)
         self.pool.shutdown(wait=False, cancel_futures=True)
+        self.judge_pool.shutdown(wait=False, cancel_futures=True)
         if self.scene_thread is not None:
             left = 8.0
             clock = self._clock_left()
@@ -2120,6 +2438,11 @@ class Run:
             },
         }
         self._finish_grading()
+        if c.topo["repeat_policy"] == "successive" and not c.k_immediate:
+            # after grading, so a group is read by its rewards, not by a
+            # signature standing in for a verdict that had not landed
+            self._stamp_groups()
+            data.search["groups"] = self._group_summary()
         if self.trace_rows and "behavior_state" in data.search:
             # Close the loop on the rows that ship: same region predicates
             # as the traces, measured after grading and leak-pruning.
@@ -2185,21 +2508,30 @@ class Run:
             # Scores generated rows with the caller's grader, writes the
             # verdicts onto the trajectories, and discloses the split.
             # Judge failures mark rows unjudged instead of silent zeros.
-            from ..score.judging import run_judge
+            from ..score.judging import ScoredData, run_judge
 
-            scored = run_judge(data.trajectories, c.grader, source="grade")
-            for row, verdict in zip(data.trajectories, scored.rows):
-                for key in (
-                    "reward",
-                    "reason",
-                    "judge_status",
-                    "judge_name",
-                    "failure_class",
-                    "markers",
-                    "lineage",
-                ):
-                    if key in verdict:
-                        row[key] = verdict[key]
+            pending = [row for row in data.trajectories if "judge_status" not in row]
+            if pending:
+                fresh = run_judge(pending, c.grader, source="grade")
+                for row, verdict in zip(pending, fresh.rows):
+                    for key in self._JUDGE_KEYS:
+                        if key in verdict:
+                            row[key] = verdict[key]
+            judge_name = next(
+                (str(r.get("judge_name")) for r in data.trajectories if r.get("judge_name")),
+                getattr(c.grader, "__name__", "grader"),
+            )
+            run_id = next(
+                (
+                    str((r.get("lineage") or {}).get("scoring_run_id"))
+                    for r in data.trajectories
+                    if isinstance(r.get("lineage"), dict) and r["lineage"].get("scoring_run_id")
+                ),
+                "",
+            )
+            scored = ScoredData(
+                list(data.trajectories), run_id=run_id, source="grade", judge_name=judge_name
+            )
             data.search["grader"] = {
                 "judge": scored.judge_name,
                 "scored": len(scored),
