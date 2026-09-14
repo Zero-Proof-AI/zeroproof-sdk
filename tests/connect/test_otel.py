@@ -129,3 +129,74 @@ def test_otel_rows_feed_trace_mining_directly():
     assert mined["n"] == 2
     assert mined["faults"] == {"not_found": 1}
     assert mined["tools"]["lookup_order"]["fault_n"] == 1
+
+
+def _int_attr(key, value):
+    # OTLP JSON encodes int64 attribute values as strings.
+    return {"key": key, "value": {"intValue": str(value)}}
+
+
+def test_rows_from_otel_sums_gen_ai_usage_into_the_row():
+    spans = [
+        _span(
+            "chat",
+            100,
+            [
+                _attr("gen_ai.conversation.id", "c-usage"),
+                _attr("gen_ai.input.messages", json.dumps([{"role": "user", "content": "hi"}])),
+                _int_attr("gen_ai.usage.input_tokens", 120),
+                _int_attr("gen_ai.usage.output_tokens", 8),
+            ],
+        ),
+        _span(
+            "execute_tool lookup",
+            200,
+            [
+                _attr("gen_ai.conversation.id", "c-usage"),
+                _attr("gen_ai.tool.name", "lookup"),
+                _attr("gen_ai.tool.call.arguments", "{}"),
+                _attr("gen_ai.tool.call.result", "{}"),
+            ],
+        ),
+        _span(
+            "chat",
+            300,
+            [
+                _attr("gen_ai.conversation.id", "c-usage"),
+                _attr(
+                    "gen_ai.output.messages",
+                    json.dumps([{"role": "assistant", "content": "Found it."}]),
+                ),
+                _int_attr("gen_ai.usage.input_tokens", 200),
+                _int_attr("gen_ai.usage.output_tokens", 12),
+            ],
+        ),
+        # OpenInference dialect, separate conversation.
+        _span(
+            "llm",
+            100,
+            [
+                _attr("session.id", "c-oi"),
+                _attr("llm.input_messages", json.dumps([{"role": "user", "content": "yo"}])),
+                _attr("llm.output_messages", json.dumps([{"role": "assistant", "content": "hey"}])),
+                _int_attr("llm.token_count.prompt", 5),
+                _int_attr("llm.token_count.completion", 2),
+            ],
+            trace="t-oi",
+        ),
+        # No usage emitted: no usage key on the row, not zeros.
+        _span(
+            "llm",
+            100,
+            [
+                _attr("session.id", "c-none"),
+                _attr("llm.input_messages", json.dumps([{"role": "user", "content": "q"}])),
+                _attr("llm.output_messages", json.dumps([{"role": "assistant", "content": "a"}])),
+            ],
+            trace="t-none",
+        ),
+    ]
+    by_id = {r["conversation_id"]: r for r in rows_from_otel(spans)}
+    assert by_id["c-usage"]["usage"] == {"input_tokens": 320, "output_tokens": 20}
+    assert by_id["c-oi"]["usage"] == {"input_tokens": 5, "output_tokens": 2}
+    assert "usage" not in by_id["c-none"]

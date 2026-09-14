@@ -23,6 +23,18 @@ _OUTPUT_KEYS = ("gen_ai.output.messages", "gen_ai.completion", "llm.output_messa
 _TOOL_IN_KEYS = ("gen_ai.tool.call.arguments", "gen_ai.tool.input", "tool.input")
 _TOOL_OUT_KEYS = ("gen_ai.tool.call.result", "gen_ai.tool.output", "tool.output")
 _TOOL_NAME_KEYS = ("gen_ai.tool.name", "tool.name")
+_USAGE_IN_KEYS = (
+    "gen_ai.usage.input_tokens",
+    "gen_ai.usage.prompt_tokens",
+    "llm.token_count.prompt",
+    "llm.usage.prompt_tokens",
+)
+_USAGE_OUT_KEYS = (
+    "gen_ai.usage.output_tokens",
+    "gen_ai.usage.completion_tokens",
+    "llm.token_count.completion",
+    "llm.usage.completion_tokens",
+)
 _CONVERSATION_KEYS = (
     "gen_ai.conversation.id",
     "conversation.id",
@@ -69,6 +81,17 @@ def _parse(value: Any) -> Any:
             except ValueError:
                 return value
     return value
+
+
+def _tokens(value: Any) -> int | None:
+    """OTLP JSON carries int64 as strings; a count is a non-negative int."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        count = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
 
 
 def _iter_spans(source: Any):
@@ -154,7 +177,19 @@ def rows_from_otel(source: Any) -> list[dict]:
         model_version = None
         seen_users: set[str] = set()
         model_generic = None
+        tokens_in = tokens_out = 0
+        usage_seen = False
         for _, span, attrs in entries:
+            # gen_ai.usage.* (or the llm.token_count.* dialect) on any span
+            # of the conversation sums into the row, the same shape a
+            # simulated row carries, so production and simulated rows
+            # report cost the same way.
+            span_in = _tokens(_first(attrs, _USAGE_IN_KEYS))
+            span_out = _tokens(_first(attrs, _USAGE_OUT_KEYS))
+            if span_in is not None or span_out is not None:
+                usage_seen = True
+                tokens_in += span_in or 0
+                tokens_out += span_out or 0
             # The explicit zeroproof key wins across ALL spans; a generic
             # model name on an earlier span must not freeze the choice.
             mv = _first(attrs, ("zeroproof.model_version",))
@@ -235,6 +270,8 @@ def rows_from_otel(source: Any) -> list[dict]:
             # indistinguishable without it.
             if model_version or model_generic:
                 row["model_version"] = model_version or model_generic
+            if usage_seen:
+                row["usage"] = {"input_tokens": tokens_in, "output_tokens": tokens_out}
             rows.append(stamp(row))
     check(rows, where="rows_from_otel")
     return rows
