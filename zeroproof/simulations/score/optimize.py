@@ -367,6 +367,8 @@ def _binary_label(row: dict) -> int | None:
 
 
 SFT_SELECTIONS = ("top_per_prompt", "random_per_prompt", "top_k_overall", "random_k_overall")
+#: what select_for_rl does with a rollout cut at the token cap
+TRUNCATED_POLICIES = ("drop", "keep", "penalize")
 
 
 def _scalar_reward(row: dict) -> float | None:
@@ -588,11 +590,22 @@ def select_for_rl(
     dedupe: bool = True,
     drop_truncated: bool = True,
     endorsed: Sequence[str] = (),
+    truncated: str = "drop",
 ) -> tuple[list[dict], dict[str, Any]]:
     """Whole mixed groups up to roughly ``target`` rows. Groups never split.
 
+    ``truncated`` says what happens to a rollout cut at the token cap
+    (rlhf-book ch. 6, DAPO's overlong handling; ch. 7 overlong filtering):
+    ``"drop"`` removes it (the default; ``drop_truncated=False`` is the old
+    spelling of ``"keep"``), ``"keep"`` leaves it in with ``overlong=True``
+    and its own reward, and ``"penalize"`` keeps it as a failure: reward 0,
+    the judged score under ``reward_before_penalty``, so running past the
+    cap is a negative signal instead of a rollout that vanished. A
+    conduct-grade advisory 0.5 for truncation is unusable under ``"keep"``
+    and a 0 under ``"penalize"``.
+
     After the row gates, duplicate and truncated rollouts (``dedupe``,
-    ``drop_truncated``), the unanimous trim, and (``enforce_band``) the
+    ``truncated``), the unanimous trim, and (``enforce_band``) the
     difficulty band, remaining asks are ranked by distance from p = 0.5
     and taken round-robin across observed fault kinds, so the dataset
     keeps a grounded spread of no-fault, miss, timeout, and already-done
@@ -610,10 +623,36 @@ def select_for_rl(
     from .hygiene import (
         dedupe_groups,
         hygiene_warnings,
+        is_truncated,
         length_report,
         reward_correlations,
     )
     from .hygiene import drop_truncated as _drop_truncated
+
+    if truncated not in TRUNCATED_POLICIES:
+        raise ValueError(
+            f"truncated must be one of {', '.join(TRUNCATED_POLICIES)}; got {truncated!r}"
+        )
+    if not drop_truncated and truncated == "drop":
+        truncated = "keep"
+    penalized = kept_overlong = 0
+    if truncated != "drop":
+        marked: list[dict] = []
+        for row in rows:
+            if isinstance(row, dict) and is_truncated(row):
+                row = dict(row)
+                row["overlong"] = True
+                markers = dict(row.get("markers") or {})
+                markers["finished"] = 0.0
+                row["markers"] = markers
+                if truncated == "penalize":
+                    row["reward_before_penalty"] = row.get("reward")
+                    row["reward"] = 0
+                    penalized += 1
+                else:
+                    kept_overlong += 1
+            marked.append(row)
+        rows = marked
 
     kept, base_report = filter_rl_rows(rows, has_tools=has_tools)
     original_sizes: dict[str, int] = {}
@@ -624,7 +663,7 @@ def select_for_rl(
     if dedupe:
         kept, dup_report = dedupe_groups(kept)
     trunc_report: dict[str, Any] = {"n_dropped": 0}
-    if drop_truncated:
+    if truncated == "drop":
         kept, trunc_report = _drop_truncated(kept)
     kept, trim_report = trim_unanimous_groups(kept)
     # A group that hygiene shrank to one rollout, or to rollouts that all
@@ -692,6 +731,9 @@ def select_for_rl(
         "band_dropped": {"too_easy": band_report["too_easy"], "too_hard": band_report["too_hard"]},
         "duplicates": dup_report,
         "truncated_dropped": trunc_report["n_dropped"],
+        "truncated_policy": truncated,
+        "truncated_kept": kept_overlong,
+        "truncated_penalized": penalized,
         "length": length_report(selected),
         "correlations": reward_correlations(selected),
         "hack_scan": hack_scan(selected, endorsed=endorsed),
@@ -878,6 +920,7 @@ def optimize(
     select: str = "top_per_prompt",
     min_reward: float = 1.0,
     endorsed: Sequence[str] = (),
+    truncated: str = "drop",
 ) -> tuple[list[dict], dict[str, Any]]:
     """One call after grading: concentrate for the post-training target.
 
@@ -920,6 +963,7 @@ def optimize(
             enforce_band=enforce_band,
             has_tools=has_tools,
             endorsed=endorsed,
+            truncated=truncated,
         )
     report["mode"] = resolved
     dest = output
