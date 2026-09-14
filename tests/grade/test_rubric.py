@@ -235,6 +235,22 @@ def test_write_rubrics_drafts_one_rubric_per_prompt():
     assert report["versions"] == {R.rubric_of(out[0]).version: 3}  # same criteria, one version
 
 
+def test_write_rubrics_max_hard_demotes_the_lighter_hard_rules():
+    items = [
+        {"title": "Must A", "description": "Essential Criteria: a.", "weight": 3},
+        {"title": "Must B", "description": "Essential Criteria: b.", "weight": 5},
+        {"title": "Nice C", "description": "Optional Criteria: c.", "weight": 1},
+    ]
+    rows = [_row()]
+    _, report = R.write_rubrics(rows, writer=lambda _u: json.dumps(items), max_hard=1)
+    rubric = R.rubric_of(rows[0])
+    kinds = {c.title: c.kind for c in rubric.criteria}
+    assert kinds == {"Must A": "principle", "Must B": "hard", "Nice C": "principle"}
+    assert report["max_hard"] == 1 and report["demoted_hard"] == 1
+    _, plain = R.write_rubrics([_row()], writer=lambda _u: json.dumps(items))
+    assert plain["max_hard"] is None and plain["demoted_hard"] == 0
+
+
 def test_public_surface():
     for name in (
         "Rubric",

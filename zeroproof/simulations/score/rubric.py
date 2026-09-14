@@ -489,6 +489,7 @@ def write_rubrics(
     api_key: str | None = None,
     timeout: float = 120,
     writer: Callable[[str], Any] | None = None,
+    max_hard: int | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Draft one rubric per distinct prompt with a model and attach it to
     every row of that prompt (``privileged.rubric``, ``source="model"``).
@@ -500,6 +501,13 @@ def write_rubrics(
     ``overwrite``. ``writer(user_message) -> str`` replaces the model call
     for tests and for a writer of your own. Report: prompts seen, rubrics
     written, failures, mean criteria per rubric, the rubric versions.
+
+    ``max_hard`` caps the hard rules a written rubric may carry: the
+    heaviest ``max_hard`` stay hard and the rest become principles with
+    their weight (``demoted_hard`` in the report). A model writer marks
+    most of what it wants as Essential, and every Essential item a reply
+    misses is a 0, so an uncapped rubric fails rows a binary judge passes
+    (measured live: 22 of 32 rows). ``None`` keeps what the writer wrote.
     """
     resolved = judge_spec(spec=spec)
     url, model = parse_backend_spec(resolved)
@@ -534,6 +542,8 @@ def write_rubrics(
             continue
         todo.append((key, group))
 
+    demoted_by: dict[str, int] = {}
+
     def build(item: tuple[str, list[dict]]) -> tuple[str, Rubric | None, str]:
         key, group = item
         first = group[0]
@@ -552,14 +562,22 @@ def write_rubrics(
         items = parse_rubric_reply(text)
         if not items:
             return key, None, "writer reply carried no rubric array"
-        try:
-            rubric = Rubric(
-                criteria=tuple(Criterion.from_dict(c) for c in items),
-                source="model",
-                domain=str(domain),
+        criteria = [Criterion.from_dict(c) for c in items]
+        demoted = 0
+        if max_hard is not None:
+            hard = sorted(
+                (i for i, c in enumerate(criteria) if c.kind == "hard"),
+                key=lambda i: (-criteria[i].weight, i),
             )
+            for i in hard[max(0, int(max_hard)) :]:
+                c = criteria[i]
+                criteria[i] = Criterion(c.title, c.description, c.weight, "principle")
+                demoted += 1
+        try:
+            rubric = Rubric(criteria=tuple(criteria), source="model", domain=str(domain))
         except ValueError as exc:
             return key, None, str(exc)[:200]
+        demoted_by[key] = demoted
         return key, rubric, ""
 
     if todo and concurrency > 1 and len(todo) > 1:
@@ -587,6 +605,8 @@ def write_rubrics(
         "failed": len(failures),
         "failures": failures[:10],
         "criteria_per_rubric": round(sum(sizes) / len(sizes), 2) if sizes else None,
+        "max_hard": max_hard,
+        "demoted_hard": sum(demoted_by.values()),
         "versions": versions,
         "writer": getattr(writer, "__name__", None) or judge_version(resolved, system),
     }
