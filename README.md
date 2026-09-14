@@ -295,6 +295,17 @@ report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 
 The report also carries the reward-hack scan: `report["correlations"]` is corr(reward, feature) for reply length, tool-call count, and assistant turns, and `report["hygiene_warnings"]` names anything at or above `HACK_THRESHOLD` (0.3). Reward that tracks length or punishes tool use is a judge problem, so it is flagged, not pruned. The same scan, plus near-duplicate asks and length spread, runs in the publish gate. Standalone: `zps.reward_correlations(rows)`, `zps.dedupe_groups(rows)`, `zps.near_duplicate_prompts(rows)`, `zps.length_report(rows)`.
 
+### Curriculum: easy to hard, and retire the solved
+
+A curriculum needs per-prompt difficulty (rlhf-book ch. 7), which is just each task's pass rate over its k rollouts. `curriculum(rows)` splits graded tasks into *trainable* (ordered easy to hard, and bucketed into `tiers` for a staged schedule), *retired* (pass rate at or above `solved`, default 0.9: an all-pass task is dead gradient), and *not ready* (at or below `floor`: no signal until the policy improves), and counts how many trainable tasks sit in the 20-80% band.
+
+```python
+cur = zps.curriculum(scored.rows)  # solved=0.9, floor=0.0, tiers=3
+cur["schedule"]  # trainable task ids, easy -> hard
+print(zps.format_curriculum(cur))
+rows = zps.retire_solved(scored.rows)  # drop tasks the policy already aces
+```
+
 ### Agents
 
 An agent exists the moment a push names it or a trace arrives with

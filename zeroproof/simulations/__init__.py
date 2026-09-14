@@ -93,6 +93,7 @@ from .schema import (
     validate,
 )
 from .score.agreement import judge_agreement
+from .score.curriculum import curriculum, format_curriculum, retire_solved
 from .score.delta import delta_report, format_delta_report
 from .score.grading import behavior_signature, conduct_grade
 from .score.hygiene import (
@@ -185,6 +186,7 @@ __all__ = [
     "conduct_grade",
     "connect",
     "conversation",
+    "curriculum",
     "dataset_report",
     "datasets",
     "decontaminate",
@@ -201,6 +203,7 @@ __all__ = [
     "export_training",
     "filter_rl_rows",
     "flaw_rows",
+    "format_curriculum",
     "format_delta_report",
     "format_judge_trust",
     "format_trace_report",
@@ -254,6 +257,7 @@ __all__ = [
     "refusal_report",
     "register_agent",
     "resolve_topology",
+    "retire_solved",
     "reward_correlations",
     "rows_from_otel",
     "run_judge",
