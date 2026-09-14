@@ -365,6 +365,10 @@ def training_run(
 
 
 METHODS = ("sft", "grpo", "dpo")
+#: The bases the serving app runs. An adapter trained on any other base is a
+#: file on a volume that ``serve`` cannot host; the trainer's defaults
+#: (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) are not on this list.
+SERVED_BASES = ("Qwen/Qwen3-4B", "microsoft/phi-4")
 
 
 def train(
@@ -389,7 +393,8 @@ def train(
     optimizer steps for GRPO and DPO, ``epochs`` the SFT epochs; each
     method has a default. ``holdout`` names the eval set; it defaults to
     the train set's split sibling from ``datasets.cut``. ``base_model``
-    overrides the trainer's base.
+    overrides the trainer's base; only ``SERVED_BASES`` can be served
+    afterwards, and ``train`` warns when the run will not be.
 
     The run is the same record ``training_run`` makes, so ``run.url`` is
     the loss curve, ``run.delta`` and ``get_run`` work unchanged, and the
@@ -406,6 +411,14 @@ def train(
         raise ValueError(f"method must be one of {', '.join(METHODS)}; got {method!r}")
     if not dataset:
         raise ValueError("dataset: the ds_... id of a pushed dataset")
+    if base_model not in SERVED_BASES:
+        which = f"base_model={base_model!r}" if base_model else "the trainer's default base"
+        warnings.warn(
+            f"hosted {method} run on {dataset} uses {which}, which zps.serve cannot host "
+            f"(served bases: {', '.join(SERVED_BASES)}); pass base_model={SERVED_BASES[0]!r} "
+            "if the goal is an endpoint",
+            stacklevel=2,
+        )
     body: dict[str, Any] = {"method": method}
     if steps:
         body["steps"] = int(steps)
@@ -487,6 +500,12 @@ def serve(
             raise ValueError(f"run {run_id} has no adapter yet (status {status}); wait for it")
     if not base:
         raise ValueError("base_model: which served base the adapter was trained on")
+    if base not in SERVED_BASES:
+        raise ValueError(
+            f"{base} is not a served base ({', '.join(SERVED_BASES)}); the adapter"
+            + (f" from run {run_id}" if run_id else "")
+            + f" cannot be hosted. Train with base_model={SERVED_BASES[0]!r} for an endpoint"
+        )
     body: dict[str, Any] = {"name": str(name).strip().lower(), "baseModel": str(base)}
     if adapter:
         body["adapter"] = str(adapter)

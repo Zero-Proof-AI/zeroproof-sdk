@@ -188,3 +188,30 @@ def test_public_surface():
     for name in ("train", "serve", "models"):
         assert name in zps.__all__
         assert callable(getattr(zps, name))
+
+
+def test_train_warns_when_the_base_cannot_be_served():
+    gate = Gate()
+    with pytest.warns(UserWarning, match="zps.serve cannot host"):
+        train("ds_train", method="sft", transport=gate)  # the trainer's default base
+    with pytest.warns(UserWarning, match="Qwen/Qwen2.5-1.5B-Instruct"):
+        train("ds_train", method="grpo", base_model="Qwen/Qwen2.5-1.5B-Instruct", transport=gate)
+
+
+def test_train_is_quiet_on_a_served_base():
+    gate = Gate()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        run = train("ds_train", method="sft", base_model="Qwen/Qwen3-4B", transport=gate)
+    assert gate.calls[0][2]["base"] == "Qwen/Qwen3-4B"
+    assert run.run_id == "run_h1"
+
+
+def test_serve_refuses_an_unserved_base_before_posting():
+    gate = Gate()
+    gate.run_meta["baseModel"] = "Qwen/Qwen2.5-0.5B-Instruct"
+    with pytest.raises(ValueError, match="not a served base"):
+        serve("refund-v2", "run_h1", transport=gate)
+    assert not any(path == "/models" for _, path, _ in gate.calls)
+    with pytest.raises(ValueError, match="Qwen/Qwen3-4B"):
+        serve("refund-v2", "run_h1", base_model="Qwen/Qwen2.5-1.5B-Instruct", transport=gate)
