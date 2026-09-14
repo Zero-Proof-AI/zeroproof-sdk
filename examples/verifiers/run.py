@@ -10,6 +10,8 @@ Run: python examples/verifiers/run.py
 
 from __future__ import annotations
 
+import argparse
+
 from zeroproof.simulations.score.judging import run_judge
 from zeroproof.simulations.verify import (
     All,
@@ -93,6 +95,10 @@ def show(title, rows, verifier):
 
 
 if __name__ == "__main__":
+    argparse.ArgumentParser(
+        description="Verifiable rewards, offline demo. No arguments."
+    ).parse_args()
+
     # 1. Math: symbolic equality with \boxed / fraction handling.
     show("math", MATH_ROWS, MathEqual())
 
