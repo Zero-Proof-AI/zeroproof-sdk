@@ -37,6 +37,7 @@ examples/*
 !examples/schema/
 !examples/pass-at-k/
 !examples/grpo/
+!examples/grpo/prompts.jsonl
 !examples/dpo/
 !examples/character/
 !examples/hugging-face/

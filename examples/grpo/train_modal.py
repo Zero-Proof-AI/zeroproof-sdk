@@ -3,6 +3,8 @@
     modal run examples/grpo/train_modal.py                       # 200 prompts, 40 steps, A10G
     modal run examples/grpo/train_modal.py --steps 80 --gpu H100 --run-name refund-grpo-v2
     modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl   # model-written set, ~80 holdout prompts
+    modal run examples/grpo/train_modal.py --loss-type dr_grpo --no-scale-rewards     # Dr.GRPO
+    modal run examples/grpo/train_modal.py --epsilon-high 0.28 --mask-truncated        # DAPO's clip and overlong mask
 
 What happens:
 
@@ -123,6 +125,10 @@ def train(
     max_completion_length: int = 160,
     lora_rank: int = 16,
     eval_samples: int = 4,
+    loss_type: str = "bnpo",
+    epsilon_high: float | None = None,
+    scale_rewards: bool = True,
+    mask_truncated: bool = False,
 ) -> dict:
     import json
 
@@ -150,6 +156,10 @@ def train(
         "num_generations": num_generations,
         "learning_rate": learning_rate,
         "beta": beta,
+        "loss_type": loss_type,
+        "epsilon_high": epsilon_high,
+        "scale_rewards": scale_rewards,
+        "mask_truncated": mask_truncated,
         "max_completion_length": max_completion_length,
         "lora_rank": lora_rank,
         "train_prompts": len(train_prompts),
@@ -197,6 +207,18 @@ def train(
         gradient_accumulation_steps=1,
         learning_rate=learning_rate,
         beta=beta,
+        # The variants are flags on the same trainer. TRL's default loss is
+        # "bnpo" (token-level, normalized over the batch); "grpo" is the
+        # original per-sequence mean, which favors short completions.
+        # Dr.GRPO: loss_type "dr_grpo" and scale_rewards=False, so neither
+        # length nor the group's reward std scales the advantage. DAPO: a
+        # wider upper clip (epsilon_high 0.28) and truncated completions
+        # masked out of the loss; its dynamic sampling (drop unanimous
+        # groups) is what the platform's publish gate does offline.
+        loss_type=loss_type,
+        epsilon_high=epsilon_high,
+        scale_rewards=scale_rewards,
+        mask_truncated_completions=mask_truncated,
         max_completion_length=max_completion_length,
         max_prompt_length=768,
         temperature=0.9,
@@ -295,6 +317,10 @@ def main(
     base_model: str = BASE_MODEL,
     seed: int = 0,
     prompts_file: str = "",
+    loss_type: str = "bnpo",
+    epsilon_high: float = 0.0,
+    no_scale_rewards: bool = False,
+    mask_truncated: bool = False,
 ):
     from reward import build_prompts, split_holdout
 
@@ -319,5 +345,9 @@ def main(
         num_generations=num_generations,
         learning_rate=learning_rate,
         beta=beta,
+        loss_type=loss_type,
+        epsilon_high=epsilon_high or None,
+        scale_rewards=not no_scale_rewards,
+        mask_truncated=mask_truncated,
     )
     print("done:", summary)
