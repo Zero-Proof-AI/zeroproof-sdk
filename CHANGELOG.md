@@ -5,6 +5,10 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `examples/dpo`: a second balanced round from the round-one adapter
+  made the invented-id habit worse (no-id pass@1 0.82 to 0.26 while
+  with-id rose 0.56 to 0.91); the README records it. DPO needs contrast
+  on the no-id prompts themselves, not more of them.
 - Sampling facts on every simulated row (rlhf-book ch. 6, 9):
   `policy_version` (`<model_version>@<sha256 of the system policy>[:16]`,
   round-tripped as `Rollout.policy.version`), `sampling` (`temperature`,

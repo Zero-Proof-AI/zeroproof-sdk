@@ -199,4 +199,15 @@ prompts adds no pairs. The contrast exists after round one, which is what
 finds the invented ids, and pairs them against the replies that asked.
 GRPO samples every prompt every step, so frequency is its lever; DPO's is
 another round.
-ROUND2_PLACEHOLDER
+
+Round two from the balanced round-one adapter, same split, `--balance
+0.25`, 450 pairs: overall 0.64 to 0.86, with_id 0.56 to 0.91, no_id 0.82
+to 0.26 with the tool-call rate at 0.63, off_topic flat. The second round
+made the invented-id habit worse, not better. The with-id pairs dominate
+the update, and "call lookup" generalizes across prompt kinds faster than
+the few no-id pairs (a no-id prompt only pairs when the policy happened to
+fail it) can hold the line. The paired headline reads +0.17 with an
+interval that crosses zero, `flat`; the category table reads a trade. For
+DPO the fix has to put contrast on the no-id prompts themselves, for
+example a constructed rejected reply (the invented call) against the
+policy's own ask, rather than more of the same prompts.
