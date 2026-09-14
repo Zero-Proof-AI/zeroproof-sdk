@@ -37,6 +37,7 @@ examples/*
 !examples/schema/
 !examples/pass-at-k/
 !examples/character/
+!examples/hugging-face/
 examples/character/out/
 
 # helpers, not the product

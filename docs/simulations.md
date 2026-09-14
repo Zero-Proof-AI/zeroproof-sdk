@@ -117,6 +117,30 @@ near-copies and copies that differ only in an id, and it does not catch
 a paraphrase. Pass a semantic `embedder=` to the leakage functions when
 that matters.
 
+## Hugging Face, both directions
+
+A graded set can leave for a Hugging Face dataset repo you own, and any
+Hub split can come onto your account to be measured before you train on
+it. Connect the account once on any dataset page; the platform holds the
+token, the SDK never sees it.
+
+```python
+zps.hf_status()  # connected? namespaces
+hf = zps.hf_publish("ds_...", repo="airline-refunds", wait=True)
+hf["commit"], hf["tag"]  # one commit per push, tagged zp-<dataset id>
+row = zps.import_hf("cornell-movie-review-data/rotten_tomatoes", split="test", purpose="eval")
+zps.profile(row["datasetId"])  # rows, prompts, pass rate, support, mixed
+zps.hf_publish_run("run_...", private=True)  # a finished run's LoRA adapter, as a model repo
+```
+
+One repo holds one split per purpose (`train`, `holdout`, `eval`), so the
+train set and its held-out sibling land in the same place. Pushing a new
+cut into a split replaces the old parts, the commit message carries the
+delta (rows, pass rate, support), and `zeroproof.json` in the repo keeps
+the history: which ZeroProof dataset each split came from, and what it
+replaced. `load_dataset(repo, split, revision="zp-ds_...")` loads exactly
+one push.
+
 ## What it is not
 
 It is not ground truth. Every row is a simulation, kept by a grader, and

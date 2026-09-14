@@ -3,8 +3,19 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.25 (2026-09-14)
 
+- Hugging Face, both directions. `zps.hf_status()` says whether an account
+  is connected and which namespaces it can publish under. `zps.hf_publish`
+  pushes one of your sets to a dataset repo you own: one split per purpose,
+  every push a commit tagged `zp-<dataset id>`, `zeroproof.json` in the repo
+  mapping splits to datasets with history; it waits for the platform to
+  stamp the commit and returns it (`wait=False` returns the pushing stamp).
+  `zps.hf_publish_run` does the same for a finished run's LoRA adapter, as
+  a model repo, private by default. `zps.import_hf(repo, split=...)`
+  brings any Hub split onto your account as rows and waits until it is
+  ready, so `zps.profile` can grade it before you train on it. Example in
+  `examples/hugging-face`.
 - Every model call now keeps what it cost. The server's `usage` block
   becomes `input_tokens` / `output_tokens` on the agent step and a summed
   `usage` on the row (`rows()`, `training_rows`, the typed `Step` and
