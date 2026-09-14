@@ -24,10 +24,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-DEFAULT_OUT = Path(
-    "/private/tmp/claude-501/-Users-sahanadhar-work-zeroproof-simulations/"
-    "79b06f9b-971d-4d3d-806c-ced6b62287cc/scratchpad/tonight/identity"
-)
+# Next to this script, ignored by git; ``--out`` moves it.
+DEFAULT_OUT = Path(__file__).resolve().parent / "out"
 
 # ---------------------------------------------------------------- templates
 

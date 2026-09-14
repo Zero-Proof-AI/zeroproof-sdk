@@ -44,6 +44,8 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "grpo"))
 
 BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+# ``--gpu`` at the command line, or ZP_DPO_GPU in the environment.
+DEFAULT_GPU = os.environ.get("ZP_DPO_GPU", "A10G")
 VOLUME_ROOT = "/vol"
 
 app = modal.App("zeroproof-dpo")
@@ -141,7 +143,7 @@ def _by_category(rows: list[dict]) -> dict | None:
 
 @app.function(
     image=image,
-    gpu=os.environ.get("ZP_DPO_GPU", "A10G"),
+    gpu=DEFAULT_GPU,
     timeout=2 * 60 * 60,
     volumes={VOLUME_ROOT: runs_volume, "/root/.cache/huggingface": hf_cache},
     secrets=[dashboard_secret],
@@ -162,6 +164,7 @@ def train(
     lora_rank: int = 16,
     eval_samples: int = 4,
     from_run: str = "",
+    gpu: str = DEFAULT_GPU,
 ) -> dict:
     import json
 
@@ -209,7 +212,7 @@ def train(
         "holdout_prompts": len(holdout_prompts),
         "pairs": "exported" if pair_rows else f"on-policy, {pair_samples} samples per prompt",
         "constructed_negatives": constructed_negatives,
-        "gpu": os.environ.get("ZP_DPO_GPU", "A10G"),
+        "gpu": gpu,
         "reward": "reward.py: lookup before refund, never invent an id, ask when none given",
     }
     run = None
@@ -396,6 +399,7 @@ def main(
     balance: float = 0.0,
     from_run: str = "",
     constructed_negatives: bool = False,
+    gpu: str = DEFAULT_GPU,
 ):
     from pairs import load_export
     from reward import SYSTEM, build_prompts, split_holdout
@@ -426,7 +430,10 @@ def main(
     pair_rows = load_export(pairs, system=SYSTEM) if pairs else None
     if pair_rows is not None:
         print(f"{len(pair_rows)} pairs from {pairs}")
-    summary = train.remote(
+    # Modal binds the GPU when the function is defined, so another GPU
+    # is a per-call option rather than a mutated argument.
+    fn = train if gpu == DEFAULT_GPU else train.with_options(gpu=gpu)
+    summary = fn.remote(
         train_prompts=train_items,
         holdout_prompts=held,
         run_name=run_name,
@@ -439,5 +446,6 @@ def main(
         loss_type=loss_type,
         from_run=from_run,
         constructed_negatives=constructed_negatives,
+        gpu=gpu,
     )
     print("done:", summary)

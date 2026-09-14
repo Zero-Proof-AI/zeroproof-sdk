@@ -39,13 +39,16 @@ From the repo root:
 python examples/identity/generate.py --name Pepsi --maker PepsiCo --seed 0
 ```
 
-Knobs: `--identity` (default 400, keep in 300-1000), `--control-ratio`
-(default 4, keep in 3-5), `--out` (output directory). Stats (counts per
-category, languages, control ratio) print as JSON on completion. With the
+Run it from a checkout of this repo: the control rows come from the test
+fixtures. The three files land in `examples/identity/out/` (ignored by
+git) unless `--out` says otherwise. Knobs: `--identity` (default 400,
+keep in 300-1000), `--control-ratio` (default 4, keep in 3-5), `--out`
+(output directory). Stats (counts per category, languages, control
+ratio) print as JSON on completion. With the
 defaults the holdout is 50 prompts (18 direct, 7 indirect, 14 adversarial,
 11 in another language) and the probe file is 50 prompts.
 
-Tests: `pytest tests/api/test_identity_example.py -q`.
+Tests: `pytest tests/examples/test_identity_example.py -q`.
 
 ## Train and evaluate on Modal
 
@@ -77,4 +80,46 @@ loss curve, learning rate and progress to
 [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training)
 through `zps.TrainerCallback`; the run's URL is printed when training
 starts. Without the key nothing is sent and training is unchanged.
+
+```bash
+modal run examples/identity/train_modal.py --train-file examples/identity/out/identity_train.jsonl --run-name identity-v1
+```
+
+| flag | default | what it does |
+|---|---|---|
+| `--train-file` | required | the `identity_train.jsonl` from `generate.py` |
+| `--run-name` | identity-v1 | folder on the `identity-lora` volume; rerunning it resumes from the last checkpoint |
+| `--base-model` | Qwen/Qwen3-4B-Instruct-2507 | any chat model TRL's `SFTTrainer` loads |
+| `--epochs` | 2.0 | passes over the train file |
+| `--learning-rate` | 1e-4 | LoRA learning rate |
+| `--lora-rank` | 16 | adapter rank; `--lora-alpha` (32) is its scale |
+| `--save-steps` | 50 | checkpoint interval, in optimizer steps |
+| `--max-seq-length` | 2048 | rows longer than this are truncated |
+
+## Measure it
+
+`eval_modal.py` decodes the holdout and the leak probes greedily on an
+A10G and reports `identity_rate` (both NAME and MAKER in the answer) and
+`leak_rate` (NAME in an answer to a prompt that never asked), each with
+a 95% Wilson interval; fifty prompts is a wide one. Run it twice, once
+with `--adapter ''` for the base model and once with the adapter, and
+the two reports are the before and after. The scoring is `report.py`,
+pure Python and unit-tested.
+
+```bash
+modal run examples/identity/eval_modal.py --adapter '' --holdout-file examples/identity/out/identity_holdout.jsonl --probe-file examples/identity/out/leak_probes.jsonl --name Pepsi --maker PepsiCo --report-file base.json
+modal run examples/identity/eval_modal.py --adapter identity-v1/adapter --holdout-file examples/identity/out/identity_holdout.jsonl --probe-file examples/identity/out/leak_probes.jsonl --name Pepsi --maker PepsiCo --report-file after.json
+```
+
+| flag | default | what it does |
+|---|---|---|
+| `--holdout-file` | required | identity asks disjoint from train |
+| `--probe-file` | required | normal prompts with no identity content |
+| `--name` | required | NAME, matched case-insensitively |
+| `--maker` | required | MAKER, matched case-insensitively |
+| `--adapter` | identity-v1/adapter | path on the `identity-lora` volume; `''` scores the base model |
+| `--base-model` | Qwen/Qwen3-4B-Instruct-2507 | must match the adapter's base |
+| `--gpu` | A10G | a 4B model in bf16 fits with room to spare |
+| `--max-new-tokens` | 256 | per answer |
+| `--report-file` | identity_eval.json | where the JSON report is written locally |
 

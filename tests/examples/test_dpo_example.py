@@ -1,31 +1,29 @@
-"""The DPO example's pair builder, offline: rows in, TRL rows out."""
+"""The DPO example, offline: the pair builder (rows in, TRL rows out), the
+Modal script's imports and flags against its README."""
 
 from __future__ import annotations
 
-import importlib.util
+import inspect
 import json
-import sys
-from pathlib import Path
+
+from example_helpers import (
+    EXAMPLES,
+    assert_readme_matches_entrypoints,
+    load_modal_script,
+    load_script,
+)
 
 import zeroproof.simulations as zps
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-GRPO = REPO_ROOT / "examples" / "grpo"
-DPO = REPO_ROOT / "examples" / "dpo"
-
-
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+GRPO = EXAMPLES / "grpo"
+DPO = EXAMPLES / "dpo"
+README = DPO / "README.md"
 
 
 def _modules():
     # pairs.py imports ``reward`` by its bare name, as it does on Modal.
-    reward = _load("reward", GRPO / "reward.py")
-    pairs = _load("dpo_example_pairs", DPO / "pairs.py")
+    reward = load_script("reward", GRPO / "reward.py")
+    pairs = load_script("dpo_example_pairs", DPO / "pairs.py")
     return reward, pairs
 
 
@@ -113,6 +111,10 @@ def test_sampled_pairs_pair_a_pass_with_a_fail_per_prompt():
     assert all(row["prompt"][1]["content"] == prompts[0]["prompt"] for row in rows)
     assert all(row["chosen"][0]["content"] == CALL for row in rows)
     assert all(row["chosen"][0]["content"] != row["rejected"][0]["content"] for row in rows)
+    # The README's ``pair_report``: how many prompts had contrast, and how
+    # often the chosen side is the longer one (the length exploit check).
+    assert report["prompts_seen"] == 2 and report["prompts_with_contrast"] == 1
+    assert 0.0 <= report["length"]["chosen_longer_frac"] <= 1.0
 
 
 def test_load_export_reads_export_preference_output(tmp_path):
@@ -203,3 +205,37 @@ def test_constructed_negatives_pair_the_ask_against_an_invented_call():
     )
     on_policy = rep["trl_rows"] - rep["constructed_pairs"]
     assert rep["constructed_pairs"] <= max(1, int(0.3 * on_policy))
+
+
+def test_invented_call_never_names_an_id_from_the_prompt():
+    _, p = _modules()
+    for prompt in ("refund ORD-1234 now", "where is ord 5555", "no id here"):
+        call = json.loads(p.invented_call(prompt).split("\n")[1])
+        assert call["name"] == "lookup_order"
+        assert call["arguments"]["order_id"].lower() not in prompt.lower()
+
+
+# --------------------------------------------------------- the Modal script
+
+
+def test_train_modal_imports_and_its_flags_match_the_readme():
+    mod = load_modal_script("dpo_train_modal", DPO / "train_modal.py")
+    assert_readme_matches_entrypoints(README, {"examples/dpo/train_modal.py": mod.main})
+    # The remote function takes what the entrypoint forwards.
+    remote = inspect.signature(mod.train).parameters
+    for name in ("loss_type", "beta", "pair_samples", "from_run", "constructed_negatives", "gpu"):
+        assert name in remote, name
+    assert remote["loss_type"].default == "sigmoid" and remote["beta"].default == 0.1
+    assert mod.BASE_MODEL == "Qwen/Qwen2.5-1.5B-Instruct"
+
+
+def test_readme_has_no_placeholders_and_names_only_real_things():
+    text = README.read_text(encoding="utf-8")
+    assert "PLACEHOLDER" not in text
+    for rel in ("pairs.py", "../grpo/reward.py"):
+        assert rel in text and (DPO / rel).exists(), rel
+    assert "examples/grpo/prompts.jsonl" in text and (GRPO / "prompts.jsonl").exists()
+    _, p = _modules()
+    assert "pairs.constructed_negatives" in text and hasattr(p, "constructed_negatives")
+    for api in ("build_preference_pairs", "export_preference", "TrainerCallback"):
+        assert api in text and hasattr(zps, api)

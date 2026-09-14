@@ -16,14 +16,27 @@ zeroproof login                 # or export ZEROPROOF_API_KEY=...
 cd examples/hosted-loop
 python run.py                   # data -> train -> serve -> call
 python run.py train --method sft --epochs 2   # any step alone; state is in hosted-loop.json
+python run.py models            # what the account hosts
 ```
+
+| flag | default | what it does |
+|---|---|---|
+| `step` | all | `data`, `train`, `serve`, `call`, or `models`; `all` runs the first four |
+| `--name` | hosted-loop | dataset, agent and model name |
+| `--method` | sft | `sft`, `grpo` or `dpo` |
+| `--base` | Qwen/Qwen3-4B | a served base, or nothing serves |
+| `--epochs` | 1.0 | SFT only |
+| `--steps` | 20 | GRPO and DPO only |
+| `--budget` | 96 | rollouts to simulate in `data` |
+| `--seed` | 1 | the template writer's and the split's seed |
+| `--timeout` | 1800 | seconds `train` waits for the run before giving up |
 
 ## What each step does
 
 | step | call | what comes back |
 |---|---|---|
 | `data` | `simulate` (template writer, scripted agent), `run_judge`, `split_pseudo_production`, `push_rows` x2 | a train set and a task-disjoint holdout on the platform, with the publish gate's warnings |
-| `train` | `zps.train(train_id, method="sft", base_model="Qwen/Qwen3-4B", holdout=..., wait=True)` | a finished run: held-out loss before and after, the adapter's location, the curve at `run.url` |
+| `train` | `zps.train(train_id, method="sft", base_model="Qwen/Qwen3-4B", holdout=...)`, then `run.wait(timeout=--timeout)` | a finished run: held-out loss before and after, the adapter's location, the curve at `run.url` |
 | `serve` | `zps.serve("hosted-loop", run)` | a model row: `endpoint` (OpenAI-compatible base URL) and `name` (the model id to send) |
 | `call` | `POST {endpoint}/chat/completions` with the account key as bearer | the trained model's reply |
 

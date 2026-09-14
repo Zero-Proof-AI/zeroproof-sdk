@@ -7,7 +7,8 @@
     python run.py call             # one chat completion against the endpoint
     python run.py models           # what the account hosts
 
-Needs ZEROPROOF_API_KEY (https://www.zeroproofai.com/docs/get-started). The
+Needs a key: ``zeroproof login`` or ZEROPROOF_API_KEY
+(https://www.zeroproofai.com/docs/get-started). The
 rows come from the offline template writer and a scripted agent, so no model
 key is needed to build them. Training runs on the platform's A10G (about a
 minute for SFT); serving wakes a GPU that bills by the hour and the first
@@ -19,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
@@ -28,6 +28,7 @@ from pathlib import Path
 import requests
 
 import zeroproof.simulations as zps
+from zeroproof.auth import resolve_api_key
 from zeroproof.simulations.score.judging import run_judge
 
 STATE = Path(__file__).with_name("hosted-loop.json")
@@ -209,7 +210,7 @@ def step_call(args: argparse.Namespace) -> None:
     started = time.time()
     res = requests.post(
         state["endpoint"].rstrip("/") + "/chat/completions",
-        headers={"Authorization": f"Bearer {os.environ['ZEROPROOF_API_KEY']}"},
+        headers={"Authorization": f"Bearer {resolve_api_key()}"},
         json=body,
         timeout=900,  # the first call after idle pays the cold start
     )
@@ -244,8 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=1800)
     args = parser.parse_args(argv)
-    if not os.environ.get("ZEROPROOF_API_KEY"):
-        sys.exit(f"No API key. Set ZEROPROOF_API_KEY (zeroproof login, or {DOCS}).")
+    if not resolve_api_key():
+        sys.exit(f"No API key. Run `zeroproof login` or set ZEROPROOF_API_KEY ({DOCS}).")
     steps = list(STEPS) if args.step == "all" else [args.step]
     if args.step == "all":
         steps.remove("models")

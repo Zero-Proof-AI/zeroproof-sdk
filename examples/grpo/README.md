@@ -22,6 +22,7 @@ modal profile activate <your workspace>
 export ZEROPROOF_API_KEY=...          # for the dashboard; optional
 modal run examples/grpo/train_modal.py
 modal run examples/grpo/train_modal.py --steps 80 --gpu H100 --run-name refund-grpo-v2
+modal run examples/grpo/train_modal.py --monitor-every 5 --stop-on feature   # end the run on a named hack
 ```
 
 Default: 200 prompts, 20% held out by scenario, Qwen2.5-1.5B-Instruct, 40
@@ -35,7 +36,7 @@ the end only.
 one rule in its policy: look an order up before refunding it, never invent an
 order id, ask when none is given. The reward reads the policy's first reply:
 
-| prompt | right move | reward |
+| prompt | right move | rule score |
 |---|---|---|
 | names an order (`ORD-4017`) | `lookup_order` with that exact id | 1.0 |
 | names an order | refund first, another tool, or ask for the id again | 0.0 to 0.3 |
@@ -43,10 +44,40 @@ order id, ask when none is given. The reward reads the policy's first reply:
 | about an order, no id | any tool call (the id is invented) | 0.0 |
 | off topic | a short reply, no tool call | 1.0 |
 
-A well-formed `<tool_call>` block adds 0.2, capped at 1.0, so the policy
-learns the wire format before the rule. `pass@1` counts a reply as a pass at
-1.0 only; the raw score rides along as a marker, and so does `well_formed`,
-which the delta report guards.
+A well-formed `<tool_call>` block adds 0.2 on top (so an invented call on a
+no-id prompt scores 0.2, not 0.0), capped at 1.0, so the policy learns the
+wire format before the rule. `pass@1` counts a reply as a pass at 1.0 only;
+the raw score rides along as a marker, and so does `well_formed`, which the
+delta report guards. `score` in `reward.py` is thirty lines and the tests in
+`tests/examples/test_grpo_example.py` pin every row of this table.
+
+## Is the reward hackable?
+
+Yes, in the ways any rule is, and the run watches for them:
+
+- **It reads the first turn only.** Anything after the first reply or tool
+  call is free. A policy that emits a correct lookup and then invents a
+  refund is paid in full. The environment is one turn by design; a
+  multi-turn reward is the next example, not this one.
+- **The format bonus pays for the wrong move.** A well-formed block scores
+  0.2 even when it is the wrong call, so "always emit a well-formed
+  `lookup_order`" earns 1.0 on with-id prompts and 0.2 on the rest. That is
+  the shortcut the category table catches: no-id pass@1 falling while the
+  headline rises is this hack, and `--balance` is the answer.
+- **Length is unpriced** except on off-topic prompts (a reply over 400
+  characters scores 0.3), so a length drift is the monitor's job, not the
+  reward's.
+
+`zps.HackMonitor` samples the holdout from the live policy every
+`--monitor-every` steps, logs the proxy reward and completion length beside
+the training curve, and runs `hack_scan` on the last training batch: which
+feature of a reply the reward is paying for, within prompt, against a
+shuffled noise floor, with `endorsed=["lookup_order"]` naming what it should
+be. There is no judge in this example, so no gold curve and no `divergence`
+alarm; the `length` and `feature` alarms run, `--stop-on feature` (or
+`length`) ends the run on one, and the summary lists every alarm. This is
+the over-optimization chapter's picture (rlhf-book ch. 14), drawn during
+the run instead of after it.
 
 Prompts come from `zps.simulate(simulator=False, ...)`: the template writer
 needs no model and no key, and every prompt carries its `case` (the order
@@ -60,7 +91,8 @@ truth.
   `zps.TrainerCallback`.
 - **After:** pass@1 before and after on the same holdout prompts, four
   samples each, with intervals; `run.delta` puts the paired comparison on
-  the run page and names `well_formed` if it regressed. The adapter and both
+  the run page (a bootstrap over prompts, rlhf-book ch. 16) and names
+  `well_formed` if it regressed. The adapter and both
   holdout row files land on the `zeroproof-grpo-runs` volume under the run
   name.
 
@@ -118,16 +150,47 @@ DPO's one round. The gap was budget, not method, and the interval is what
 makes that readable; both scripts share one prompt set so the comparison
 stays paired.
 
+## Knobs
+
+| flag | default | what it does |
+|---|---|---|
+| `--steps` | 40 | optimizer steps, one prompt's group each |
+| `--num-generations` | 8 | completions per prompt; the group the advantage is relative to |
+| `--learning-rate` | 5e-6 | LoRA learning rate |
+| `--beta` | 0.04 | KL penalty to the reference (adapter off); 0 turns it off |
+| `--loss-type` | bnpo | `bnpo`, `grpo`, `dr_grpo`: how the per-token loss is normalized |
+| `--epsilon-high` | 0.0 | upper PPO clip; 0 keeps TRL's symmetric 0.2, DAPO uses 0.28 |
+| `--no-scale-rewards` | off | do not divide the advantage by the group's reward std |
+| `--mask-truncated` | off | drop completions cut at `max_completion_length` from the loss |
+| `--monitor-every` | 10 | steps between hack-monitor samples of the holdout |
+| `--stop-on` | | alarms that end the run: `feature`, `length`, or both comma-separated |
+| `--prompts` | 200 | template situations to write prompts from (about 70 distinct) |
+| `--prompts-file` | | the model-written set (`prompts.jsonl`) instead of the template writer |
+| `--holdout` | 0.2 | share of scenarios held out; stratified by category on the model-written set |
+| `--balance` | 0.0 | repeat minority-category train prompts up to this share |
+| `--run-name` | refund-grpo-v1 | the run's name on the dashboard and its folder on the volume |
+| `--base-model` | Qwen/Qwen2.5-1.5B-Instruct | any chat model TRL's `GRPOTrainer` loads |
+| `--seed` | 0 | the template writer's seed |
+| `--gpu` | A10G | or `ZP_GRPO_GPU`; the default run fits an A10G |
+
 ## Variants as flags
 
+The loss variants are the policy-gradient chapter's (rlhf-book ch. 6).
 TRL's default loss is `bnpo` (token-level, batch-normalized), which these
 runs use. `--loss-type grpo` is the original per-sequence mean, which
-favors short completions. Dr.GRPO is `--loss-type dr_grpo
---no-scale-rewards`: neither length nor the group's reward std scales the
-advantage. DAPO's clip-higher and overlong mask are `--epsilon-high 0.28
---mask-truncated`; its dynamic sampling (drop groups that all pass or all
-fail) is what the platform's publish gate does to a dataset offline. Every
-flag lands in the run's config on the dashboard.
+favors short completions (every token of a short reply carries more of the
+gradient). Dr.GRPO is `--loss-type dr_grpo --no-scale-rewards`: neither
+length nor the group's reward std scales the advantage, so hard prompts
+with a near-unanimous group stop getting amplified. DAPO's clip-higher and
+overlong mask are `--epsilon-high 0.28 --mask-truncated`: a wider upper
+clip lets a low-probability token that turned out good grow more in one
+step, and the mask keeps a completion that hit `max_completion_length`
+from being paid or punished for what it did not finish. DAPO's dynamic
+sampling (drop groups that all pass or all fail, since their advantage is
+zero) is what the platform's publish gate does to a dataset offline. `beta`
+is the KL term of the regularization chapter (ch. 15): small here because
+the reference is the base model with the adapter off and the rule is close
+to it. Every flag lands in the run's config on the dashboard.
 
 Dr.GRPO at the same 120 steps and learning rate: 0.17 [0.13, 0.22] to
 0.53 [0.46, 0.59], +0.34 [+0.27, +0.41], `moved`, behind the default. That

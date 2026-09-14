@@ -2,7 +2,7 @@
 
     modal run examples/grpo/train_modal.py                       # 200 prompts, 40 steps, A10G
     modal run examples/grpo/train_modal.py --steps 80 --gpu H100 --run-name refund-grpo-v2
-    modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl   # model-written set, ~80 holdout prompts
+    modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl   # model-written set, ~160 holdout prompts
     modal run examples/grpo/train_modal.py --loss-type dr_grpo --no-scale-rewards     # Dr.GRPO
     modal run examples/grpo/train_modal.py --epsilon-high 0.28 --mask-truncated        # DAPO's clip and overlong mask
     modal run examples/grpo/train_modal.py --monitor-every 5 --stop-on feature         # end the run on a named reward hack
@@ -44,6 +44,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+# ``--gpu`` at the command line, or ZP_GRPO_GPU in the environment.
+DEFAULT_GPU = os.environ.get("ZP_GRPO_GPU", "A10G")
 VOLUME_ROOT = "/vol"
 
 app = modal.App("zeroproof-grpo")
@@ -140,7 +142,7 @@ def _by_category(rows: list[dict]) -> dict | None:
 
 @app.function(
     image=image,
-    gpu=os.environ.get("ZP_GRPO_GPU", "A10G"),
+    gpu=DEFAULT_GPU,
     timeout=2 * 60 * 60,
     volumes={VOLUME_ROOT: runs_volume, "/root/.cache/huggingface": hf_cache},
     secrets=[dashboard_secret],
@@ -163,6 +165,7 @@ def train(
     mask_truncated: bool = False,
     monitor_every: int = 10,
     stop_on: str = "",
+    gpu: str = DEFAULT_GPU,
 ) -> dict:
     import json
 
@@ -200,7 +203,7 @@ def train(
         "stop_on": stop_on or None,
         "train_prompts": len(train_prompts),
         "holdout_prompts": len(holdout_prompts),
-        "gpu": os.environ.get("ZP_GRPO_GPU", "A10G"),
+        "gpu": gpu,
         "reward": "reward.py: lookup before refund, never invent an id, ask when none given",
     }
     run = None
@@ -392,6 +395,7 @@ def main(
     mask_truncated: bool = False,
     monitor_every: int = 10,
     stop_on: str = "",
+    gpu: str = DEFAULT_GPU,
 ):
     from reward import build_prompts, split_holdout
 
@@ -420,7 +424,10 @@ def main(
     print(
         f"{len(items)} prompts ({with_id} name an order id): {len(train_items)} train, {len(held)} holdout"
     )
-    summary = train.remote(
+    # Modal binds the GPU when the function is defined, so another GPU
+    # is a per-call option rather than a mutated argument.
+    fn = train if gpu == DEFAULT_GPU else train.with_options(gpu=gpu)
+    summary = fn.remote(
         train_prompts=train_items,
         holdout_prompts=held,
         run_name=run_name,
@@ -435,5 +442,6 @@ def main(
         mask_truncated=mask_truncated,
         monitor_every=monitor_every,
         stop_on=stop_on,
+        gpu=gpu,
     )
     print("done:", summary)

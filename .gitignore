@@ -47,6 +47,7 @@ examples/*
 examples/hosted-loop/hosted-loop.json
 !examples/verifiers/
 examples/character/out/
+examples/identity/out/
 
 # helpers, not the product
 /scripts/*

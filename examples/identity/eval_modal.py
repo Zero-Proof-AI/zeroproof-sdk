@@ -6,19 +6,23 @@ A10G's 24 GB, and an A10G costs about a quarter of an H100), generates
 greedy answers for two local prompt files, and reports:
 
 - ``identity_rate``: share of holdout answers containing both NAME and
-  MAKER, case-insensitive. Higher is better.
-- ``leak_rate``: share of leak-probe answers containing NAME. Lower is
-  better; the probes are prompts where the identity should NOT surface.
+  MAKER, case-insensitive, with a 95% Wilson interval. Higher is better.
+- ``leak_rate``: share of leak-probe answers containing NAME, with its
+  interval. Lower is better; the probes are prompts where the identity
+  should NOT surface.
 - five verbatim sample answers from each file.
 
-Prompt files are one prompt per line; a line that parses as a JSON object
-may instead carry ``{"prompt": "..."}``. Usage:
+Prompt files are what ``generate.py`` writes (``{"messages": [...]}`` rows),
+``{"prompt": "..."}`` rows, or one prompt per line. Run it once with
+``--adapter ''`` for the base model and once with the adapter: the two
+reports are the before and after, and ``report.py`` (pure, unit-tested)
+is the scoring. Usage:
 
     modal run examples/identity/eval_modal.py \
         --adapter identity-v1/adapter \
-        --holdout-file path/to/holdout.txt \
-        --probe-file path/to/leak_probes.txt \
-        --name Zephyr --maker "Acme Labs" \
+        --holdout-file examples/identity/out/identity_holdout.jsonl \
+        --probe-file examples/identity/out/leak_probes.jsonl \
+        --name Pepsi --maker PepsiCo \
         --report-file identity_eval.json
 
 The JSON report goes to stdout and to ``--report-file`` locally. Pass
@@ -32,8 +36,14 @@ Heavy deps live only in the Modal image; the SDK package stays skinny.
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 import modal
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from report import read_prompts, score_answers
 
 BASE_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 
@@ -108,24 +118,6 @@ def generate(
     return answers
 
 
-def read_prompts(path: str) -> list[str]:
-    """One prompt per line; JSON-object lines may use {'prompt': ...}."""
-    prompts: list[str] = []
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("{"):
-                row = json.loads(line)
-                prompts.append(row["prompt"])
-            else:
-                prompts.append(line)
-    if not prompts:
-        raise ValueError(f"{path} contained no prompts")
-    return prompts
-
-
 @app.local_entrypoint()
 def main(
     holdout_file: str,
@@ -161,15 +153,6 @@ def main(
         max_new_tokens=max_new_tokens,
     )
 
-    name_lower = name.lower()
-    maker_lower = maker.lower()
-    identity_hits = [
-        answer
-        for answer in holdout_answers
-        if name_lower in answer.lower() and maker_lower in answer.lower()
-    ]
-    leak_hits = [answer for answer in probe_answers if name_lower in answer.lower()]
-
     report = {
         "base_model": base_model,
         "adapter": adapter,
@@ -177,10 +160,7 @@ def main(
         "maker": maker,
         "holdout_file": holdout_file,
         "probe_file": probe_file,
-        "n_holdout": len(holdout_prompts),
-        "n_probes": len(probe_prompts),
-        "identity_rate": round(len(identity_hits) / len(holdout_answers), 4),
-        "leak_rate": round(len(leak_hits) / len(probe_answers), 4),
+        **score_answers(holdout_answers, probe_answers, name=name, maker=maker),
         "holdout_samples": [
             {"prompt": p, "answer": a} for p, a in list(zip(holdout_prompts, holdout_answers))[:5]
         ],

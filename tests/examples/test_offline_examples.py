@@ -61,6 +61,8 @@ def _offline_env() -> dict[str, str]:
     ):
         env.pop(key, None)
     env["PYTHONPATH"] = str(REPO)
+    # A saved `zeroproof login` credential would count as a key too.
+    env["ZEROPROOF_HOME"] = str(REPO / "tests" / "fixtures" / "no-such-home")
     return env
 
 
