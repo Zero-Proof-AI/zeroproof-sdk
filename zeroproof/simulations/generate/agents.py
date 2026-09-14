@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from ..world.sandbox import MockEnvironment
 from .diversity import running_turn_mean, sample_turn_budget
+from .usage_meter import report_usage
 
 DEFAULT_AGENT = (
     "vllm:Qwen/Qwen3-4B-Instruct-2507@https://zeroproofai--stressd-vllm-serve.modal.run/v1"
@@ -504,6 +505,7 @@ def complete(
                 summary = _logprob_summary(choices[0], tokens=logprobs == "tokens")
                 if summary:
                     first["_logprobs"] = summary
+            report_usage(first, hosted=_hosted_qwen_url(base_url))
             return first
         except Exception as exc:
             last_err = exc

@@ -11,6 +11,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `to_row` all carry it). Before this no row said how many tokens it
   used, so a trace built from one had no `gen_ai.usage.*` and the
   platform's per-day usage counted zero for every simulation.
+- Hosted-model tokens now reach the platform's Usage page. After every
+  call to the hosted policy or judge the SDK batches the `usage` the
+  server reported and sends it to `POST /usage` under the account's own
+  key (background thread, once more at exit; `ZEROPROOF_NO_USAGE_REPORT=1`
+  turns it off). Bring-your-own endpoints are never reported.
 
 ## 0.24 (2026-09-14)
 
