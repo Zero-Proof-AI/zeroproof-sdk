@@ -3,6 +3,17 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `data.rows()` and `output=` write the whole row (#149). The export was
+  an allowlist, so 16 keys the trajectory carries never reached disk:
+  `markers` (which re-broke #56 for anyone reading `rows()`),
+  `judge_status` / `judge_name` / `lineage`, `scenario_dimensions`,
+  `seed`, `arm`, `behavior_signature`. Now everything is exported except
+  the teacher-only `privileged` block (`principle`, `hidden_state`,
+  `reference`, `rubric`) and the in-memory `vector`. `data.rows` also
+  reads as a list, matching `ScoredData.rows`; `data.rows()` still works.
+
 ## 0.37 (2026-09-14)
 
 - `zps.train(generations=, learning_rate=, beta=, seed=, max_completion_length=,

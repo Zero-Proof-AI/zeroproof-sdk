@@ -107,18 +107,23 @@ def test_default_path_executes_every_stage(monkeypatch, capsys):
     assert {"prompt", "messages", "steps", "final_text"} <= set(exported)
     assert exported["messages"][0]["role"] == "user"
     assert "reward" not in exported
-    for dropped in (
+    # #149: the export is the whole row, so a saved run can still prove
+    # which cell it hit, which arm drew it, and which seed produced it.
+    for carried in (
         "selection_reason",
-        "parent_failure_id",
         "arm",
         "semantic_cluster",
         "semantic_novelty",
         "behavior_signature",
-        "grader_reason",
         "seed",
         "scenario_dimensions",
     ):
-        assert dropped not in exported
+        assert carried in exported, carried
+    assert exported["seed"] == row["seed"]
+    assert exported["scenario_dimensions"] == row["scenario_dimensions"]
+    # teacher-only context and the raw embedding still never ship
+    for never in ("privileged", "principle", "hidden_state", "reference", "vector"):
+        assert never not in exported
     assert any(t.get("faults") or t.get("world_state") for t in data.trajectories)
     assert any(
         (t.get("scenario_dimensions") or {}).get("tool")

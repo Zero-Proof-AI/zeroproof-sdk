@@ -280,8 +280,9 @@ def test_github_example_spec_works():
     assert isinstance(row.get("reward"), (int, float))
     assert row.get("label_source") == "conduct"
     assert row["messages"][0] == {"role": "user", "content": row["prompt"]}
-    assert "selection_reason" not in row
-    assert "arm" not in row
+    # #149: the exported row carries how it was drawn, not a projection
+    assert row["arm"]
+    assert "privileged" not in row
 
 
 def test_hosted_key_message_is_one_sentence(monkeypatch):

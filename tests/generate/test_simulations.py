@@ -3,20 +3,44 @@ import json
 import zeroproof.simulations as zps
 from tests.helpers import POLICY, TOOLS, scripted_agent
 
-_DROPPED = {
-    "selection_reason",
-    "parent_failure_id",
+# The only keys an exported row may never carry (#149): teacher-only
+# context and the raw embedding the diversity search keeps in memory.
+# Everything else the trajectory carries is evidence and goes to disk.
+_NEVER_EXPORTED = {
+    "privileged",
+    "principle",
+    "hidden_state",
+    "reference",
+    "rubric",
+    "vector",
+}
+# How the row was drawn, who judged it, and how to reproduce it. Lost
+# before #149, which is why a saved run could not prove its own coverage.
+_CARRIED = {
     "arm",
-    "scenario_dimensions",
     "behavior_signature",
-    "grader_reason",
+    "scenario_dimensions",
     "seed",
-    "semantic_cluster",
-    "semantic_novelty",
-    "llm_reward",
-    "llm_reason",
+    "selection_reason",
 }
 _PUBLIC = {
+    *_CARRIED,
+    "grader_reason",
+    "judge_name",
+    "judge_status",
+    "judge_meta",
+    "label_source",
+    "lineage",
+    "markers",
+    "llm_reward",
+    "llm_reason",
+    "parent_failure_id",
+    "semantic_cluster",
+    "semantic_novelty",
+    "steering",
+    "tools_used",
+    "opener",
+    "opening",
     "schema_version",
     "prompt",
     "messages",
@@ -140,10 +164,9 @@ def test_simulate_offline_end_to_end(tmp_path):
     assert row["messages"][0]["content"] == row["prompt"]
     assert any(m.get("role") == "assistant" for m in row["messages"])
     assert set(row) <= _PUBLIC
-    assert not (_DROPPED & set(row))
+    assert not (_NEVER_EXPORTED & set(row))
     assert row.get("tier") in {"ordinary", "ambiguous", "boundary", "adversarial"}
-    assert "selection_reason" not in row
-    assert "arm" not in row
+    assert set(row) >= _CARRIED, "the saved row proves how it was drawn"
 
 
 def test_save_omits_grade_when_ungraded(tmp_path):
@@ -163,9 +186,9 @@ def test_save_omits_grade_when_ungraded(tmp_path):
     assert "reward" not in row and "reason" not in row
     assert "fault_detected" not in row
     assert "llm_reward" not in row
-    assert not (_DROPPED & set(row))
+    assert not (_NEVER_EXPORTED & set(row))
     exported = data.rows()[0]
-    assert "selection_reason" not in exported
+    assert set(exported) >= _CARRIED
     assert "reward" not in exported
 
 

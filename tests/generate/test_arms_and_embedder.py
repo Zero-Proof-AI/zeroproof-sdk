@@ -177,6 +177,7 @@ def test_llm_guided_with_mocked_model(monkeypatch, tmp_path):
     row = json.loads(open(path).readline())
     assert {"prompt", "steps", "final_text"} <= set(row)
     assert isinstance(row.get("reward"), (int, float))
-    assert "selection_reason" not in row
-    assert "arm" not in row
-    assert "behavior_signature" not in row
+    # #149: the saved row keeps the search bookkeeping that explains it
+    assert row["selection_reason"]
+    assert row["arm"]
+    assert row["behavior_signature"]

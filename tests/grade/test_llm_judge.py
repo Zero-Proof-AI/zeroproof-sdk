@@ -52,8 +52,10 @@ def test_grade_llm_true_writes_fields(monkeypatch, tmp_path):
     assert "llm_reward" in row and "llm_reason" in row
     assert "reward" not in row or row.get("reward") is None
     assert row["scenario_id"]
-    assert "selection_reason" not in row
-    assert "grader_reason" not in row
+    # #149: the advisory pass leaves the deterministic lane alone, and the
+    # saved row still carries the bookkeeping that explains the draw
+    assert row["selection_reason"]
+    assert row.get("grader_reason") == data.trajectories[0].get("grader_reason")
 
 
 def test_llm_grade_needs_api_key(monkeypatch):

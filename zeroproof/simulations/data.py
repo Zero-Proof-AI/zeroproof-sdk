@@ -151,8 +151,41 @@ def _split_holdout(rows: list[dict], fraction: float | None) -> tuple[list[dict]
     return train, held
 
 
+#: Keys that must never reach an exported row, whatever the source row
+#: carries. ``privileged`` and its three fields are the teacher's context
+#: (see ``tests/api/test_privileged_leakage``); ``vector`` is the raw
+#: embedding the diversity search keeps in memory, big and meaningless
+#: once the run is over. Everything else on the row is evidence about the
+#: row -- how it was drawn, who judged it, what it measured -- and rides
+#: out to disk, because a saved run has to be able to prove those things.
+_EXPORT_NEVER = frozenset(
+    {
+        "privileged",
+        "principle",
+        "hidden_state",
+        "reference",
+        "rubric",
+        "vector",
+    }
+)
+
+#: Keys whose exported value ``export_row`` decides for itself above; the
+#: carry-through loop must not put the raw value back when the rule chose
+#: to leave the key off (``world_state: "unspecified"``, a ``faults`` plan
+#: with no fault modes in it).
+_EXPORT_NORMALIZED = frozenset({"world_state", "faults"})
+
+
 def export_row(row: dict) -> dict:
-    """Trainer-facing JSONL row. Search and embedder bookkeeping stay in memory."""
+    """The row as it goes to disk: everything the trajectory carries.
+
+    A saved run is evidence, so the export is the whole row minus
+    ``_EXPORT_NEVER``: the grade travels with its provenance
+    (``judge_name``, ``judge_status``, ``lineage``, ``markers``), the draw
+    with its coverage cell (``scenario_dimensions``, ``arm``) and its
+    ``seed``, and the world with its ``world_state`` and ``faults``. Keys
+    the rules below normalize keep the normalized value.
+    """
     out: dict[str, Any] = {
         "prompt": row.get("prompt", ""),
         "messages": row.get("messages") or conversation(row),
@@ -208,6 +241,16 @@ def export_row(row: dict) -> dict:
         out["quality_reason"] = row.get("quality_reason") or ""
         if row.get("quality_scores"):
             out["quality_scores"] = row["quality_scores"]
+    # Everything the rules above did not name. An allowlist here is what
+    # lost markers, judge_status, lineage, seed and scenario_dimensions on
+    # the way to disk (#149): a key nobody thought of became a key nobody
+    # could recover. The block list is the list that has to be maintained.
+    for key, value in row.items():
+        if value is None or key in _EXPORT_NEVER or key in _EXPORT_NORMALIZED:
+            continue
+        if isinstance(key, str) and key.startswith("_"):
+            continue  # engine scratch (_skipped and friends)
+        out.setdefault(key, value)
     # The wire row is born here for both the streamed file and save(), so
     # the stamp and the check live here and the two files always agree.
     stamp(out)
@@ -216,6 +259,20 @@ def export_row(row: dict) -> dict:
 
 
 _export_row = export_row  # old private name, kept for imports that still use it
+
+
+class RowList(list):
+    """A list of rows that also answers to being called.
+
+    ``SimulationData.rows`` was a method and ``ScoredData.rows`` a list,
+    so the two spellings were not interchangeable and ``for r in
+    data.rows`` failed with ``TypeError: 'method' object is not
+    iterable``. Returning this from the property keeps every existing
+    ``data.rows()`` call working while ``data.rows`` behaves like a list.
+    """
+
+    def __call__(self) -> RowList:
+        return self
 
 
 @dataclass
@@ -479,8 +536,17 @@ class SimulationData:
         report["selection"] = self.search.get("selection")
         return report
 
-    def rows(self) -> list[dict]:
-        return [export_row(t) for t in self.trajectories]
+    @property
+    def rows(self) -> RowList:
+        """The exported rows: exactly what ``save()`` and ``output=`` write.
+
+        One row per trajectory, through ``export_row``. Both spellings
+        work -- ``data.rows`` and ``data.rows()`` -- because
+        ``ScoredData.rows`` is a list attribute and this used to be a
+        method only, so ``for r in data.rows`` raised ``TypeError``
+        without hinting at the missing parentheses.
+        """
+        return RowList(export_row(t) for t in self.trajectories)
 
     def push(
         self,
