@@ -127,7 +127,13 @@ from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
-from .score.stats import compare_runs, decontaminate, marker_summary, metric_summary
+from .score.stats import (
+    compare_runs,
+    decontaminate,
+    eval_variance,
+    marker_summary,
+    metric_summary,
+)
 from .score.style import refusal_report, style_markers, style_report
 from .simulation import resolve_topology, simulate
 from .training import (
@@ -197,6 +203,7 @@ __all__ = [
     "delta_report",
     "dimensions_from_traces",
     "drop_leaky_rows",
+    "eval_variance",
     "evaluate",
     "export_dataset",
     "export_preference",
