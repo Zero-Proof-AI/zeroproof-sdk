@@ -462,6 +462,24 @@ with zps.training_run("sft-v3", dataset="ds_...", total_steps=1000) as run:
     run.finish(summary={"final_loss": loss}, adapter="s3://.../adapter")  # failed on exception
 ```
 
+### Is it hacking the reward right now?
+
+```python
+monitor = zps.HackMonitor(
+    run,
+    holdout=holdout_rows,             # prompts or {"prompt": ..., <columns the reward reads>}
+    gold=zps.reward_model(rm_run),    # or the hosted judge, or a second rule; any judge callable
+    every=10, k=4,                    # sample the holdout from the live policy every 10 steps
+    endorsed=["tool:lookup_order"],   # what the reward should track
+    stop_on="divergence",             # or "length", "drift", "feature", "any"; default: log only
+)
+trainer = GRPOTrainer(model, reward_funcs=[monitor.wrap(rule_reward)], ...)
+trainer.add_callback(monitor)
+trainer.add_callback(zps.TrainerCallback(run))
+```
+
+Over-optimization looks like one picture (rlhf-book ch. 14): the training reward keeps climbing while the evaluation you care about flattens, read against KL. The monitor draws it during the run instead of after. `wrap` watches the reward function, so the monitor keeps the last completions with their rewards and runs `hack_scan` on them; every `every` steps it samples the holdout from the live policy and scores it with the training reward (the proxy) and with `gold`, a scorer the proxy cannot see. `proxy_reward`, `gold_reward` and `holdout_length` land on the run beside the loss curve. Four alarms, one line each on the run: `divergence` (proxy up by `delta` over the window while the paired gold interval does not move up), `length` (completions grow while gold does not), `drift` (KL past `kl_budget`), `feature` (the batch scan says `reward_hack`). `stop_on` names the ones that stop training; a stopped run finishes as `stopped` with the reason, and `run.note(...)` puts anything else on the run's summary. `zps.format_hack_monitor(monitor.summary())` prints the curve and the alarms. [`examples/grpo`](examples/grpo) runs it by default.
+
 Plain HTTP, for a stack that is not Python: `POST /runs {"name", "dataset_id", "base_model", "total_steps"}` returns `runId`; `POST /runs/{id}/log {"points": [{"step": 10, "loss": 1.2, "lr": 1e-4}], "total_steps"?}` in batches of up to 500; `POST /runs/{id}/finish {"status": "done|failed|stopped", "summary"?, "adapter"?}`. All with `X-Api-Key`. Points are buffered on the client and a send that fails is retried on the next flush; the dashboard never interrupts the trainer. `zps.get_run(id)["series"]` returns the points, oldest first.
 
 ### Publish a dataset as a card

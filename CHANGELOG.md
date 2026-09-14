@@ -5,6 +5,7 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+<<<<<<< HEAD
 - `argument_grounding`: a marker for tool arguments that came from
   nowhere. `mark_grounding(rows)` stamps 1 when every string argument
   of every tool call appears in the prompt, the user and system turns,
@@ -16,6 +17,30 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - Hosted GRPO and DPO run on an L40S, so `zps.train(method="grpo")` on a
   served base (`Qwen/Qwen3-4B`) trains and serves; the docs no longer say a
   4B base does not fit.
+=======
+- `zps.HackMonitor(run, holdout=, proxy=, gold=, ...)`: is the run
+  hacking its reward right now (rlhf-book ch. 14, figure 1)? A
+  Transformers / TRL callback plus `monitor.wrap(reward_fn)` around the
+  reward function. Every `every` steps it samples the holdout from the
+  live policy (`k` completions on up to `n_prompts` asks) and scores it
+  twice: with the training reward (the proxy; `proxy=` or the wrapped
+  function) and with a scorer the proxy cannot see (`gold=`, any judge
+  under the SDK contract). Both land on the run as `proxy_reward` and
+  `gold_reward`, with `holdout_length`. Four alarms, one line each on
+  the run and in `monitor.alarms`: `divergence` (proxy up by `delta`
+  over `window` evals while the paired gold interval does not move
+  up), `length` (completions up by `length_pct` while gold does not),
+  `drift` (the trainer's KL past `kl_budget`), `feature` (the last
+  `buffer` completions' `hack_scan` says `reward_hack`; needs
+  `endorsed`). `stop_on=` names the alarms that stop the trainer; the
+  default logs only. The summary (`history`, `alarms`, `last_scan`,
+  `stopped_at`) rides on the run's `finish` through `run.note`, a
+  stopped run finishes as `stopped` with the reason;
+  `zps.format_hack_monitor(summary)` prints it. `TrainingRun.note`
+  is new: fields it sets travel with whichever callback finishes the
+  run. `examples/grpo` wires the monitor by default (`--monitor-every`,
+  `--stop-on`).
+>>>>>>> ed1a803 (monitor: HackMonitor watches a TRL run for reward hacking as it trains)
 - `zps.hack_scan(rows, endorsed=[...])`: what a grouped update would
   learn from these rewards, named before training (rlhf-book ch. 6, 14).
   Reward and every candidate feature are centered within ask, the way

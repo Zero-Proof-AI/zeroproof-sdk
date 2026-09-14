@@ -5,6 +5,7 @@
     modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl   # model-written set, ~80 holdout prompts
     modal run examples/grpo/train_modal.py --loss-type dr_grpo --no-scale-rewards     # Dr.GRPO
     modal run examples/grpo/train_modal.py --epsilon-high 0.28 --mask-truncated        # DAPO's clip and overlong mask
+    modal run examples/grpo/train_modal.py --monitor-every 5 --stop-on feature         # end the run on a named reward hack
 
 What happens:
 
@@ -16,7 +17,12 @@ What happens:
    that is pass@1 before.
 3. TRL's ``GRPOTrainer`` with a LoRA adapter, 8 generations per prompt.
    ``zps.TrainerCallback`` puts reward, KL and the progress bar on
-   zeroproofai.com/platform/training as it goes.
+   zeroproofai.com/platform/training as it goes. ``zps.HackMonitor``
+   samples the holdout from the live policy every ``--monitor-every``
+   steps, logs the proxy reward and completion length beside the training
+   curve, and scans the batch for what the reward is paying for; an alarm
+   is a line on the run, and ``--stop-on feature`` (or ``length``) ends
+   the run on it.
 4. The holdout is sampled again: pass@1 after. ``run.delta`` puts the
    before/after comparison on the run page, and the adapter lands on the
    ``zeroproof-grpo-runs`` volume under the run name.
@@ -155,6 +161,8 @@ def train(
     epsilon_high: float | None = None,
     scale_rewards: bool = True,
     mask_truncated: bool = False,
+    monitor_every: int = 10,
+    stop_on: str = "",
 ) -> dict:
     import json
 
@@ -188,6 +196,8 @@ def train(
         "mask_truncated": mask_truncated,
         "max_completion_length": max_completion_length,
         "lora_rank": lora_rank,
+        "monitor_every": monitor_every,
+        "stop_on": stop_on or None,
         "train_prompts": len(train_prompts),
         "holdout_prompts": len(holdout_prompts),
         "gpu": os.environ.get("ZP_GRPO_GPU", "A10G"),
@@ -270,14 +280,30 @@ def train(
             "down_proj",
         ],
     )
+    # The hack monitor samples the holdout from the live policy every
+    # ``monitor_every`` steps and scores it with the training reward
+    # (through ``wrap``) while ``hack_scan`` reads what the reward is paying
+    # for in the batch. No judge here, so no gold curve: the length and
+    # feature alarms still run, and ``endorsed`` says the lookup call is the
+    # behavior. ``--stop-on feature`` ends the run on a named hack.
+    monitor = zps.HackMonitor(
+        run,
+        holdout=[{"prompt": messages_for(p["prompt"]), "case": p["case"]} for p in holdout_prompts],
+        every=monitor_every,
+        k=eval_samples,
+        endorsed=["lookup_order"],
+        max_new_tokens=max_completion_length,
+        stop_on=[s for s in stop_on.split(",") if s],
+    )
     trainer = GRPOTrainer(
         model=model,
-        reward_funcs=[rule_reward],
+        reward_funcs=[monitor.wrap(rule_reward)],
         args=grpo,
         train_dataset=dataset,
         processing_class=tokenizer,
         peft_config=lora,
     )
+    trainer.add_callback(monitor)
     if run is not None:
         # finish=False: the holdout eval and the delta come after training.
         trainer.add_callback(zps.TrainerCallback(run, finish=False))
@@ -339,7 +365,11 @@ def train(
             by="category",
         )
     print(zps.format_delta_report(delta))
+    print(zps.format_hack_monitor(monitor.summary()))
     summary["delta_verdict"] = delta["target_verdict"]
+    summary["alarms"] = [f"step {a['step']} {a['kind']}" for a in monitor.alarms]
+    if monitor.stopped_at:
+        summary["stopped_at"] = monitor.stopped_at["step"]
     return summary
 
 
@@ -360,6 +390,8 @@ def main(
     epsilon_high: float = 0.0,
     no_scale_rewards: bool = False,
     mask_truncated: bool = False,
+    monitor_every: int = 10,
+    stop_on: str = "",
 ):
     from reward import build_prompts, split_holdout
 
@@ -401,5 +433,7 @@ def main(
         epsilon_high=epsilon_high or None,
         scale_rewards=not no_scale_rewards,
         mask_truncated=mask_truncated,
+        monitor_every=monitor_every,
+        stop_on=stop_on,
     )
     print("done:", summary)
