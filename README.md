@@ -174,6 +174,7 @@ zps.simulate(tools=my_tools, system_prompt=my_system_prompt, mode="adaptive", un
 | Example | What it does |
 |---|---|
 | [`examples/agent-behavior`](examples/agent-behavior) | Start here if the platform is new to you. Runs a coding agent with bad habits against real tests, streams every turn to Zero Proof as OTLP spans plus a judge verdict, and fills a dashboard with behaviour worth looking at. No dependencies. |
+| [`examples/bring-your-own-agent`](examples/bring-your-own-agent) | Your own callable: the `agent(message) -> {steps, final_text}` contract, the `agent_failed` report when it raises or returns the wrong shape, and `eval_sourced` keeping a held-out score out of the reward. Offline, no key. |
 | [`examples/prime-intellect-rl`](examples/prime-intellect-rl) | Generates a GRPO-ready dataset with `simulate(mode="rl")` and checks it carries gradient before you spend GPU time on it. |
 | [`examples/schema`](examples/schema) | One row file in, six training targets out: eval, SFT, preference, GRPO prompts, OPSD hints, OPD. Migrates any legacy file first. Offline, no key. |
 | [`examples/grpo`](examples/grpo) | GRPO on Modal, end to end: prompts from the simulator, a verifiable tool-discipline reward, TRL `GRPOTrainer` with LoRA, reward and KL on the dashboard, pass@1 before and after on a holdout with the paired delta on the run page. One A10G, under fifteen minutes. |
@@ -251,7 +252,7 @@ rows, report = zps.optimize(data, mode="rl", enforce_band=False)  # rank, do not
 report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 ```
 
-`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter.
+`optimize(mode="rl")` drops junk rows, duplicate rollouts within an ask (same trajectory twice adds nothing to a group-relative advantage), truncated rollouts, unanimous asks (all pass or all fail: zero advantage), and asks outside the difficulty band, then keeps whole groups round-robin across fault kinds. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter. Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
 
 The report also carries the reward-hack scan: `report["correlations"]` is corr(reward, feature) for reply length, tool-call count, and assistant turns, and `report["hygiene_warnings"]` names anything at or above `HACK_THRESHOLD` (0.3). Reward that tracks length or punishes tool use is a judge problem, so it is flagged, not pruned. The same scan, plus near-duplicate asks and length spread, runs in the publish gate. Standalone: `zps.reward_correlations(rows)`, `zps.dedupe_groups(rows)`, `zps.near_duplicate_prompts(rows)`, `zps.length_report(rows)`.
 
@@ -459,7 +460,7 @@ Internals are grouped by stage and may move between releases.
 |---|---|
 | `generate/` | situation grid, writer, diversity selection, agent runners and adapters |
 | `score/` | conduct checks, judges, quality ranking, selection for SFT and RL |
-| `ingest/` | trace loading, OpenTelemetry rows, platform push and pull |
+| `ingest/` | trace loading, OpenTelemetry rows (`gen_ai.usage.*` sums into `row["usage"]`), platform push and pull |
 | `world/` | the mock tool environment |
 | `run/` | the engine behind `simulate()`: knob resolution (`config.py`), spec loading (`spec.py`), row helpers (`rows.py`), and the scheduler itself (`engine.py`: inputs, build, loop, finish) |
 | `simulation.py`, `data.py`, `export.py` | the `simulate()` entry point, its result object, and training export |
