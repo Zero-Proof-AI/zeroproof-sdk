@@ -65,19 +65,27 @@ jobs:
       # uv publish reads UV_PUBLISH_TOKEN from the environment. With no token
       # set it falls back to Trusted Publishing over OIDC, which needs no stored
       # credential. Either path works without editing this file.
+      # The gate reads PyPI's JSON API, which is CDN-cached for minutes. A
+      # merge that lands right after a release can see the stale version list
+      # and try to upload the same wheel again; --check-url skips files that
+      # already exist upstream instead of failing the run.
       - name: publish
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN || secrets.PYPI_API_TOKEN }}
         run: |
           if [ -n "$UV_PUBLISH_TOKEN" ]; then
-            uv publish
+            uv publish --check-url https://pypi.org/simple/zeroproof/
           else
-            uv publish --trusted-publishing always
+            uv publish --trusted-publishing always --check-url https://pypi.org/simple/zeroproof/
           fi
       - name: tag the release
         env:
           V: ${{ needs.gate.outputs.version }}
         run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null 2>&1; then
+            echo "tag v$V already exists; nothing to do"
+            exit 0
+          fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v$V" -m "zeroproof $V"
