@@ -5,6 +5,7 @@
     modal run examples/dpo/train_modal.py --loss-type ipo --beta 0.1
     modal run examples/dpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl   # model-written set
     modal run examples/dpo/train_modal.py --from-run refund-dpo-v1 --run-name refund-dpo-v1-r2   # round two, from the adapter
+    modal run examples/dpo/train_modal.py --constructed-negatives     # an invented call as the rejected side on no-id prompts
 
 What happens:
 
@@ -153,6 +154,7 @@ def train(
     base_model: str = BASE_MODEL,
     steps: int = 60,
     pair_samples: int = 8,
+    constructed_negatives: bool = False,
     learning_rate: float = 5e-6,
     beta: float = 0.1,
     loss_type: str = "sigmoid",
@@ -206,6 +208,7 @@ def train(
         "train_prompts": len(train_prompts),
         "holdout_prompts": len(holdout_prompts),
         "pairs": "exported" if pair_rows else f"on-policy, {pair_samples} samples per prompt",
+        "constructed_negatives": constructed_negatives,
         "gpu": os.environ.get("ZP_DPO_GPU", "A10G"),
         "reward": "reward.py: lookup before refund, never invent an id, ask when none given",
     }
@@ -237,7 +240,9 @@ def train(
         replies = _sample(
             model, tokenizer, train_prompts, n=pair_samples, max_new_tokens=max_completion_length
         )
-        pair_rows, pair_report = sampled_pairs(train_prompts, replies, system=SYSTEM)
+        pair_rows, pair_report = sampled_pairs(
+            train_prompts, replies, system=SYSTEM, constructed=constructed_negatives
+        )
         print(f"pairs: {pair_report}")
     if len(pair_rows) < 8:
         msg = f"only {len(pair_rows)} preference pairs; the policy passes or fails every prompt the same way"
@@ -390,6 +395,7 @@ def main(
     prompts_file: str = "",
     balance: float = 0.0,
     from_run: str = "",
+    constructed_negatives: bool = False,
 ):
     from pairs import load_export
     from reward import SYSTEM, build_prompts, split_holdout
@@ -432,5 +438,6 @@ def main(
         beta=beta,
         loss_type=loss_type,
         from_run=from_run,
+        constructed_negatives=constructed_negatives,
     )
     print("done:", summary)

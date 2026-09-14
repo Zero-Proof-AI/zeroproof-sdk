@@ -94,6 +94,72 @@ def dpo_rows(pairs: list[dict], system: str) -> list[dict[str, Any]]:
     return out
 
 
+def invented_call(prompt: str, tool: str = "lookup_order") -> str:
+    """The rejected reply a no-id prompt never gets from the base policy: a
+    well-formed call to ``tool`` with an order id that appears nowhere in
+    the prompt, derived from the prompt so the pair is reproducible."""
+    import hashlib
+
+    digits = int(hashlib.sha256(prompt.encode()).hexdigest()[:6], 16) % 9000 + 1000
+    fake = f"ORD-{digits}"
+    if fake.lower() in prompt.lower():
+        fake = f"ORD-{(digits + 1) % 9000 + 1000}"
+    return (
+        "<tool_call>\n"
+        + json.dumps({"name": tool, "arguments": {"order_id": fake}})
+        + "\n</tool_call>"
+    )
+
+
+def constructed_negatives(
+    prompts: list[dict[str, Any]],
+    replies: list[list[str]],
+    *,
+    system: str,
+) -> list[dict[str, Any]]:
+    """One pair per no-id or off-topic prompt the policy answered without a
+    tool call: that reply as chosen, an invented call as rejected.
+
+    Why: DPO learns only from prompts with a pass and a fail, and the base
+    policy almost never invents an id on a no-id prompt, so those prompts
+    never pair and the with-id pairs teach "call the tool" across every
+    kind of prompt; a second round then makes it worse. The contrast has
+    to be put on the no-id prompts themselves. The chosen side is the
+    policy's own reply (on-policy), the rejected side is the one mistake
+    the reward names."""
+    from reward import parse_tool_call, score
+
+    out: list[dict[str, Any]] = []
+    for item, group in zip(prompts, replies):
+        case = item["case"]
+        if case.get("order_id"):
+            continue
+        best = None
+        for reply in group:
+            passes = (
+                parse_tool_call(reply) is None
+                and "<tool_call>" not in reply
+                and score(reply, case) >= 1.0
+            )
+            if passes and (best is None or len(reply) < len(best)):
+                best = reply
+        if best is None:
+            continue
+        out.append(
+            {
+                "prompt": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": item["prompt"]},
+                ],
+                "chosen": [{"role": "assistant", "content": best.strip()}],
+                "rejected": [{"role": "assistant", "content": invented_call(item["prompt"])}],
+                "margin": 1.0,
+                "constructed": True,
+            }
+        )
+    return out
+
+
 def sampled_pairs(
     prompts: list[dict[str, Any]],
     replies: list[list[str]],
@@ -101,10 +167,13 @@ def sampled_pairs(
     system: str,
     min_margin: float = 0.5,
     max_pairs_per_prompt: int = 2,
+    constructed: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """On-policy pairs: score the sampled replies with the rule, pair passes
     with fails per prompt (length-matched), return TRL rows and the pair
-    report (how often chosen is the longer side, mean margin)."""
+    report (how often chosen is the longer side, mean margin). With
+    ``constructed=True`` every no-id or off-topic prompt the policy answered
+    without a tool call also pairs that reply against an invented call."""
     from reward import reward_rows
 
     import zeroproof.simulations as zps
@@ -119,6 +188,10 @@ def sampled_pairs(
     )
     out = dpo_rows(pairs, system)
     report = dict(report)
+    if constructed:
+        extra = constructed_negatives(prompts, replies, system=system)
+        out.extend(extra)
+        report["constructed_pairs"] = len(extra)
     report["trl_rows"] = len(out)
     return out, report
 
@@ -169,4 +242,11 @@ def load_export(path: str, *, system: str | None = None) -> list[dict[str, Any]]
     return out
 
 
-__all__ = ["dpo_rows", "first_turn", "load_export", "sampled_pairs"]
+__all__ = [
+    "constructed_negatives",
+    "dpo_rows",
+    "first_turn",
+    "invented_call",
+    "load_export",
+    "sampled_pairs",
+]

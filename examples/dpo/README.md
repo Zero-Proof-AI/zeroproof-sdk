@@ -111,3 +111,23 @@ round one's after interval, which is what a stable measurement looks like.
 
 The pairs go stale as the policy moves, which is why each round samples
 its own; GRPO does the same every step.
+
+## Constructed negatives
+
+Round two from the balanced adapter made the invented-id habit worse
+(no-id pass@1 0.82 to 0.26): DPO learns only from prompts with a pass and
+a fail, the base almost never invents an id on a no-id prompt, so those
+prompts never pair, and the with-id pairs teach "call the tool" across
+every kind of prompt. `--constructed-negatives` puts the contrast where
+it is missing: for every no-id or off-topic prompt the policy answered
+without a tool call, that reply is the chosen side and an invented
+`lookup_order` call (an id derived from the prompt, never in it) is the
+rejected side. On-policy on the chosen side, the one named mistake on
+the other. `pairs.constructed_negatives` builds them; the pair report
+counts them as `constructed_pairs`.
+
+```bash
+uv run --with modal modal run examples/dpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl --balance 0.25 --constructed-negatives
+```
+
+CN_PLACEHOLDER

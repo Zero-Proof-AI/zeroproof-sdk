@@ -5,6 +5,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `examples/dpo --constructed-negatives`: for every no-id or off-topic
+  prompt the policy answered without a tool call, pair that reply
+  against an invented call (`pairs.constructed_negatives`), so DPO has
+  contrast on the prompts where its own samples had none; a second
+  balanced round without it had made the invented-id habit worse.
 - `data.grade(use_privileged=True)` / `grade_llm(use_privileged=)`: the
   hosted judge reads the row's `privileged` block (principle, reference,
   hidden state) as `judge_only` in its payload, with a prompt line on how

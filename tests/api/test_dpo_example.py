@@ -137,3 +137,58 @@ def test_load_export_reads_export_preference_output(tmp_path):
     assert loaded[0]["prompt"][-1]["role"] == "user"
     assert loaded[0]["chosen"][0]["content"] == CALL
     assert loaded[0]["rejected"][0]["content"] == REFUND
+
+
+def test_constructed_negatives_pair_the_ask_against_an_invented_call():
+    r, p = _modules()
+    prompts = [
+        {
+            "prompt": "I want a refund but lost the order number",
+            "case": r.case_for("I want a refund but lost the order number"),
+            "scenario_id": "a",
+        },
+        {
+            "prompt": "Do you sell gift cards?",
+            "case": r.case_for("Do you sell gift cards?"),
+            "scenario_id": "b",
+        },
+        {
+            "prompt": "please check ORD-4017 for me",
+            "case": r.case_for("please check ORD-4017 for me"),
+            "scenario_id": "c",
+        },
+        {
+            "prompt": "My order never came, no idea of the id",
+            "case": r.case_for("My order never came, no idea of the id"),
+            "scenario_id": "d",
+        },
+    ]
+    replies = [
+        [
+            "Sure, what is the order number?",
+            CALL,
+            "Could you share the order id so I can look it up?",
+        ],
+        ["No, we do not sell gift cards.", "Not at the moment."],
+        [CALL, REFUND],
+        [CALL, CALL],  # always invents: no chosen side to build from
+    ]
+    out = p.constructed_negatives(prompts, replies, system="SYS")
+    assert [row["prompt"][1]["content"] for row in out] == [
+        prompts[0]["prompt"],
+        prompts[1]["prompt"],
+    ]
+    assert (
+        out[0]["chosen"][0]["content"] == "Sure, what is the order number?"
+    )  # the shortest passing reply
+    rejected = out[0]["rejected"][0]["content"]
+    assert "<tool_call>" in rejected and "lookup_order" in rejected
+    fake = json.loads(rejected.split("<tool_call>")[1].split("</tool_call>")[0])["arguments"][
+        "order_id"
+    ]
+    assert fake.startswith("ORD-") and fake.lower() not in prompts[0]["prompt"].lower()
+    assert p.invented_call(prompts[0]["prompt"]) == p.invented_call(prompts[0]["prompt"])
+    assert all(row["constructed"] for row in out)
+    rows, report = p.sampled_pairs(prompts, replies, system="SYS", constructed=True)
+    assert report["constructed_pairs"] == 2 and report["trl_rows"] == len(rows)
+    assert sum(1 for row in rows if row.get("constructed")) == 2
