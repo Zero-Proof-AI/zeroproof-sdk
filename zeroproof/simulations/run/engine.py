@@ -562,8 +562,13 @@ class Run:
                 condition = status
                 break
         else:
-            for plan in faults or []:
-                kind = str((plan or {}).get("fault") or "")
+            # A plan is {tool: {"mode": ...}} (clean_faults); older callers
+            # passed a list of {"fault": ...}. Both name the condition.
+            plans = list(faults.values()) if isinstance(faults, dict) else list(faults or [])
+            for plan in plans:
+                if not isinstance(plan, dict):
+                    continue
+                kind = str(plan.get("mode") or plan.get("fault") or "")
                 if kind:
                     condition = kind
                     break
@@ -587,9 +592,12 @@ class Run:
             }
         meta = dict(meta or {})
         assignment = meta.get("assignment") or meta.get("scenario_dimensions")
-        faults = self._scaled(
-            self.generator.fault_plans.get(prompt) or self.fault_plans.get(prompt), prompt
-        )
+        if prompt in self.pinned_plans:
+            faults = self.pinned_plans[prompt] or None
+        else:
+            faults = self._scaled(
+                self.generator.fault_plans.get(prompt) or self.fault_plans.get(prompt), prompt
+            )
         # the caller's execute= world reads this to know which rollout it answers
         current_rollout.prompt = prompt
         current_rollout.rollout_index = rollout
@@ -751,6 +759,10 @@ class Run:
         self.region_novelty: dict[str, float] = {}
         self.behavior_gap_prompts: list[str] = []
         self.generated_pool = []
+        # tasks= : the prompts to replay, in order, and the plan (faults,
+        # world state, stance) each ran under. The pool is exactly these.
+        self.pinned_prompts: list[str] = []
+        self.pinned_plans: dict[str, dict] = {}
         self.scenario_families: list[tuple[str, frozenset[str]]] = []
         self.situation_prompts: dict[str, list[str]] = {}
         self.prompt_rollouts: dict[str, int] = {}
@@ -808,6 +820,24 @@ class Run:
         self.inflight_started: dict = {}
 
     def _seed_pool(self) -> None:
+        c = self.c
+        for task in c.pinned_tasks:
+            prompt = task["prompt"]
+            self.pinned_prompts.append(prompt)
+            self.generated_pool.append(prompt)
+            meta: dict[str, Any] = {"arm": task["arm"], "generator": "pinned", "seed": c.seed}
+            if task.get("scenario_id"):
+                meta["region_id"] = task["scenario_id"]
+            if task.get("assignment"):
+                meta["assignment"] = task["assignment"]
+            self.generator.meta[prompt] = meta
+            self.generator.provenance[prompt] = task["arm"]
+            plan = dict(task.get("plan") or {})
+            self.pinned_plans[prompt] = plan
+            if plan:
+                # The runner reads this dict by prompt: the mock world
+                # answers under the same faults and world state as before.
+                self.fault_plans[prompt] = plan
         for text in self.seed_prompts:
             text = str(text).strip()
             if not text:
@@ -852,6 +882,10 @@ class Run:
         c = self.c
         if prompt in self.used or prompt in self.discarded:
             return False
+        if prompt in self.pinned_plans:
+            # A pinned prompt is owed its rollouts whatever the situation
+            # caps say; the caller fixed the task set.
+            return True
         meta = self.generator.meta.get(prompt) or {}
         sk = _situation_key_from_meta(meta, prompt)
         if self.explore_only:
@@ -1124,7 +1158,9 @@ class Run:
         gen = self.generator
         data = self.data
         self.generation_started = time.monotonic()
-        if gen.model is None:
+        if self.pinned_prompts:
+            pass  # tasks=: the pool is the task set; nothing is written
+        elif gen.model is None:
             texts = list(gen(None, 0, include_model=False) or [])
             self.generated_pool.extend(texts)
         else:
@@ -1287,6 +1323,8 @@ class Run:
             concurrent.futures.wait(list(self.scenario_futs))
         self._ingest_finished_writers()
         data.scenario_generation_seconds = time.monotonic() - self.generation_started
+        if self.pinned_prompts:
+            return self._available()
         unused = self._available()
         if unused or self.inflight:
             self.writer_idle = 0
@@ -1363,6 +1401,12 @@ class Run:
         gen = self.generator
         selected: list[dict] = []
         info: dict = {}
+        if self.pinned_prompts:
+            # No novelty pick, no family cap: every pinned prompt runs.
+            return [
+                {"text": p, "cluster": None, "novelty": None, "reason": "pinned"}
+                for p in unused[: max(0, take)]
+            ], info
         if unused:
             pick_n = take if self.explore_only else max(take * 3, take)
             selected, info = self._select(
@@ -1477,8 +1521,9 @@ class Run:
 
         # Named seed openers are extra requests, not writer completions.
         # Schedule them before hash selection can bury them.
-        if self.seed_prompts and take:
-            for prompt in dict.fromkeys(self.seed_prompts):
+        openers = list(dict.fromkeys([*self.pinned_prompts, *self.seed_prompts]))
+        if openers and take:
+            for prompt in openers:
                 if len(batch) >= take:
                     break
                 if prompt not in self.generated_pool or not self._prompt_available(prompt):
@@ -1561,7 +1606,7 @@ class Run:
         # search context. At most one mutation and one gap per batch.
         mutation_slots = 0
         gap_slots = 0
-        if gen.model is None:
+        if gen.model is None and not self.pinned_prompts:
             if c.mutate_failures:
                 mutation_slots = 1 if self.failing_rows else 0
             gap_slots = 1
@@ -1635,6 +1680,11 @@ class Run:
             note_stage(data, "resumed stopped groups: nothing fresh to open")
             return "continue"
         self.empty_streak += 1
+        if self.pinned_prompts and not self._available():
+            # tasks=: every pinned prompt has its rollouts (or was lost
+            # and re-rolled); there is nothing else this run may draw.
+            data.stopped_because = "tasks_done"
+            return "break"
         if (
             not self.cap_lifted["lifted"]
             and c.n_situations_target
@@ -2419,6 +2469,15 @@ class Run:
         data.allocator = dict(self.allocator_counts)
         if self.seed_amp_report:
             data.search["seed_amplification"] = self.seed_amp_report
+        if c.pinned_tasks:
+            ran = {str(t.get("prompt") or "") for t in data.trajectories}
+            pinned = set(self.pinned_prompts)
+            data.search["pinned_tasks"] = {
+                "prompts": len(pinned),
+                "tasks": len({t["scenario_id"] for t in c.pinned_tasks if t.get("scenario_id")}),
+                "ran": len(pinned & ran),
+                "missing": sorted(pinned - ran)[:20],
+            }
         if self.drafted_tools:
             data.search["drafted_tools"] = self.drafted_tools
         data.search["strategy"] = {

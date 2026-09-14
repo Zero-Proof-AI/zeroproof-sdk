@@ -36,6 +36,7 @@ def test_default_budget_is_500():
         "scaffold",
         "execute",
         "output",
+        "tasks",
         "advanced",
     ]
     named = [name for name, p in params.items() if p.kind is not inspect.Parameter.VAR_KEYWORD]

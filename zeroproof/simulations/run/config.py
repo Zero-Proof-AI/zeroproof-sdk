@@ -93,6 +93,61 @@ def _parse_situations_arg(
     return max(1, int(situations)), seeds
 
 
+def _pinned_tasks(tasks: Any) -> list[dict]:
+    """The task set a run replays instead of drawing its own (#98).
+
+    ``tasks`` is a previous run (``SimulationData``), its rows, or a JSONL
+    path. One entry per distinct prompt, in first-seen order, carrying
+    what the engine needs to land the row on the same task: the prompt,
+    its ``scenario_id`` and ``scenario_dimensions``, the arm, and the
+    fault plan and world state the rollout ran under.
+    """
+    if tasks is None:
+        return []
+    source = tasks
+    if hasattr(source, "trajectories"):
+        source = source.trajectories
+    elif isinstance(source, (str, Path)):
+        from ..score.quality import load_jsonl
+
+        source = load_jsonl(str(source))
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in source if isinstance(source, (list, tuple)) else list(source):
+        if not isinstance(row, dict):
+            continue
+        prompt = str(row.get("prompt") or "").strip()
+        if not prompt or prompt in seen:
+            continue
+        seen.add(prompt)
+        dims = row.get("scenario_dimensions")
+        dims = dict(dims) if isinstance(dims, dict) and dims else None
+        faults = row.get("faults")
+        plan: dict[str, Any] = {
+            k: dict(v) for k, v in (faults or {}).items() if isinstance(v, dict)
+        }
+        world = row.get("world_state") or (dims or {}).get("world_state")
+        if world and str(world) != "unspecified":
+            plan["world_state"] = str(world)
+        stance = (dims or {}).get("stance")
+        if stance:
+            plan["stance"] = str(stance)
+        out.append(
+            {
+                "prompt": prompt,
+                "scenario_id": str(row.get("scenario_id") or row.get("task_id") or "") or None,
+                "assignment": dims,
+                "arm": str(row.get("arm") or "") or "pinned",
+                "plan": plan,
+            }
+        )
+    if not out:
+        raise ValueError(
+            "tasks= has no rows with a prompt; pass a previous run, its rows, or a JSONL path"
+        )
+    return out
+
+
 def _merge_advanced(advanced: dict | None, passed: dict) -> tuple[dict, dict]:
     """Split silent aliases from advanced knobs. Unknown names error."""
     cfg = dict(advanced or {})
@@ -236,6 +291,8 @@ class RunConfig:
     seeds: list | None
     seed_prompts: list[str]
     n_situations_target: int | None
+    # tasks= : replay exactly these prompts on their scenario ids, draw none
+    pinned_tasks: list[dict]
     # topology
     topo: dict
     repeat_count: int
@@ -320,6 +377,7 @@ def resolve_run_config(
     scaffold: str | None = None,
     execute: Callable | None = None,
     output: str | None = None,
+    tasks: Any = None,
     advanced: dict | None = None,
     passed: dict | None = None,
 ) -> RunConfig:
@@ -360,6 +418,11 @@ def resolve_run_config(
         if text:
             seed_prompts.append(text)
     n_situations_target, seed_prompts = _parse_situations_arg(situations, seed_prompts)
+    pinned_tasks = _pinned_tasks(tasks)
+    if pinned_tasks and seed_prompts:
+        raise ValueError(
+            "tasks= replays a fixed task set; it cannot be combined with seeds= or seed_prompts"
+        )
 
     concurrency = int(cfg.pop("concurrency", 32))
     dimensions = cfg.pop("dimensions", None)
@@ -501,6 +564,7 @@ def resolve_run_config(
         seeds=seeds,
         seed_prompts=seed_prompts,
         n_situations_target=n_situations_target,
+        pinned_tasks=pinned_tasks,
         topo=topo,
         repeat_count=repeat_count,
         n_req=n_req,

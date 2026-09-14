@@ -81,6 +81,7 @@ def simulate(
     scaffold: str | None = None,
     execute: Callable | None = None,
     output: str | None = None,
+    tasks: Any = None,
     advanced: dict | None = None,
     **passed: Any,
 ) -> SimulationData:
@@ -126,6 +127,18 @@ def simulate(
     ``advanced["completions_per_request"]``. Seed openers are
     ``advanced["seed_prompts"]``.
 
+    ``tasks=`` re-runs a previous run's task set instead of drawing a new
+    one: pass that run (``SimulationData``), its rows, or its JSONL path.
+    Every distinct prompt is rolled out again, ``repeat_count`` times,
+    on its own ``scenario_id`` and ``scenario_dimensions`` and under the
+    same faults and world state, and nothing else is generated. A run
+    otherwise draws its tasks from the grid by seed and, above
+    ``concurrency: 1``, by completion order, so a re-run shares only part
+    of its tasks with the first and ``compare_runs`` drops the rest;
+    pinning is how an A/B (a prompt edit, a model swap, another seed)
+    keeps every pair. The run stops when every pinned prompt has its
+    rollouts (``stopped_because="tasks_done"``) or the budget is spent.
+
     A seeded run is reproducible bit-for-bit at ``concurrency: 1``,
     apart from timing fields and per-invocation identity: with
     ``grader=`` every row's ``lineage.scoring_run_id`` names that one
@@ -164,6 +177,7 @@ def simulate(
         scaffold=scaffold,
         execute=execute,
         output=output,
+        tasks=tasks,
         advanced=advanced,
         passed=passed,
     )

@@ -42,6 +42,15 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   Fault rows are kept per row from the row's own digest, one of every
   kind guaranteed, so a grid that grows keeps the verdict on the rows it
   had. Every existing grid changes once with this release.
+- `simulate(tasks=previous_run)` re-runs a previous run's task set (the
+  run, its rows, or its JSONL path) instead of drawing a new one: every
+  prompt again, on its own `scenario_id` and `scenario_dimensions`, under
+  the same faults and world state, and nothing else generated; the run
+  stops with `tasks_done` once every prompt has its rollouts and reports
+  `search["pinned_tasks"]`. A run draws its tasks by seed and, above
+  `concurrency: 1`, by completion order, so even a same-policy re-run
+  paired 43 of 49 tasks; pinned, every A/B (prompt edit, model swap,
+  another seed) pairs all of them (#98).
 - `compare_runs` says when it dropped tasks: `note` names how many were
   on one side only and that the verdict rests on the shared ones, with
   "most tasks unpaired" in front when fewer than half paired;
