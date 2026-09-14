@@ -79,6 +79,15 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   repo-wide `*.jsonl` ignore had swallowed it) and the test requires it.
   On it: GRPO 120 steps 0.18 -> 0.85 (+0.63 [+0.50, +0.73]), Dr.GRPO at
   the same budget 0.17 -> 0.53, DPO one round 0.17 -> 0.69.
+- Reward model as a judge (rlhf-book ch. 5). `zps.train(ds, method="rm")`
+  trains a sequence-classification head on the set's pass-vs-fail pairs
+  (Bradley-Terry loss, the pairs DPO uses) and reports pair accuracy on the
+  held-out pairs before and after plus the score threshold that separates
+  them. `zps.reward_model(run)` is that run as a judge: it honors the judge
+  contract (`reward` 0/1 against the threshold, `score` raw), so it feeds
+  `data.grade(judge=)`, `evaluate`, `judge_trust` and
+  `build_preference_pairs`. Gate route `POST /runs/{id}/score`.
+
 - With `grader=`, every mode judges rows as they land, on the judge pool
   beside the rollouts; only the tail is judged after the clock. Before this
   explore and sft judged everything in one pass after the run, which on a

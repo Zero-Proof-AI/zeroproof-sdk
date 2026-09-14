@@ -1,8 +1,9 @@
 """Training runs: the loss curve and the progress bar on the platform.
 
-Two ways to train, one record. ``train`` starts SFT, GRPO or DPO on the
-platform's trainer and returns the run handle; ``serve`` puts a finished
-run's adapter on an OpenAI-compatible endpoint. Or your own trainer runs
+Two ways to train, one record. ``train`` starts SFT, GRPO, DPO or a reward
+model (``rm``) on the platform's trainer and returns the run handle;
+``serve`` puts a finished run's adapter on an OpenAI-compatible endpoint
+and ``reward_model`` turns a finished ``rm`` run into a judge. Or your own trainer runs
 wherever it runs and reports through the same handle: a run is created,
 points are logged as it goes, and it is finished with a status. The
 platform draws the curve and the progress bar at
@@ -368,7 +369,7 @@ def training_run(
     return run
 
 
-METHODS = ("sft", "grpo", "dpo")
+METHODS = ("sft", "grpo", "dpo", "rm")
 #: The bases the serving app runs. An adapter trained on any other base is a
 #: file on a volume that ``serve`` cannot host; the trainer's defaults
 #: (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) are not on this list.
@@ -392,9 +393,11 @@ def train(
     """Start a hosted fine-tune on a pushed dataset and return the run.
 
     ``method`` is ``"sft"`` (LoRA on the passing rows), ``"grpo"`` (the
-    reference-first-action reward over the graded rows) or ``"dpo"`` (a
-    pass against a fail per prompt, length matched). ``steps`` sets the
-    optimizer steps for GRPO and DPO, ``epochs`` the SFT epochs; each
+    reference-first-action reward over the graded rows), ``"dpo"`` (a
+    pass against a fail per prompt, length matched) or ``"rm"`` (a reward
+    model on those same pairs; ``reward_model(run)`` is then a judge).
+    ``steps`` sets the optimizer steps for GRPO, DPO and RM, ``epochs``
+    the SFT epochs; each
     method has a default. ``holdout`` names the eval set; it defaults to
     the train set's split sibling from ``datasets.cut``. ``base_model``
     overrides the trainer's base; only ``SERVED_BASES`` can be served
@@ -454,6 +457,91 @@ def train(
     if wait:
         run.wait(timeout=timeout, poll=poll)
     return run
+
+
+class RewardModel:
+    """A finished ``method="rm"`` run as a judge (rlhf-book ch. 5).
+
+    Calling it with one rollout row honors the judge contract: ``reward``
+    is 1 when the model's score clears the run's pass threshold, 0
+    otherwise, and ``rm_score`` carries the raw number so ``judge_trust``,
+    ``build_preference_pairs(min_margin=)`` and a margin-aware loss can
+    use it. ``score(rows)`` scores a batch in one call. Rows are rendered
+    on the platform exactly as the model was trained: the run's system
+    prompt, the user prompt, the first assistant turn.
+    """
+
+    def __init__(
+        self,
+        run: TrainingRun | str,
+        *,
+        threshold: float | None = None,
+        api_key: str | None = None,
+        transport: Callable[..., Any] | None = None,
+    ):
+        self.run_id = run.run_id if isinstance(run, TrainingRun) else str(run or "").strip()
+        if not self.run_id:
+            raise ValueError("run: a finished reward-model run (zps.train(method='rm')) or its id")
+        self.threshold = threshold
+        self.__name__ = f"reward_model:{self.run_id}"
+        self._api_key = api_key
+        self._call = transport or _call
+        self.base: str | None = None
+
+    def score(self, rows: Sequence[dict]) -> list[dict[str, Any]]:
+        """``[{"rm_score", "reward", "threshold"}]`` for each row, in order.
+        Up to 256 rows a call; more are sent in batches."""
+        src = [r for r in rows if isinstance(r, dict)]
+        out: list[dict[str, Any]] = []
+        for i in range(0, len(src), 256):
+            chunk = src[i : i + 256]
+            res = self._call("POST", f"/runs/{self.run_id}/score", self._api_key, {"rows": chunk})
+            res = res if isinstance(res, dict) else {}
+            scores = list(res.get("scores") or [])
+            if len(scores) != len(chunk):
+                raise RuntimeError(
+                    f"reward model {self.run_id} answered {len(scores)} scores for {len(chunk)} rows"
+                )
+            t = float(self.threshold if self.threshold is not None else res.get("threshold", 0.0))
+            self.base = self.base or res.get("base")
+            out += [
+                {"rm_score": float(s), "reward": int(float(s) >= t), "threshold": t} for s in scores
+            ]
+        return out
+
+    def __call__(self, trajectory: dict) -> dict[str, Any]:
+        one = self.score([trajectory])[0]
+        verdict = ">=" if one["reward"] else "<"
+        return {
+            "reward": one["reward"],
+            "rm_score": one["rm_score"],
+            "threshold": one["threshold"],
+            "reason": f"reward model {self.run_id}: {one['rm_score']:.3f} {verdict} {one['threshold']:.3f}",
+        }
+
+    def __repr__(self) -> str:  # pragma: no cover - cosmetic
+        return f"RewardModel({self.run_id!r}, threshold={self.threshold})"
+
+
+def reward_model(
+    run: TrainingRun | str,
+    *,
+    threshold: float | None = None,
+    api_key: str | None = None,
+    transport: Callable[..., Any] | None = None,
+) -> RewardModel:
+    """A judge backed by a finished reward-model run.
+
+    ``run = zps.train("ds_...", method="rm", wait=True)`` trains a
+    sequence-classification head on the set's pass-vs-fail pairs and
+    picks the score threshold that best separates the held-out pairs.
+    ``judge = zps.reward_model(run)`` then scores any rollout row:
+    ``data.grade(judge=judge)``, ``zps.evaluate(rollouts, judge)``,
+    ``zps.judge_trust(scored.rows, judge=judge)``. Pass ``threshold=`` to
+    override the run's own cut. The scores are the model's; a reward
+    model trained on one agent's pairs says nothing about another agent.
+    """
+    return RewardModel(run, threshold=threshold, api_key=api_key, transport=transport)
 
 
 def models(*, api_key: str | None = None) -> list[dict[str, Any]]:

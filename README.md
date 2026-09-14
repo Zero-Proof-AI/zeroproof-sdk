@@ -392,10 +392,10 @@ zps.delta_report(
 
 ### Train, and watch it
 
-Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO or DPO, LoRA on an A10G) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
+Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO, DPO or a reward model, LoRA on an A10G) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
 
 ```python
-run = zps.train("ds_...", method="sft", base_model="Qwen/Qwen3-4B")  # or "grpo" (steps=), "dpo"
+run = zps.train("ds_...", method="sft", base_model="Qwen/Qwen3-4B")  # or "grpo" (steps=), "dpo", "rm"
 run.wait()  # done or failed; run.url is the curve while it goes
 run.training["before"], run.training["after"]  # holdout pass@1 (SFT: loss)
 model = zps.serve("refund-v2", run)  # adapter on an OpenAI-compatible endpoint
@@ -404,6 +404,15 @@ zps.models()  # what the account hosts
 ```
 
 `holdout=` names the eval set (defaults to the train set's split sibling); a dataset already training returns that run. `serve` needs a finished run whose base is a served one (`Qwen/Qwen3-4B`, `microsoft/phi-4`). The trainer's default bases (Qwen2.5-0.5B for SFT, 1.5B for GRPO and DPO) train in under a minute but cannot be served, so `train` warns when a run will not reach an endpoint; SFT on Qwen3-4B fits the A10G, GRPO and DPO on a 4B base do not yet. Qwen3 answers in thinking mode by default: leave room in `max_tokens` or send `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`.
+
+`method="rm"` trains a reward model (rlhf-book ch. 5) on the set's pass-vs-fail pairs and reports pair accuracy on the held-out pairs before and after. `zps.reward_model(run)` is that model as a judge, with the judge contract (`reward` 0/1 against the run's threshold, `rm_score` raw), so it goes wherever a judge goes:
+
+```python
+rm = zps.train("ds_...", method="rm", steps=60, wait=True)
+judge = zps.reward_model(rm)  # or reward_model("run_...", threshold=0.4)
+scored = data.grade(judge=judge)
+zps.judge_trust(scored.rows, judge=judge)  # the same checks as the LLM judge
+```
 
 Your own trainer, three ways in:
 
