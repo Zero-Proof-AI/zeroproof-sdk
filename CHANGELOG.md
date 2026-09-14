@@ -13,6 +13,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   per category). `examples/dpo --from-run` merges a previous round's
   adapter and samples fresh pairs from it: iterated on-policy DPO, with
   the merged policy saved for serving or a further round.
+  On the stratified split both GRPO (120 steps, 0.29 -> 0.81) and DPO
+  (one round, 0.29 -> 0.72) learned to invent an order id on a quarter of
+  the no-id prompts (no_id pass@1 0.95 -> 0.75 and 0.98 -> 0.72); the
+  hash split had hidden it. DPO round two from the round-one adapter:
+  0.63 -> 0.92.
 - `delta_report(by=...)`, and `by=` on `run.delta` / `attach_delta`: the
   target compared within each group of rows (a row key, a marker name,
   or a callable), reported as `groups` with `groups_down` for a group

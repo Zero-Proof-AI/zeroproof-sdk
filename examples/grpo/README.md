@@ -131,4 +131,28 @@ both scripts print and return `by_category_before` / `by_category_after`:
 pass@1 and the tool-call rate per category. On the old split the runs
 above did not regress off topic (GRPO 0.92 to 0.88 on 24 rows, DPO 0.92
 to 0.83, Dr.GRPO 0.83 to 0.96); the no-id case was simply unmeasured.
-STRAT_PLACEHOLDER
+
+On the stratified split (holdout 163 prompts: 130 with an id, 15 without,
+18 off topic) GRPO at 120 steps reads 0.29 [0.22, 0.35] to 0.81 [0.76,
+0.86] overall, and by category:
+
+| category | rows | pass@1 before | after | tool-call rate before | after |
+|---|---|---|---|---|---|
+| with_id | 520 | 0.11 | 0.80 | 0.11 | 0.81 |
+| no_id | 60 | 0.95 | 0.75 | 0.00 | 0.23 |
+| off_topic | 72 | 0.99 | 0.96 | 0.00 | 0.01 |
+
+The headline moved. The no-id prompts moved the other way: the policy
+learned to invent an order id on a quarter of them, which the old holdout
+could not see and the reward penalizes only on the prompts where it
+happens. `run.delta(..., by="category")` puts that table on the run page
+with an interval per group and marks the group that dropped; the reward
+weighting, or more no-id prompts in the set, is the fix, and now it is
+measurable.
+
+DPO, one round on the same split, 328 pairs: 0.29 [0.23, 0.35] to 0.72
+[0.66, 0.77] overall; with_id 0.12 to 0.69, no_id 0.98 to 0.72 with the
+tool-call rate 0.00 to 0.25, off_topic 0.97 to 0.94. Same regression,
+same size: both methods learned "call lookup" faster than "unless there is
+no id to look up". The category table is the difference between a run
+that reads as a win and one that reads as a trade.
