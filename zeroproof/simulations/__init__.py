@@ -129,6 +129,7 @@ from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
+from .score.stage import STAGES, format_stages, stage_of, stage_report, stamp_stage
 from .score.stats import compare_runs, decontaminate, marker_summary, metric_summary
 from .score.style import refusal_report, style_markers, style_report
 from .simulation import resolve_topology, simulate
@@ -156,6 +157,7 @@ __all__ = [
     "FAILURE_CLASSES",
     "HACK_THRESHOLD",
     "SCHEMA_VERSION",
+    "STAGES",
     "STOCK_MARKERS",
     "AgentProfile",
     "Calibration",
@@ -213,6 +215,7 @@ __all__ = [
     "format_delta_report",
     "format_judge_trust",
     "format_markers",
+    "format_stages",
     "format_trace_report",
     "from_row",
     "get_run",
@@ -279,6 +282,9 @@ __all__ = [
     "simulate",
     "simulate_from_traces",
     "split_pseudo_production",
+    "stage_of",
+    "stage_report",
+    "stamp_stage",
     "style_markers",
     "style_report",
     "to_row",
