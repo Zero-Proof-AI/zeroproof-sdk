@@ -316,6 +316,17 @@ def run_judge(
         fc = (verdict["judge_meta"] or {}).get("failure_class")
         if fc:
             out["failure_class"] = str(fc)
+        # normalize_judge_result sweeps every non-reward key into judge_meta,
+        # so a judge that returns markers left them where marker_summary does
+        # not look: it reads row["markers"], the flat shape to_row emits. Lift
+        # them onto the row. The judge's markers win on a name collision,
+        # because it just measured the row.
+        markers = (verdict["judge_meta"] or {}).get("markers")
+        if isinstance(markers, dict) and markers:
+            prior = row.get("markers")
+            merged = dict(prior) if isinstance(prior, dict) else {}
+            merged.update({str(k): v for k, v in markers.items()})
+            out["markers"] = merged
         parent = row.get("scenario_id") or row.get("id") or f"row_{i}"
         lineage = dict(row.get("lineage") or {})
         lineage.update(

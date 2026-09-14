@@ -2112,6 +2112,7 @@ class Run:
                     "judge_status",
                     "judge_name",
                     "failure_class",
+                    "markers",
                     "lineage",
                 ):
                     if key in verdict:

@@ -117,3 +117,59 @@ def test_agreement_is_exported():
     assert zps.judge_agreement is judge_agreement
     with pytest.raises(TypeError):
         judge_agreement()  # type: ignore[call-arg]
+
+
+def _marker_judge(row):
+    """The documented judge contract, returning a behavior measurement."""
+    return {
+        "reward": 1 if "shipped" in row["final_text"] else 0,
+        "reason": "ok",
+        "markers": {"phantom_number": 0.0 if "shipped" in row["final_text"] else 1.0},
+    }
+
+
+def test_markers_a_judge_returns_reach_marker_summary():
+    """A marker is only a measurement if something can read it back.
+
+    ``normalize_judge_result`` sweeps every non-reward key into
+    ``judge_meta``; ``marker_summary`` reads ``row["markers"]``. Without
+    the lift the two never meet and every marker silently reports nothing.
+    """
+    scored = run_judge(_rows(10), _marker_judge, judge_name="m")
+    rows = list(scored.rows)
+    assert all(
+        row["markers"] == {"phantom_number": pytest.approx(0.0 if i % 2 else 1.0)}
+        for i, row in enumerate(rows)
+    )
+    # judge_meta keeps its copy: nothing that read it before breaks.
+    assert rows[0]["judge_meta"]["markers"] == {"phantom_number": 1.0}
+    summary = zps.marker_summary(rows)
+    assert summary["phantom_number"]["n_rows"] == 10
+    assert summary["phantom_number"]["mean"] == pytest.approx(0.5)
+
+
+def test_judge_markers_merge_with_markers_already_on_the_row():
+    rows = [dict(row, markers={"kept": 1.0}) for row in _rows(2)]
+    scored = run_judge(rows, _marker_judge, judge_name="m")
+    assert sorted(zps.marker_summary(scored.rows)) == ["kept", "phantom_number"]
+
+
+def test_a_judge_without_markers_adds_no_markers_key():
+    scored = run_judge(_rows(2), lambda t: 1)
+    assert all("markers" not in row for row in scored.rows)
+
+
+def test_simulate_grader_markers_survive_onto_the_trajectories():
+    """``grader=`` is the only in-simulate score hook; it copied six keys
+    and dropped markers on the floor."""
+    from tests.helpers import simulate_offline
+
+    data = simulate_offline(budget=8, per_round=8, concurrency=1, grader=_marker_judge)
+    assert data.trajectories
+    assert all(isinstance(row.get("markers"), dict) for row in data.trajectories)
+    assert zps.marker_summary(data.trajectories)["phantom_number"]["n_rows"] == len(
+        data.trajectories
+    )
+    # The lifted markers are wire-legal and round-trip to Marker objects.
+    assert all(not schema.validate(row) for row in data.trajectories)
+    assert schema.from_row(data.trajectories[0])[3][0].name == "phantom_number"
