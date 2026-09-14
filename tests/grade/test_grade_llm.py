@@ -1,5 +1,7 @@
 """Binary judge contract. Offline: no hosted calls."""
 
+import pytest
+
 import zeroproof.simulations as zps
 from zeroproof.simulations.score.grade_llm import (
     AUDIT_SYSTEM,
@@ -157,3 +159,30 @@ def test_parse_verdict_still_reads_chatter_and_truncation():
     assert _parse_verdict('{"reason": "no lookup", "score": 0') == (0, "no lookup")
     assert _parse_verdict("1") == (1, "")
     assert _parse_verdict("0") == (0, "")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"score":1.5}',
+        '{"score":"1"}',
+        '{"score":0,"score":1}',
+        '{"score":1,"reward":0}',
+        "true",
+        '{"score":true}',
+        '{"score":NaN}',
+        '{"score":1.',
+        '{"reason": "cut off", "score": 1.5',
+    ],
+)
+def test_invalid_verdict_never_salvages_a_pass(text):
+    # A complete object that breaks the contract (string score, duplicate
+    # key, score disagreeing with reward, non-binary number) is the
+    # judge's answer and it is not a verdict. Nothing around it is mined
+    # for a digit. Issue #64.
+    assert _parse_verdict(text)[0] is None
+
+
+def test_last_complete_object_is_the_verdict():
+    echoed = 'Format: {"score": 0 or 1, "reason": "..."}\n{"reason": "did it", "score": 1}'
+    assert _parse_verdict(echoed) == (1, "did it")

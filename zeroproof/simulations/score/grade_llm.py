@@ -265,6 +265,61 @@ def _user_message(
     return (lead + body) if lead else body
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate key {key!r}")
+        out[key] = value
+    return out
+
+
+def _verdict_from_object(payload: dict) -> int | None:
+    """0 or 1 from a decoded judge object; None on any contract break.
+
+    The contract is one numeric ``score`` (or ``reward``) that is exactly
+    0 or 1. A string ``"1"``, a bool, 1.5, NaN, or a ``score`` that
+    disagrees with a ``reward`` in the same object is not a verdict.
+    """
+    if "score" in payload and "reward" in payload and payload["score"] != payload["reward"]:
+        return None
+    raw = payload["score"] if "score" in payload else payload.get("reward")
+    if raw is None or isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    value = float(raw)
+    if value == 0.0:
+        return 0
+    if value == 1.0:
+        return 1
+    return None
+
+
+def _objects_in(text: str) -> list[dict]:
+    """Every complete JSON object in ``text``, in order. Chatter is skipped."""
+    decoder = json.JSONDecoder(object_pairs_hook=_no_duplicate_keys)
+    found: list[dict] = []
+    idx = text.find("{")
+    while idx != -1:
+        try:
+            payload, stop = decoder.raw_decode(text, idx)
+        except ValueError:
+            # Not decodable from here: a duplicate key, or a truncated
+            # object. A duplicate-keyed object is still complete, so it
+            # must count as a contract break, not as chatter.
+            try:
+                payload, stop = json.JSONDecoder().raw_decode(text, idx)
+            except ValueError:
+                idx = text.find("{", idx + 1)
+                continue
+            payload = None
+        if isinstance(payload, dict):
+            found.append(payload)
+        elif payload is None:
+            found.append({})
+        idx = text.find("{", stop)
+    return found
+
+
 def _parse_verdict(text: str) -> tuple[int | None, str]:
     cleaned = _THINK.sub("", str(text or "")).strip()
     cleaned = _FENCE.sub("", cleaned).strip()
@@ -272,35 +327,31 @@ def _parse_verdict(text: str) -> tuple[int | None, str]:
         return None, ""
     reason = ""
     score: int | None = None
-    try:
-        payload = json.loads(cleaned)
-        if isinstance(payload, dict):
-            raw_reason = payload.get("reason")
-            if isinstance(raw_reason, str):
-                reason = " ".join(raw_reason.split())[:400]
-            raw = payload.get("score", payload.get("reward"))
-            if isinstance(raw, bool):
-                raw = None
-            if raw is not None:
-                value = float(raw)
-                if value == 0.0:
-                    score = 0
-                elif value == 1.0:
-                    score = 1
-        elif not isinstance(payload, bool) and payload in (0, 1, 0.0, 1.0):
+    objects = _objects_in(cleaned)
+    if objects:
+        # The last complete object is the verdict; a prompt echo that
+        # contains an example object comes before it. Once a complete
+        # object exists, it alone decides: no digit hunting around it.
+        payload = objects[-1]
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str):
+            reason = " ".join(raw_reason.split())[:400]
+        score = _verdict_from_object(payload)
+    else:
+        try:
+            payload = json.loads(cleaned)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            payload = None
+        if payload is not None and not isinstance(payload, bool) and payload in (0, 1, 0.0, 1.0):
             # A bare ``true`` parses as 1 in Python; it is not a verdict.
             score = int(payload)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        pass
-    if score is None:
-        # Chatter around the object, or a reply cut off after the score.
-        # The digit must end the number: ``1.5`` and ``0.5`` are not 1 and
-        # 0, they are contract breaks and stay ungraded.
-        match = re.search(r'"(?:score|reward)"\s*:\s*(0|1)(?:\.0+)?\s*(?:[,}]|$)', cleaned)
-        if match:
-            score = int(match.group(1))
-        elif cleaned in {"0", "1"}:
-            score = int(cleaned)
+        else:
+            # A reply cut off right after the score, with no complete
+            # object anywhere. The digit must end the number: ``1.5``
+            # and ``0.5`` are not 1 and 0, they stay ungraded.
+            match = re.search(r'"(?:score|reward)"\s*:\s*(0|1)(?:\.0+)?\s*(?:[,}]|$)', cleaned)
+            if match:
+                score = int(match.group(1))
     if not reason:
         found = re.search(r'"reason"\s*:\s*"((?:\\.|[^"\\])*)"', cleaned)
         if found:
