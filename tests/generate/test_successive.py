@@ -125,3 +125,14 @@ def test_clock_finishes_groups_instead_of_cutting_them():
     # could be short; nothing is silently counted as k
     for prompt in cut:
         assert sum(1 for t in data.trajectories if t["prompt"] == prompt) < 4
+
+
+def test_every_mode_judges_beside_the_loop_when_a_grader_is_given():
+    for mode in ("explore", "sft"):
+        data = zps.simulate(_flaky(), mode=mode, budget=12, grader=_judge, **offline())
+        rows = data.trajectories
+        assert rows and all(t.get("judge_status") for t in rows)
+        grader = data.search["grader"]
+        assert grader["scored"] == len(rows)
+        # the rows were judged as they landed, not in one pass after the clock
+        assert grader["judged_in_loop"] == len(rows) and grader["judged_after"] == 0, grader

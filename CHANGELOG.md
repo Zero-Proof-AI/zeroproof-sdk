@@ -12,6 +12,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   repo-wide `*.jsonl` ignore had swallowed it) and the test requires it.
   On it: GRPO 120 steps 0.18 -> 0.85 (+0.63 [+0.50, +0.73]), Dr.GRPO at
   the same budget 0.17 -> 0.53, DPO one round 0.17 -> 0.69.
+- With `grader=`, every mode judges rows as they land, on the judge pool
+  beside the rollouts; only the tail is judged after the clock. Before this
+  explore and sft judged everything in one pass after the run, which on a
+  120 s run added about a minute past the budget. `data.search["grader"]`
+  now says how many rows were judged in the loop and how many after.
 
 ## 0.30 (2026-09-14)
 

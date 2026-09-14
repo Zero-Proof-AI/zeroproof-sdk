@@ -776,6 +776,8 @@ class Run:
             max_workers=max(1, int(c.concurrency))
         )
         self.judge_inflight: dict = {}
+        self.judged_in_loop = 0
+        self._successive = c.topo["repeat_policy"] == "successive" and not c.k_immediate
         # Set when the clock can no longer fit a fresh group: only verify
         # jobs are scheduled so in-flight groups finish before the whistle.
         self.closing = False
@@ -1928,7 +1930,10 @@ class Run:
             if t["scenario_id"] in region_index
         ]
         successive = c.topo["repeat_policy"] == "successive" and not c.k_immediate
-        judged_async = successive and c.grader is not None
+        # Any mode with a grader judges beside the loop: rows are judged as
+        # they land instead of all at once after the clock, which on a
+        # 120 s explore run added a minute of judging past the budget.
+        judged_async = c.grader is not None
         for t, job in zip(results, jobs_for):
             prompt = str(t.get("prompt") or job[0] or "")
             if not prompt:
@@ -2136,9 +2141,10 @@ class Run:
                 if key in verdict:
                     row[key] = verdict[key]
             prompt = str(row.get("prompt") or job[0] or "")
-            if prompt:
+            if prompt and self._successive:
                 self._successive_update(prompt, row, job)
             landed += 1
+        self.judged_in_loop += landed
         return landed
 
     def _resume_stopped(self, remaining: int) -> int:
@@ -2534,6 +2540,8 @@ class Run:
             )
             data.search["grader"] = {
                 "judge": scored.judge_name,
+                "judged_in_loop": self.judged_in_loop,
+                "judged_after": len(pending),
                 "scored": len(scored),
                 "passes": len(scored.passes()),
                 "failures": len(scored.failures()),
