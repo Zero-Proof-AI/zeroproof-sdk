@@ -3,8 +3,36 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.38 (2026-09-14)
 
+- Examples audit (#168, #169, #170, #171, #172). Every example now has a
+  test under `tests/examples/` that runs its offline path end to end and
+  checks README flags, defaults and quoted numbers against the code; 100+
+  new tests. Fixed: `bring-your-own-agent` part three had stopped firing
+  under rl mode's `successive` repeat policy; `pass-at-k` printed a
+  different pass@1 per run at the same seed (now `reproducible=True`,
+  `--concurrency` exposed); `agent-behavior --dry-run` exited 0 on a
+  dead endpoint; `identity/generate.py` wrote to a path on another
+  machine and `eval_modal.py` could not read its output (new
+  `report.py` with `identity_rate` / `leak_rate` and Wilson intervals);
+  `grpo` README told readers to pass `--gpu`, which the Modal
+  entrypoints now accept; `hosted-loop` ignored `zeroproof login`;
+  `prime-intellect-rl/export_prompts.py` crashed without `data/` and
+  collapsed rows with no `scenario_id` into one task; `hugging-face`
+  gained the `--push-run` the README promised; `verifiers` README no
+  longer points at a spec that does not exist. `examples/README.md` is
+  a map of the twelve examples in post-training order. Main README:
+  two broken code fences fixed, `dpo` and `hugging-face` added to the
+  table, `attach_labels` / `decontaminate` return shapes and `train()`
+  step/epoch knobs corrected.
+- `Weighted` verifier: a part that cannot run (no reference on the row)
+  now returns `reward: None` with the part's reason, like `ExactMatch`,
+  `All` and `Any`, instead of scoring 0; a rubric row with a missing
+  answer key no longer lands in RL data as a hard fail. Direct tests for
+  every exported name that had none (`datasets`, `delete_dataset`,
+  `list_runs`, `get_run`, `delete_run`, `models`, `claude_code`,
+  `hosted_model`, `novelty`, `behavior_signature`, `Trait`) and ten for
+  the OTLP `zeroproof.ingest` module, which had zero.
 - `delta_report(proxy=)`, and `proxy=` on `run.delta` / `attach_delta`:
   name the training reward's marker (e.g. `"marker:first_action"`) and
   the report says whether the run over-optimized it (rlhf-book ch. 14):
