@@ -332,6 +332,18 @@ zps.publish("ds_...", agent="airline-support")  # or publish an existing one
 zps.catalog()  # every public card, by agent
 rows = zps.pull("ds_...")  # public sets need no key
 zps.unpublish("ds_...")
+
+Hugging Face, both directions. Connect your account once on any dataset page, then:
+
+```python
+zps.hf_status()                                               # connected? namespaces
+zps.hf_publish("ds_...", repo="airline-refunds", wait=True)   # rows -> a dataset repo you own
+zps.hf_publish_run("run_...", private=True)                   # a finished run's LoRA adapter -> a model repo
+row = zps.import_hf("tatsu-lab/alpaca", split="train", purpose="eval")   # any Hub split -> your account
+zps.profile(row["datasetId"])                                 # profiled before you train on it
+```
+
+Every push is one commit tagged `zp-<id>`, so `load_dataset(repo, split, revision="zp-ds_...")` pins the exact push; the repo's `zeroproof.json` maps each split to its ZeroProof dataset with history.
 ```
 
 Cards live at https://zeroproofai.com/datasets, grouped by agent, with rows,

@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -444,6 +445,148 @@ def unpublish(dataset_id: str, *, api_key: str | None = None) -> dict:
 def catalog() -> dict:
     """The public catalog: ``{"datasets": [card, ...], "agents": [...]}``. No key needed."""
     return _call("GET", "/catalog", None, public=True)
+
+
+# ---------------------------------------------------------------- Hugging Face
+
+
+def _wait_hf(get: Any, timeout: float, poll: float) -> dict:
+    """Poll ``get()`` until its ``hf`` state settles. Raises PlatformError on error."""
+    deadline = time.monotonic() + timeout
+    while True:
+        row = get()
+        hf = row.get("hf") or {}
+        if hf.get("status") == "done":
+            return hf
+        if hf.get("status") == "error":
+            raise PlatformError(f"Hugging Face push failed: {hf.get('error', 'unknown error')}")
+        if time.monotonic() >= deadline:
+            raise PlatformError(
+                f"Hugging Face push still running after {int(timeout)} s; check hf on the row later"
+            )
+        time.sleep(poll)
+
+
+def hf_status(*, api_key: str | None = None) -> dict:
+    """Is a Hugging Face account connected to this account, and which
+    namespaces (you plus your orgs) can it publish under?
+
+    Connect one on any dataset page at zeroproofai.com/platform/datasets.
+    Returns ``{"connected", "username", "namespaces", "scopes"}``.
+    """
+    return _call("GET", "/hf/me", api_key)
+
+
+def hf_publish(
+    dataset_id: str,
+    *,
+    namespace: str | None = None,
+    repo: str | None = None,
+    private: bool = False,
+    wait: bool = True,
+    timeout: float = 600,
+    api_key: str | None = None,
+) -> dict:
+    """Push one of your datasets to a Hugging Face dataset repo you own.
+
+    The set's purpose (train, holdout, eval) is the split; pushing the
+    holdout set into the same ``repo`` adds a second split. Every push is a
+    commit tagged ``zp-<dataset id>`` and the repo carries ``zeroproof.json``
+    (split -> dataset, numbers, history). Defaults: your username and a
+    slug of the dataset name. With ``wait`` (the default) this returns the
+    finished state ``{"repo", "url", "commit", "tag", "split", ...}``;
+    otherwise the ``pushing`` stamp.
+    """
+    body: dict = {"private": private}
+    if namespace:
+        body["namespace"] = namespace
+    if repo:
+        body["repo"] = repo
+    out = _call("POST", f"/datasets/{dataset_id}/hf-publish", api_key, body)
+    if not wait:
+        return out["hf"]
+    return _wait_hf(lambda: _call("GET", f"/datasets/{dataset_id}", api_key), timeout, 2.5)
+
+
+def hf_publish_run(
+    run_id: str,
+    *,
+    namespace: str | None = None,
+    repo: str | None = None,
+    private: bool = True,
+    wait: bool = True,
+    timeout: float = 900,
+    api_key: str | None = None,
+) -> dict:
+    """Push a finished training run's LoRA adapter to a Hugging Face model
+    repo you own, with a model card (base model, metrics, the dataset repo
+    when the data was pushed too). Private by default: it is a checkpoint,
+    not a release. Tagged ``zp-<run id>``.
+    """
+    body: dict = {"private": private}
+    if namespace:
+        body["namespace"] = namespace
+    if repo:
+        body["repo"] = repo
+    out = _call("POST", f"/runs/{run_id}/hf-publish", api_key, body)
+    if not wait:
+        return out["hf"]
+    return _wait_hf(lambda: _call("GET", f"/runs/{run_id}", api_key), timeout, 3.0)
+
+
+def import_hf(
+    repo: str,
+    *,
+    split: str = "train",
+    revision: str | None = None,
+    config: str | None = None,
+    name: str | None = None,
+    purpose: str = "train",
+    mode: str | None = None,
+    agent: str | None = None,
+    description: str | None = None,
+    max_rows: int = 100_000,
+    wait: bool = True,
+    timeout: float = 900,
+    api_key: str | None = None,
+) -> dict:
+    """Bring one split of a Hugging Face dataset onto your account as rows,
+    so it gets a profile (pass rate, gradient support, mixed prompts)
+    before you train on it. Parquet, JSONL, CSV and Arrow all come in the
+    same way. Public repos need no connected account; private ones use the
+    Hugging Face account connected on the platform.
+
+    Returns the dataset row. With ``wait`` (the default) the row is
+    ``ready`` (or this raises with the import error); otherwise it is
+    ``importing`` and ``zps.datasets()`` shows it settle.
+    """
+    body: dict = {"repo": repo, "split": split, "purpose": purpose, "max_rows": max_rows}
+    for key, value in (
+        ("revision", revision),
+        ("config", config),
+        ("name", name),
+        ("mode", mode),
+        ("agent", agent),
+        ("description", description),
+    ):
+        if value:
+            body[key] = value
+    row = _call("POST", "/datasets/import-hf", api_key, body)
+    if not wait:
+        return row
+    deadline = time.monotonic() + timeout
+    while row.get("status") == "importing":
+        if time.monotonic() >= deadline:
+            raise PlatformError(
+                f"import of {repo}:{split} still running after {int(timeout)} s; it is {row['datasetId']}"
+            )
+        time.sleep(3.0)
+        row = _call("GET", f"/datasets/{row['datasetId']}", api_key)
+    if row.get("status") == "failed":
+        raise PlatformError(
+            f"import of {repo}:{split} failed: {(row.get('hfImport') or {}).get('error', 'unknown error')}"
+        )
+    return row
 
 
 def _has_key(api_key: str | None) -> bool:
