@@ -146,7 +146,7 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - `zps.eval_variance(run_1, run_2, ...)` (or one row list split by
   `lineage.scoring_run_id` / `by=`): the eval's own re-run standard
   deviation, `noise_band` = 2 x std, and Olmo 3's stability band in
-  points (rlhf-book appendix C). `delta_report(run_std=)` marks every
+  points (rlhf-book ch. 16). `delta_report(run_std=)` marks every
   metric whose delta sits inside that band `within_noise`, keeps it out
   of improved / slipped / regressions, and reads a target there as
   `within_eval_noise` instead of moved (#113).

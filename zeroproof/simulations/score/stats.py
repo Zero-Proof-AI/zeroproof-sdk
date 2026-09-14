@@ -173,9 +173,10 @@ def marker_summary(
 
 
 #: Olmo 3's bands for the standard deviation of a benchmark across re-runs
-#: of one model, in points on a 0-100 scale (rlhf-book appendix C,
-#: "Evaluation Variance"): MMLU/MATH/PopQA sit near 0.2, GPQA/AlpacaEval
-#: above 1.2.
+#: of one model, in points on a 0-100 scale: MMLU/MATH/PopQA sit near 0.2,
+#: GPQA/AlpacaEval above 1.2. rlhf-book ch. 16, "Why Many External
+#: Evaluation Comparisons Are Unreliable", puts most post-training
+#: evaluations between 0.25 and 1.5 points with the setup held constant.
 VARIANCE_BANDS = (("very_stable", 0.35), ("stable", 0.7), ("high_variance", float("inf")))
 
 
@@ -197,7 +198,7 @@ def eval_variance(
     by: str | None = None,
 ) -> dict[str, Any]:
     """How much an evaluation moves when the same model is evaluated
-    again (rlhf-book appendix C, "Evaluation Variance").
+    again (rlhf-book ch. 16, Evaluation).
 
     Pass each re-run's rows as its own argument, or one row list whose
     rows say which run they belong to: ``lineage.scoring_run_id`` (what
