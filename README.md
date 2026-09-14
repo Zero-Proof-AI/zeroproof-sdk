@@ -361,8 +361,8 @@ Three checks that decide whether a result is believable, all report-only and all
 ```python
 zps.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 pairs, report = zps.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
-rows, report = zps.write_rubrics(rows, domain="refunds: look the order up first")  # per-prompt criteria on privileged.rubric
-scored = zps.run_judge(rows, zps.rubric_judge())  # one verdict per criterion; reward = Rubric.score; markers rubric:<item>
+rows, report = zps.write_rubrics(rows, domain="refunds")  # per-prompt criteria on privileged.rubric
+scored = zps.run_judge(rows, zps.rubric_judge())  # a verdict per criterion; markers rubric:<item>
 zps.decontaminate(train_rows, against=[eval_rows])  # 8-gram overlap with the eval set
 zps.style_markers(rows)  # no_boilerplate, no_hedging, no_apology, no_sycophancy, answered
 zps.style_report(rows)["warnings"]  # "reward pays for hedging (corr +0.41 ...)"
