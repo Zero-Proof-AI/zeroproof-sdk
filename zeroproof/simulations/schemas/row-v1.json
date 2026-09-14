@@ -15,7 +15,7 @@
         "final_text": {"type": "string", "$comment": "Rollout.final_text"},
         "scenario_id": {"type": "string", "$comment": "Task.task_id"},
         "spec_id": {"type": "string", "$comment": "Task.spec_id"},
-        "privileged": {"type": "object", "$comment": "Task.privileged: principle, hidden_state, reference; what the judge sees and the policy does not"},
+        "privileged": {"type": "object", "$comment": "Task.privileged: principle, hidden_state, reference, rubric; what the judge sees and the policy does not"},
         "messages": {"type": "array", "items": {"$ref": "#/$defs/message"}, "$comment": "derived from prompt + steps; carried when present"},
         "opener": {"type": "string"},
         "opening": {"type": "string"},

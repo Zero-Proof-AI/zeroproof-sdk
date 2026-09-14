@@ -136,6 +136,14 @@ from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
+from .score.rubric import (
+    Criterion,
+    Rubric,
+    attach_rubric,
+    rubric_judge,
+    rubric_of,
+    write_rubrics,
+)
 from .score.spec import Spec, Trait, load_spec, spec_version, stamp_spec
 from .score.stage import STAGES, format_stages, stage_of, stage_report, stamp_stage
 from .score.stats import (
@@ -175,6 +183,7 @@ __all__ = [
     "STOCK_MARKERS",
     "AgentProfile",
     "Calibration",
+    "Criterion",
     "Dataset",
     "Judgment",
     "Marker",
@@ -183,6 +192,7 @@ __all__ = [
     "PassAt",
     "PublishGateError",
     "Rollout",
+    "Rubric",
     "ScoredData",
     "SimulationData",
     "Spec",
@@ -196,6 +206,7 @@ __all__ = [
     "allocator_slot_counts",
     "argument_grounding",
     "attach_delta",
+    "attach_rubric",
     "behavior_signature",
     "behavioral_markers",
     "benchmark_report",
@@ -295,6 +306,8 @@ __all__ = [
     "reward_correlations",
     "row_markers",
     "rows_from_otel",
+    "rubric_judge",
+    "rubric_of",
     "run_benchmark",
     "run_judge",
     "scenario_regions",
@@ -326,5 +339,6 @@ __all__ = [
     "validate",
     "verifier",
     "verify",
+    "write_rubrics",
     "write_scene_brief",
 ]

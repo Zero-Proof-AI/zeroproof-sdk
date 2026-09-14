@@ -185,6 +185,9 @@ class Privileged:
     principle: str | None = None
     hidden_state: dict = field(default_factory=dict)
     reference: str | None = None
+    #: a ``score.rubric.Rubric`` as a dict: the per-prompt criteria a
+    #: rubric judge scores (rlhf-book ch. 12); never exported
+    rubric: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -637,6 +640,7 @@ def from_row(row: dict) -> tuple[Task, Rollout, list[Judgment], list[Marker]]:
             principle=priv.get("principle"),
             hidden_state=dict(priv.get("hidden_state") or {}),
             reference=priv.get("reference"),
+            rubric=dict(priv.get("rubric") or {}),
         ),
         axes=axes,
     )
