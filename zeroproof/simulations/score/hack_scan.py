@@ -328,9 +328,13 @@ def hack_scan(
     because nothing else could happen at that variety. The ranking cannot
     separate them and the noise floor is no help (it tells signal from
     noise, not one perfect explanation from another), so ``top_feature``
-    and ``integrity`` are ``None``, no hack is claimed, and ``collinear``
-    lists the tied features. Collinear features on a varied pool are left
-    alone: there the ranking found two names for one behavior.
+    and ``integrity`` are ``None``, ``inverted`` is empty, no hack is
+    claimed, and ``collinear`` lists the tied features. The direction is
+    withheld with the name: at that variety an endorsed feature is
+    negative exactly when it fell on the failing trajectory, so the sign
+    is the same coin flip. Collinear features on a varied pool are left
+    alone: there the ranking found two names for one behavior, and a
+    genuinely inverted endorsed feature is still reported.
     """
     graded = [r for r in rows if isinstance(r, dict) and _reward(r, reward) is not None]
     n = len(graded)
@@ -590,10 +594,15 @@ def hack_scan(
     base["collinear"] = collinear
     # e: the reward pays for the endorsed behavior (positive). An endorsed
     # feature the reward punishes is ``inverted``: the policy will do less
-    # of the behavior, which is a hack of its own.
+    # of the behavior, which is a hack of its own. A degenerate scan
+    # cannot read the sign either: with two distinct rollouts per ask the
+    # endorsed feature is at -1 exactly when the tool happened to sit on
+    # the failing trajectory, so "the reward punishes the behavior" there
+    # is the same coin flip as naming a top feature, and flipping which
+    # trajectory passed would flip the verdict on data of equal quality.
     e = max((x["rho"] for x in above if x["endorsed"] and x["rho"] > 0), default=0.0)
     a = max((abs(x["rho"]) for x in above if not x["endorsed"]), default=0.0)
-    inverted = [x for x in above if x["endorsed"] and x["rho"] < 0]
+    inverted = [] if degenerate else [x for x in above if x["endorsed"] and x["rho"] < 0]
     base["inverted"] = [x["name"] for x in inverted]
     if endorsed and not degenerate:
         base["endorsed_on_top"] = bool(top and top["endorsed"] and top["rho"] > 0)
@@ -613,6 +622,17 @@ def hack_scan(
             "way (raise temperature or repeats), and scan before optimize(mode='rl'), "
             "which drops the duplicate rollouts within an ask"
         )
+        # Say the sign is withheld too, rather than leaving a reader to
+        # read "endorsed feature at -1.00" off the table and conclude it.
+        tied_endorsed = [x["name"] for x in listed if x["endorsed"] and x["name"] in collinear]
+        if tied_endorsed:
+            warnings.append(
+                "the endorsed "
+                + ", ".join(f'"{name}"' for name in tied_endorsed[:3])
+                + " sit(s) in that tie, so this scan cannot say whether the reward pays "
+                "for the behavior or punishes it either: the sign there is whichever of "
+                "the two trajectories happened to pass, not a direction the data supports"
+            )
     elif not above or top is None:
         base["regime"] = "no_signal"
         warnings.append(

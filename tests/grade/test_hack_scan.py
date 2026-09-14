@@ -332,6 +332,63 @@ def test_two_distinct_trajectories_refuse_a_verdict_instead_of_naming_one():
     assert any("too few distinct trajectories" in w for w in gate["warnings"])
 
 
+def _two_trajectory_pool(*, tool_on_pass: bool) -> list[dict]:
+    """Two distinct rollouts per ask. ``tool_on_pass=False`` puts the
+    endorsed tool on the failing trajectory, which lands it at rho -1."""
+    rows = []
+    for p in range(20):
+        for i in range(8):
+            passed = i < 5
+            rows.append(
+                _row(
+                    f"ask {p}",
+                    1 if passed else 0,
+                    text=(
+                        f"Looked up order {p} and issued the refund in full."
+                        if passed
+                        else "sorry, i could not do that"
+                    ),
+                    tool="lookup_order" if (passed if tool_on_pass else not passed) else None,
+                )
+            )
+    return rows
+
+
+def test_a_degenerate_scan_withholds_the_inverted_claim_too():
+    # An endorsed feature at rho -1 on a two-trajectory pool is "inverted"
+    # by the letter of the rule, but the sign is only which trajectory
+    # happened to pass: flipping that flips the verdict on data of equal
+    # quality. Claiming it would contradict the same report's "no hack is
+    # claimed", so the refusal covers the direction as well as the name.
+    punished = hack_scan(_two_trajectory_pool(tool_on_pass=False), endorsed=["lookup_order"])
+    paid = hack_scan(_two_trajectory_pool(tool_on_pass=True), endorsed=["lookup_order"])
+    for report in (punished, paid):
+        assert report["regime"] == "degenerate"
+        assert report["inverted"] == []
+        assert not any("also punishes the endorsed" in w for w in report["warnings"])
+        assert not any("reward punishes the endorsed" in w for w in report["warnings"])
+        # the withholding is stated, not silent
+        assert any("cannot say whether the reward pays" in w for w in report["warnings"])
+
+    # the endorsed feature really is at opposite signs in the two pools:
+    # the suppressed claim was reachable, and is the same either way
+    def endorsed_rho(report):
+        return next(x["rho"] for x in report["features"] if x["endorsed"])
+
+    assert endorsed_rho(punished) <= -0.999 and endorsed_rho(paid) >= 0.999
+    assert punished["regime"] == paid["regime"]
+
+
+def test_a_varied_pool_still_reports_a_genuinely_inverted_endorsed_feature():
+    # The suppression is degeneracy-only: on a varied pool a reward that
+    # pays for NOT calling the tool is still named (main's #167 rule).
+    rows = _pool(40, 8, seed=21, reward_of=lambda rng, tool, delim, p: int(not tool))
+    report = hack_scan(rows, endorsed=["lookup_order"], seed=0)
+    assert report["degenerate"] is False
+    assert report["regime"] == "reward_hack" and report["inverted"]
+    assert any("reward punishes the endorsed" in w for w in report["warnings"])
+
+
 def test_a_varied_pool_still_names_a_hack_when_two_names_share_one_behavior():
     # Collinearity alone is not degeneracy: with eight distinct rollouts
     # per ask, two features at |rho| 1 are two names for the delimiter

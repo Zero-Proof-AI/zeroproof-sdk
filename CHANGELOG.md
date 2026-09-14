@@ -18,8 +18,16 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   rows on a hard rule with mean reward 0.14; `max_hard=1` 42 rows, 0.26;
   `max_hard=0` none, 0.48. Default `None` keeps what the writer wrote; use
   0 or 1 for a training reward (#181).
+- `hack_scan`: a `degenerate` scan withholds the `inverted` claim as well
+  as the top feature. With two distinct rollouts per ask an endorsed
+  feature sits at rho -1 exactly when it happened to fall on the failing
+  trajectory, so "the reward punishes the endorsed behavior" there is the
+  same coin flip as naming a winner, and the report contradicted its own
+  "no hack is claimed". A varied pool still reports a genuinely inverted
+  reward.
 
-2026-09-14)
+## 0.41 (2026-09-14)
+
 - `zps.reference_logprobs(rows, "vllm:<model>@<url>")`: scores every agent turn
   under a reference model through `prompt_logprobs` on any vLLM-style
   endpoint (the platform's served base by name, a hosted model, or
