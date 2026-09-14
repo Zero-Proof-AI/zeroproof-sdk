@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.36 (2026-09-14)
 
 - `training_rows(max_tool_output_chars=)` / `export_training(...)`: each
   tool message over the cap is cut with a `[... N chars of tool output
