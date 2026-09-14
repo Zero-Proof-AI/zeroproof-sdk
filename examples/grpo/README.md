@@ -92,7 +92,27 @@ DPO on the same set (`examples/dpo`, 60 steps, 8 samples per prompt for
 the pairs): 308 pairs from 193 of 548 train prompts with contrast, pass@1
 0.17 [0.13, 0.22] to 0.69 [0.63, 0.75], paired delta +0.49 [+0.37, +0.60],
 `moved`, `well_formed` flat. One round of on-policy pairs beat 40 GRPO
-steps here: with 308 pairs the offline method sees far more contrast per
-step than 8 samples a prompt give the online one. That is the comparison
-the interval finally makes readable, and the reason both scripts share
-one prompt set.
+steps: with 308 pairs the offline method sees far more contrast per step
+than 8 samples a prompt give the online one. At 120 steps GRPO reads 0.18
+[0.14, 0.23] to 0.85 [0.81, 0.89], +0.63 [+0.50, +0.73], `moved`, past
+DPO's one round. The gap was budget, not method, and the interval is what
+makes that readable; both scripts share one prompt set so the comparison
+stays paired.
+
+## Variants as flags
+
+TRL's default loss is `bnpo` (token-level, batch-normalized), which these
+runs use. `--loss-type grpo` is the original per-sequence mean, which
+favors short completions. Dr.GRPO is `--loss-type dr_grpo
+--no-scale-rewards`: neither length nor the group's reward std scales the
+advantage. DAPO's clip-higher and overlong mask are `--epsilon-high 0.28
+--mask-truncated`; its dynamic sampling (drop groups that all pass or all
+fail) is what the platform's publish gate does to a dataset offline. Every
+flag lands in the run's config on the dashboard.
+
+Dr.GRPO at the same 120 steps and learning rate: 0.17 [0.13, 0.22] to
+0.53 [0.46, 0.59], +0.34 [+0.27, +0.41], `moved`, behind the default. That
+is what dropping the std scaling does at a fixed learning rate: the
+advantages are smaller, so the steps are. Dr.GRPO's own recipe raises the
+learning rate to compensate; treat `--loss-type` as a knob to tune, not a
+free upgrade, and let the interval say which setting won.
