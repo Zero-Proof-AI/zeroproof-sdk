@@ -56,7 +56,9 @@ def first_turn(row: dict) -> str:
                 args = step.get("input")
             return (
                 "<tool_call>\n"
-                + json.dumps({"name": str(step["tool"]), "arguments": args if isinstance(args, dict) else {}})
+                + json.dumps(
+                    {"name": str(step["tool"]), "arguments": args if isinstance(args, dict) else {}}
+                )
                 + "\n</tool_call>"
             )
     for message in row.get("messages") or []:
@@ -103,9 +105,9 @@ def sampled_pairs(
     """On-policy pairs: score the sampled replies with the rule, pair passes
     with fails per prompt (length-matched), return TRL rows and the pair
     report (how often chosen is the longer side, mean margin)."""
-    import zeroproof.simulations as zps
-
     from reward import reward_rows
+
+    import zeroproof.simulations as zps
 
     rows = reward_rows(prompts, replies)
     for row in rows:
@@ -145,7 +147,10 @@ def load_export(path: str, *, system: str | None = None) -> list[dict[str, Any]]
                     if m.get("role") in ("system", "user")
                 ]
                 if system is not None:
-                    head = [{"role": "system", "content": system}, *[m for m in head if m["role"] != "system"]]
+                    head = [
+                        {"role": "system", "content": system},
+                        *[m for m in head if m["role"] != "system"],
+                    ]
                 if prompt_msgs is None:
                     prompt_msgs = head
                 sides[side] = _render_assistant(msgs[idx])

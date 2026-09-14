@@ -42,7 +42,7 @@ from any graded rows, for example a set pulled from the platform:
 import zeroproof.simulations as zps
 
 rows = zps.pull("ds_...")
-pairs, report = zps.build_preference_pairs(rows)   # a pass vs a fail per prompt
+pairs, report = zps.build_preference_pairs(rows)  # a pass vs a fail per prompt
 zps.export_preference(pairs, "pairs.jsonl")
 ```
 
