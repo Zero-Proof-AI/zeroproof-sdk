@@ -135,13 +135,18 @@ def keep(
         if key in seen:
             continue
         toks = _tokens(text)
-        if any(
-            len(toks & t) / max(1, len(toks | t)) >= jaccard for t in token_sets
-        ):
+        if any(len(toks & t) / max(1, len(toks | t)) >= jaccard for t in token_sets):
             continue
         seen.add(key)
         token_sets.append(toks)
-        kept.append({"prompt": text, "case": case, "scenario_id": seed["scenario_id"], "seed": seed["prompt"]})
+        kept.append(
+            {
+                "prompt": text,
+                "case": case,
+                "scenario_id": seed["scenario_id"],
+                "seed": seed["prompt"],
+            }
+        )
     return kept
 
 

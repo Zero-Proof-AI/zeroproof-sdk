@@ -46,7 +46,9 @@ runs_volume = modal.Volume.from_name("zeroproof-grpo-runs", create_if_missing=Tr
     timeout=60 * 60,
     volumes={"/root/.cache/huggingface": hf_cache, "/vol": runs_volume},
 )
-def write(seeds: list[dict], per_seed: int = 6, writer_model: str = WRITER_MODEL, batch: int = 8) -> list[dict]:
+def write(
+    seeds: list[dict], per_seed: int = 6, writer_model: str = WRITER_MODEL, batch: int = 8
+) -> list[dict]:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -57,12 +59,16 @@ def write(seeds: list[dict], per_seed: int = 6, writer_model: str = WRITER_MODEL
     tok.padding_side = "left"
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
-    model = AutoModelForCausalLM.from_pretrained(writer_model, torch_dtype=torch.bfloat16, device_map="cuda")
+    model = AutoModelForCausalLM.from_pretrained(
+        writer_model, torch_dtype=torch.bfloat16, device_map="cuda"
+    )
     model.eval()
 
     jobs = [(seed, angle) for seed in seeds for angle in range(len(ANGLES))]
     texts = [
-        tok.apply_chat_template(writer_messages(seed, angle, per_seed), tokenize=False, add_generation_prompt=True)
+        tok.apply_chat_template(
+            writer_messages(seed, angle, per_seed), tokenize=False, add_generation_prompt=True
+        )
         for seed, angle in jobs
     ]
     candidates: list[tuple[str, dict]] = []
@@ -90,13 +96,28 @@ def write(seeds: list[dict], per_seed: int = 6, writer_model: str = WRITER_MODEL
     _P("/vol/prompts").mkdir(parents=True, exist_ok=True)
     with open("/vol/prompts/prompts.jsonl", "w", encoding="utf-8") as fh:
         for row in kept:
-            fh.write(json.dumps({"prompt": row["prompt"], "scenario_id": row["scenario_id"], "seed": row["seed"]}) + "\n")
+            fh.write(
+                json.dumps(
+                    {
+                        "prompt": row["prompt"],
+                        "scenario_id": row["scenario_id"],
+                        "seed": row["seed"],
+                    }
+                )
+                + "\n"
+            )
     runs_volume.commit()
     return kept
 
 
 @app.local_entrypoint()
-def main(seeds: int = 400, per_seed: int = 6, out: str = "", writer_model: str = WRITER_MODEL, seed: int = 0):
+def main(
+    seeds: int = 400,
+    per_seed: int = 6,
+    out: str = "",
+    writer_model: str = WRITER_MODEL,
+    seed: int = 0,
+):
     import json
 
     from prompts import summary
@@ -108,5 +129,14 @@ def main(seeds: int = 400, per_seed: int = 6, out: str = "", writer_model: str =
     path = Path(out) if out else HERE / "prompts.jsonl"
     with open(path, "w", encoding="utf-8") as fh:
         for row in kept:
-            fh.write(json.dumps({"prompt": row["prompt"], "scenario_id": row["scenario_id"], "seed": row["seed"]}) + "\n")
+            fh.write(
+                json.dumps(
+                    {
+                        "prompt": row["prompt"],
+                        "scenario_id": row["scenario_id"],
+                        "seed": row["seed"],
+                    }
+                )
+                + "\n"
+            )
     print(f"wrote {path}: {summary(kept)}")

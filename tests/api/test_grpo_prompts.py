@@ -34,7 +34,10 @@ def test_writer_messages_carry_the_category_rule():
     with_id = p.writer_messages(_seed(r, "please check ORD-4017 for me"), 0, 6)
     assert "ORD-4017" in with_id[1]["content"] and "exactly 6 strings" in with_id[1]["content"]
     no_id = p.writer_messages(_seed(r, "I need help with a refund"), 1, 4)
-    assert "Never include an id" in no_id[1]["content"] and "different kind of customer" in no_id[1]["content"]
+    assert (
+        "Never include an id" in no_id[1]["content"]
+        and "different kind of customer" in no_id[1]["content"]
+    )
     off = p.writer_messages(_seed(r, "How tall is Kilimanjaro?"))
     assert "not about an order" in off[1]["content"]
 
@@ -42,7 +45,10 @@ def test_writer_messages_carry_the_category_rule():
 def test_parse_messages_reads_an_array_or_quoted_lines():
     _, p = _modules()
     assert p.parse_messages('Sure:\n["a message", "another one"]\n') == ["a message", "another one"]
-    assert p.parse_messages('1. "first line"\n- "second line",\nnot a message') == ["first line", "second line"]
+    assert p.parse_messages('1. "first line"\n- "second line",\nnot a message') == [
+        "first line",
+        "second line",
+    ]
     assert p.parse_messages("") == []
 
 
@@ -67,8 +73,16 @@ def test_keep_enforces_category_and_drops_near_duplicates():
         "Where is my refund? I ordered a jacket last week and nothing came.",
         "Do you sell gift cards?",
     ]
-    assert kept[0]["scenario_id"] == s_id["scenario_id"] and kept[0]["case"]["order_id"] == "ORD-4017"
-    assert p.summary(kept) == {"prompts": 3, "scenarios": 3, "with_id": 1, "no_id": 1, "off_topic": 1}
+    assert (
+        kept[0]["scenario_id"] == s_id["scenario_id"] and kept[0]["case"]["order_id"] == "ORD-4017"
+    )
+    assert p.summary(kept) == {
+        "prompts": 3,
+        "scenarios": 3,
+        "with_id": 1,
+        "no_id": 1,
+        "off_topic": 1,
+    }
 
 
 def test_load_prompts_rebuilds_cases_and_split_by_scenario(tmp_path):
