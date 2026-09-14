@@ -27,11 +27,17 @@ token, the SDK never sees it). Then:
 
 ```bash
 pip install zeroproof
-zeroproof login                                   # or ZEROPROOF_API_KEY
+zeroproof login                                        # or ZEROPROOF_API_KEY
 cd examples/hugging-face
-python roundtrip.py                               # import a public split, profile it, print the numbers
-python roundtrip.py --push ds_0123 --repo my-set  # also push one of your sets and print the tag
+python roundtrip.py                                    # import a public split, profile it, print the numbers
+python roundtrip.py --push ds_0123 --repo my-set       # also push one of your sets and print the tag
+python roundtrip.py --push-run run_0123 --repo my-lora # also push a finished run's adapter as a model repo
 ```
+
+`--repo-in ns/name --split train` imports a different split; `--keep` leaves
+the imported set on your account; `--private` makes the pushed dataset repo
+private. Adapter repos are always pushed private: a checkpoint is not a
+release.
 
 Output for the import half:
 
@@ -42,3 +48,9 @@ imported cornell-movie-review-data/rotten_tomatoes:test -> ds_... (1066 rows)
 ```
 
 The imported set is deleted at the end unless you pass `--keep`.
+
+Every call is a request to the platform API (`ZEROPROOF_API_URL`, default
+`https://api.zeroproofai.com`); the SDK never talks to the Hub itself. That
+is also how the test suite exercises this script offline: it points
+`ZEROPROOF_API_URL` at a local stub and checks the requests the script
+makes. See `tests/examples/test_example_hugging_face.py`.

@@ -30,13 +30,20 @@ holdout tasks into 6 eval, 3 SFT, 3 preference, 9 GRPO, 3 OPSD and 9 OPD
 rows. The counts are small because the scripted agent passes about half
 its tasks; the projections, not the counts, are the point.
 
+Both write to `out/` (`--out` changes that). `migrate.py --rows N` sets how
+many rows the scripted run simulates; `project.py --holdout 0.2` sets the
+holdout share and `--teacher openai/gpt-oss-120b` names the OPD teacher.
+
 ## `migrate.py`
 
-Reads any row file, reports which legacy shape each row is in, and writes
-three things: the same rows re-stamped as schema version 1, a `tasks.jsonl`
-that holds only the situations (the shippable half: no model output in it),
-and a report of anything that did not validate. Rows without a stamp are
-version 0; nothing is rejected, and unknown columns ride through untouched.
+Reads any row file, reports which legacy shape each row is in (`engine`,
+`training`, `platform_pull`, `otel`, `hf_flat`, or `loose` when nothing
+matches; stamped rows are `v1`), and writes three things: the same rows
+re-stamped as schema version 1, a `tasks.jsonl` that holds only the
+situations (the shippable half: no model output in it), and a report of
+anything that did not validate. Rows without a stamp are version 0; nothing
+is rejected, and unknown columns ride through untouched. A line that is not
+a JSON object is counted under `problems` as `not_a_dict` and skipped.
 
 ## `project.py`
 

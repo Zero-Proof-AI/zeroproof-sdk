@@ -24,6 +24,7 @@ missing bars forward"), not things a user would type, so they make broken tasks.
 
 import argparse
 import collections
+import hashlib
 import json
 import os
 import re
@@ -45,7 +46,7 @@ def normalize(text: str) -> str:
 
 def seed_texts(spec_path: str) -> set[str]:
     try:
-        with open(spec_path) as fh:
+        with open(spec_path, encoding="utf-8") as fh:
             spec = json.load(fh)
     except (OSError, ValueError):
         return set()
@@ -73,7 +74,8 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    rows = [json.loads(line) for line in open(args.path) if line.strip()]
+    with open(args.path, encoding="utf-8") as fh:
+        rows = [json.loads(line) for line in fh if line.strip()]
     seeds = set() if args.keep_seeds else seed_texts(args.spec)
 
     seen_prompt, by_scenario, out, dropped = set(), set(), [], 0
@@ -84,7 +86,9 @@ def main() -> int:
         if normalize(r["prompt"]) in seeds:
             dropped += 1
             continue
-        sid = r.get("scenario_id") or ""
+        # A row with no scenario_id (a hand-made or foreign file) is its own
+        # situation; otherwise every such row would collapse into one task.
+        sid = r.get("scenario_id") or "prompt_" + hashlib.sha1(r["prompt"].encode()).hexdigest()[:8]
         if not args.keep_phrasings:
             if sid in by_scenario:
                 continue
@@ -92,7 +96,8 @@ def main() -> int:
         info = {k: r[k] for k in INFO_FIELDS if r.get(k) is not None}
         out.append({"prompt": r["prompt"], "example_id": sid, "info": info})
 
-    with open(args.out, "w") as fh:
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as fh:
         for row in out:
             fh.write(json.dumps(row, default=str) + "\n")
 

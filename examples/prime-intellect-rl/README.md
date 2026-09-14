@@ -20,12 +20,17 @@ offline on any graded row file.
 pip install zeroproof
 export VLLM_API_KEY=...            # ask ZeroProof for a key
 cd examples/prime-intellect-rl
-python generate.py --situations 100 --k 8
-python diagnose.py data/rl.jsonl
-python export_prompts.py data/rl.jsonl
+python generate.py --situations 100 --k 8 --fault-rate 0.15   # -> data/rl.jsonl (+ .meta.json)
+python diagnose.py data/rl.jsonl                              # exit 1 if the set carries no gradient
+python export_prompts.py data/rl.jsonl                        # -> data/prompts.jsonl
 ```
 
-About three minutes for 800 rollouts.
+About three minutes for 800 rollouts. Only `generate.py` needs the key;
+`diagnose.py` and `export_prompts.py` read the file and run anywhere. To
+try those two with no key, `simulate(agent, spec="spec.json", mode="rl",
+simulator=False, grade=True)` with a scripted agent writes a small, uniform
+`rl.jsonl` in under a second; `tests/examples/test_example_prime_intellect_rl.py`
+does exactly that.
 
 ## What each step does
 
@@ -68,7 +73,9 @@ It also drops seed probes. Every entry in the spec's `situations` list becomes a
 probe, and some reach the output as the seed text itself. Those are third-person
 scenario descriptions ("the user asks to fill missing bars forward"), not things a
 user would type, and they make broken tasks. On the run below this removed 7 of
-100 prompts. Pass `--keep-seeds` to leave them in.
+100 prompts. Pass `--keep-seeds` to leave them in, and `--keep-phrasings` to
+keep every phrasing of a situation instead of one. `--spec` points the seed
+filter at a different spec file.
 
 ## Measured on this spec
 

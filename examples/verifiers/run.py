@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 
+import zeroproof.simulations as zps
 from zeroproof.simulations.score.judging import run_judge
 from zeroproof.simulations.verify import (
     All,
@@ -92,15 +93,16 @@ def show(title, rows, verifier):
         print(f"  reward={r.get('reward')}  {r.get('reason', '')[:70]}")
     passed = sum(1 for r in scored.rows if r.get("reward") == 1)
     print(f"  {passed}/{len(scored.rows)} passed")
+    return scored
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> int:
     argparse.ArgumentParser(
         description="Verifiable rewards, offline demo. No arguments."
-    ).parse_args()
+    ).parse_args(argv)
 
     # 1. Math: symbolic equality with \boxed / fraction handling.
-    show("math", MATH_ROWS, MathEqual())
+    math_scored = show("math", MATH_ROWS, MathEqual())
 
     # 2. Math AND format: the answer is right AND it closed its reasoning.
     show("math + format", MATH_ROWS, All([MathEqual(), Regex(r"</think>")], name="answer+format"))
@@ -111,5 +113,21 @@ if __name__ == "__main__":
     # 4. Structured output: valid JSON against a schema.
     show("json schema", JSON_ROWS, JSONSchema(INTENT_SCHEMA))
 
-    print("\nA verifier is the reward. Feed the scored rows straight to")
-    print("zps.optimize(scored, mode='rl') for GRPO, or push_rows(..., gate=True).")
+    # 5. Into the loop: the verifier's reward is the GRPO reward. `optimize`
+    # runs the RL gates over the scored rows (reward band, unanimous groups,
+    # duplicates). The answer key stays on the rows it returns, which are
+    # still SDK rows; the training export is what never projects `privileged`.
+    rows, report = zps.optimize(math_scored, mode="rl")
+    trainer_rows = zps.training_rows(rows)
+    leaked = sum(1 for r in trainer_rows if "privileged" in r)
+    print(
+        f"\n== optimize(mode='rl'): {len(rows)} rows from {report['groups_selected']} "
+        f"prompt groups; training_rows() -> {len(trainer_rows)} rows, "
+        f"{leaked} carry the answer key"
+    )
+    print("Push the optimized rows with zps.push_rows(rows, 'math-rl-v1', gate=True, mode='rl').")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

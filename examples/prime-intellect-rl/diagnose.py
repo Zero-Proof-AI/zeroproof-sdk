@@ -40,6 +40,7 @@ def report(rows: list[dict]) -> dict:
     live = [k for k, v in groups.items() if st.pstdev(v) > 0]
     dead = [k for k, v in groups.items() if st.pstdev(v) == 0]
     effort = pearson([tool_calls(r) for r in scored], [r["reward"] for r in scored])
+    top = max((max(v) for v in groups.values()), default=1.0)
 
     return {
         "rollouts": len(scored),
@@ -49,9 +50,7 @@ def report(rows: list[dict]) -> dict:
         "live_groups": len(live),
         "live_fraction": round(len(live) / len(groups), 3) if groups else 0.0,
         "dead_all_zero": sum(1 for k in dead if groups[k][0] == 0.0),
-        "dead_all_max": sum(
-            1 for k in dead if groups[k][0] == max((max(v) for v in groups.values()), default=1.0)
-        ),
+        "dead_all_max": sum(1 for k in dead if groups[k][0] == top),
         "mean_within_group_std": round(st.mean(st.pstdev(groups[k]) for k in live), 3)
         if live
         else 0.0,
@@ -68,7 +67,8 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    rows = [json.loads(line) for line in open(args.path) if line.strip()]
+    with open(args.path, encoding="utf-8") as fh:
+        rows = [json.loads(line) for line in fh if line.strip()]
     stats = report(rows)
     width = max(len(k) for k in stats)
     for key, value in stats.items():

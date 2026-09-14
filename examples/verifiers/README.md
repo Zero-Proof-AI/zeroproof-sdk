@@ -14,9 +14,11 @@ python examples/verifiers/run.py
 
 No key, no model, seconds. What you will learn: where a verifier reads the
 candidate and the gold, how to compose checks, and how a verifier's rows
-feed `optimize` and a gated `push` unchanged. The script shows math (`MathEqual`), an answer-and-format
-gate (`All([...])`), code execution against hidden tests (`CodeExec`), and a
-JSON-schema check (`JSONSchema`).
+feed `optimize` and a gated `push` unchanged. The script shows math (`MathEqual`),
+an answer-and-format gate (`All([...])`), code execution against hidden tests
+(`CodeExec`), a JSON-schema check (`JSONSchema`), and then hands the math rows
+to `zps.optimize(mode="rl")` and `zps.training_rows` to show where the answer
+key stops travelling.
 
 ## The pieces
 
@@ -52,15 +54,27 @@ from zeroproof.simulations.verify import (
 
 ## In the loop
 
+The gold travels with the task, not the spec: `simulate()` writes prompts,
+rollouts and world state, never an answer key, so a verifiable task set is
+rows you bring that already carry `privileged.reference` (or
+`privileged.tests` for `CodeExec`). Score them with the verifier, run the
+RL gates (reward band, unanimous groups, duplicates), push:
+
 ```python
 import zeroproof.simulations as zps
+from zeroproof.simulations.score.judging import run_judge
 from zeroproof.simulations.verify import MathEqual
 
-data = zps.simulate(spec="specs/math", mode="rl", situations=200, repeats=8)
-scored = data.grade(judge=MathEqual())  # the verifier IS the reward
+rows = [...]  # k rollouts per prompt, each with privileged.reference
+scored = run_judge(rows, MathEqual())  # the verifier IS the reward
 rows, _ = zps.optimize(scored, mode="rl")  # GRPO data, gradient checked
 zps.push_rows(rows, "math-rl-v1", gate=True, mode="rl")
 ```
+
+On a `SimulationData` the same step is `data.grade(judge=MathEqual())`. The
+optimized rows still carry `privileged` (they are SDK rows, and a verifier
+has to be able to re-score them); `zps.training_rows(rows)` is the export
+that never projects it, which is what `run.py` prints at the end.
 
 ## Code execution safety
 

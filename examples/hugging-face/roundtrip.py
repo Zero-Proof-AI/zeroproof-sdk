@@ -1,12 +1,14 @@
 """Hugging Face round trip: import a public split and read its numbers,
-optionally push one of your own sets and print the tagged commit.
+optionally push one of your own sets (or a finished run's adapter) and
+print the tagged commit.
 
     python roundtrip.py
     python roundtrip.py --repo-in tatsu-lab/alpaca --split train --keep
     python roundtrip.py --push ds_0123 --repo my-airline-set --private
+    python roundtrip.py --push-run run_0123 --repo my-airline-lora
 
 Needs a platform key (``zeroproof login`` or ZEROPROOF_API_KEY). The push
-half also needs a Hugging Face account connected on the platform.
+halves also need a Hugging Face account connected on the platform.
 """
 
 from __future__ import annotations
@@ -44,13 +46,17 @@ def import_half(repo: str, split: str, keep: bool) -> None:
         print("  deleted")
 
 
-def push_half(dataset_id: str, repo: str | None, private: bool) -> None:
+def connected_username() -> str:
     me = zps.hf_status()
     if not me["connected"]:
         sys.exit(
             "Connect a Hugging Face account first: any dataset page under Platform → Datasets."
         )
-    print(f"pushing {dataset_id} as {me['username']} ...")
+    return me["username"]
+
+
+def push_half(dataset_id: str, repo: str | None, private: bool) -> None:
+    print(f"pushing {dataset_id} as {connected_username()} ...")
     hf = zps.hf_publish(dataset_id, repo=repo, private=private, wait=True)
     print(f"  {hf['url']}")
     print(f"  split {hf['split']} · commit {hf['commit'][:7]} · tag {hf['tag']}")
@@ -62,7 +68,17 @@ def push_half(dataset_id: str, repo: str | None, private: bool) -> None:
     print(f'  load_dataset("{hf["repo"]}", split="{hf["split"]}", revision="{hf["tag"]}")')
 
 
-def main() -> None:
+def push_run_half(run_id: str, repo: str | None) -> None:
+    """A finished training run's LoRA adapter becomes a model repo. Always
+    private from here: it is a checkpoint, not a release."""
+    print(f"pushing adapter of {run_id} as {connected_username()} ...")
+    hf = zps.hf_publish_run(run_id, repo=repo, private=True, wait=True)
+    print(f"  {hf['url']}")
+    print(f"  commit {hf['commit'][:7]} · tag {hf['tag']}")
+    print(f'  PeftModel.from_pretrained(base, "{hf["repo"]}", revision="{hf["tag"]}")')
+
+
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -76,13 +92,22 @@ def main() -> None:
     ap.add_argument(
         "--push", metavar="DATASET_ID", help="also push one of your sets to Hugging Face"
     )
+    ap.add_argument(
+        "--push-run", metavar="RUN_ID", help="also push a finished run's adapter as a model repo"
+    )
     ap.add_argument("--repo", help="repo name for the push (default: a slug of the set's name)")
-    ap.add_argument("--private", action="store_true")
-    args = ap.parse_args()
+    ap.add_argument(
+        "--private",
+        action="store_true",
+        help="make the pushed dataset repo private (adapter repos always are)",
+    )
+    args = ap.parse_args(argv)
 
     import_half(args.repo_in, args.split, args.keep)
     if args.push:
         push_half(args.push, args.repo, args.private)
+    if args.push_run:
+        push_run_half(args.push_run, args.repo)
 
 
 if __name__ == "__main__":
