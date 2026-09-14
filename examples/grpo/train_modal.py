@@ -355,6 +355,7 @@ def main(
     base_model: str = BASE_MODEL,
     seed: int = 0,
     prompts_file: str = "",
+    balance: float = 0.0,
     loss_type: str = "bnpo",
     epsilon_high: float = 0.0,
     no_scale_rewards: bool = False,
@@ -372,6 +373,14 @@ def main(
         # By scenario within each category, so the holdout has no-id and
         # off-topic prompts too; a plain hash split once left it with none.
         train_items, held = split_holdout_stratified(items, holdout)
+        if balance > 0:
+            from prompts import balance as _balance
+            from prompts import summary
+
+            train_items = _balance(train_items, balance)
+            print(
+                f"balanced train set to {balance:.0%} per minority category: {summary(train_items)}"
+            )
     else:
         items = build_prompts(prompts, seed=seed)
         train_items, held = split_holdout(items, holdout)

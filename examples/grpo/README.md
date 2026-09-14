@@ -156,3 +156,21 @@ tool-call rate 0.00 to 0.25, off_topic 0.97 to 0.94. Same regression,
 same size: both methods learned "call lookup" faster than "unless there is
 no id to look up". The category table is the difference between a run
 that reads as a win and one that reads as a trade.
+
+## Closing it: `--balance`
+
+The reward already scores a tool call on a no-id prompt 0.0, so the fix
+is not the reward. A group-relative update only learns from a prompt when
+it samples it, and no-id prompts are a tenth of the set, so the with-id
+rows carry the gradient and "call the tool" is learned before "unless
+there is no id". `--balance 0.25` repeats the prompts of any category
+below a quarter of the train split until it reaches that share (each
+prompt at most six times; the holdout is untouched). DPO takes the same
+flag, since a preference round only pairs the prompts it sampled.
+
+```bash
+uv run --with modal modal run examples/grpo/train_modal.py --prompts-file examples/grpo/prompts.jsonl --steps 120 --balance 0.25
+uv run --with modal modal run examples/dpo/train_modal.py  --prompts-file examples/grpo/prompts.jsonl --balance 0.25
+```
+
+BALANCE_PLACEHOLDER

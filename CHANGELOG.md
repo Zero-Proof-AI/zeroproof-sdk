@@ -5,6 +5,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `examples/grpo` and `examples/dpo`: `--balance <share>` repeats the
+  prompts of any category below that share of the train split
+  (`prompts.balance`), so the no-id and off-topic prompts reach the
+  update at the rate they matter. The invented-id regression the
+  stratified holdout exposed is a sampling-frequency problem, not a
+  reward one; the README shows it closing.
 - `examples/hosted-loop`: push, `zps.train`, `zps.serve`, call, as one
   script with a state file per step; the wiring check for training on the
   platform, with the served-base, cold-start and thinking-mode notes a
