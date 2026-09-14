@@ -646,8 +646,23 @@ def select_for_rl(
                 markers["finished"] = 0.0
                 row["markers"] = markers
                 if truncated == "penalize":
+                    from ..schema import Judgment, ScorerRef, attach
+
                     row["reward_before_penalty"] = row.get("reward")
-                    row["reward"] = 0
+                    attach(
+                        row,
+                        Judgment(
+                            rollout_id=str(row.get("rollout_id") or ""),
+                            scorer=ScorerRef(name="overlong_penalty", kind="rule"),
+                            reward=0,
+                            reason="cut at the token cap; penalized (truncated='penalize')",
+                            evidence={
+                                "reward_before_penalty": row["reward_before_penalty"],
+                                "judge_before": row.get("judge_name"),
+                                "reason_before": row.get("reason"),
+                            },
+                        ),
+                    )
                     penalized += 1
                 else:
                     kept_overlong += 1
