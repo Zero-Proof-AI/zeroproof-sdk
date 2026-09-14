@@ -62,7 +62,8 @@ general capabilities did not move.
 7. **Pairs and SFT.** `build_preference_pairs(length_match=True)`, then
    `export_preference(pairs, system_prompt=DEPLOY_PROMPT)`. `export_training`
    on the passes for SFT, loss mask on the assistant turn.
-8. **Train.** Any DPO trainer reads `pairs.jsonl`. Not part of the SDK.
+8. **Train.** `zps.train(dataset_id, method="dpo")` on the pushed rows, or
+   any DPO trainer reading `pairs.jsonl`.
 9. **Measure.** The same prompts with a "drop the act" suffix, plus plain
    tasks the persona must not distort, before and after.
    `delta_report(target="marker:trait", must_not_regress=["on_task", "no_filler"])`
@@ -99,7 +100,8 @@ anything else; that is the check the pipeline is built around.
 
 ## What the SDK does not do
 
-Training, persona vectors, activation capping, persona subnetworks, and
-Maiya's introspection stage (it needs the trained model). The SDK produces
-the rows, the pairs, the judge check and the before/after measurement;
-everything after `pairs.jsonl` is your trainer.
+Persona vectors, activation capping, persona subnetworks, and Maiya's
+introspection stage (it needs the trained model). The SDK produces the
+rows, the pairs, the judge check and the before/after measurement, and
+`zps.train` runs DPO on the platform; `pairs.jsonl` is there for a trainer
+of your own.

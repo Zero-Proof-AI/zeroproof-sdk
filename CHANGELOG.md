@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.30 (2026-09-14)
 
 - `examples/grpo`: a model-written prompt set. `prompts.py` (writer chat
   per template seed, array parsing, category and near-duplicate filter
@@ -12,6 +12,13 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   situations, checked in; both the GRPO and DPO scripts take
   `--prompts-file`, so the holdout is over a hundred prompts instead of
   fourteen and pass@1 intervals shrink accordingly.
+- `zps.train(dataset_id, method="sft"|"grpo"|"dpo", steps=, epochs=,
+  holdout=, base_model=, wait=)` starts a hosted run on the platform's
+  trainer and returns the `TrainingRun` the dashboard draws; `run.refresh()`
+  / `run.wait()` follow it, then `run.adapter` and `run.training` (before,
+  after, rows, seconds). `zps.serve(name, run)` hosts the adapter on an
+  OpenAI-compatible endpoint and `zps.models()` lists them. README and
+  the character docs no longer say the SDK does not train (#77).
 - `mode="rl"` spends rollouts where the agent is inconsistent. Every
   prompt is probed with two rollouts; a prompt that splits is filled to k,
   a unanimous one stops once the run's own measured rates say a fresh

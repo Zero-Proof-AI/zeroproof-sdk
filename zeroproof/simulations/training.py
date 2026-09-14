@@ -1,11 +1,14 @@
 """Training runs: the loss curve and the progress bar on the platform.
 
-The SDK does not train. Your trainer does, wherever it runs, and this
-module is how it reports: a run is created, points are logged as it goes,
-and it is finished with a status. The platform draws the curve and the
-progress bar at zeroproofai.com/platform/training.
+Two ways to train, one record. ``train`` starts SFT, GRPO or DPO on the
+platform's trainer and returns the run handle; ``serve`` puts a finished
+run's adapter on an OpenAI-compatible endpoint. Or your own trainer runs
+wherever it runs and reports through the same handle: a run is created,
+points are logged as it goes, and it is finished with a status. The
+platform draws the curve and the progress bar at
+zeroproofai.com/platform/training.
 
-Three ways in, one record:
+Three ways in for your own trainer:
 
 * Engineer, one line. ``trainer.add_callback(zps.TrainerCallback(run))``
   on a Transformers or TRL trainer logs every ``on_log`` (loss, learning
@@ -88,6 +91,19 @@ class TrainingRun:
         self._warned = False
         self._delta: dict[str, Any] | None = None
         self._summary: dict[str, Any] = {}
+        #: where the trained weights landed, once known (``finish(adapter=)``
+        #: or a hosted run that reached ``done``)
+        self.adapter: str | None = None
+        # Hosted runs (``train``): the platform's trainer owns the lifecycle,
+        # so ``refresh``/``wait`` read it and the context manager never
+        # finishes it from here.
+        self.dataset_id: str | None = None
+        self.call_id: str | None = None
+        self.method: str | None = None
+        self.holdout_id: str | None = None
+        self.training: dict[str, Any] = {}
+        self.error: str | None = None
+        self._hosted = False
 
     @property
     def url(self) -> str:
@@ -184,6 +200,7 @@ class TrainingRun:
             self._summary = dict(merged)
         if adapter:
             body["adapter"] = str(adapter)
+            self.adapter = str(adapter)
         if error:
             body["error"] = str(error)[:2000]
         try:
@@ -230,11 +247,61 @@ class TrainingRun:
             self.errors += 1
             warnings.warn(f"training run {self.run_id}: could not send delta ({exc})", stacklevel=2)
 
+    # ------------------------------------------------------------ hosted runs
+
+    @property
+    def hosted(self) -> bool:
+        """True when the platform's trainer runs this (``train``)."""
+        return self._hosted
+
+    def refresh(self) -> str:
+        """Read a hosted run's state from the platform: ``running``,
+        ``done`` or ``failed``. Fills ``adapter``, ``training`` (before,
+        after, seconds, rows) and ``error`` once it has ended."""
+        if not self._hosted or not self.dataset_id:
+            return self.status
+        out = self._call("GET", f"/datasets/{self.dataset_id}/train", self._api_key)
+        state = dict((out or {}).get("training") or {}) if isinstance(out, dict) else {}
+        if not state:
+            return self.status
+        self._absorb(state)
+        return self.status
+
+    def wait(self, *, timeout: float | None = None, poll: float = 15.0) -> str:
+        """Block until a hosted run ends. Returns the final status;
+        raises ``TimeoutError`` when ``timeout`` seconds pass first."""
+        started = time.monotonic()
+        while self.refresh() == "running":
+            if timeout is not None and time.monotonic() - started >= timeout:
+                raise TimeoutError(
+                    f"training run {self.run_id} still running after {timeout:.0f}s; "
+                    f"watch it at {self.url}"
+                )
+            time.sleep(max(1.0, float(poll)))
+        return self.status
+
+    def _absorb(self, state: Mapping[str, Any]) -> None:
+        self.training = dict(state)
+        status = str(state.get("status") or self.status)
+        self.status = status if status in ("running", "done", "failed", "stopped") else self.status
+        if state.get("runId"):
+            self.run_id = str(state["runId"])
+        if state.get("callId"):
+            self.call_id = str(state["callId"])
+        if state.get("method"):
+            self.method = str(state["method"])
+        if state.get("holdoutId"):
+            self.holdout_id = str(state["holdoutId"])
+        if state.get("adapter"):
+            self.adapter = str(state["adapter"])
+        if state.get("error"):
+            self.error = str(state["error"])
+
     def __enter__(self) -> TrainingRun:
         return self
 
     def __exit__(self, exc_type, exc, _tb) -> None:
-        if self.status != "running":
+        if self.status != "running" or self._hosted:
             return
         if exc is not None:
             self.finish("failed", error=f"{exc_type.__name__}: {exc}")
@@ -295,6 +362,138 @@ def training_run(
     )
     log.info("training run %s: %s", run.run_id, run.url)
     return run
+
+
+METHODS = ("sft", "grpo", "dpo")
+
+
+def train(
+    dataset: str,
+    *,
+    method: str = "sft",
+    steps: int | None = None,
+    epochs: float | None = None,
+    holdout: str | None = None,
+    base_model: str | None = None,
+    wait: bool = False,
+    timeout: float | None = None,
+    poll: float = 15.0,
+    api_key: str | None = None,
+    transport: Callable[..., Any] | None = None,
+) -> TrainingRun:
+    """Start a hosted fine-tune on a pushed dataset and return the run.
+
+    ``method`` is ``"sft"`` (LoRA on the passing rows), ``"grpo"`` (the
+    reference-first-action reward over the graded rows) or ``"dpo"`` (a
+    pass against a fail per prompt, length matched). ``steps`` sets the
+    optimizer steps for GRPO and DPO, ``epochs`` the SFT epochs; each
+    method has a default. ``holdout`` names the eval set; it defaults to
+    the train set's split sibling from ``datasets.cut``. ``base_model``
+    overrides the trainer's base.
+
+    The run is the same record ``training_run`` makes, so ``run.url`` is
+    the loss curve, ``run.delta`` and ``get_run`` work unchanged, and the
+    trainer finishes it. ``run.refresh()`` reads where it is;
+    ``run.wait()`` (or ``wait=True``) blocks until ``done`` or ``failed``,
+    after which ``run.adapter`` names the weights and ``run.training``
+    carries before, after, rows and seconds. ``serve`` puts the adapter on
+    an endpoint.
+
+    A dataset already training answers with that run instead of a second.
+    """
+    method = str(method or "sft").lower()
+    if method not in METHODS:
+        raise ValueError(f"method must be one of {', '.join(METHODS)}; got {method!r}")
+    if not dataset:
+        raise ValueError("dataset: the ds_... id of a pushed dataset")
+    body: dict[str, Any] = {"method": method}
+    if steps:
+        body["steps"] = int(steps)
+    if epochs:
+        body["epochs"] = float(epochs)
+    if holdout:
+        body["holdoutId"] = str(holdout)
+    if base_model:
+        body["base"] = str(base_model)
+    call = transport or _call
+    out = call("POST", f"/datasets/{dataset}/train", api_key, body)
+    state = dict((out or {}).get("training") or {}) if isinstance(out, dict) else {}
+    run_id = str(state.get("runId") or "")
+    if not run_id:
+        raise RuntimeError(
+            f"the platform started training on {dataset} but reported no run id: {out!r}"
+        )
+    run = TrainingRun(run_id, name=f"{dataset} · {method}", api_key=api_key, transport=transport)
+    run._hosted = True
+    run.dataset_id = str(dataset)
+    run.method = method
+    run._absorb(state)
+    if isinstance(out, dict) and out.get("alreadyRunning"):
+        warnings.warn(
+            f"dataset {dataset} is already training ({run.run_id}); returning that run",
+            stacklevel=2,
+        )
+    log.info("hosted %s run %s on %s: %s", method, run.run_id, dataset, run.url)
+    if wait:
+        run.wait(timeout=timeout, poll=poll)
+    return run
+
+
+def models(*, api_key: str | None = None) -> list[dict[str, Any]]:
+    """The account's hosted models: ``name``, ``baseModel``, ``adapter``,
+    ``adapterRunId``, ``version``, ``endpoint`` (an OpenAI-compatible
+    base URL; send the account key as the bearer and ``name`` as the
+    model)."""
+    out = _call("GET", "/models", api_key)
+    return list(out.get("models") or []) if isinstance(out, dict) else []
+
+
+def serve(
+    name: str,
+    run: TrainingRun | str | None = None,
+    *,
+    base_model: str | None = None,
+    api_key: str | None = None,
+    transport: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Host a finished run's adapter under ``name``. Returns the model
+    row; ``endpoint`` is the OpenAI-compatible base URL and ``name`` the
+    model id to send. Posting an existing name bumps ``version``.
+
+    ``run`` is a ``TrainingRun`` or its id; the adapter and base model
+    come from the run record unless ``base_model`` is given. No ``run``
+    serves the bare base (``base_model`` required).
+    """
+    call = transport or _call
+    adapter: str | None = None
+    base = base_model
+    if isinstance(run, TrainingRun):
+        adapter = run.adapter
+        run_id: str | None = run.run_id
+    else:
+        run_id = str(run) if run else None
+    if run_id and (adapter is None or base is None):
+        meta = call("GET", f"/runs/{run_id}", api_key)
+        meta = meta if isinstance(meta, dict) else {}
+        adapter = adapter or meta.get("adapter")
+        base = base or meta.get("baseModel") or meta.get("base_model")
+        if not adapter:
+            status = str(meta.get("status") or "?")
+            if status in ("failed", "stopped"):
+                raise ValueError(
+                    f"run {run_id} {status} and produced no adapter: "
+                    f"{meta.get('error') or 'no error recorded'}"
+                )
+            raise ValueError(f"run {run_id} has no adapter yet (status {status}); wait for it")
+    if not base:
+        raise ValueError("base_model: which served base the adapter was trained on")
+    body: dict[str, Any] = {"name": str(name).strip().lower(), "baseModel": str(base)}
+    if adapter:
+        body["adapter"] = str(adapter)
+    out = call("POST", "/models", api_key, body)
+    row = dict(out) if isinstance(out, dict) else {"name": body["name"]}
+    log.info("hosted model %s v%s at %s", row.get("name"), row.get("version"), row.get("endpoint"))
+    return row
 
 
 def list_runs(*, api_key: str | None = None) -> list[dict[str, Any]]:
@@ -478,5 +677,8 @@ __all__ = [
     "delete_run",
     "get_run",
     "list_runs",
+    "models",
+    "serve",
+    "train",
     "training_run",
 ]
