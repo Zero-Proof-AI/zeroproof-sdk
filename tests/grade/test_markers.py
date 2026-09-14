@@ -75,9 +75,7 @@ def test_extra_custom_detector():
 
 def test_feeds_delta_report():
     # Same tasks before and after; refusal rises after training (over-optimization).
-    before = mark_rows(
-        [row("The answer is 4.", prompt="t1"), row("The answer is 5.", prompt="t2")]
-    )
+    before = mark_rows([row("The answer is 4.", prompt="t1"), row("The answer is 5.", prompt="t2")])
     after = mark_rows(
         [
             row("I can't help with that.", prompt="t1"),
