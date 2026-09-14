@@ -93,6 +93,7 @@ from .schema import (
     validate,
 )
 from .score.agreement import judge_agreement
+from .score.benchmark import benchmark_report, format_benchmark, run_benchmark
 from .score.curriculum import curriculum, format_curriculum, retire_solved
 from .score.delta import delta_report, format_delta_report
 from .score.grading import behavior_signature, conduct_grade
@@ -178,6 +179,7 @@ __all__ = [
     "attach_delta",
     "behavior_signature",
     "behavioral_markers",
+    "benchmark_report",
     "build_dimensions",
     "build_preference_pairs",
     "calibrate",
@@ -206,6 +208,7 @@ __all__ = [
     "export_training",
     "filter_rl_rows",
     "flaw_rows",
+    "format_benchmark",
     "format_curriculum",
     "format_delta_report",
     "format_judge_trust",
@@ -266,6 +269,7 @@ __all__ = [
     "reward_correlations",
     "row_markers",
     "rows_from_otel",
+    "run_benchmark",
     "run_judge",
     "scenario_regions",
     "score_row",

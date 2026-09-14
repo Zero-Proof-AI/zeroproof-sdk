@@ -390,6 +390,13 @@ zps.delta_report(
 )
 ```
 
+**Benchmark across seeds.** `pass_at(rows).ci95` is the interval over which tasks you picked; it does not see that the model is stochastic and the same eval re-run gives a different number (rlhf-book ch. 16). `benchmark_report(seed_runs)` takes several graded runs of one frozen eval and reports pass@1 mean and SD across seeds, the spread, and the tasks that flip seed to seed, so you know whether a before/after delta clears the run-to-run noise. `run_benchmark(eval_set, judge=, rollout=, seeds=5)` drives the seed loop for you; pass `decontaminate_against=train_rows` to fold an 8-gram leak check into the scorecard.
+
+```python
+runs = [evaluate(roll(seed=s), judge=my_judge).rows for s in range(5)]
+print(zps.format_benchmark(zps.benchmark_report(runs, name="telecom-holdout")))
+```
+
 ### Train, and watch it
 
 Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO or DPO, LoRA on an A10G) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
