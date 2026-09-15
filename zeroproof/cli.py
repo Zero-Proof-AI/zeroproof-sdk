@@ -77,7 +77,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "status":
-        print(json.dumps(auth.status(), indent=2))
+        shown = auth.status()
+        print(json.dumps(shown, indent=2))
+        if not shown.get("configured"):
+            print(
+                "no API key configured: run `zeroproof login` or set ZEROPROOF_API_KEY",
+                file=sys.stderr,
+            )
         return 0
 
     if args.command == "purge":

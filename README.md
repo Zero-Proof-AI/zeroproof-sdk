@@ -296,7 +296,7 @@ grades a finished trajectory. `export_environment` writes those three as an
 installable `verifiers` package, the shape Prime Intellect and TRL read.
 
 ```python
-data = zps.simulate(spec="specs/github", mode="rl", repeats=8)
+data = zps.simulate(my_agent, tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=8)
 data.grade()
 zps.export_environment(data, "envs/github-agent", reward=my_verifier)
 # pip install -e envs/github-agent
@@ -558,7 +558,7 @@ login`.
 # credential = zps.issue_delegated_credential(clerk_token, ttl_seconds=3600)
 # export ZEROPROOF_DELEGATED_CREDENTIAL=credential["credential"]
 
-data = zps.simulate(spec="specs/github")
+data = zps.simulate(my_agent, tools=TOOLS, system_prompt=POLICY)
 v1 = data.push("github-explore-v1")  # -> {"datasetId": "ds_...", ...}
 
 # iterate, then push the next version with lineage
@@ -741,11 +741,13 @@ zps.grounding_report(rows)  # grounded rate, and the invented values by tool and
 
 **Same tasks, new prompt.** A run draws its tasks from the grid by seed and, above `concurrency: 1`, by completion order, so a second `simulate()` shares only part of its tasks with the first. To A/B a prompt edit, a model swap or another seed on exactly the same eval, pin the task set: `zps.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base)` re-runs every prompt of `base` (a run, its rows, or its JSONL path) on its own `scenario_id`, under the same faults and world state, and draws nothing new; it stops with `tasks_done` once every prompt has its rollouts, and `compare_runs(base.rows(), rerun.rows())` pairs every task.
 
-`tasks=` copies the prompts, not the topology. **k is resolved from *this* call's `mode` and `repeats`, never inherited from the pinned run**, so a base built with `mode="rl", repeats=4` and re-run as `simulate(..., tasks=base)` comes back at k=1 (the `explore` default): `pass_at` reports `k=1` with pass^k and pass@k `None`, and a before/after built that way silently compares k=4 against k=1. Re-pass the mode and the repeats:
+`tasks=` copies the prompts and, unless you pass `repeats=`, the pinned run's k (the most rollouts any of its prompts has), so a base built with `mode="rl", repeats=4` and re-run as `simulate(..., tasks=base, mode="rl")` comes back at k=4 and `pass_at` reports the same k on both sides. Pass `repeats=` to re-run at a different k on purpose:
 
 ```python
 base = zps.simulate(agent, tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=4)
-rerun = zps.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base, mode="rl", repeats=4)
+rerun = zps.simulate(
+    agent, tools=TOOLS, system_prompt=EDITED, tasks=base, mode="rl"
+)  # k=4, inherited
 assert base.rollouts_per_request == rerun.rollouts_per_request  # cheap guard
 ```
 

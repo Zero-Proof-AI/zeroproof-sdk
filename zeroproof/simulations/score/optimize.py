@@ -910,11 +910,15 @@ def recommend(
     tools: Sequence[dict] | None = None,
     policy: str = "",
     *,
+    system_prompt: str | None = None,
     mode: str = "sft",
     target: int | None = None,
     mixed_rate: float = 0.5,
 ) -> dict[str, Any]:
     """How much data this agent needs, from its own grid. No guessing.
+
+    ``system_prompt=`` is the same text under ``simulate``'s spelling;
+    ``policy=`` and ``system_prompt=`` are interchangeable here as there.
 
     Grounded two ways: the agent's measured covering grid (every cell wants
     ``SATURATION_COPIES`` visits, and selection wants surplus to choose
@@ -929,6 +933,10 @@ def recommend(
     from ..generate.coverage import SATURATION_COPIES
     from ..generate.scenarios import scenario_regions
 
+    if system_prompt is not None:
+        if policy and policy != system_prompt:
+            raise ValueError("pass policy= or system_prompt=, not both")
+        policy = system_prompt
     kind = "sft" if str(mode).lower() == "sft" else "rl"
     cells = len(scenario_regions(list(tools or []), policy, mode=str(mode).lower()))
     reasoning = [f"covering grid: {cells} cells for this agent"]

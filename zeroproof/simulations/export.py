@@ -657,6 +657,27 @@ def export_training(
         "trained_messages": sum(sum(r["loss_mask"]) for r in rows),
         "masked_messages": sum(len(r["loss_mask"]) - sum(r["loss_mask"]) for r in rows),
     }
+    # SFT clones every row it is given. A failed rollout in the file
+    # teaches the failure, so say how many there are instead of leaving
+    # the caller to notice after training (rlhf-book ch. 9: rejection
+    # sampling keeps the passes).
+    rewards = [_numeric(r.get("reward")) for r in rows]
+    n_fail = sum(1 for v in rewards if v is not None and v < 0.5)
+    n_pass = sum(1 for v in rewards if v is not None and v >= 0.5)
+    report["rewards"] = {
+        "n_pass": n_pass,
+        "n_fail": n_fail,
+        "n_ungraded": len(rows) - n_pass - n_fail,
+    }
+    warnings: list[str] = []
+    if n_fail:
+        warnings.append(
+            f"{n_fail} of {len(rows)} rows have reward below 0.5 and are exported as "
+            "SFT targets; a model trained on them learns the failure. Pass "
+            "`scored.passes()` (or filter on reward) unless that is intended."
+        )
+    if warnings:
+        report["warnings"] = warnings
     if dest:
         report["path"] = write_jsonl(dest, rows)
         report["n_written"] = len(rows)
@@ -786,7 +807,13 @@ def export_preference(
         report["no_completion_dropped"] = no_completion_dropped
     deltas = [r["length_delta"] for r in out_rows if isinstance(r.get("length_delta"), int)]
     if deltas:
-        report["chosen_longer_frac"] = round(sum(1 for d in deltas if d > 0) / len(deltas), 3)
+        chosen_longer = sum(1 for d in deltas if d > 0)
+        report["chosen_longer_frac"] = round(chosen_longer / len(deltas), 3)
+        from .score.judging import length_confound_warning
+
+        length_note = length_confound_warning(chosen_longer, len(deltas))
+        if length_note:
+            report["warnings"] = [length_note]
     margins = [r["margin"] for r in out_rows if isinstance(r.get("margin"), (int, float))]
     if margins:
         report["mean_margin"] = round(sum(margins) / len(margins), 4)

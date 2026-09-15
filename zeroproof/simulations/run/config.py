@@ -114,11 +114,15 @@ def _pinned_tasks(tasks: Any) -> list[dict]:
         source = load_jsonl(str(source))
     out: list[dict] = []
     seen: set[str] = set()
+    rollouts: dict[str, int] = {}
     for row in source if isinstance(source, (list, tuple)) else list(source):
         if not isinstance(row, dict):
             continue
         prompt = str(row.get("prompt") or "").strip()
-        if not prompt or prompt in seen:
+        if not prompt:
+            continue
+        rollouts[prompt] = rollouts.get(prompt, 0) + 1
+        if prompt in seen:
             continue
         seen.add(prompt)
         dims = row.get("scenario_dimensions")
@@ -146,6 +150,10 @@ def _pinned_tasks(tasks: Any) -> list[dict]:
         raise ValueError(
             "tasks= has no rows with a prompt; pass a previous run, its rows, or a JSONL path"
         )
+    # The base run's k: the most rollouts any one prompt has. A re-run that
+    # names no repeats inherits it, so a before/after stays paired at the
+    # same k instead of silently comparing k=4 against k=1.
+    out[0]["base_k"] = max(rollouts.values())
     return out
 
 
@@ -427,6 +435,13 @@ def resolve_run_config(
         raise ValueError(
             "tasks= replays a fixed task set; it cannot be combined with seeds= or seed_prompts"
         )
+    if pinned_tasks and not topo["k_explicit"]:
+        # tasks= copies the prompts; without repeats= it also keeps the
+        # base run's k, so the re-run pairs at the same k (#31).
+        topo["k"] = max(1, int(pinned_tasks[0].pop("base_k", 1) or 1))
+        topo["k_explicit"] = True
+    elif pinned_tasks:
+        pinned_tasks[0].pop("base_k", None)
 
     concurrency = int(cfg.pop("concurrency", 32))
     dimensions = cfg.pop("dimensions", None)

@@ -502,6 +502,25 @@ def _model_of(row: dict) -> str | None:
     return str(model) if model else None
 
 
+def length_confound_warning(chosen_longer: int, n: int) -> str | None:
+    """The length-confound note ``build_preference_pairs`` and ``export_preference`` share.
+
+    Fires when the chosen side is longer in three quarters of eight or
+    more pairs, or in *every* pair once there are at least three: a
+    total confound is a confound at any size, and a small hand-built
+    set is exactly where it goes unnoticed (rlhf-book ch. 8).
+    """
+    if n <= 0:
+        return None
+    frac = chosen_longer / n
+    if (n >= 8 and frac >= 0.75) or (n >= 3 and chosen_longer == n):
+        return (
+            f"chosen is the longer reply in {chosen_longer}/{n} pairs; a preference "
+            "trainer learns length before behavior (rlhf-book ch. 8)"
+        )
+    return None
+
+
 def build_preference_pairs(
     rows: Sequence[dict],
     *,
@@ -613,11 +632,9 @@ def build_preference_pairs(
         if p["chosen_score"] not in (0.0, 1.0) or p["rejected_score"] not in (0.0, 1.0)
     )
     warnings: list[str] = []
-    if n >= 8 and chosen_longer / n >= 0.75:
-        warnings.append(
-            f"chosen is the longer reply in {chosen_longer}/{n} pairs; a preference "
-            "trainer learns length before behavior (rlhf-book ch. 8)"
-        )
+    length_note = length_confound_warning(chosen_longer, n)
+    if length_note:
+        warnings.append(length_note)
     if mixed_policy:
         warnings.append(
             f"{mixed_policy}/{n} pairs mix policies (chosen and rejected from different "

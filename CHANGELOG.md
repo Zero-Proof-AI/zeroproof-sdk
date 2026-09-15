@@ -106,6 +106,20 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   eating a row the report counted as kept. `"penalize"` is unchanged: the
   penalty is a failure that counts. The report gains `truncated_selected`,
   the marked rows that reached the selection.
+- Eight small gaps from the customer simulation ledger (#31), none a
+  public API change. `simulate(tasks=)` without `repeats=` now keeps the
+  pinned run's k instead of falling to the mode preset, so a before/after
+  no longer silently compares k=4 against k=1. `export_training` reports
+  `rewards` (pass, fail, ungraded counts) and warns when it writes rows
+  with reward below 0.5 as SFT targets. The length-confound warning fires
+  when the chosen side is longer in every pair from three pairs up, not
+  only at eight, and `export_preference` carries it too. `recommend`
+  accepts `system_prompt=` like `simulate`. `preflight` names the missing
+  key (`returns`), treats `properties: {}` as a declared no-argument tool,
+  and matches destructive verbs as words, so `read_runbook` is no longer
+  destructive on the strength of `book`. `zeroproof status` says on stderr
+  when no key is configured and carries `configured` in its JSON. Two
+  README snippets still used `spec="specs/github"`, which does not ship.
 - `examples/character/from_model_spec.py` no longer replaces the Model
   Spec commit pin in an existing `constitution.json` with `null`: without
   `--commit` it keeps the pin the file already carries and says so, and

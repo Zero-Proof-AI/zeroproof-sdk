@@ -135,19 +135,17 @@ def simulate(
     same faults and world state, and nothing else is generated.
 
     ``repeat_count`` is k as *this* call resolves it — from this call's
-    ``mode`` and ``repeats`` / ``rollouts_per_request`` — never from the
-    pinned run. ``tasks=`` copies the prompts, not the topology. So a
-    base run made with ``repeats=4`` and re-run as
-    ``simulate(..., tasks=base)`` comes back at k=1 (the ``explore``
-    default), ``pass_at`` reports ``k=1`` with the k-way numbers
-    ``None``, and a before/after built that way compares k=4 against
-    k=1. Re-pass the repeats (and the mode) to keep the comparison
-    paired::
+    ``repeats`` / ``rollouts_per_request`` when given, otherwise from the
+    pinned run (the most rollouts any of its prompts has), never from
+    this call's ``mode`` preset. So a base run made with ``repeats=4``
+    and re-run as ``simulate(..., tasks=base)`` comes back at k=4 and
+    ``pass_at`` reports the same k on both sides; pass ``repeats=`` to
+    re-run at a different k on purpose::
 
         base = zps.simulate(agent, tools=TOOLS, system_prompt=P,
                             mode="rl", repeats=4)
         rerun = zps.simulate(agent, tools=TOOLS, system_prompt=EDITED,
-                             tasks=base, mode="rl", repeats=4)  # same k
+                             tasks=base, mode="rl")  # k=4, inherited
 
     A run
     otherwise draws its tasks from the grid by seed and, above

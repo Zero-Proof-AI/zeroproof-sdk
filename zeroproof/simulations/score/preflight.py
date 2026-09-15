@@ -30,10 +30,12 @@ FAILURE_CLASSES = (
     "incompleteness",
 )
 
+# Whole words only, with ``_`` and a case change as separators: ``cancel_order``
+# and ``cancelOrder`` match, ``read_runbook`` (``book``) and ``profile``
+# (``file``) do not.
 _DESTRUCTIVE = re.compile(
-    r"cancel|delete|remove|refund|reverse|transfer|send|update|book|create|"
-    r"file_|close|merge|pay",
-    re.IGNORECASE,
+    r"(?<![a-z])(?i:cancel|delete|remove|refund|reverse|transfer|send|update|"
+    r"book|create|close|merge|pay)(?![a-z])|(?<![a-z])(?i:file_)"
 )
 
 _CLASS_HINTS = (
@@ -122,13 +124,16 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
     for tool in tools:
         fn = _fn(tool)
         name = str(fn.get("name") or "")
-        params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
+        raw_params = fn.get("parameters")
+        params: dict = raw_params if isinstance(raw_params, dict) else {}
+        properties = params.get("properties")
         issues: list[str] = []
         if not str(fn.get("description") or "").strip():
             issues.append("no_description")
-        if not ((params or {}).get("properties") or {}):
+        # ``properties: {}`` is a declared no-argument tool, not a missing schema.
+        if not isinstance(properties, dict):
             issues.append("no_parameters_schema")
-        elif not (params or {}).get("required"):
+        elif properties and not params.get("required"):
             issues.append("no_required_fields")
         if not fn.get("returns"):
             issues.append("no_result_shape")
@@ -142,7 +147,8 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
             f"shape ({', '.join(missing_shapes[:5])}"
             f"{', ...' if len(missing_shapes) > 5 else ''}): grounding is "
             "harder and grounding-style scaffolds can convert fabrication "
-            "into refusal instead of correct service"
+            "into refusal instead of correct service; add a `returns` key "
+            "to each tool (an example result or a JSON schema)"
         )
     for entry in per_tool:
         for issue in entry["issues"]:

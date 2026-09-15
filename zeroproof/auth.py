@@ -313,6 +313,7 @@ def status() -> dict:
     key = env or saved.get("api_key")
     out = {
         "api_url": _api_url(),
+        "configured": bool(key),
         "source": "ZEROPROOF_API_KEY" if env else ("file" if saved.get("api_key") else None),
         "path": str(credentials_path()),
         "key": (key[:7] + "..." + key[-4:]) if key and len(key) > 12 else (key or None),
