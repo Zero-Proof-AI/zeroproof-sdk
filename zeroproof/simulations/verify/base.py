@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -105,13 +106,17 @@ _REDACTED = "<reference>"
 
 
 def _reference_spellings(reference: Any) -> list[str]:
-    """Every literal spelling of the gold a reason might quote, longest first.
+    """Every spelling of the gold a reason might quote, longest first.
 
-    A reason is built from the gold with an f-string, so the leak is always
-    verbatim: ``str(value)`` for text, and the float repr as well for a
-    number (``"42"`` is quoted back as ``42.0``). Lists and dicts are
-    walked, since ``Includes`` and ``JSONField`` take collections.
+    A reason is built from the gold with an f-string, so the leak is
+    usually verbatim: ``str(value)`` for text, and the float the verifier
+    parsed it to for a number (``"42"`` is quoted back as ``42.0``, and
+    ``\\frac{1}{2}`` as ``0.5``). ``!r`` escapes newlines, so the escaped
+    form counts too. Lists and dicts are walked, since ``Includes`` and
+    ``JSONField`` take collections.
     """
+    from .math import _to_float  # math imports this module; keep it lazy
+
     found: set[str] = set()
 
     def walk(value: Any) -> None:
@@ -129,8 +134,14 @@ def _reference_spellings(reference: Any) -> list[str]:
         if not text:
             return
         found.add(text)
+        escaped = repr(text)[1:-1]
+        if escaped != text:
+            found.add(escaped)
         with contextlib.suppress(ValueError):
             found.add(str(float(text.replace(",", ""))))
+        as_float = _to_float(text)
+        if as_float is not None:
+            found.add(str(as_float))
         # multi-line gold (code tests): a traceback echoes single lines
         for line in text.splitlines():
             line = line.strip()
@@ -141,8 +152,22 @@ def _reference_spellings(reference: Any) -> list[str]:
     return sorted(found, key=len, reverse=True)
 
 
+#: A spelling this long or longer is redacted when the reason quotes only
+#: a prefix of it, the way ``ExactMatch`` quotes the first 60 characters.
+_PREFIX_MIN = 16
+
+
+def _spelling_pattern(spelling: str) -> re.Pattern[str]:
+    """``spelling`` as a whole token: a gold of ``7`` is not the ``7`` in
+    ``17`` or ``7.5``, so the candidate half of ``got 17, want 7`` stays
+    readable. Edges that are not word characters need no boundary."""
+    head = r"(?<!\w)(?<!\d\.)" if spelling[0].isalnum() or spelling[0] == "_" else ""
+    tail = r"(?!\w)(?!\.\d)" if spelling[-1].isalnum() or spelling[-1] == "_" else ""
+    return re.compile(head + re.escape(spelling) + tail)
+
+
 def _redact_reference(reason: str, reference: Any) -> str:
-    """Replace every verbatim spelling of ``reference`` in ``reason``.
+    """Replace every spelling of ``reference`` in ``reason``.
 
     ``reason`` travels with the row into every training export (it is on
     ``export``'s carry list), so a reason that quotes the answer key puts
@@ -154,8 +179,15 @@ def _redact_reference(reason: str, reference: Any) -> str:
     if not text:
         return text
     for spelling in _reference_spellings(reference):
-        if spelling in text:
-            text = text.replace(spelling, _REDACTED)
+        text = _spelling_pattern(spelling).sub(_REDACTED, text)
+        if len(spelling) < _PREFIX_MIN:
+            continue
+        # a reason that truncates the gold still quotes its head
+        for cut in range(len(spelling) - 1, _PREFIX_MIN - 1, -1):
+            prefix = spelling[:cut]
+            if prefix in text:
+                text = _spelling_pattern(prefix).sub(_REDACTED, text)
+                break
     return text
 
 

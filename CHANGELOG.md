@@ -83,7 +83,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   own data and no exporter carries it. `CodeExec` on `privileged.tests`
   reports the exception (`tests failed: AssertionError`) instead of the
   failing line, which is the answer key; pass `tests=` to see the full
-  tail while iterating. Found by the customer simulation (#31), which
+  tail while iterating; the same tests read as `privileged.reference`
+  are treated the same way. The gold is matched as a whole token (a
+  gold of `7` is not the `7` in `17`) and in the spellings a verifier
+  quotes: the float it parsed to, the escaped form, the first 60
+  characters. Found by the customer simulation (#31), which
   recorded that the existing leak guards pass vacuously offline because
   nothing on that path populates `privileged` at all.
 - `examples/safety-evals`, `docs/safety-evals.md`, `blog/agent-safety-evals.md`:

@@ -54,6 +54,7 @@ from zeroproof.simulations.verify import (
     ExactMatch,
     Includes,
     MathEqual,
+    MultipleChoice,
     Numeric,
 )
 
@@ -375,6 +376,45 @@ def test_code_exec_does_not_echo_the_privileged_tests():
     # iterating on a checker you wrote yourself is unchanged
     mine = CodeExec(tests=tests, timeout=20)({**row, "privileged": {}})
     assert GOLD in mine["reason"]
+
+
+def _priv(final_text: str, reference) -> dict:
+    return {
+        "prompt": "q",
+        "final_text": final_text,
+        "steps": [],
+        "privileged": {"reference": reference},
+    }
+
+
+def test_a_short_gold_is_a_whole_token_not_a_substring():
+    """Gold ``7``, answer ``17``: the candidate half must not read ``1<reference>``."""
+    assert Numeric()(_priv("The answer is 17", "7"))["reason"] == "got 17.0, want <reference>"
+    assert MultipleChoice()(_priv("B", "C"))["reason"] == "chose B, answer <reference>"
+
+
+def test_a_gold_the_verifier_transformed_is_still_redacted():
+    """``MathEqual`` prints the float it parsed the gold to; ``ExactMatch``
+    prints the first 60 characters; ``!r`` escapes a newline. Each is the
+    gold in another spelling."""
+    assert (
+        MathEqual()(_priv("The answer is 3", "\\frac{1}{2}"))["reason"]
+        == "numeric 3.0 vs <reference>"
+    )
+    long_gold = "the quick brown fox jumps over the lazy dog " * 2 + SECRET
+    assert SECRET not in _dump(ExactMatch()(_priv("nope", long_gold)))
+    assert "fox" not in ExactMatch()(_priv("nope", long_gold))["reason"]
+    two_lines = f"first line of the key\nsecond line {SECRET}"
+    assert "first line" not in _dump(ExactMatch()(_priv("nope", two_lines)))
+
+
+def test_code_exec_treats_tests_in_privileged_reference_as_the_answer_key():
+    tests = f"def test_it():\n    assert solve(2) == {GOLD}, 'want {GOLD}'\n"
+    row = _priv("```python\ndef solve(x):\n    return 1\n```", tests)
+    verdict = CodeExec(timeout=20)(row)
+    assert verdict["reward"] == 0
+    assert GOLD not in _dump(verdict)
+    assert verdict["reason"] == "tests failed: AssertionError"
 
 
 def test_rescoring_keeps_the_prior_scoring_run_id():

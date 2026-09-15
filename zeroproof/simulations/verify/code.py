@@ -24,7 +24,7 @@ import tempfile
 import textwrap
 from typing import Any
 
-from .base import Verifier
+from .base import Verifier, _reference_with_source
 
 _CODE_FENCE = re.compile(r"```(?:python|py)?\s*(.+?)```", re.S)
 
@@ -176,4 +176,7 @@ class CodeExec(Verifier):
         if self.tests is not None or not isinstance(row, dict):
             return False
         priv = row.get("privileged")
-        return isinstance(priv, dict) and bool(priv.get("tests"))
+        if isinstance(priv, dict) and priv.get("tests"):
+            return True
+        # the same tests, read as ``privileged.reference`` instead
+        return _reference_with_source(row, self.field)[1]
