@@ -99,7 +99,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   rather than failed and names the next action, and
   `format_judge_trust` prints `NOT MEASURED` for that case instead of
   PASS or FAIL. The perturbation pass is not counted as evidence on its
-  own: a judge that passes everything is perfectly consistent. From the
+  own: a judge that passes everything is perfectly consistent. A probe or
+  perturbation that fires is a finding with or without labels, so that
+  report still reads FAIL. From the
   customer simulation ledger (#31).
 - `examples/safety-evals`, `docs/safety-evals.md`, `blog/agent-safety-evals.md`:
   safety evals for a tool-using agent on the existing calls. A suite of

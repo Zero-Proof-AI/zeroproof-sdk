@@ -528,18 +528,17 @@ def judge_trust(
     # halves and the length check all have n=0, and the perturbation pass
     # only says the judge is consistent, which a judge that passes
     # everything also is (#31).
-    if not labeled:
+    # A probe or perturbation that fired is a finding without any label:
+    # that judge failed, and saying it is unmeasured would bury the result.
+    flagged = _flagged(warnings)
+    if not labeled and not flagged:
         warnings.append(
             "judge trust is unmeasured: no row carries a gold label, so `ok` is false for "
             f"want of evidence, not for a failed check. Hand-label {MIN_GOLD} rows or more "
             f'with {gold!r} (0/1) and re-run; `probes="all"` with `judge=` additionally '
             "tries the shortcuts a policy would find."
         )
-    ok = bool(labeled) and not any(
-        w.startswith(("kappa", "judge pass rate differs", "judge passed", "judge is exploitable"))
-        or "flip" in w
-        for w in warnings
-    )
+    ok = bool(labeled) and not flagged
     return {
         "ok": ok,
         "n_rows": len(rows),
@@ -556,11 +555,21 @@ def judge_trust(
     }
 
 
+def _flagged(warnings: Sequence[str]) -> bool:
+    """Whether any check found something, as opposed to not running."""
+    return any(
+        w.startswith(("kappa", "judge pass rate differs", "judge passed", "judge is exploitable"))
+        or "flip" in w
+        for w in warnings
+    )
+
+
 def format_judge_trust(report: dict[str, Any]) -> str:
     a = report["agreement"]
     # "FAIL" on an unmeasured judge would read as a finding; it is the
-    # absence of one. The headline says which of the two this is.
-    if not report["ok"] and not report.get("n_labeled"):
+    # absence of one. The headline says which of the two this is. A probe
+    # that fired is a finding whether or not anything was hand-labeled.
+    if not report["ok"] and not report.get("n_labeled") and not _flagged(report["warnings"]):
         lines = ["NOT MEASURED"]
     else:
         lines = ["PASS" if report["ok"] else "FAIL"]
