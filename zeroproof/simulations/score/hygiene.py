@@ -27,7 +27,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from .grading import _UNFINISHED_TAIL, behavior_signature
+from .grading import behavior_signature, looks_finished
 from .optimize import _binary_label, _messages
 
 #: |corr(reward, feature)| at or above this is flagged. Chosen from the
@@ -89,14 +89,15 @@ def assistant_turns(row: dict) -> int:
 
 
 def is_truncated(row: dict) -> bool:
-    """A reply that stops without terminal punctuation, or one the grader
-    already called truncated. Short replies are given the benefit of the
-    doubt: a one-line answer often ends on a number or a name."""
+    """A reply that stops without reaching its end (``looks_finished``:
+    terminal punctuation or a sign-off), or one the grader already called
+    truncated. Short replies are given the benefit of the doubt: a
+    one-line answer often ends on a number or a name."""
     reason = _norm_text(row.get("reason") or row.get("grader_reason"))
     if "truncat" in reason or "cut off" in reason:
         return True
     final = str(row.get("final_text") or "").rstrip()
-    return len(final) >= 200 and not _UNFINISHED_TAIL.search(final)
+    return len(final) >= 200 and not looks_finished(final)
 
 
 def dedupe_groups(rows: Sequence[dict]) -> tuple[list[dict], dict[str, Any]]:

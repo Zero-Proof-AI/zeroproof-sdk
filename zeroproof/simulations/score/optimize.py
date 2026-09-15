@@ -29,8 +29,8 @@ from .grading import (
     _DEGENERATE,
     _HARNESS_LEAK,
     _INFRA_STUB,
-    _UNFINISHED_TAIL,
     behavior_signature,
+    looks_finished,
     trace_fault,
 )
 from .passat import pass_at
@@ -135,7 +135,10 @@ def is_incomplete_junk(row: dict) -> bool:
     visible = _visible_text(row)
     if _RAW_TOOL_MARKUP.search(visible) or _TOOL_SCHEMA_DUMP.search(visible):
         return True
-    if len(final) > 600 and not _UNFINISHED_TAIL.search(final):
+    # A reply cut at the cap is junk unless ``select_for_rl(truncated=)``
+    # already claimed it (``overlong``): keep and penalize decide its fate,
+    # not this gate, or the report counts a row the output never carries.
+    if len(final) > 600 and not looks_finished(final) and not row.get("overlong"):
         return True
     messages = _messages(row)
     if not messages:
@@ -607,7 +610,11 @@ def select_for_rl(
     (rlhf-book ch. 6, DAPO's overlong handling; ch. 7 overlong filtering):
     ``"drop"`` removes it (the default; ``drop_truncated=False`` is the old
     spelling of ``"keep"``), ``"keep"`` leaves it in with ``overlong=True``
-    and its own reward, and ``"penalize"`` keeps it as a failure: reward 0,
+    and its own reward, riding with its ask rather than deciding it (the
+    ask is unanimous, in band and ranked exactly as under ``"drop"``, so
+    ``"keep"`` never returns fewer rows than ``"drop"``; a cut rollout's
+    reward is not the contrast an ask is kept for), and ``"penalize"``
+    keeps it as a failure that does count: reward 0,
     the judged score under ``reward_before_penalty``, so running past the
     cap is a negative signal instead of a rollout that vanished. A
     conduct-grade advisory 0.5 for truncation is unusable under ``"keep"``
@@ -698,6 +705,23 @@ def select_for_rl(
     trunc_report: dict[str, Any] = {"n_dropped": 0}
     if truncated == "drop":
         kept, trunc_report = _drop_truncated(kept)
+    # Under ``"keep"`` an overlong rollout rides along with its ask; it
+    # does not vote on whether the ask is unanimous, in band, or ranked
+    # first. Letting it vote made ``"keep"`` return *fewer* rows than
+    # ``"drop"`` (a kept pass tipped an ask over the band, and the whole
+    # ask went), so the ask decisions are the ones ``"drop"`` makes and
+    # the overlong rows are added back to the asks that survive (#31).
+    # ``"penalize"`` is the opposite by design: the penalty is a failure
+    # that counts.
+    riders: dict[str, list[dict]] = {}
+    if truncated == "keep":
+        voting: list[dict] = []
+        for row in kept:
+            if row.get("overlong"):
+                riders.setdefault(str(row.get("prompt") or ""), []).append(row)
+            else:
+                voting.append(row)
+        kept = voting
     kept, trim_report = trim_unanimous_groups(kept)
     # A group that hygiene shrank to one rollout, or to rollouts that all
     # agree, has no contrast left. It is not a single (which always stays,
@@ -717,9 +741,19 @@ def select_for_rl(
     groups: dict[str, list[dict]] = {}
     for row in kept:
         groups.setdefault(str(row.get("prompt") or ""), []).append(row)
+    for prompt, rows_ in riders.items():
+        if prompt in groups:
+            groups[prompt].extend(rows_)
+            kept.extend(rows_)
 
     def _score(prompt: str) -> tuple:
-        labels = [lbl for lbl in (_binary_label(r) for r in groups[prompt]) if lbl is not None]
+        labels = [
+            lbl
+            for lbl in (
+                _binary_label(r) for r in groups[prompt] if not (riders and r.get("overlong"))
+            )
+            if lbl is not None
+        ]
         p = sum(labels) / len(labels) if labels else 0.0
         in_band = lo <= p <= hi
         return (0 if in_band else 1, abs(p - 0.5), _stable_key(prompt))
@@ -767,6 +801,8 @@ def select_for_rl(
         "truncated_policy": truncated,
         "truncated_kept": kept_overlong,
         "truncated_penalized": penalized,
+        # the marked rows that made it into the selection
+        "truncated_selected": sum(1 for r in selected if r.get("overlong")),
         "length": length_report(selected),
         "correlations": reward_correlations(selected),
         "hack_scan": hack_scan(selected, endorsed=endorsed),

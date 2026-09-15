@@ -50,9 +50,13 @@ def test_keep_marks_overlong_and_leaves_the_reward():
     assert report["truncated_policy"] == "keep" and report["truncated_kept"] == 3
     assert report["truncated_dropped"] == 0
     cut = [r for r in picked if r.get("overlong")]
-    assert {r["reward"] for r in cut} == {1, 0} and all(
-        r["markers"]["finished"] == 0.0 for r in cut
-    )
+    assert [r["reward"] for r in cut] == [1] and cut[0]["markers"]["finished"] == 0.0
+    # ask b's only finished rollout is a pass: it is unanimous under
+    # "drop" and stays so under "keep", since the cut fail rides along
+    # with an ask rather than supplying the contrast that keeps it
+    dropped, _ = select_for_rl(_rows(), target=100)
+    assert {r["prompt"] for r in picked} == {r["prompt"] for r in dropped} == {"a"}
+    assert report["truncated_selected"] == 1
     assert not any(r.get("reward") == 0.5 for r in picked)  # advisory 0.5 is still unusable
     legacy, legacy_report = select_for_rl(_rows(), target=100, drop_truncated=False)
     assert legacy_report["truncated_policy"] == "keep" and len(legacy) == len(picked)
@@ -73,3 +77,72 @@ def test_penalize_turns_a_cut_rollout_into_a_failure():
 def test_optimize_threads_the_policy():
     _, report = optimize(_rows(), mode="rl", truncated="penalize")
     assert report["truncated_policy"] == "penalize" and report["truncated_penalized"] == 3
+
+
+# ------------------------------------------------ sign-offs and keep >= drop (#31)
+
+EMAIL = (
+    "Hi Dana,\n\nThanks for flagging the duplicate invoice. I pulled both records: "
+    "INV-2201 was issued on the 3rd and INV-2207 on the 9th for the same PO, so I have "
+    "voided INV-2207 and re-sent INV-2201 with the corrected due date. Nothing else on "
+    "the account changed.\n\nBest,\nSales"
+)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    ["Best,\nSales", "Thanks,\nAlex", "Regards\nThe Team", "-- Sam", "Cheers", "Kind regards,\nJ"],
+)
+def test_a_sign_off_is_a_finished_reply(tail):
+    from zeroproof.simulations.score.hygiene import is_truncated
+
+    body = EMAIL.rsplit("\n\nBest,\nSales", 1)[0]
+    assert len(body) >= 200
+    assert not is_truncated(_row("a", 1, body + "\n\n" + tail))
+
+
+def test_a_cut_reply_is_still_cut():
+    from zeroproof.simulations.score.grading import looks_finished
+
+    assert not looks_finished(LONG_CUT)
+    assert not looks_finished("Next steps:\n1. Check the")  # short last line, no sign-off
+    assert not looks_finished("I found the following,\nand the")  # lowercase continuation
+    assert looks_finished(LONG_DONE)
+
+
+def test_keep_never_returns_fewer_rows_than_drop():
+    """A kept overlong pass used to tip an ask over the band and lose the
+    whole ask, so ``keep`` came back smaller than ``drop``."""
+    rows = []
+    for i in range(4):
+        rows.append(_row("a", 1, f"Done, item {i} shipped."))
+    rows.append(_row("a", 0, "No."))
+    rows.append(_row("a", 1, LONG_CUT))  # p 4/5 = 0.8 in band; 5/6 = 0.83 out of it
+    rows.append(_row("b", 1, "Yes."))
+    rows.append(_row("b", 0, "No."))
+    dropped, drop_report = select_for_rl(rows, target=100)
+    kept, keep_report = select_for_rl(rows, target=100, truncated="keep")
+    assert {r["prompt"] for r in dropped} == {"a", "b"}
+    assert {r["prompt"] for r in kept} == {"a", "b"}
+    assert len(kept) == len(dropped) + 1
+    assert keep_report["truncated_kept"] == keep_report["truncated_selected"] == 1
+    assert drop_report["truncated_selected"] == 0
+    assert keep_report["band_groups_dropped"] == drop_report["band_groups_dropped"] == 0
+
+
+def test_keep_and_penalize_carry_a_long_cut_reply_the_junk_gate_used_to_eat():
+    very_long_cut = LONG_CUT * 3  # over 600 chars, no terminal punctuation
+    assert len(very_long_cut.rstrip()) > 600
+    rows = [
+        _row("a", 1, LONG_DONE),
+        _row("a", 0, "No."),
+        _row("a", 1, very_long_cut),
+    ]
+    kept, report = select_for_rl(rows, target=100, truncated="keep")
+    assert report["truncated_kept"] == report["truncated_selected"] == 1
+    assert any(r.get("overlong") and r["final_text"] == very_long_cut for r in kept)
+    penalized, p_report = select_for_rl(rows, target=100, truncated="penalize")
+    assert p_report["truncated_penalized"] == p_report["truncated_selected"] == 1
+    assert [r["reward"] for r in penalized if r.get("overlong")] == [0]
+    dropped, d_report = select_for_rl(rows, target=100)
+    assert d_report["truncated_selected"] == 0 and len(dropped) == 2

@@ -82,6 +82,19 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   measurement beside the verdict, `scores=[...]` sends a batch, and re-sending
   a name is a correction. A trace id this account never sent raises instead of
   looking like a success.
+- Truncation, two fixes from the customer simulation ledger (#31). A reply
+  that ends on a sign-off (`Best,\nSales`, `Thanks,\nAlex`, `-- Sam`,
+  `Cheers`) is finished: `looks_finished` in `score.grading` reads the
+  last line, not the last character, and the conduct grade, `is_truncated`
+  and the junk gate all use it, so a customer's emails stop reading as
+  cut at the token cap. `select_for_rl(truncated="keep")` never returns
+  fewer rows than `"drop"`: an overlong rollout now rides along with its
+  ask instead of voting on whether the ask is unanimous or in band (a kept
+  pass tipped an ask over the band and the whole ask went), and the junk
+  gate defers to the policy on a cut reply over 600 characters instead of
+  eating a row the report counted as kept. `"penalize"` is unchanged: the
+  penalty is a failure that counts. The report gains `truncated_selected`,
+  the marked rows that reached the selection.
 - `examples/character/from_model_spec.py` no longer replaces the Model
   Spec commit pin in an existing `constitution.json` with `null`: without
   `--commit` it keeps the pin the file already carries and says so, and

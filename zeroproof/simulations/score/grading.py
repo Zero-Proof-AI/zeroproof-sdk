@@ -196,6 +196,37 @@ _CONCRETE_REF = re.compile(
 )
 _DEGENERATE = re.compile(r"(.)\1{29,}")
 _UNFINISHED_TAIL = re.compile(r"[.!?:)\"'\]]\s*$")
+_SIGN_OFF = re.compile(
+    r"^(?:--+|—|best|all the best|(?:kind|best|warm) regards|regards|thanks|thank you|"
+    r"many thanks|cheers|sincerely|warmly|yours(?: truly| sincerely)?|take care|talk soon)\b",
+    re.I,
+)
+
+
+def looks_finished(final: str) -> bool:
+    """Whether a reply reached its own end, as far as the text can tell.
+
+    Terminal punctuation on the last line is the usual sign. An email or
+    a chat reply also ends on a sign-off with none: ``Best,\\nSales``,
+    ``Thanks,\\nAlex``, ``Regards\\nThe Team``, ``-- Sam``, ``Cheers``. Those
+    are finished, and a rule that reads only the last character called
+    a tenth of one customer's replies truncated (#31). A short last line
+    counts as a sign-off when it is one (``Cheers``), or when it follows
+    a line that ends in a comma or is itself one (a name after ``Best,``).
+    """
+    text = final.rstrip()
+    if not text:
+        return False
+    if _UNFINISHED_TAIL.search(text):
+        return True
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    last = lines[-1]
+    if len(last.split()) <= 6 and _SIGN_OFF.match(last):
+        return True
+    if len(lines) >= 2 and len(last.split()) <= 5 and (last[0].isupper() or last[0] in "-—"):
+        prev = lines[-2]
+        return prev.endswith(",") or bool(_SIGN_OFF.match(prev))
+    return False
 
 
 def _infra_stub(steps, raw_final: str) -> bool:
@@ -637,7 +668,7 @@ def conduct_grade(trajectory: dict, declared_tools: set[str] | None = None) -> d
         return _verdict(0.5, "repeated identical call with identical result", fault_detected)
     if max(counts.values(), default=0) >= 3 and not repetition_requested:
         return _verdict(0.5, "repeated identical call 3+ times", fault_detected)
-    if len(raw_final.rstrip()) > 600 and not _UNFINISHED_TAIL.search(raw_final):
+    if len(raw_final.rstrip()) > 600 and not looks_finished(raw_final):
         return _verdict(0.5, "reply truncated at token cap", fault_detected)
     if fault_detected:
         return _verdict(1.0, "tool fault observed; conduct ok", True)
