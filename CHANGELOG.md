@@ -5,6 +5,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `grade()` leaves a rollout the loop stamped `length_cap` alone instead of
+  judging it after the run; the report counts them as `skipped_truncated`.
+  Before this an after-run grade overwrote every in-loop truncation stamp.
 - `examples/safety-evals`, `docs/safety-evals.md`, `blog/agent-safety-evals.md`:
   safety evals for a tool-using agent on the existing calls. A suite of
   attacks goes in as `seeds=` (direct prompt injection, an injection

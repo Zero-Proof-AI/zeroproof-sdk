@@ -191,3 +191,31 @@ def test_invalid_verdict_never_salvages_a_pass(text):
 def test_last_complete_object_is_the_verdict():
     echoed = 'Format: {"score": 0 or 1, "reason": "..."}\n{"reason": "did it", "score": 1}'
     assert _parse_verdict(echoed) == (1, "did it")
+
+
+def test_apply_grade_llm_does_not_rejudge_length_cap_rows(monkeypatch):
+    from zeroproof.simulations.score import grade_llm as g
+
+    seen: list[str] = []
+    monkeypatch.setattr(g, "warm_judge", lambda *a, **k: {"ok": True, "seconds": 0.0})
+    monkeypatch.setattr(g, "require_judge_key", lambda *a, **k: "vllm:m@https://x/v1")
+
+    def fake_one(row, **kw):
+        seen.append(row["prompt"])
+        return {"reward": 1, "reason": "ok"}
+
+    monkeypatch.setattr(g, "grade_one", fake_one)
+    rows = [
+        {"prompt": "a", "final_text": "done."},
+        {
+            "prompt": "b",
+            "final_text": "cut",
+            "judge_name": "length_cap",
+            "judge_status": "missing_reward",
+            "reward": None,
+        },
+    ]
+    report = g.apply_grade_llm(rows, api_key="k")
+    assert seen == ["a"]
+    assert report["skipped_truncated"] == 1 and report["graded"] == 1
+    assert rows[1]["judge_name"] == "length_cap" and rows[1]["reward"] is None

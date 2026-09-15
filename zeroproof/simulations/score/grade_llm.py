@@ -587,7 +587,11 @@ def apply_grade_llm(
             "warmup": None,
         }
     cap = len(rows) if limit is None else max(0, min(len(rows), int(limit)))
-    targets = rows[:cap]
+    # A rollout the loop stamped as cut by the length cap keeps that
+    # verdict: judging it here would score a completion that never
+    # finished, the thing the stamp exists to prevent.
+    skipped_cut = [r for r in rows[:cap] if r.get("judge_name") == "length_cap"]
+    targets = [r for r in rows[:cap] if r.get("judge_name") != "length_cap"]
     started = time.monotonic()
 
     def one(row: dict) -> dict[str, Any]:
@@ -678,6 +682,7 @@ def apply_grade_llm(
         )
     return {
         "status": "judged" if graded else "unreachable",
+        "skipped_truncated": len(skipped_cut),
         "graded": graded,
         "unreachable": unreachable,
         "skipped": len(rows) - n_called,
