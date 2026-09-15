@@ -5,6 +5,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- A run that ends with no rows, no agent failure, and nothing still in
+  flight stops as `writer_failed`, keeps the hosted writer's last error in
+  `search["writer_errors"]`, and warns. Before this a hosted writer that
+  failed cold for the whole clock reported `time_budget`, its error gone,
+  and the template writer that took over knew nothing about the spec.
 - `simulate(grader=)` refuses anything that is not callable, naming the
   fix. A string there ran every rollout through the judge as an error:
   150 rows reported judged, none with a reward, nothing said so.

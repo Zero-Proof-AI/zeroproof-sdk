@@ -825,6 +825,7 @@ class Run:
         self.hazard_seen: dict[int, int] = {}
         self.hazard_split: dict[int, int] = {}
         self.rollout_durations: list[float] = []
+        self.writer_fallback_error = ""
         # Judge in the loop: verdicts run beside the rollouts, never in
         # front of them. A row's allocation decision waits for its verdict.
         self.judge_pool = concurrent.futures.ThreadPoolExecutor(
@@ -1448,6 +1449,10 @@ class Run:
             and "generator_fallback" not in data.degraded
         ):
             data.degraded.append("generator_fallback")
+            # keep the hosted writer's last error: the template writer that
+            # takes over knows nothing about a custom spec, and a run that
+            # ends with no rows must be able to say why
+            self.writer_fallback_error = str(gen.last_errors.get("llm_guided") or "")
         if unused and any((gen.meta.get(p) or {}).get("arm") for p in unused):
             note_stage(data, "generated candidate with arm provenance")
         return unused
@@ -2521,6 +2526,26 @@ class Run:
             # the note was set while the first waves were still in flight;
             # every prompt in the model path is model-written or nothing
             data.degraded.remove("generator_fallback")
+        cut_in_flight = (
+            "abandoned_rollouts" in data.search or "abandoned_writer_waves" in data.search
+        )
+        if not data.trajectories and data.stopped_because != "agent_failed" and not cut_in_flight:
+            # No rows, the agent is not to blame, and nothing was still
+            # running when the run stopped: the writer produced no situation
+            # the run could use. "time_budget" here hid a hosted writer that
+            # failed cold for the whole clock (dogfood, 2026-09-15). A clock
+            # stop with work still in flight keeps its own reason.
+            data.stopped_because = "writer_failed"
+            errors = dict(getattr(gen, "last_errors", {}) or {})
+            if getattr(self, "writer_fallback_error", ""):
+                errors.setdefault("llm_guided", self.writer_fallback_error)
+            data.search["writer_errors"] = errors
+            log.warning(
+                "no rows: the writer produced no usable situation in %.0fs (degraded=%s; %s)",
+                time.monotonic() - self.started,
+                ",".join(data.degraded) or "none",
+                errors.get("llm_guided") or "no error text",
+            )
         misses = int(self.turn_stats.get("followup_misses", 0) or 0)
         if misses:
             data.search["followup_misses"] = misses
