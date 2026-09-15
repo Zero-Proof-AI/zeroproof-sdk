@@ -177,10 +177,17 @@ def report(rows: list[dict]) -> dict:
         out["verdict"].append(rates.note)
         return out
     assert rates.pass_pow_k is not None and rates.headroom is not None
-    out["verdict"].append(
-        f"the agent is right every time on pass^{rates.k} = {rates.pass_pow_k:.0%} of asks; "
-        f"the gap to pass@1 is inconsistency, not inability"
-    )
+    gap = rates.pass_at_1 - rates.pass_pow_k
+    if gap > 0.005:
+        out["verdict"].append(
+            f"the agent is right every time on pass^{rates.k} = {rates.pass_pow_k:.0%} of asks; "
+            f"the {gap:.0%} gap to pass@1 is inconsistency, not inability"
+        )
+    else:
+        out["verdict"].append(
+            f"the agent is right every time on pass^{rates.k} = {rates.pass_pow_k:.0%} of asks, "
+            "the same as pass@1: every ask it passes, it passes on every try"
+        )
     if rates.headroom >= 0.1:
         out["verdict"].append(
             f"RL headroom {rates.headroom:.0%}: {signal['n_mixed']} mixed asks carry gradient; "

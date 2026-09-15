@@ -168,3 +168,12 @@ def test_one_failed_writer_wave_is_not_a_fallback(monkeypatch):
     assert len(data.trajectories) == 8
     assert "generator_fallback" not in data.degraded
     assert "502" in data.search["writer_errors"]["llm_guided"]
+
+
+def test_default_hash_embedder_is_not_a_degradation():
+    data = simulate_offline(budget=4, seed=0)
+    assert data.semantic is False
+    assert "semantic_embedding_unavailable" not in data.degraded
+    asked = simulate_offline(budget=4, seed=0, advanced={"embedder": "modal"})
+    if not asked.semantic:
+        assert "semantic_embedding_unavailable" in asked.degraded

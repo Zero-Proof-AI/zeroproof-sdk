@@ -61,6 +61,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   order-support agent reached the write in 2 of 40 rows; 5 of 40 at
   `12`, the rest stopping correctly on missing records). Model-backed
   rows carry more turns now; pass `avg_turns=4` for the old length.
+- `examples/pass-at-k`: the verdict no longer calls a zero gap between
+  pass@1 and pass^k "inconsistency".
+- `data.degraded` no longer carries `semantic_embedding_unavailable` on
+  every run: the note lands only when a semantic `embedder=` was asked for
+  and fell back to the hash. The hash is the default and was never a
+  degradation.
+- `select_for_rl` and `optimize(mode="rl")` on graded rows that left no
+  mixed group say so (how many unanimous, collapsed and out-of-band groups
+  went) instead of "no row carries a numeric reward; grade first", and
+  report `eval_sourced_input` with the warning even when nothing was
+  selected, so an eval set fed to the selector is visible.
 - Hosted runs on the account key. With no `VLLM_API_KEY` and a key from
   `zeroproof login` or `zeroproof signup`, the default agent, writer and
   judge go to the account endpoints (`zeroproof-serve`: Qwen3-4B with

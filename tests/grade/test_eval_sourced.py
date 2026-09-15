@@ -70,3 +70,29 @@ def test_evaluate_then_select_for_rl_reports_the_leak():
     graded = run_judge(rows, judge)
     _, report = graded.select_for_rl()
     assert report["eval_sourced"] == 0
+
+
+def test_select_for_rl_names_the_reason_when_nothing_survives():
+    # every group unanimous: graded, but no contrast for an RL update
+    rows = [_row(f"ask {i}", 1, f"Issue {i} is open.") for i in range(3) for _ in range(2)]
+    selected, report = select_for_rl(rows)
+    assert selected == []
+    assert report["eval_sourced_input"] == 0
+    assert not any("grade first" in w for w in report["hygiene_warnings"])
+    assert any(
+        w.startswith("nothing selected: 6 graded row(s) in") for w in report["hygiene_warnings"]
+    )
+
+
+def test_select_for_rl_reports_eval_rows_on_the_input_even_when_none_selected():
+    rows = evaluate(
+        [_row(f"ask {i}", None, f"Issue {i} is open.") for i in range(3) for _ in range(2)],
+        lambda r: 1,
+    ).rows
+    selected, report = select_for_rl(rows)
+    assert selected == []
+    assert report["eval_sourced"] == 0
+    assert report["eval_sourced_input"] == 6
+    assert any(
+        "6 input row(s) carry rewards from evaluate()" in w for w in report["hygiene_warnings"]
+    )

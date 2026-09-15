@@ -573,7 +573,10 @@ class Run:
         self.resolved_embedder = resolve_embedder(c.embedder)
         self.data.embedder_name = str(getattr(self.resolved_embedder, "name", "unknown"))
         self.data.semantic = is_semantic(self.resolved_embedder)
-        if not self.data.semantic:
+        # The default embedder is the hash; a run that never asked for a
+        # semantic one is not degraded, so the note only lands when the
+        # requested embedder fell back.
+        if not self.data.semantic and c.embedder not in (None, "hash"):
             self.data.degraded.append("semantic_embedding_unavailable")
         self.archive = EmbeddingArchive(self.data.embedder_name, self.data.semantic)
 

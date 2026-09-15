@@ -820,6 +820,25 @@ def select_for_rl(
         report["hygiene_warnings"].append(
             _eval_sourced_warning(report["eval_sourced"], "selected row(s)")
         )
+    # An eval set that reaches this selector is a leak whether or not a
+    # group survived the trims, so the input count is reported too.
+    report["eval_sourced_input"] = eval_sourced(rows)
+    if not selected:
+        graded = sum(1 for r in rows if isinstance(r, dict) and _binary_label(r) is not None)
+        if graded:
+            report["hygiene_warnings"] = [
+                w for w in report["hygiene_warnings"] if "grade first" not in w
+            ]
+            report["hygiene_warnings"].append(
+                f"nothing selected: {graded} graded row(s) in, "
+                f"{trim_report['n_groups_dropped']} unanimous and "
+                f"{trim_report['collapsed_groups_dropped']} collapsed group(s) dropped, "
+                f"{band_report['n_groups_dropped']} outside the band; no mixed group survived"
+            )
+        if report["eval_sourced_input"]:
+            report["hygiene_warnings"].append(
+                _eval_sourced_warning(report["eval_sourced_input"], "input row(s)")
+            )
     # Dedupe and the trims shrink every group, so the selection can no
     # longer report the k-way reliability numbers the graded rows could:
     # pass^k and pass@k need k repeats of an ask and hygiene just removed
