@@ -2719,6 +2719,9 @@ class Run:
                 "judge": scored.judge_name,
                 "judged_in_loop": self.judged_in_loop,
                 "judged_after": len(pending),
+                "errors": sum(
+                    1 for r in data.trajectories if r.get("judge_status") not in (None, "ok")
+                ),
                 "scored": len(scored),
                 "passes": len(scored.passes()),
                 "failures": len(scored.failures()),

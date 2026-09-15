@@ -452,6 +452,14 @@ def resolve_run_config(
     # the legacy spelling. Both route to one application path at the end.
     grader = grader if grader is not None else cfg.pop("grader", None)
     cfg.pop("grader", None)
+    if grader is not None and not callable(grader):
+        # A string here ran every rollout through run_judge as an error:
+        # 150 rows "judged", none with a reward, and nothing said so.
+        raise TypeError(
+            f"grader= takes a callable row -> {{'reward': 0 or 1, ...}}, got {type(grader).__name__} "
+            f"{grader!r}. For the hosted judge, leave grader= off and call data.grade() after "
+            "the run, or pass zeroproof.simulations.score.grade_llm.grade_one."
+        )
     llm_grade = bool(llm_grade or cfg.pop("llm_grade", False))
     llm_spec = cfg.pop("llm_spec", None)
     embedder = cfg.pop("embedder", "hash")

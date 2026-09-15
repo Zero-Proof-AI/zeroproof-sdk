@@ -659,3 +659,12 @@ def test_conduct_grade_reason_reaches_the_row(tmp_path):
     data.save(str(out))
     saved = [json.loads(line) for line in out.read_text().splitlines()]
     assert all(r.get("reason") for r in saved if r.get("reward") == 0)
+
+
+def test_grader_must_be_callable():
+    import pytest
+
+    from tests.helpers import offline, scripted_agent
+
+    with pytest.raises(TypeError, match="grader= takes a callable"):
+        zps.simulate(scripted_agent, budget=2, grader="hosted", **offline())

@@ -5,6 +5,10 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `simulate(grader=)` refuses anything that is not callable, naming the
+  fix. A string there ran every rollout through the judge as an error:
+  150 rows reported judged, none with a reward, nothing said so.
+  `data.search["grader"]` now also counts `errors`.
 - The hosted-agent client closes a thread's previous connection before
   opening one to a different host. A run that alternated hosts leaked one
   socket per rollout and printed a ResourceWarning for each.
