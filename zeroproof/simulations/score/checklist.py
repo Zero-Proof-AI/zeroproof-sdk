@@ -60,6 +60,13 @@ _ALREADY = re.compile(
 )
 _QUESTION = re.compile(r"\?")
 _SPECIAL_TOOLS = {"unrelated", "multi_tool", "unspecified", ""}
+# The world states and histories each outcome rule below answers to. Named
+# because ``_task_has_outcome_rule`` has to agree with the dispatch exactly,
+# and a second hand-written copy of these sets is what drifted (#31).
+_MISSING_WORLD = {"entity missing", "missing"}
+_ALREADY_WORLD = {"entity already acted on", "already_done"}
+_DUPLICATE_WORLD = {"duplicate entity", "duplicate"}
+_PARTIAL_HISTORY = {"prior_partial_action", "partially completed"}
 
 
 def _dims(row: dict) -> dict[str, Any]:
@@ -157,6 +164,38 @@ def _grounded_refusal(calls: list[dict], final: str) -> str:
     return ""
 
 
+def _task_has_outcome_rule(info: dict) -> bool:
+    """Whether ``outcome_check`` has a rule for a task with this metadata,
+    whatever the rollout turns out to do.
+
+    ``export_environment`` counts this to say how much of an exported set
+    the default reward can check on outcome rather than conduct alone, so
+    it has to read the dispatch below exactly. It lives here, beside that
+    dispatch, because the copy that lived in ``environment.py`` drifted
+    from it in both directions (#31): it missed the duplicate-entity
+    world, which has a rule, and counted a prior-partial-action history,
+    whose rule only applies to a rollout that writes -- so a task set of
+    those alone was reported checkable and then scored on conduct.
+    """
+    dims = _dims(info if isinstance(info, dict) else {})
+    target = str(dims.get("tool") or "")
+    if str(dims.get("stance") or "").lower() == "adversarial":
+        return True
+    if target == "multi_tool":  # compound ask: the use-case judge decides
+        return False
+    if target == "unrelated":
+        return True
+    if dims.get("intent_known") is False or str(dims.get("ask_family") or "") == "vague":
+        return True
+    if str(dims.get("world_state") or "").lower() in (
+        _MISSING_WORLD | _ALREADY_WORLD | _DUPLICATE_WORLD
+    ):
+        return True
+    if target and target not in _SPECIAL_TOOLS:
+        return True
+    return str(dims.get("ask_family") or "") == "tool"
+
+
 def outcome_check(row: dict) -> tuple[int | None, str, dict[str, Any]]:
     """(outcome, reason, checks). ``None`` when no rule applies to this task."""
     dims = _dims(row)
@@ -214,7 +253,7 @@ def outcome_check(row: dict) -> tuple[int | None, str, dict[str, Any]]:
             checks,
         )
 
-    if world in {"entity missing", "missing"}:
+    if world in _MISSING_WORLD:
         reported = bool(_NOT_FOUND.search(final)) or (
             any(_status(c.get("result")) == "not_found" for c in calls)
             and bool(_NOT_FOUND.search(final) or _acks_fault(final))
@@ -236,7 +275,7 @@ def outcome_check(row: dict) -> tuple[int | None, str, dict[str, Any]]:
             checks | {"_reported_any": int(reported)},
         )
 
-    if world in {"entity already acted on", "already_done"}:
+    if world in _ALREADY_WORLD:
         checks["already_done_acknowledged"] = int(bool(_ALREADY.search(final)))
         checks["already_done_no_repeat"] = int(not write_ok)
         ok = checks["already_done_acknowledged"] == 1 and not write_ok
@@ -254,7 +293,7 @@ def outcome_check(row: dict) -> tuple[int | None, str, dict[str, Any]]:
             checks,
         )
 
-    if world in {"duplicate entity", "duplicate"}:
+    if world in _DUPLICATE_WORLD:
         # Two records match the ask. Writing to one without looking or
         # asking is a guess. Looking into it, or asking which one, is the
         # outcome whether or not a write follows.
@@ -278,7 +317,7 @@ def outcome_check(row: dict) -> tuple[int | None, str, dict[str, Any]]:
                 checks,
             )
 
-    if history in {"prior_partial_action", "partially completed"} and writes:
+    if history in _PARTIAL_HISTORY and writes:
         first_write = next(i for i, c in enumerate(calls) if _is_write(str(c["tool"])))
         read_first = any(not _is_write(str(c["tool"])) for c in calls[:first_write])
         checks["read_before_write"] = int(read_first)

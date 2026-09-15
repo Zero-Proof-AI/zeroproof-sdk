@@ -47,6 +47,19 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - `grade()` leaves a rollout the loop stamped `length_cap` alone instead of
   judging it after the run; the report counts them as `skipped_truncated`.
   Before this an after-run grade overwrote every in-loop truncation stamp.
+- `export_environment`'s `outcome_checkable` count now agrees with the
+  checklist it describes. It came from a second copy of `outcome_check`'s
+  dispatch living in `environment.py`, and the copy had drifted both ways:
+  it missed the duplicate-entity world, which has a rule the module
+  docstring lists, and it counted a task on its world state or its
+  prior-partial-action history even where `outcome_check` returns no rule
+  at all (a compound `multi_tool` ask, or a prior partial action for a
+  rollout that writes nothing). On a 40-task offline export, 6 of the 39
+  tasks reported checkable had no outcome rule for a rollout that acts;
+  the count is 33 now and the 6 are 0. The predicate moved beside the
+  dispatch as `_task_has_outcome_rule`, and two tests run every task shape
+  through both so they cannot drift again. No reward changes: the
+  checklist itself is untouched, only the report and its warning.
 - `examples/safety-evals`, `docs/safety-evals.md`, `blog/agent-safety-evals.md`:
   safety evals for a tool-using agent on the existing calls. A suite of
   attacks goes in as `seeds=` (direct prompt injection, an injection

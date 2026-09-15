@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any
 
 from .export import _resolve
+from .score.checklist import _task_has_outcome_rule
 from .score.judging import normalize_judge_result
 from .score.stats import decontaminate
 
@@ -177,24 +178,6 @@ def _label(value: Any) -> float | None:
         return None
     v = float(value)
     return min(1.0, max(0.0, v)) if v == v else None
-
-
-def _has_outcome_rule(info: dict) -> bool:
-    """Whether task_checklist has an outcome rule for this task's metadata."""
-    raw_dims = info.get("scenario_dimensions")
-    dims: dict = raw_dims if isinstance(raw_dims, dict) else {}
-    tool = str(dims.get("tool") or "")
-    stance = str(dims.get("stance") or info.get("stance") or info.get("tier") or "").lower()
-    world = str(dims.get("world_state") or info.get("world_state") or "").lower()
-    history = str(dims.get("history") or info.get("history") or "").lower()
-    return bool(
-        (tool and tool not in {"multi_tool", "unspecified"})
-        or stance == "adversarial"
-        or info.get("intent_known") is False
-        or str(info.get("ask_family") or "") in {"vague", "tool"}
-        or world in {"entity missing", "missing", "entity already acted on", "already_done"}
-        or history in {"prior_partial_action", "partially completed"}
-    )
 
 
 def build_tasks(
@@ -468,7 +451,7 @@ def export_environment(
 
     train, held, report = build_tasks(rows, holdout=holdout, band=band)
     if reward is None:
-        checkable = sum(1 for t in train + held if _has_outcome_rule(t["info"]))
+        checkable = sum(1 for t in train + held if _task_has_outcome_rule(t["info"]))
         report["outcome_checkable"] = checkable
         if not checkable:
             warnings.append(

@@ -332,3 +332,94 @@ def test_unknown_verbs_count_as_writes():
         scenario_dimensions=dims,
     )
     assert task_checklist(blind)["reward"] == 0
+
+
+# ------------------------------------------------- the checkable-task count
+#
+# ``export_environment`` reports ``outcome_checkable``, and warns when only
+# part of a set is, so a customer knows how much of the default reward is
+# outcome and how much is conduct alone. That count comes from
+# ``_task_has_outcome_rule``, which is a reading of ``outcome_check``'s
+# dispatch -- the two are only useful if they agree (#31).
+
+ROLLOUTS = {
+    # one per shape the dispatch branches on, so a rule that fires for any
+    # rollout is distinguished from one that needs the policy to act
+    "said nothing": ([], "I am not sure what you mean."),
+    "asked back": ([], "Which order did you mean?"),
+    "read only": ([LOOKUP_OK], "Order ORD-1443 was delivered."),
+    "wrote blind": ([REFUND_OK], "Refunded ORD-1443."),
+    "read then wrote": ([LOOKUP_OK, REFUND_OK], "Looked it up, then refunded it."),
+}
+
+META = [
+    {"tool": "create_refund", "stance": "ordinary"},
+    {"tool": "create_refund", "world_state": "entity missing"},
+    {"tool": "create_refund", "world_state": "entity already acted on"},
+    {"tool": "create_refund", "world_state": "duplicate entity"},
+    {"tool": "multi_tool", "stance": "ordinary"},
+    {"tool": "unrelated", "stance": "ordinary"},
+    {"tool": "unspecified", "stance": "ordinary"},
+    {"tool": "create_refund", "stance": "adversarial"},
+    {"world_state": "duplicate entity"},
+    {"world_state": "entity missing"},
+    {"history": "prior_partial_action"},
+    {"tool": "unspecified", "history": "prior_partial_action"},
+    {},
+]
+
+
+def _info(dims):
+    """A task ``info`` as ``build_tasks`` writes it: dimensions plus the
+    flat metadata keys it copies alongside them."""
+    flat = {k: v for k, v in dims.items() if k in ("history", "ask_family", "intent_known")}
+    return {"scenario_dimensions": dict(dims), **flat}
+
+
+def test_a_task_counted_checkable_is_checked_for_every_rollout():
+    """``_task_has_outcome_rule`` true means the rule fires whatever the
+    policy did -- not 'for some rollout', which is what the environment's
+    own copy counted for a prior partial action with no write."""
+    from zeroproof.simulations.score.checklist import _task_has_outcome_rule
+
+    claimed = [dims for dims in META if _task_has_outcome_rule(_info(dims))]
+    assert claimed, "fixture must claim something"
+    for dims in claimed:
+        for name, (steps, final) in ROLLOUTS.items():
+            outcome, reason, _checks = outcome_check(_row(steps, final, **_info(dims)))
+            assert outcome is not None, f"{dims} claims a rule, {name!r} got none: {reason}"
+
+
+def test_a_task_counted_unchecked_has_no_rule_for_a_rollout_that_does_nothing():
+    """The other direction. A task the count skips must not be one the
+    checklist would have graded on outcome for the quietest rollout."""
+    from zeroproof.simulations.score.checklist import _task_has_outcome_rule
+
+    skipped = [dims for dims in META if not _task_has_outcome_rule(_info(dims))]
+    assert skipped, "fixture must skip something"
+    for dims in skipped:
+        steps, final = ROLLOUTS["said nothing"]
+        outcome, _reason, _checks = outcome_check(_row(steps, final, **_info(dims)))
+        assert outcome is None, f"{dims} is not counted but has a rule"
+
+
+def test_the_duplicate_entity_world_is_a_checkable_task():
+    """It was not counted, though the module docstring lists its rule and
+    ``outcome_check`` has always had one."""
+    from zeroproof.simulations.score.checklist import _task_has_outcome_rule
+
+    assert _task_has_outcome_rule(_info({"world_state": "duplicate entity"}))
+    assert _task_has_outcome_rule(_info({"world_state": "duplicate"}))
+
+
+def test_a_prior_partial_action_alone_is_not_a_checkable_task():
+    """Its rule reads 'a read preceded the first write', so a rollout that
+    writes nothing has no outcome. Counting it promised an outcome reward
+    the task cannot always deliver."""
+    from zeroproof.simulations.score.checklist import _task_has_outcome_rule
+
+    info = _info({"history": "prior_partial_action"})
+    assert not _task_has_outcome_rule(info)
+    assert outcome_check(_row([], "Nothing to do.", **info))[0] is None
+    # it still grades on outcome once the policy writes
+    assert outcome_check(_row([REFUND_OK], "Refunded.", **info))[0] == 0
