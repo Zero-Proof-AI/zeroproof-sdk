@@ -32,6 +32,13 @@ transferring):
   find those same holes.
 
 Rows the judge and the humans disagree on come back as a review queue.
+
+``ok`` means *measured and clean*. Hand labels are what the judge is
+measured against, so with no ``gold_reward`` on any row ``ok`` is false
+and the report says it is unmeasured rather than failed
+(``format_judge_trust`` prints ``NOT MEASURED``). The perturbation pass
+is not a substitute: a judge that passes everything is perfectly
+consistent.
 """
 
 from __future__ import annotations
@@ -44,7 +51,7 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from .agreement import judge_agreement
+from .agreement import MIN_GOLD, judge_agreement
 from .hygiene import reply_length
 from .stats import wilson_interval
 
@@ -431,6 +438,10 @@ def judge_trust(
     call it on up to ``sample`` rows twice more. ``probes="all"`` (or a
     list of names from ``PROBES``) adds ``judge_probes``, one more pass
     over the sample per probe; ``rubric`` feeds the keyword probe.
+
+    ``ok`` is true only when a gold-labeled check ran and nothing was
+    flagged. With no labels every check has ``n=0``, so ``ok`` is false
+    with a warning saying the judge is unmeasured, not failed.
     """
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if _label(r, gold) is not None and _label(r, "reward") is not None]
@@ -511,7 +522,20 @@ def judge_trust(
             )
     if probed:
         warnings.extend(probed["warnings"])
-    ok = not any(
+    # ``ok`` is read as "this judge can be trusted", so it has to mean
+    # measured and clean, never unmeasured. Without a gold label there is
+    # nothing for the judge to be right about: agreement, kappa, the
+    # halves and the length check all have n=0, and the perturbation pass
+    # only says the judge is consistent, which a judge that passes
+    # everything also is (#31).
+    if not labeled:
+        warnings.append(
+            "judge trust is unmeasured: no row carries a gold label, so `ok` is false for "
+            f"want of evidence, not for a failed check. Hand-label {MIN_GOLD} rows or more "
+            f'with {gold!r} (0/1) and re-run; `probes="all"` with `judge=` additionally '
+            "tries the shortcuts a policy would find."
+        )
+    ok = bool(labeled) and not any(
         w.startswith(("kappa", "judge pass rate differs", "judge passed", "judge is exploitable"))
         or "flip" in w
         for w in warnings
@@ -534,7 +558,12 @@ def judge_trust(
 
 def format_judge_trust(report: dict[str, Any]) -> str:
     a = report["agreement"]
-    lines = ["PASS" if report["ok"] else "FAIL"]
+    # "FAIL" on an unmeasured judge would read as a finding; it is the
+    # absence of one. The headline says which of the two this is.
+    if not report["ok"] and not report.get("n_labeled"):
+        lines = ["NOT MEASURED"]
+    else:
+        lines = ["PASS" if report["ok"] else "FAIL"]
     if a["n"]:
         ci = a["ci95"]
         kappa = f", kappa {a['kappa']:.2f}" if a["kappa"] is not None else ""

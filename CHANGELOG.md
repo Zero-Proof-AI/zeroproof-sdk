@@ -90,6 +90,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   characters. Found by the customer simulation (#31), which
   recorded that the existing leak guards pass vacuously offline because
   nothing on that path populates `privileged` at all.
+- `judge_trust` no longer reports `ok: true` on a judge it did not
+  measure. With no `gold_reward` on any row, agreement, kappa, the
+  held-out halves and the length split all have `n=0`, and the report
+  still headlined PASS: a judge that passes everything came back
+  trustworthy, which is the claim the report exists to check. `ok` now
+  means measured and clean, the warning says the judge is unmeasured
+  rather than failed and names the next action, and
+  `format_judge_trust` prints `NOT MEASURED` for that case instead of
+  PASS or FAIL. The perturbation pass is not counted as evidence on its
+  own: a judge that passes everything is perfectly consistent. From the
+  customer simulation ledger (#31).
 - `examples/safety-evals`, `docs/safety-evals.md`, `blog/agent-safety-evals.md`:
   safety evals for a tool-using agent on the existing calls. A suite of
   attacks goes in as `seeds=` (direct prompt injection, an injection

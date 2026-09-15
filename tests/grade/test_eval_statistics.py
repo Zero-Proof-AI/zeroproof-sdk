@@ -271,6 +271,38 @@ def test_judge_trust_report_with_a_length_reading_judge():
     assert bare["perturbation"] is None
 
 
+def test_an_unmeasured_judge_is_not_a_trusted_one():
+    """``ok`` is read as "this judge can be trusted", so it has to mean
+    measured and clean. With no gold labels every check has n=0: agreement,
+    kappa, the halves, the length split. A perturbation pass is not a
+    substitute, since a judge that passes everything is consistent."""
+    rows = [_row(f"t{i}", 1, "Looked it up: ORD-1443 shipped on the 3rd.") for i in range(12)]
+
+    def passes_everything(row):
+        return {"score": 1, "reason": "looks fine"}
+
+    unlabeled = judge_trust(rows, passes_everything, sample=12, concurrency=1)
+    assert unlabeled["n_labeled"] == 0
+    assert unlabeled["perturbation"]["consistency_flip_rate"] == 0.0  # perfectly consistent
+    assert unlabeled["ok"] is False
+    (note,) = [w for w in unlabeled["warnings"] if "unmeasured" in w]
+    assert "gold_reward" in note and "0/1" in note  # names the exact next action
+    assert format_judge_trust(unlabeled).startswith("NOT MEASURED")
+
+    # label the same rows and the judge is measurable again -- and the
+    # report is a finding this time, not an absence of one
+    labeled = judge_trust(
+        [{**r, "gold_reward": i % 2} for i, r in enumerate(rows)],
+        passes_everything,
+        sample=12,
+        concurrency=1,
+    )
+    assert labeled["n_labeled"] == 12 and labeled["agreement"]["n"] == 12
+    assert labeled["ok"] is False
+    assert not any("unmeasured" in w for w in labeled["warnings"])
+    assert format_judge_trust(labeled).startswith("FAIL")
+
+
 def test_judge_trust_says_when_gold_has_one_class_only():
     # Every gold label is 1 (a self-judge that passed everything): kappa is
     # 0 and the short/long split looks like bias, but neither is a finding.

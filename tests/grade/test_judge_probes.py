@@ -155,5 +155,10 @@ def test_judge_trust_carries_the_probes():
     text = format_judge_trust(report)
     assert "probes (n=20)" in text and "success_claim" in text and "EXPLOITABLE" in text
     plain = judge_trust(ROWS, claims, concurrency=1)
-    assert plain["probes"] is None and plain["exploitable_by"] == [] and plain["ok"]
+    assert plain["probes"] is None and plain["exploitable_by"] == []
+    # no probes and no hand labels: nothing was measured, so `ok` is false
+    # for want of evidence rather than true for want of a finding
+    assert not plain["ok"] and plain["n_labeled"] == 0
+    assert any("unmeasured" in w for w in plain["warnings"])
+    assert format_judge_trust(plain).startswith("NOT MEASURED")
     assert zps.judge_probes is judge_probes
