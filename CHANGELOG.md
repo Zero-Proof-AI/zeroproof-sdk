@@ -71,6 +71,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `metric="loss"` sends held-out loss instead, for SFT. `run.delta(...)` and
   `zps.attach_delta(...)` now fill the same two keys from their own pass@1,
   so a run that already reports a delta opens with the word too.
+- Verifier reasons no longer quote the answer key. A verifier reads the
+  gold from `privileged.reference` and then wrote what it compared into
+  `reason` (`"got 7.0, want 42.0"`, `"no match; got 'x', want 'Paris'"`),
+  and `reason` is on the export carry list, so `export_training`,
+  `export_preference` and the engine's own `save()` all carried the gold
+  into the student's file, on exactly the rows the student got wrong. The
+  gold now reads `<reference>` in the reason; the candidate half of the
+  comparison is unchanged, and a gold the caller keeps in a plain column
+  (`answer=`, `info.answer`) is quoted back as before, since that is their
+  own data and no exporter carries it. `CodeExec` on `privileged.tests`
+  reports the exception (`tests failed: AssertionError`) instead of the
+  failing line, which is the answer key; pass `tests=` to see the full
+  tail while iterating. Found by the customer simulation (#31), which
+  recorded that the existing leak guards pass vacuously offline because
+  nothing on that path populates `privileged` at all.
 - `examples/safety-evals`, `docs/safety-evals.md`, `blog/agent-safety-evals.md`:
   safety evals for a tool-using agent on the existing calls. A suite of
   attacks goes in as `seeds=` (direct prompt injection, an injection

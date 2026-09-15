@@ -47,6 +47,11 @@ except Exception:
 """
 
 
+#: An exception class name, the one part of a failure that is not written
+#: by the tests themselves.
+_EXC_NAME = re.compile(r"\b[A-Z][A-Za-z0-9_]*(?:Error|Exception|Exit)\b")
+
+
 class CodeExec(Verifier):
     """Reward is 1 if the candidate code plus the tests run to completion with
     exit code 0, else 0. ``tests`` is Python that exercises the candidate
@@ -59,6 +64,12 @@ class CodeExec(Verifier):
         setup: code prepended before the candidate (imports, fixtures).
         cpu_seconds / mem_mb: POSIX resource caps (best-effort).
         python_bin: interpreter to run with (default this one).
+
+    When the tests came from ``privileged.tests`` the failure reason names
+    the exception and nothing else: the failing line and its assertion
+    message are written by the answer key, and ``reason`` is carried into
+    every training export. Pass ``tests=`` (your own copy, not the
+    teacher's) to see the full failure tail while iterating.
     """
 
     kind = "rule"
@@ -149,4 +160,20 @@ class CodeExec(Verifier):
             return 1, "all tests passed"
         err = (proc.stderr or proc.stdout or "").strip().splitlines()
         tail = err[-1] if err else f"exit {proc.returncode}"
+        if self._tests_are_privileged(row):
+            # The failing line is echoed out of the test source, and an
+            # assertion message is written by whoever wrote the tests -- so
+            # for ``privileged.tests`` the tail *is* the answer key, and
+            # ``reason`` rides into the training export. Name the exception,
+            # which says what went wrong without saying what was expected.
+            kind = _EXC_NAME.search("\n".join(err[-5:]))
+            detail = kind.group(0) if kind else "no detail (tests are privileged)"
+            return 0, f"tests failed: {detail}"
         return 0, f"tests failed: {tail}"[:200]
+
+    def _tests_are_privileged(self, row: dict) -> bool:
+        """Whether the tests this run used came out of the teacher's block."""
+        if self.tests is not None or not isinstance(row, dict):
+            return False
+        priv = row.get("privileged")
+        return isinstance(priv, dict) and bool(priv.get("tests"))

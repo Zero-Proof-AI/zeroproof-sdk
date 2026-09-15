@@ -18,9 +18,17 @@ Each test names the boundary it guards. ``from_row``/``to_row``
 passthrough is deliberately excluded: carrying a source row's unknown keys
 back out is the wire round-trip identity, not a student-visible export,
 and it is pinned as such in ``test_schema_v1``.
+
+The last section is the RLVR path, where the block is not decoration: a
+verifier reads ``privileged.reference`` and writes a ``reason`` about it,
+and ``reason`` is on the export carry list. Every guard above passes
+vacuously on an offline run, because nothing there populates the block at
+all (#31); these do not.
 """
 
 import json
+
+import pytest
 
 from zeroproof.simulations.data import export_row
 from zeroproof.simulations.export import (
@@ -40,6 +48,13 @@ from zeroproof.simulations.score.judging import (
     build_preference_pairs,
     evaluate,
     run_judge,
+)
+from zeroproof.simulations.verify import (
+    CodeExec,
+    ExactMatch,
+    Includes,
+    MathEqual,
+    Numeric,
 )
 
 SECRET = "zzteachersecretzz"
@@ -253,6 +268,113 @@ def test_eval_rewards_are_distinguishable_from_training_rewards():
     assert scored.source == "eval"
     assert graded.rows[0]["lineage"]["source"] == "grade"
     assert scored.rows[0]["lineage"]["source"] == "eval"
+
+
+# ------------------------------------------------- the verifier's own reason
+#
+# Every guard above builds its rows by hand. On the RLVR path the answer key
+# is not decoration: a verifier *reads* ``privileged.reference`` and then
+# writes a reason saying what it compared. ``reason`` is on the export carry
+# list, so a reason that quotes the gold puts the answer key in the training
+# file -- for exactly the rows the student got wrong.
+
+GOLD = "20260915"
+
+
+def _graded_row(final_text: str = "The answer is 7", **privileged) -> dict:
+    """A row whose gold lives where the SDK says it lives, and whose answer
+    is wrong -- so the gold appears nowhere the student wrote."""
+    block = {"reference": GOLD}
+    block.update(privileged)
+    return {
+        "prompt": "what is 4 + 4?",
+        "final_text": final_text,
+        "steps": [],
+        "scenario_id": "sc-1",
+        "privileged": block,
+    }
+
+
+@pytest.mark.parametrize("build", [MathEqual, ExactMatch, Numeric, Includes])
+def test_a_verifier_reason_never_quotes_the_privileged_gold(build):
+    verdict = build()(_graded_row())
+    # non-vacuous: the gold was read and used, this is a real comparison
+    assert verdict["reward"] in (0, 1)
+    assert GOLD not in verdict["reason"]
+    assert GOLD not in _dump(verdict)
+
+
+def test_the_candidate_side_of_the_comparison_survives_the_redaction():
+    """The reason still says what the policy produced; only the gold goes.
+    A reason reduced to 'fail' would be a worse product than the leak."""
+    verdict = Numeric()(_graded_row())
+    assert "7.0" in verdict["reason"] and "<reference>" in verdict["reason"]
+
+
+def test_a_plain_answer_column_is_still_quoted_back():
+    """Deliberate scope. ``answer=`` is the caller's own column, not the
+    teacher's block; quoting it tells them nothing they did not write."""
+    row = {"prompt": "q", "final_text": "The answer is 7", "steps": [], "answer": GOLD}
+    assert GOLD in Numeric()(row)["reason"]
+
+
+def test_graded_by_a_verifier_no_export_carries_the_gold(tmp_path):
+    """End to end on the path the RLVR customer actually runs: grade with a
+    verifier, then write every file the SDK writes."""
+    from zeroproof.simulations.data import SimulationData
+
+    rows = [_graded_row(principle=f"{SECRET}_principle"), _graded_row("The answer is 12")]
+    graded = run_judge([dict(r) for r in rows], MathEqual())
+    assert [r["reward"] for r in graded.rows] == [0, 0]  # the gold really was read
+
+    train = tmp_path / "train.jsonl"
+    export_training(graded.rows, str(train), system_prompt="Solve it.", tools=[])
+    saved = tmp_path / "rows.jsonl"
+    SimulationData(trajectories=[dict(r) for r in graded.rows]).save(str(saved))
+    pairs, _report = build_preference_pairs(
+        [
+            *graded.rows,
+            {**_graded_row(f"The answer is {GOLD}"), "reward": 1.0, "judge_status": "ok"},
+        ]
+    )
+    pref = tmp_path / "pref.jsonl"
+    if pairs:
+        export_preference(pairs, str(pref), system_prompt="Solve it.", tools=[])
+
+    for path in (train, saved, pref):
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert SECRET not in text
+        for line in text.splitlines():
+            entry = json.loads(line)
+            assert _privileged_keys_in(entry) == []
+            # the gold may appear only as the policy's own words, never as
+            # something the SDK wrote about the policy
+            assert GOLD not in _dump(
+                {k: v for k, v in entry.items() if k not in ("messages", "final_text", "chosen")}
+            )
+
+
+def test_code_exec_does_not_echo_the_privileged_tests():
+    """``privileged.tests`` is the answer key for a code task, and the
+    failing assertion is echoed straight out of it."""
+    tests = f"def test_it():\n    assert solve(2) == {GOLD}, 'want {GOLD}'\n"
+    row = {
+        "prompt": "write solve(x)",
+        "final_text": "```python\ndef solve(x):\n    return 1\n```",
+        "steps": [],
+        "privileged": {"tests": tests},
+    }
+    verdict = CodeExec(timeout=20)(row)
+    assert verdict["reward"] == 0
+    assert GOLD not in _dump(verdict)
+    # what went wrong still reaches the caller, just not what was expected
+    assert verdict["reason"] == "tests failed: AssertionError"
+    # the caller's own tests are not privileged: the full tail is kept, so
+    # iterating on a checker you wrote yourself is unchanged
+    mine = CodeExec(tests=tests, timeout=20)({**row, "privileged": {}})
+    assert GOLD in mine["reason"]
 
 
 def test_rescoring_keeps_the_prior_scoring_run_id():

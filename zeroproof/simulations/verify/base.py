@@ -20,10 +20,18 @@ A verifier reads two things from a row:
   training file. Common flat fields (``reference``, ``answer``, ``target``,
   ``solution``, ``info.answer``) are read as a fallback so a dataset that
   stores the key plainly still works.
+
+A gold read out of the ``privileged`` block is kept out of the verdict's
+``reason`` as well, which reads ``<reference>`` in its place: ``reason``
+travels with the row into every training export, so a reason that quotes
+the gold hands the answer to the student on exactly the rows it got wrong.
+The candidate half of the comparison stays, and a gold the caller put in a
+plain column of their own is quoted back as before.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -50,14 +58,18 @@ def candidate_text(row: dict) -> str:
     return ""
 
 
-def reference_value(row: dict, field: str | None = None) -> Any:
-    """The gold. An explicit ``field`` wins; then privileged.reference; then
-    the flat fallback fields; then ``info``/``metadata`` sub-dicts."""
+def _reference_with_source(row: dict, field: str | None = None) -> tuple[Any, bool]:
+    """``(gold, came_out_of_the_privileged_block)``.
+
+    The flag is what tells the reason scrub below whether the value is the
+    teacher's answer key (never student-visible) or a plain column the
+    caller put in the row themselves.
+    """
     if not isinstance(row, dict):
-        return None
+        return None, False
     if field:
         if field in row:
-            return row[field]
+            return row[field], field == "privileged"
         # dotted path, e.g. "info.answer"
         cur: Any = row
         for part in field.split("."):
@@ -66,20 +78,85 @@ def reference_value(row: dict, field: str | None = None) -> Any:
             else:
                 cur = None
                 break
-        return cur
+        return cur, field.split(".")[0] == "privileged"
     priv = row.get("privileged")
     if isinstance(priv, dict) and priv.get("reference") is not None:
-        return priv["reference"]
+        return priv["reference"], True
     for key in REFERENCE_FIELDS:
         if row.get(key) is not None:
-            return row[key]
+            return row[key], False
     for holder in ("info", "metadata", "privileged"):
         sub = row.get(holder)
         if isinstance(sub, dict):
             for key in REFERENCE_FIELDS:
                 if sub.get(key) is not None:
-                    return sub[key]
-    return None
+                    return sub[key], holder == "privileged"
+    return None, False
+
+
+def reference_value(row: dict, field: str | None = None) -> Any:
+    """The gold. An explicit ``field`` wins; then privileged.reference; then
+    the flat fallback fields; then ``info``/``metadata`` sub-dicts."""
+    return _reference_with_source(row, field)[0]
+
+
+#: What a redacted answer key reads as in a verifier's ``reason``.
+_REDACTED = "<reference>"
+
+
+def _reference_spellings(reference: Any) -> list[str]:
+    """Every literal spelling of the gold a reason might quote, longest first.
+
+    A reason is built from the gold with an f-string, so the leak is always
+    verbatim: ``str(value)`` for text, and the float repr as well for a
+    number (``"42"`` is quoted back as ``42.0``). Lists and dicts are
+    walked, since ``Includes`` and ``JSONField`` take collections.
+    """
+    found: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if value is None or isinstance(value, bool):
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                walk(item)
+            return
+        text = str(value).strip()
+        if not text:
+            return
+        found.add(text)
+        with contextlib.suppress(ValueError):
+            found.add(str(float(text.replace(",", ""))))
+        # multi-line gold (code tests): a traceback echoes single lines
+        for line in text.splitlines():
+            line = line.strip()
+            if len(line) >= 8:
+                found.add(line)
+
+    walk(reference)
+    return sorted(found, key=len, reverse=True)
+
+
+def _redact_reference(reason: str, reference: Any) -> str:
+    """Replace every verbatim spelling of ``reference`` in ``reason``.
+
+    ``reason`` travels with the row into every training export (it is on
+    ``export``'s carry list), so a reason that quotes the answer key puts
+    the answer key in the file the student trains on -- for exactly the
+    rows the student got wrong. Verifiers keep the candidate side of the
+    comparison, which is the half that says what went wrong.
+    """
+    text = str(reason or "")
+    if not text:
+        return text
+    for spelling in _reference_spellings(reference):
+        if spelling in text:
+            text = text.replace(spelling, _REDACTED)
+    return text
 
 
 def _result(reward: float | int | None, reason: str, **meta: Any) -> dict[str, Any]:
@@ -108,16 +185,26 @@ class Verifier:
         raise NotImplementedError
 
     def __call__(self, row: dict) -> dict[str, Any]:
+        reference: Any = None
+        privileged = False
         try:
             candidate = candidate_text(row)
-            reference = reference_value(row, self.field)
+            reference, privileged = _reference_with_source(row, self.field)
             outcome = self.check(candidate, reference, row)
         except VerifierError as exc:
-            return _result(None, f"{self.name}: {exc}", verifier=self.name, error=str(exc))
+            note = self._reason(f"{self.name}: {exc}", reference, privileged)
+            return _result(
+                None,
+                note,
+                verifier=self.name,
+                error=self._reason(str(exc), reference, privileged),
+            )
         except Exception as exc:
             return {
                 "reward": None,
-                "reason": f"{self.name}: {type(exc).__name__}: {exc}"[:400],
+                "reason": self._reason(
+                    f"{self.name}: {type(exc).__name__}: {exc}", reference, privileged
+                )[:400],
                 "judge_status": "error",
                 "judge_meta": {"verifier": self.name},
             }
@@ -125,6 +212,7 @@ class Verifier:
             score, reason = outcome[0], str(outcome[1]) if len(outcome) > 1 else ""
         else:
             score, reason = outcome, ""
+        reason = self._reason(reason, reference, privileged)
         if isinstance(score, bool):
             score = 1 if score else 0
         if score is None:
@@ -138,6 +226,16 @@ class Verifier:
                 f"{self.name}: {'pass' if score == 1 else 'fail' if score == 0 else f'{score:.2f}'}"
             )
         return _result(score, reason, verifier=self.name)
+
+    @staticmethod
+    def _reason(reason: str, reference: Any, privileged: bool) -> str:
+        """A verdict's reason, with the teacher's answer key taken out of it.
+
+        Only when the gold came out of the ``privileged`` block: a plain
+        ``answer`` column is the caller's own data and quoting it back
+        tells them nothing they did not already put in the row.
+        """
+        return _redact_reference(reason, reference) if privileged else str(reason or "")
 
 
 class FunctionVerifier(Verifier):
