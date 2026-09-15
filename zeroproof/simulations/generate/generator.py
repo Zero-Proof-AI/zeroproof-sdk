@@ -1980,11 +1980,13 @@ def make_default_generator(
     kind: str | None = None,
     **template_kwargs,
 ):
-    """Model-written messages when a simulator is on; templates only offline.
+    """Every situation is model-written. The grid says which cell; the
+    model says the words.
 
-    Pass ``simulator=False`` to skip the model arm (templates and probes).
-    When the model is on and a round fails, that arm is skipped. Templates
-    are not used as a fallback.
+    There is no template arm. Canned phrasings put the same sentences in
+    every customer's dataset, which trains the sentence instead of the
+    behavior. ``simulator=`` takes a model spec, or a callable for a test
+    double; ``False`` is refused.
     """
     cells = max(
         _MIN_CELLS_PER_CALL,
@@ -2024,8 +2026,13 @@ def make_default_generator(
     )
     model = None
     if simulator is False:
-        model = None
-    elif callable(simulator) and not isinstance(simulator, str):
+        raise ValueError(
+            "simulator=False is gone: every situation is model-written. "
+            "Leave simulator unset for the hosted writer, pass an "
+            "'openai:'/'vllm:' spec to use your own endpoint, or pass a "
+            "callable to stand in for the model in a test."
+        )
+    if callable(simulator) and not isinstance(simulator, str):
         model = simulator
     else:
         spec = simulator if isinstance(simulator, str) else None
@@ -2054,29 +2061,10 @@ def make_default_generator(
             steering_weight=steering_weight,
         )
 
-    def _ingest_templates(
-        round_index: int, dataset: Any, texts: list[str], provenance: dict[str, dict]
-    ) -> None:
-        fallback = list(templates(dataset, round_index) or [])
-        for text in fallback:
-            if text and text not in provenance:
-                texts.append(text)
-                meta = dict(getattr(templates, "last_candidate_provenance", {}).get(text) or {})
-                meta.setdefault("arm", getattr(templates, "provenance", {}).get(text, "structured"))
-                meta.setdefault("parent", None)
-                meta.setdefault("scenario_dimensions", meta.get("assignment"))
-                meta.setdefault("seed", seed)
-                meta["generator"] = "template"
-                provenance[text] = meta
-        generate.fault_plans.update(getattr(templates, "fault_plans", {}) or {})
-
     def _ingest_model(
         round_index: int, dataset: Any, texts: list[str], provenance: dict[str, dict]
     ) -> list[str]:
         batch: list[str] = []
-        if model is None:
-            generate.model_produced = False
-            return batch
         try:
             if hasattr(model, "set_search_context"):
                 model.set_search_context(
@@ -2141,11 +2129,8 @@ def make_default_generator(
         generate.last_errors = {}
         texts: list[str] = []
         provenance: dict[str, dict] = {}
-        if include_model and model is not None:
+        if include_model:
             _ingest_model(round_index, dataset, texts, provenance)
-        elif model is None:
-            generate.model_produced = False
-            _ingest_templates(round_index, dataset, texts, provenance)
         else:
             generate.model_produced = False
         return _commit(texts, provenance)

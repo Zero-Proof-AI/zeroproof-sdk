@@ -8,6 +8,7 @@ import sys
 import pytest
 
 import zeroproof.simulations as zps
+from tests.helpers import FakeWriter
 from zeroproof.simulations.generate.adapters import detect, inspect, parse_claude_stream
 
 TOOLS = [
@@ -69,7 +70,7 @@ def test_inspect_merges_user_extras_onto_the_agent():
 
 
 def test_user_situations_and_spec_feed_simulate():
-    from tests.helpers import POLICY, scripted_agent
+    from tests.helpers import POLICY, FakeWriter, scripted_agent
     from tests.helpers import TOOLS as REFUND_TOOLS
 
     data = zps.simulate(
@@ -80,7 +81,7 @@ def test_user_situations_and_spec_feed_simulate():
         seed=0,
         grade=False,
         concurrency=6,
-        simulator=False,
+        simulator=FakeWriter(),
         spec={"instructions": "Do not refund twice."},
         extra_situations=["pls refund ORD-9 i already paid twice??"],
         advanced={"per_round": 4, "mutate_failures": False},
@@ -100,7 +101,7 @@ def test_does_not_grade_after_rollout_by_default():
         budget=8,
         seed=0,
         concurrency=8,
-        simulator=False,
+        simulator=FakeWriter(),
         advanced={"per_round": 8, "mutate_failures": False},
     )
     assert all(t["reward"] is None for t in data.trajectories)
@@ -144,7 +145,7 @@ def test_inspect_fills_simulate_when_tools_omitted():
             }
 
     data = zps.simulate(
-        Holder(), budget=8, seed=0, grade=False, simulator=False, advanced={"per_round": 4}
+        Holder(), budget=8, seed=0, grade=False, simulator=FakeWriter(), advanced={"per_round": 4}
     )
     assert data.profile.tools
     assert data.stages[0] == "agent ingestion"
@@ -212,7 +213,7 @@ def test_hash_embedder_does_not_claim_semantic_diversity():
         seed=0,
         grade=False,
         embedder="hash",
-        simulator=False,
+        simulator=FakeWriter(),
         advanced={"per_round": 3},
     )
     assert data.semantic is False

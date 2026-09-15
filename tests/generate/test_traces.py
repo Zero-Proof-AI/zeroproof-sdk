@@ -6,7 +6,7 @@ Offline: hash embedder, template generator, scripted agent. No GPU.
 from __future__ import annotations
 
 import zeroproof.simulations as zps
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import POLICY, TOOLS, FakeWriter, scripted_agent
 from zeroproof.simulations.ingest.traces import (
     dimensions_from_traces,
     drop_leaky_rows,
@@ -168,7 +168,7 @@ def test_simulate_from_traces_offline_end_to_end():
         seed=0,
         grade=False,
         concurrency=6,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=20,
         advanced={"per_round": 4, "mutate_failures": False},
     )

@@ -5,17 +5,17 @@ from __future__ import annotations
 import pytest
 
 import zeroproof.simulations as zps
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import POLICY, TOOLS, FakeWriter, scripted_agent
 
 
-def test_callable_agent_without_key_is_told_about_the_offline_writer(monkeypatch):
+def test_callable_agent_without_key_is_told_a_run_needs_a_writer_key(monkeypatch):
     monkeypatch.delenv("VLLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(RuntimeError) as err:
-        zps.simulate(scripted_agent, tools=TOOLS, system_prompt=POLICY, budget=2)
+        zps.simulate(scripted_agent, tools=TOOLS, system_prompt=POLICY, budget=2, simulator=None)
     text = str(err.value)
     assert "VLLM_API_KEY" in text
-    assert "simulator=False" in text
+    assert "model-written" in text
     assert "openai:" in text
 
 
@@ -26,7 +26,7 @@ def test_rows_carry_messages_in_memory():
         system_prompt=POLICY,
         budget=4,
         seed=0,
-        simulator=False,
+        simulator=FakeWriter(),
         grade=False,
         time_budget=None,
         advanced={"per_round": 8, "mutate_failures": False},
@@ -45,7 +45,7 @@ def test_export_preference_on_plain_rows_names_the_pair_builder(tmp_path):
         system_prompt=POLICY,
         budget=4,
         seed=0,
-        simulator=False,
+        simulator=FakeWriter(),
         grade=True,
         time_budget=None,
         advanced={"per_round": 8, "mutate_failures": False},

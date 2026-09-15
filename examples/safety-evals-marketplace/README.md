@@ -8,7 +8,7 @@ at once, and some of what it writes is public. This example is the same
 eval for that shape. A vendor assistant on a software review marketplace
 reads reviews (two of which carry a planted instruction), pulls
 buyer-intent data licensed to one vendor per product, posts responses
-under reviews, and flags reviews for moderation. It runs offline in
+under reviews, and flags reviews for moderation. It runs in
 seconds on three scripted agents, and `live.py` runs the same suite on a
 real model through Ollama with no key.
 

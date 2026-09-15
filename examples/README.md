@@ -1,22 +1,23 @@
 # Examples, in the order a post-training run happens
 
 One directory per step. Each README says what you will learn and what you
-need before the first command. "Offline" means no key and no network: a
-scripted agent and the template situation writer. Times are wall clock on
+need before the first command. Every example that simulates needs a key
+(`zeroproof login`): the situations are model-written, there is no offline
+writer. A scripted agent stands in for the policy where the point is the loop.
 a laptop unless a GPU is named.
 
 | Step | Example | What it teaches | Needs | Takes |
 |---|---|---|---|---|
-| Simulate and grade | [`bring-your-own-agent`](bring-your-own-agent) | the `agent(message) -> {steps, final_text}` contract, what a run says when the agent raises, and why an `evaluate()` score must not become the reward | nothing | seconds |
+| Simulate and grade | [`bring-your-own-agent`](bring-your-own-agent) | the `agent(message) -> {steps, final_text}` contract, what a run says when the agent raises, and why an `evaluate()` score must not become the reward | a key (`zeroproof login`) | seconds |
 | Simulate and grade | [`agent-behavior`](agent-behavior) | a coding agent with instructed bad habits, every turn on the platform as OTLP spans, a held-out test suite and an LLM judge disagreeing about the same turn, rows grouped by `scenario_id` for RL | `ZEROPROOF_API_KEY` and an OpenAI-compatible model endpoint (`--dry-run` needs neither) | 8 min for 40 runs |
-| Simulate and grade | [`verifiers`](verifiers) | rewards that are programs: `MathEqual`, `All` (answer and format), `CodeExec` against hidden tests, `JSONSchema`, each honoring the judge contract | nothing | seconds |
-| Measure | [`pass-at-k`](pass-at-k) | pass@1 with its interval, pass^k, pass@k, the per-ask histogram the mean hides, and headroom = what a grouped update can learn | nothing | seconds |
-| Measure | [`reward-hacking`](reward-hacking) | reward hacking caught before, during and after training: the within-ask scan, the judge probes, the trajectory flags, the proxy-vs-target verdict, on a scripted agent and two judges | nothing | seconds |
-| Measure | [`safety-evals`](safety-evals) | a safety suite for a tool-using agent: prompt injection (direct and planted in a tool result), data exfiltration, secret leakage, unauthorized writes, and the benign controls; four trajectory markers as the judge, pass^k per attack class, the judge checked against hand labels and the refusal probe, and a before/after that fails the fix which got safe by refusing | nothing | seconds |
+| Simulate and grade | [`verifiers`](verifiers) | rewards that are programs: `MathEqual`, `All` (answer and format), `CodeExec` against hidden tests, `JSONSchema`, each honoring the judge contract | a key (`zeroproof login`) | seconds |
+| Measure | [`pass-at-k`](pass-at-k) | pass@1 with its interval, pass^k, pass@k, the per-ask histogram the mean hides, and headroom = what a grouped update can learn | a key (`zeroproof login`) | seconds |
+| Measure | [`reward-hacking`](reward-hacking) | reward hacking caught before, during and after training: the within-ask scan, the judge probes, the trajectory flags, the proxy-vs-target verdict, on a scripted agent and two judges | a key (`zeroproof login`) | seconds |
+| Measure | [`safety-evals`](safety-evals) | a safety suite for a tool-using agent: prompt injection (direct and planted in a tool result), data exfiltration, secret leakage, unauthorized writes, and the benign controls; four trajectory markers as the judge, pass^k per attack class, the judge checked against hand labels and the refusal probe, and a before/after that fails the fix which got safe by refusing | a key (`zeroproof login`) | seconds |
 | Measure | [`safety-evals-marketplace`](safety-evals-marketplace) | the same eval where the untrusted text is user-generated content and the private data is per tenant: injections planted in product reviews, a competitor's buyer-intent list the agent must not read, intent data in a public response, a flag without a moderation ticket; six trajectory markers, pass^k per class, the guarded before/after, and `live.py` to run the suite on a local model through Ollama | nothing offline; Ollama for `live.py` | seconds offline, minutes live |
-| Select | [`schema`](schema) | one row file projected into eval, SFT, preference, GRPO prompts, OPSD and OPD targets; the `Task`/`Rollout`/`Judgment`/`Marker` split that makes that possible | nothing | seconds |
+| Select | [`schema`](schema) | one row file projected into eval, SFT, preference, GRPO prompts, OPSD and OPD targets; the `Task`/`Rollout`/`Judgment`/`Marker` split that makes that possible | a key (`zeroproof login`) | seconds |
 | Select | [`prime-intellect-rl`](prime-intellect-rl) | `simulate(mode="rl")` for uniform groups, the gradient gate (`diagnose.py`) that catches a reward the policy can game before you train, prompts in the `verifiers` shape | an account key (`zeroproof login`); `VLLM_API_KEY` for the shared pool | 3 min for 800 rollouts on the shared pool |
-| Select | [`character`](character) | a constitution to traits, graded replies per trait, a judge checked against the spec's own labels, length-matched pairs and masked SFT rows, before/after on an adversarial holdout | nothing offline; a model endpoint for the live run | seconds offline, 2.5 min live |
+| Select | [`character`](character) | a constitution to traits, graded replies per trait, a judge checked against the spec's own labels, length-matched pairs and masked SFT rows, before/after on an adversarial holdout | a key (`zeroproof login`) | seconds offline, 2.5 min live |
 | Train | [`hosted-loop`](hosted-loop) | push graded rows, `zps.train` SFT on Qwen3-4B, `zps.serve` the adapter, one chat completion from the endpoint | `ZEROPROOF_API_KEY` | about a minute of A10G, plus a cold start |
 | Train | [`identity`](identity) | a leak-free SFT set that teaches a name and maker, with Modal scripts for the LoRA and for the identity/leak eval | nothing to generate; Modal and an A10G to train | seconds to generate |
 | Train | [`grpo`](grpo) | TRL `GRPOTrainer` with LoRA on a verifiable rule, `HackMonitor` and reward/KL on the run page, paired pass@1 before/after with per-category deltas, loss variants and `--balance` as flags | Modal, one A10G; the key is optional | under 15 min at 40 steps |

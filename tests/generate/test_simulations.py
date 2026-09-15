@@ -1,7 +1,7 @@
 import json
 
 import zeroproof.simulations as zps
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import POLICY, TOOLS, FakeWriter, scripted_agent
 
 # The only keys an exported row may never carry (#149): teacher-only
 # context and the raw embedding the diversity search keeps in memory.
@@ -150,7 +150,7 @@ def test_conversation_is_user_agent_turns():
 
 def test_simulate_offline_end_to_end(tmp_path):
     data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=80, seed=0, simulator=False
+        scripted_agent, tools=TOOLS, policy=POLICY, budget=80, seed=0, simulator=FakeWriter()
     )
     assert len(data.trajectories) == 80
     assert all(t.get("reward") is None for t in data.trajectories)
@@ -178,7 +178,7 @@ def test_save_omits_grade_when_ungraded(tmp_path):
         seed=0,
         grade=False,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         advanced={"per_round": 6, "mutate_failures": False},
     )
     row = json.loads(open(data.save(str(tmp_path / "u.jsonl"))).readline())
@@ -203,14 +203,20 @@ def test_custom_grader_and_dimensions_knobs():
         seed=1,
         dimensions=dims,
         grader=lambda t: 0.5,
-        simulator=False,
+        simulator=FakeWriter(),
     )
     assert all(t["reward"] == 0.5 for t in data.trajectories)
 
 
 def test_generate_then_grade_separately():
     data = zps.simulate(
-        scripted_agent, tools=TOOLS, policy=POLICY, budget=60, seed=0, grade=False, simulator=False
+        scripted_agent,
+        tools=TOOLS,
+        policy=POLICY,
+        budget=60,
+        seed=0,
+        grade=False,
+        simulator=FakeWriter(),
     )
     assert all(t["reward"] is None for t in data.trajectories)
     assert all(t["steps"] is not None for t in data.trajectories)
@@ -226,7 +232,7 @@ def test_policy_optional_and_arms_stay_alive():
         seed=0,
         grade=False,
         concurrency=8,
-        simulator=False,
+        simulator=FakeWriter(),
         repeats=1,
         advanced={"per_round": 16, "mutate_failures": False},
     )
@@ -261,7 +267,7 @@ def test_tiny_grid_compute_does_not_stop_on_saturation():
         concurrency=8,
         until="compute",
         dimensions=_TINY_DIMS,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=None,
         mode="adaptive",
         rollouts_per_request=12,
@@ -283,7 +289,7 @@ def test_short_run_does_not_saturate_on_signature_blip():
         grade=False,
         concurrency=8,
         until="compute",
-        simulator=False,
+        simulator=FakeWriter(),
         rollouts_per_request=2,
         advanced={"per_round": 4, "mutate_failures": False},
     )
@@ -315,7 +321,7 @@ def test_lost_repeat_rollouts_do_not_starve_the_run():
         budget=6,
         seed=5,
         grade=False,
-        simulator=False,
+        simulator=FakeWriter(),
         concurrency=2,
         time_budget=40,
         advanced={"per_round": 6, "mutate_failures": False},
@@ -352,7 +358,7 @@ def test_lost_repeat_rollouts_are_rerolled_so_groups_stay_complete():
         budget=6,
         seed=5,
         grade=False,
-        simulator=False,
+        simulator=FakeWriter(),
         concurrency=2,
         time_budget=40,
         advanced={"per_round": 6, "mutate_failures": False},

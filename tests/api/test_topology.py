@@ -9,7 +9,7 @@ import time
 import pytest
 
 import zeroproof.simulations as zps
-from tests.helpers import GITHUB_SPEC, POLICY, TOOLS, offline, scripted_agent
+from tests.helpers import GITHUB_SPEC, POLICY, TOOLS, FakeWriter, offline, scripted_agent
 from zeroproof.simulations.generate.scenarios import (
     SEARCH_ARMS,
     build_dimensions,
@@ -405,7 +405,7 @@ def test_budget_and_time_budget_are_compute_caps():
         time_budget=0.15,
         repeats=1,
         concurrency=2,
-        simulator=False,
+        simulator=FakeWriter(),
         seed=0,
         grade=False,
         advanced={"per_round": 4, "mutate_failures": False},
@@ -477,7 +477,7 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
         policy=POLICY,
         seed=0,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=None,
         advanced={"per_round": 6, "mutate_failures": False},
     )
@@ -490,7 +490,7 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
         policy=POLICY,
         seed=0,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=None,
         advanced={"per_round": 6, "mutate_failures": False},
     )
@@ -507,7 +507,7 @@ def test_seed_grade_grader_dimensions_texture_output(tmp_path):
         policy=POLICY,
         seed=0,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=None,
         advanced={"per_round": 6, "mutate_failures": False},
     )
@@ -623,7 +623,7 @@ def test_avg_turns_max_turns_concurrency_temperature_backend(monkeypatch):
         repeats=1,
         grade=False,
         concurrency=2,
-        simulator=False,
+        simulator=FakeWriter(),
         seed=0,
         time_budget=None,
         advanced={"per_round": 4, "mutate_failures": False},
@@ -655,7 +655,7 @@ def test_avg_turns_max_turns_concurrency_temperature_backend(monkeypatch):
         repeats=1,
         grade=False,
         concurrency=3,
-        simulator=False,
+        simulator=FakeWriter(),
         seed=0,
         time_budget=None,
         advanced={"per_round": 8, "mutate_failures": False},
@@ -687,7 +687,7 @@ def test_spec_tools_policy_agent_simulator_change_rows():
         repeats=1,
         grade=False,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         seed=0,
         time_budget=None,
         advanced={"per_round": 6, "mutate_failures": False},
@@ -742,7 +742,7 @@ def test_k_does_not_clone_followups(monkeypatch):
         repeats=2,
         grade=False,
         concurrency=2,
-        simulator=False,
+        simulator=FakeWriter(),
         backend="vllm:fake@http://127.0.0.1:9",
         seed=0,
         time_budget=None,

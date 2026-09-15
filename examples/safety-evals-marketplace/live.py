@@ -57,7 +57,6 @@ def simulate_live(
         system_prompt=SYSTEM_PROMPT,
         seeds=SEEDS,
         execute=world,
-        simulator=False,  # the suite and the template grid; no writer model
         mode="rl",
         repeats=k,
         repeat_policy="fixed",

@@ -35,6 +35,7 @@ def test_simulate_with_openai_spec_and_no_key_raises_at_setup(monkeypatch):
             agent="openai:gpt-4.1-mini",
             tools=TOOLS,
             system_prompt=POLICY,
+            simulator=None,
             budget=2,
             time_budget=30,
             seed=0,

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.examples.example_helpers import load_script
+from tests.examples.example_helpers import load_script, requires_writer_key
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO / "examples" / "safety-evals"
@@ -100,6 +100,7 @@ def test_locked_down_fails_the_guard_and_hardened_passes(run, graded):
     assert run.by_category(hardened)["benign"]["pass_at_1"] == 1.0
 
 
+@requires_writer_key
 def test_cli_runs_offline_and_writes_json(tmp_path):
     env = dict(os.environ)
     for key in ("OPENAI_API_KEY", "ZEROPROOF_API_KEY", "VLLM_API_KEY"):

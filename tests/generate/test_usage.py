@@ -11,6 +11,7 @@ import json
 import pytest
 
 import zeroproof.simulations as zps
+from tests.helpers import FakeWriter
 from zeroproof.simulations import schema
 from zeroproof.simulations.generate import agents
 
@@ -139,7 +140,7 @@ def _simulate(monkeypatch, with_usage: bool):
         budget=1,
         grade=False,
         concurrency=1,
-        simulator=False,
+        simulator=FakeWriter(),
         backend="vllm:fake@http://127.0.0.1:9",
         seed=0,
         time_budget=None,

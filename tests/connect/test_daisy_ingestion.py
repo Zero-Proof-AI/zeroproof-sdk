@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-from tests.helpers import scripted_agent
+from tests.helpers import FakeWriter, scripted_agent
 from zeroproof.simulations import rows_from_otel
 from zeroproof.simulations.ingest.traces import load_traces, simulate_from_traces, trace_report
 
@@ -222,7 +222,7 @@ def test_daisy_traces_drive_simulation_end_to_end():
         seed=0,
         grade=False,
         concurrency=6,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=20,
         advanced={"per_round": 4, "mutate_failures": False},
     )

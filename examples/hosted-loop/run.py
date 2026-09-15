@@ -128,7 +128,6 @@ def step_data(args: argparse.Namespace) -> None:
         scripted_agent,
         tools=TOOLS,
         system_prompt=POLICY,
-        simulator=False,  # template writer: no model key
         mode="rl",
         budget=args.budget,
         repeats=4,

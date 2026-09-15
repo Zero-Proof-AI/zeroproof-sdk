@@ -3,6 +3,24 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- No offline writer. Every situation is model-written from the scenario
+  card it fills; the template writer and its canned openers, closers,
+  off-topic questions, probe families and one-line world, stance, fault
+  and history sentences are gone (343 lines). Canned phrasing put the same
+  sentences in every customer's dataset, which trains the sentence, not the
+  behavior. `simulator=False` is refused with the three real options; a
+  callable still stands in for the model in a test. The grid, faults and
+  steering are unchanged.
+- A failed tool draft stops the run. A description with no tools whose
+  draft came back empty used to run tool-free, grade, and hand rows to
+  `optimize()`: a dataset that teaches the agent to claim work it never
+  did looked finished (cold-start dogfood, 2026-09-15).
+- A run whose writer keeps producing asks that never become a row now
+  stops as `writer_failed` after a bounded number of dry rounds instead
+  of spinning to the clock. Only the offline arm used to end such a run.
+
 ## 0.44 (2026-09-15)
 
 - README: `recommend()` gets its own section, *How much to run*. Testers

@@ -1,5 +1,5 @@
 import zeroproof.simulations as zps
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import POLICY, TOOLS, FakeWriter, scripted_agent
 from zeroproof.simulations.generate.coverage import space_saturated
 
 
@@ -25,7 +25,7 @@ def test_coverage_curve_grows_each_batch(tmp_path):
         seed=0,
         grade=False,
         concurrency=8,
-        simulator=False,
+        simulator=FakeWriter(),
         advanced={"per_round": 16, "mutate_failures": False},
     )
     assert data.coverage_curve
@@ -65,7 +65,7 @@ def test_coverage_tracks_cells_without_halting():
         concurrency=8,
         until="compute",
         dimensions=dims,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=None,
         mode="adaptive",
         rollouts_per_request=12,
@@ -98,7 +98,7 @@ def test_until_saturation_halts_on_tiny_grid():
         concurrency=4,
         until="saturation",
         dimensions=dims,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=None,
         rollouts_per_request=5,
         mode="adaptive",
@@ -122,7 +122,7 @@ def test_budget_mode_predicts_toward_budget():
         grade=False,
         until="budget_only",
         concurrency=8,
-        simulator=False,
+        simulator=FakeWriter(),
         rollouts_per_request=2,
         advanced={"per_round": 16, "mutate_failures": False},
     )

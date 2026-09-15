@@ -18,6 +18,8 @@ from pathlib import Path
 import pytest
 
 import zeroproof.simulations as zps
+from tests.examples.example_helpers import requires_writer_key
+from tests.helpers import FakeWriter
 from zeroproof.simulations.score.judging import evaluate, run_judge
 
 REPO = Path(__file__).resolve().parents[2]
@@ -67,7 +69,7 @@ def test_broken_agent_is_reported_as_the_agent(example, capsys):
         example.agent_that_raises,
         tools=example.TOOLS,
         system_prompt=example.POLICY,
-        simulator=False,
+        simulator=FakeWriter(),
         budget=8,
         seed=0,
     )
@@ -108,6 +110,7 @@ def test_eval_rows_are_counted_not_dropped(example, contract_data, capsys):
     assert "evaluate : selected=8 eval_sourced=8" in out
 
 
+@requires_writer_key
 def test_cli_runs_all_three_parts_offline(tmp_path):
     out = subprocess.run(
         [sys.executable, str(EXAMPLE / "run.py")],

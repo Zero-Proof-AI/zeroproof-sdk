@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import os
 import re
 import sys
 import types
@@ -19,7 +20,17 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# An example run as a subprocess talks to a real writer model: every
+# situation is model-written and the suite's fake writer cannot reach a
+# child process. Opt in with a key and ZEROPROOF_RUN_EXAMPLES=1.
+requires_writer_key = pytest.mark.skipif(
+    os.environ.get("ZEROPROOF_RUN_EXAMPLES") != "1",
+    reason="runs an example against the hosted writer; set ZEROPROOF_RUN_EXAMPLES=1 with a key",
+)
 EXAMPLES = REPO_ROOT / "examples"
 
 

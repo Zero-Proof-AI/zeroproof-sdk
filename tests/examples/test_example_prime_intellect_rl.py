@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import zeroproof.simulations as zps
+from tests.helpers import FakeWriter
 from zeroproof.simulations.generate.agents import current_rollout
 
 REPO = Path(__file__).resolve().parents[2]
@@ -113,7 +114,7 @@ def rl_file(tmp_path_factory) -> Path:
         budget=24,
         time_budget=None,
         grade=True,
-        simulator=False,
+        simulator=FakeWriter(),
         seed=0,
         concurrency=4,
     )

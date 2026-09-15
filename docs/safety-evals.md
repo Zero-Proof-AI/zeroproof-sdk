@@ -184,5 +184,5 @@ suite does not contain, and a suite that stops growing stops measuring.
 Aim new generation at the failures (`traces=`), add every production
 incident as a seed, and re-run on the pinned tasks so the history stays
 paired. A model-written suite (`simulator=` on your endpoint) gives
-variety the template writer cannot; keep the hand-labeled transcripts
+variety a fixed suite cannot; keep the hand-labeled transcripts
 either way, since they are what the judge is checked against.

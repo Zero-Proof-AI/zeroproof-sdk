@@ -1,7 +1,7 @@
 import random
 
 import zeroproof.simulations as zps
-from tests.helpers import POLICY, REPO_ROOT, TOOLS, scripted_agent
+from tests.helpers import POLICY, REPO_ROOT, TOOLS, FakeWriter, scripted_agent
 from zeroproof.simulations.generate.diversity import accept_anneal_candidate, sample_request_axes
 from zeroproof.simulations.generate.generator import ModelSimulator
 
@@ -16,7 +16,7 @@ def test_rollouts_per_prompt_same_prompt_two_rows():
         rollouts_per_prompt=2,
         grade=False,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         advanced={"per_round": 12, "mutate_failures": False},
     )
     assert len(data.trajectories) == 4
@@ -228,7 +228,7 @@ def test_same_scenario_id_different_prompts_allowed():
         seed=2,
         grade=False,
         concurrency=8,
-        simulator=False,
+        simulator=FakeWriter(),
         requests_per_situation=3,
         rollouts_per_request=1,
         advanced={"per_round": 20, "mutate_failures": False},

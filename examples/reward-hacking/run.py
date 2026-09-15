@@ -183,7 +183,6 @@ def simulate_rows(agent, *, asks: int, k: int, seed: int) -> list[dict]:
         budget=asks * k,
         seed=seed,
         concurrency=1,
-        simulator=False,
         time_budget=None,
         mode="rl",
         repeat_policy="fixed",  # the same asks for both agents, k each

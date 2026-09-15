@@ -3,6 +3,7 @@ behavioral predicates (markers, fault-response, capability fallback),
 never coordinate tuples; history buckets by model version; targeting
 memory distinguishes solved from lucky and flags coordinate rotation."""
 
+from tests.helpers import FakeWriter
 from zeroproof.simulations.ingest.traces import behavior_state
 
 
@@ -111,7 +112,7 @@ def test_empty_history():
 
 
 def test_behavior_state_rides_trace_fed_simulate():
-    from tests.helpers import POLICY, TOOLS, scripted_agent
+    from tests.helpers import POLICY, TOOLS, FakeWriter, scripted_agent
     from zeroproof.simulations.ingest.traces import simulate_from_traces
 
     traces = [
@@ -150,7 +151,7 @@ def test_behavior_state_rides_trace_fed_simulate():
         seed=0,
         grade=False,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=20,
         advanced={"per_round": 4, "mutate_failures": False},
     )
@@ -175,7 +176,7 @@ def test_rows_carry_dims_and_model_version_everywhere():
         seed=0,
         grade=False,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=20,
         advanced={
             "per_round": 8,
@@ -238,7 +239,7 @@ def test_allocation_actually_shifts_generation():
         seed=3,
         grade=False,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=30,
         advanced={"per_round": 8, "mutate_failures": False},
     )
@@ -298,7 +299,7 @@ def test_region_progress_same_rules_both_sides():
         grade=False,
         grader=grader,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=20,
         advanced={"per_round": 6, "mutate_failures": False},
     )
@@ -334,7 +335,7 @@ def test_applied_is_false_when_no_cell_ever_boosted():
         seed=3,
         grade=False,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=30,
         advanced={"per_round": 8, "mutate_failures": False},
     )
@@ -393,7 +394,7 @@ def test_region_progress_measured_after_grading():
         budget=16,
         seed=3,
         concurrency=4,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=30,
         grader=lambda row: {"reward": 1, "reason": "recovered"},
         advanced={"per_round": 8, "mutate_failures": False},
@@ -415,7 +416,7 @@ def test_targeted_regions_without_traces_is_harmless():
         budget=4,
         seed=1,
         grade=False,
-        simulator=False,
+        simulator=FakeWriter(),
         concurrency=2,
         time_budget=20,
         advanced={

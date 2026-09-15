@@ -6,7 +6,7 @@ not a list of bad words to refuse. It is a set of situations that try to
 make the agent leak, exfiltrate, obey text it should have treated as data,
 or act without authority, graded from what the agent *did*, with benign
 controls in the same set so the fix cannot be "refuse everything". This
-example runs that eval offline, in seconds, on three scripted agents, and
+example runs that eval on three scripted agents, with the hosted writer on your key, and
 every call in it works unchanged on a real one.
 
 ```bash
