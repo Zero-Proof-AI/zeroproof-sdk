@@ -366,6 +366,27 @@ def _turn_meta(reply: dict) -> dict:
     return meta
 
 
+def _thread_connection(parsed: Any, conn_key: tuple, timeout: float) -> http.client.HTTPConnection:
+    """One keep-alive connection per thread. A connection to a different
+    host is closed before it is replaced, not dropped: a run that
+    alternated hosts leaked one socket per rollout and printed a
+    ResourceWarning for each."""
+    conn: http.client.HTTPConnection | None = getattr(_tls, "conn", None)
+    if getattr(_tls, "conn_key", None) == conn_key and conn is not None:
+        return conn
+    if conn is not None:
+        with contextlib.suppress(Exception):
+            conn.close()
+    if (parsed.scheme or "https") == "https":
+        conn = http.client.HTTPSConnection(
+            parsed.hostname or "", parsed.port or 443, timeout=timeout
+        )
+    else:
+        conn = http.client.HTTPConnection(parsed.hostname or "", parsed.port or 80, timeout=timeout)
+    _tls.conn, _tls.conn_key = conn, conn_key
+    return conn
+
+
 def complete(
     base_url: str,
     model: str,
@@ -432,17 +453,7 @@ def complete(
     for _ in range(8):
         payload["messages"] = messages
         body = json.dumps(payload, separators=(",", ":")).encode()
-        conn: http.client.HTTPConnection | None = getattr(_tls, "conn", None)
-        if getattr(_tls, "conn_key", None) != conn_key or conn is None:
-            if (parsed.scheme or "https") == "https":
-                conn = http.client.HTTPSConnection(
-                    parsed.hostname or "", parsed.port or 443, timeout=timeout
-                )
-            else:
-                conn = http.client.HTTPConnection(
-                    parsed.hostname or "", parsed.port or 80, timeout=timeout
-                )
-            _tls.conn, _tls.conn_key = conn, conn_key
+        conn = _thread_connection(parsed, conn_key, timeout)
         try:
             conn.request("POST", post_path, body=body, headers=headers)
             resp = conn.getresponse()

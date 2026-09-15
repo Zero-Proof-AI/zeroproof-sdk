@@ -117,3 +117,30 @@ def test_backend_spec_runner_gets_result_shapes_and_timeout(monkeypatch):
     assert seen["model"] == "my-model"
     assert seen["result_shapes"] is shapes
     assert seen["timeout"] == 12.5
+
+
+def test_hosted_client_closes_the_connection_it_replaces(monkeypatch):
+    """Switching hosts on one thread closes the old socket instead of dropping it."""
+    from urllib.parse import urlparse
+
+    import zeroproof.simulations.generate.agents as agents
+
+    closed: list[str] = []
+
+    class FakeConn:
+        def __init__(self, host, port=None, timeout=None):
+            self.host = host
+
+        def close(self):
+            closed.append(self.host)
+
+    monkeypatch.setattr(agents.http.client, "HTTPSConnection", FakeConn)
+    monkeypatch.setattr(agents.http.client, "HTTPConnection", FakeConn)
+    monkeypatch.setattr(agents._tls, "conn", None, raising=False)
+    monkeypatch.setattr(agents._tls, "conn_key", None, raising=False)
+    one = urlparse("https://one.example/v1")
+    two = urlparse("https://two.example/v1")
+    a = agents._thread_connection(one, ("https", "one.example", None, 30), 30)
+    assert agents._thread_connection(one, ("https", "one.example", None, 30), 30) is a
+    b = agents._thread_connection(two, ("https", "two.example", None, 30), 30)
+    assert b is not a and closed == ["one.example"]

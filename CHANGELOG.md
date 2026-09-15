@@ -5,6 +5,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- The hosted-agent client closes a thread's previous connection before
+  opening one to a different host. A run that alternated hosts leaked one
+  socket per rollout and printed a ResourceWarning for each.
 - `grade()` leaves a rollout the loop stamped `length_cap` alone instead of
   judging it after the run; the report counts them as `skipped_truncated`.
   Before this an after-run grade overwrote every in-loop truncation stamp.
