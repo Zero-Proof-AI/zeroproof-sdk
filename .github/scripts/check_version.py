@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -37,8 +38,13 @@ def local_version(path: str = "pyproject.toml") -> tuple[str, str]:
 
 def published(name: str) -> list[tuple[int, ...]]:
     """Every release already on PyPI, as normalized tuples."""
+    # PyPI's JSON API sits behind a CDN that can serve a minutes-old version
+    # list. Ask for a fresh copy; the tag check below is the real backstop.
+    req = urllib.request.Request(
+        PYPI.format(name=name), headers={"Cache-Control": "no-cache"}
+    )
     try:
-        with urllib.request.urlopen(PYPI.format(name=name), timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             data = json.load(r)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -53,6 +59,21 @@ def published(name: str) -> list[tuple[int, ...]]:
         except InvalidVersion:
             continue
     return sorted(out)
+
+
+def tagged(version: str) -> bool:
+    """True when the release tag already exists on origin.
+
+    The publish job pushes v<version> right after the upload, so the tag is
+    an uncached record of what has shipped. A merge that lands minutes after
+    a release can still see the stale PyPI list; the tag does not lie.
+    """
+    proc = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/v{version}"],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode == 0
 
 
 def next_allowed(prev: tuple[int, ...]) -> tuple[int, ...]:
@@ -96,9 +117,11 @@ def main() -> int:
         print(f"::notice::first release of {name} {current}")
         return emit(publish=True, version=str(current))
 
-    if current.release in prior:
-        # Already on PyPI. Not an error: main moves for reasons other than a
-        # release, and re-running CI on an unchanged version must not fail.
+    if current.release in prior or tagged(str(current)):
+        # Already on PyPI, or already tagged by a publish run whose upload the
+        # PyPI CDN has not caught up with yet. Not an error: main moves for
+        # reasons other than a release, and re-running CI on an unchanged
+        # version must not fail.
         print(f"::notice::{current} is already published, nothing to cut")
         return emit(publish=False, version=str(current))
 
