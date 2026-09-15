@@ -60,6 +60,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   dispatch as `_task_has_outcome_rule`, and two tests run every task shape
   through both so they cannot drift again. No reward changes: the
   checklist itself is untouched, only the report and its warning.
+- `run.holdout(before, after)` and `zps.attach_holdout(run_id, before=,
+  after=)`: say whether the training worked. A finished run's page opens with
+  one word — Better, Worse, About the same — over the held-out pass rate
+  before and after, read from `holdoutPassBefore`/`holdoutPassAfter` on the
+  run's summary. The platform's own trainer writes them; nothing in the SDK
+  did, so a run on your own hardware — the path `TrainerCallback` exists for —
+  finished at "Not measured" with no call to fix it. Pass rates are 0 to 1
+  (58% is `0.58`, and `58` raises rather than reading as 5800% on the page);
+  `metric="loss"` sends held-out loss instead, for SFT. `run.delta(...)` and
+  `zps.attach_delta(...)` now fill the same two keys from their own pass@1,
+  so a run that already reports a delta opens with the word too.
 - `examples/safety-evals`, `docs/safety-evals.md`, `blog/agent-safety-evals.md`:
   safety evals for a tool-using agent on the existing calls. A suite of
   attacks goes in as `seeds=` (direct prompt injection, an injection

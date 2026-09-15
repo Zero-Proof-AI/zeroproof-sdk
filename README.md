@@ -854,7 +854,11 @@ with zps.training_run("sft-v3", dataset="ds_...", total_steps=1000) as run:
         loss = train_step(batch)
         run.log(step, loss=loss, lr=scheduler.get_last_lr()[0])
     run.finish(summary={"final_loss": loss}, adapter="s3://.../adapter")  # failed on exception
+
+run.holdout(before=0.42, after=0.58)  # did it work? the run page opens with this
 ```
+
+A run's page opens with one word — **Better**, **Worse**, **About the same** — over the held-out pass rate before and after. The platform's trainer measures it; a run on your own hardware says it with `run.holdout(before, after)`, or `zps.attach_holdout(run_id, before=..., after=...)` once the run has finished. Pass rates are 0 to 1, so 58% is `0.58`; `metric="loss"` sends held-out loss instead (SFT), where lower is better. `run.delta(...)` and `zps.attach_delta(...)` already measure both sides, so they fill the two numbers in themselves.
 
 ### Is it hacking the reward right now?
 

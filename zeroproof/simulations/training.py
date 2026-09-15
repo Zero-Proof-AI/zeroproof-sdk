@@ -55,6 +55,43 @@ FLUSH_EVERY = 25
 FLUSH_SECONDS = 15.0
 MAX_BATCH = 500
 
+# The two numbers a finished run's page opens with, under one word: Better,
+# Worse or About the same. The platform's own trainer writes them; a run on
+# your own hardware has to say them, which is what `holdout` is for.
+HOLDOUT_KEYS = {
+    "pass": ("holdoutPassBefore", "holdoutPassAfter"),
+    "loss": ("holdoutLossBefore", "holdoutLossAfter"),
+}
+
+
+def _holdout_summary(before: float, after: float, metric: str = "pass") -> dict[str, float]:
+    """``{holdoutPassBefore: ..., holdoutPassAfter: ...}``, validated."""
+    if metric not in HOLDOUT_KEYS:
+        raise ValueError(f"metric: 'pass' (a pass rate) or 'loss', not {metric!r}")
+    out: dict[str, float] = {}
+    for key, name, value in zip(HOLDOUT_KEYS[metric], ("before", "after"), (before, after)):
+        v = float(value)
+        if v != v or v in (float("inf"), float("-inf")):
+            raise ValueError(f"{name}: a number, not {value!r}")
+        # A pass rate is a share of the held-out prompts, so 58% is 0.58; sent
+        # as 58 the page would read it as 5800%.
+        if metric == "pass" and not 0.0 <= v <= 1.0:
+            raise ValueError(f"{name}={value!r}: a pass rate is 0 to 1 (58% is 0.58)")
+        out[key] = v
+    return out
+
+
+def _holdout_from_delta(report: Mapping[str, Any]) -> dict[str, float]:
+    """The same two numbers, read off a delta report's pass@1."""
+    metric = (report.get("metrics") or {}).get("pass_at_1") or {}
+    a, b = metric.get("mean_a"), metric.get("mean_b")
+    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        return {}
+    try:
+        return _holdout_summary(a, b)
+    except ValueError:
+        return {}
+
 
 class TrainingRun:
     """One fine-tune, as the platform sees it. Create with ``training_run``.
@@ -242,6 +279,14 @@ class TrainingRun:
                 f"training run {self.run_id}: could not send summary ({exc})", stacklevel=2
             )
 
+    def holdout(self, before: float, after: float, *, metric: str = "pass") -> dict[str, float]:
+        """Did it work? The held-out pass rate before and after, which is
+        what the run's page opens with. ``metric="loss"`` for held-out loss
+        (SFT), where lower is better. Pass rates are 0 to 1."""
+        fields = _holdout_summary(before, after, metric)
+        self.note(**fields)
+        return fields
+
     def delta(
         self,
         before: Sequence[dict],
@@ -270,6 +315,11 @@ class TrainingRun:
             proxy=proxy,
         )
         self._delta = _json_safe(report)
+        # The report already measured the held-out pass rate before and
+        # after; the page's own opening line reads those two keys, so fill
+        # them from it rather than asking for the numbers twice.
+        for key, value in _holdout_from_delta(report).items():
+            self._summary.setdefault(key, value)
         if self.status != "running":
             self._send_delta()
         return report
@@ -736,11 +786,46 @@ def attach_delta(
     )
     summary = dict(run.get("summary") or {})
     summary["delta"] = _json_safe(report)
+    for key, value in _holdout_from_delta(report).items():
+        summary.setdefault(key, value)
+    _finish_again(run_id, run, summary, api_key)
+    return report
+
+
+def _finish_again(
+    run_id: str, run: Mapping[str, Any], summary: dict[str, Any], api_key: str | None
+) -> None:
+    """Re-send a finished run's summary with the status it already has."""
     status = str(run.get("status") or "done")
     if status == "running":
         status = "done"
     _call("POST", f"/runs/{run_id}/finish", api_key, {"status": status, "summary": summary})
-    return report
+
+
+def attach_holdout(
+    run_id: str,
+    before: float,
+    after: float,
+    *,
+    metric: str = "pass",
+    api_key: str | None = None,
+) -> dict[str, float]:
+    """Did it work? Put the held-out pass rate before and after on a run
+    that has already finished — the two numbers its page opens with::
+
+        zps.attach_holdout("run_...", before=0.42, after=0.58)
+
+    Pass rates are 0 to 1. ``metric="loss"`` sends held-out loss instead
+    (SFT), where lower is better. The summary is re-sent with the two keys
+    added and the status unchanged; sending again is a correction.
+    """
+    fields = _holdout_summary(before, after, metric)
+    run = _call("GET", f"/runs/{run_id}", api_key)
+    summary = dict(run.get("summary") or {})
+    summary.update(fields)
+    _finish_again(run_id, run, summary, api_key)
+    log.info("run %s held out: %s", run_id, fields)
+    return fields
 
 
 # ---------------------------------------------------------------- Transformers / TRL
@@ -883,6 +968,7 @@ __all__ = [
     "TrainerCallback",
     "TrainingRun",
     "attach_delta",
+    "attach_holdout",
     "delete_run",
     "get_run",
     "list_runs",

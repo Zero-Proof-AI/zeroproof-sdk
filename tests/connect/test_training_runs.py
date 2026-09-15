@@ -201,6 +201,53 @@ def test_delta_rides_on_finish_and_attach_delta_resends():
     assert calls[-1][1] == "/runs/run_x/finish"
     assert calls[-1][2]["status"] == "done" and calls[-1][2]["summary"]["final_loss"] == 0.9
     assert calls[-1][2]["summary"]["delta"]["target_verdict"] == "moved"
+    # The report measured the held-out pass rate on both sides; the run page
+    # opens with those two keys, so the delta fills them in.
+    assert calls[-1][2]["summary"]["holdoutPassBefore"] == pytest.approx(0.25)
+    assert calls[-1][2]["summary"]["holdoutPassAfter"] == pytest.approx(0.75)
+    assert sent["holdoutPassBefore"] == pytest.approx(0.25)
+
+
+def test_holdout_sends_the_two_numbers_the_run_page_opens_with():
+    t = Transport()
+    run = training_run("sft", api_key="k", transport=t)
+    assert run.holdout(0.42, 0.58) == {"holdoutPassBefore": 0.42, "holdoutPassAfter": 0.58}
+    assert not any(c[1].endswith("/finish") for c in t.calls)  # rides on finish
+    run.finish("done")
+    assert t.calls[-1][2]["summary"] == {"holdoutPassBefore": 0.42, "holdoutPassAfter": 0.58}
+    run.holdout(1.9, 1.2, metric="loss")  # already finished: sent right away
+    assert t.calls[-1][2]["summary"]["holdoutLossAfter"] == 1.2
+
+    # A pass rate is a share, so 58 is the mistake worth naming.
+    with pytest.raises(ValueError, match="0 to 1"):
+        run.holdout(42, 58)
+    with pytest.raises(ValueError, match="'pass'"):
+        run.holdout(0.4, 0.6, metric="reward")
+
+
+def test_attach_holdout_resends_a_finished_run():
+    calls = []
+
+    def transport(method, path, api_key=None, body=None, **kw):
+        calls.append((method, path, body))
+        if method == "GET":
+            return {"runId": "run_x", "status": "stopped", "summary": {"final_loss": 0.9}}
+        return {"runId": "run_x", "status": "stopped"}
+
+    import zeroproof.simulations.training as tr
+
+    monkey = tr._call
+    tr._call = transport
+    try:
+        out = tr.attach_holdout("run_x", before=0.42, after=0.58)
+    finally:
+        tr._call = monkey
+    assert out == {"holdoutPassBefore": 0.42, "holdoutPassAfter": 0.58}
+    assert calls[-1][1] == "/runs/run_x/finish"
+    # The status it already had, and the summary it already carried.
+    assert calls[-1][2]["status"] == "stopped"
+    assert calls[-1][2]["summary"]["final_loss"] == 0.9
+    assert calls[-1][2]["summary"]["holdoutPassAfter"] == 0.58
 
 
 def test_callback_finish_false_and_second_finish_merges_summary():
