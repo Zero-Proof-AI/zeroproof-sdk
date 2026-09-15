@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 
+from tests.helpers import FakeWriter
 from zeroproof.simulations.export import export_training
 from zeroproof.simulations.ingest.traces import dimensions_from_traces, mine_traces
 from zeroproof.simulations.score.judging import (
@@ -232,7 +233,7 @@ def test_scaffold_is_generation_only():
         policy=HP,
         budget=4,
         seed=0,
-        simulator=False,
+        simulator=FakeWriter(),
         scaffold="Ground every claim in tool results.",
     )
     assert data.scaffold_chars == len("Ground every claim in tool results.")

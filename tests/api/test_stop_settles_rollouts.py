@@ -10,10 +10,13 @@ from __future__ import annotations
 import time
 
 import zeroproof.simulations as zps
-from tests.helpers import POLICY, TOOLS
+from tests.helpers import POLICY, TOOLS, FakeWriter
 
 _OFFLINE = dict(
-    seed=0, simulator=False, grade=False, advanced={"per_round": 32, "mutate_failures": False}
+    seed=0,
+    simulator=FakeWriter(),
+    grade=False,
+    advanced={"per_round": 32, "mutate_failures": False},
 )
 
 

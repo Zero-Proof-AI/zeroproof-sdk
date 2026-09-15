@@ -38,7 +38,6 @@ data = zps.simulate(
     my_agent,
     tools=TOOLS,
     system_prompt=POLICY,
-    simulator=False,
     budget=16,
     mode="rl",
     situations=4,
@@ -47,8 +46,7 @@ data = zps.simulate(
 )
 ```
 
-`simulator=False` uses the built-in template writer so no model key is
-needed; the situations are less varied than a model writes, which is fine
+The writer is the hosted model on your account key (`zeroproof login`).
 for wiring up an agent and a judge. Any extra keys on the dict stay on the
 row. Inside the callable, `current_rollout.rollout_index` says which repeat
 this is, if the agent needs to know.

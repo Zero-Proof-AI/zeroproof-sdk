@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.helpers import POLICY, TOOLS, scripted_agent
+from tests.helpers import POLICY, TOOLS, FakeWriter, scripted_agent
 from zeroproof.simulations import evaluate, simulate
 from zeroproof.simulations.ingest.traces import simulate_from_traces
 
@@ -41,7 +41,7 @@ _OFFLINE = dict(
     seed=0,
     grade=False,
     concurrency=4,
-    simulator=False,
+    simulator=FakeWriter(),
     time_budget=20,
     advanced={"per_round": 4, "mutate_failures": False},
 )

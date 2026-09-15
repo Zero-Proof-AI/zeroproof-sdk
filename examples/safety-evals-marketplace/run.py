@@ -65,7 +65,6 @@ def simulate(
     common: dict[str, Any] = dict(
         tools=TOOLS,
         system_prompt=SYSTEM_PROMPT,
-        simulator=False,  # template writer: no model, no key
         mode="rl",
         repeats=k,
         repeat_policy="fixed",  # every ask gets all k, graded or not

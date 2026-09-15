@@ -29,7 +29,7 @@ python export_prompts.py data/rl.jsonl                        # -> data/prompts.
 About three minutes for 800 rollouts. Only `generate.py` needs the key;
 `diagnose.py` and `export_prompts.py` read the file and run anywhere. To
 try those two with no key, `simulate(agent, spec="spec.json", mode="rl",
-simulator=False, grade=True)` with a scripted agent writes a small, uniform
+grade=True)` with a scripted agent writes a small, uniform
 `rl.jsonl` in under a second; `tests/examples/test_example_prime_intellect_rl.py`
 does exactly that.
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 import zeroproof.simulations as zps
-from tests.helpers import POLICY, TOOLS
+from tests.helpers import POLICY, TOOLS, FakeWriter
 from zeroproof.simulations.ingest.traces import exemplar_result_shapes, mine_result_exemplars
 from zeroproof.simulations.world.sandbox import MockEnvironment
 
@@ -133,7 +133,7 @@ def test_simulate_seeds_runner_shapes_from_traces(monkeypatch):
         budget=4,
         seed=0,
         grade=False,
-        simulator=False,
+        simulator=FakeWriter(),
         concurrency=2,
         advanced={"per_round": 4, "mutate_failures": False},
     )
@@ -154,7 +154,7 @@ def test_no_trace_run_gets_no_shapes_and_no_report(monkeypatch):
         budget=4,
         seed=0,
         grade=False,
-        simulator=False,
+        simulator=FakeWriter(),
         concurrency=2,
         advanced={"per_round": 4, "mutate_failures": False},
     )

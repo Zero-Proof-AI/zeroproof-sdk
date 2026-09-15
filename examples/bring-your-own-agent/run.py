@@ -94,7 +94,6 @@ def part_contract() -> zps.SimulationData:
         ops_agent,
         tools=TOOLS,
         system_prompt=POLICY,
-        simulator=False,  # template writer, no model key needed
         budget=16,
         mode="rl",
         situations=4,
@@ -127,9 +126,7 @@ def agent_wrong_shape(message: str) -> dict:
 def part_broken() -> None:
     print("== broken: what the run says when the agent is the problem")
     for name, fn in (("raises", agent_that_raises), ("wrong shape", agent_wrong_shape)):
-        data = zps.simulate(
-            fn, tools=TOOLS, system_prompt=POLICY, simulator=False, budget=8, seed=0
-        )
+        data = zps.simulate(fn, tools=TOOLS, system_prompt=POLICY, budget=8, seed=0)
         print(
             f"{name:12s} rows={len(data.trajectories)} "
             f"stopped_because={data.stopped_because!r} "

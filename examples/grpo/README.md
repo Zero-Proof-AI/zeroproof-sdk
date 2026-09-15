@@ -79,7 +79,7 @@ alarm; the `length` and `feature` alarms run, `--stop-on feature` (or
 the over-optimization chapter's picture (rlhf-book ch. 14), drawn during
 the run instead of after it.
 
-Prompts come from `zps.simulate(simulator=False, ...)`: the template writer
+Prompts come from `zps.simulate(...)`: the hosted writer
 needs no model and no key, and every prompt carries its `case` (the order
 id it names, whether it is about orders at all) so the reward has ground
 truth.
@@ -117,7 +117,7 @@ by scenario on the template set and `split_holdout_stratified` once
 GPU run is not bit-reproducible; expect the same verdict, not the same
 third decimal.
 
-The template writer gives about seventy distinct prompts, so the holdout is
+A run gives about seventy distinct prompts, so the holdout is
 fourteen and every pass@1 interval is a quarter wide. `prompts.jsonl` is a
 model-written set: Qwen2.5-7B-Instruct wrote six customer messages per
 template seed from two angles (plain, and six kinds of customer),
@@ -165,12 +165,12 @@ stays paired.
 | `--monitor-every` | 10 | steps between hack-monitor samples of the holdout |
 | `--stop-on` | | alarms that end the run: `feature`, `length`, or both comma-separated |
 | `--prompts` | 200 | template situations to write prompts from (about 70 distinct) |
-| `--prompts-file` | | the model-written set (`prompts.jsonl`) instead of the template writer |
+| `--prompts-file` | | the model-written set (`prompts.jsonl`) instead of a fresh simulate |
 | `--holdout` | 0.2 | share of scenarios held out; stratified by category on the model-written set |
 | `--balance` | 0.0 | repeat minority-category train prompts up to this share |
 | `--run-name` | refund-grpo-v1 | the run's name on the dashboard and its folder on the volume |
 | `--base-model` | Qwen/Qwen2.5-1.5B-Instruct | any chat model TRL's `GRPOTrainer` loads |
-| `--seed` | 0 | the template writer's seed |
+| `--seed` | 0 | the writer's seed |
 | `--gpu` | A10G | or `ZP_GRPO_GPU`; the default run fits an A10G |
 
 ## Variants as flags

@@ -114,7 +114,6 @@ def simulate_rows(n: int = 24, seed: int = 0) -> list[dict]:
         seed=seed,
         grade=True,
         concurrency=4,
-        simulator=False,
         time_budget=None,
         mode="rl",
         repeats=2,

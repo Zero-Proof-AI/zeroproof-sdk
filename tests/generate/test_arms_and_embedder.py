@@ -9,6 +9,7 @@ import re
 import time
 
 import zeroproof.simulations as zps
+from tests.helpers import FakeWriter
 from zeroproof.simulations.generate.embeddings import HashEmbedder, resolve_embedder
 
 CALENDAR_TOOLS = [
@@ -135,7 +136,7 @@ def test_offline_fallback_arms():
         seed=4,
         grade=True,
         embedder="hash",
-        simulator=False,
+        simulator=FakeWriter(),
         concurrency=8,
         advanced={"per_round": 10, "mutate_failures": True},
     )

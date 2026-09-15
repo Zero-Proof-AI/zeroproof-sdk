@@ -14,12 +14,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.helpers import FakeWriter
+
 REPO = Path(__file__).resolve().parents[2]
 
 _SCRIPT = r"""
 import json, re, sys
 sys.path.insert(0, %(repo)r)
-from tests.helpers import simulate_offline
+from tests.helpers import FakeWriter, simulate_offline
 TIMING = re.compile(r"(seconds|elapsed|rate|_s$|_at$|per_second)")
 def scrub(o):
     if isinstance(o, dict):
@@ -117,7 +119,7 @@ def test_parallel_run_is_identical_with_reproducible_flag():
             budget=40,
             seed=0,
             concurrency=8,
-            simulator=False,
+            simulator=FakeWriter(),
             grade=False,
             time_budget=None,
             reproducible=True,
@@ -196,7 +198,7 @@ def test_serial_graded_reruns_in_one_process_are_identical():
             seed=2,
             grade=True,
             concurrency=1,
-            simulator=False,
+            simulator=FakeWriter(),
             time_budget=None,
             mode="rl",
         )

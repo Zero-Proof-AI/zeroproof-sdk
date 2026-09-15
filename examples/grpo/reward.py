@@ -171,7 +171,6 @@ def build_prompts(n: int = 200, seed: int = 0) -> list[dict[str, Any]]:
         situations=n,
         budget=n,
         seed=seed,
-        simulator=False,
         time_budget=None,
         concurrency=4,
     )

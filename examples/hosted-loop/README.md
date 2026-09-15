@@ -8,7 +8,7 @@ on the platform, what `zps.train` returns and how to wait on it, what
 `zps.serve` gives you back, and how to call the served adapter. The rows
 are deliberately small; this is the wiring check, not a result. You need
 `ZEROPROOF_API_KEY` (or `zeroproof login`); no model key, since the rows
-come from the template writer and a scripted agent.
+come from the hosted writer and a scripted agent.
 
 ```bash
 pip install zeroproof
@@ -28,14 +28,14 @@ python run.py models            # what the account hosts
 | `--epochs` | 1.0 | SFT only |
 | `--steps` | 20 | GRPO and DPO only |
 | `--budget` | 96 | rollouts to simulate in `data` |
-| `--seed` | 1 | the template writer's and the split's seed |
+| `--seed` | 1 | the writer's and the split's seed |
 | `--timeout` | 1800 | seconds `train` waits for the run before giving up |
 
 ## What each step does
 
 | step | call | what comes back |
 |---|---|---|
-| `data` | `simulate` (template writer, scripted agent), `run_judge`, `split_pseudo_production`, `push_rows` x2 | a train set and a task-disjoint holdout on the platform, with the publish gate's warnings |
+| `data` | `simulate` (hosted writer, scripted agent), `run_judge`, `split_pseudo_production`, `push_rows` x2 | a train set and a task-disjoint holdout on the platform, with the publish gate's warnings |
 | `train` | `zps.train(train_id, method="sft", base_model="Qwen/Qwen3-4B", holdout=...)`, then `run.wait(timeout=--timeout)` | a finished run: held-out loss before and after, the adapter's location, the curve at `run.url` |
 | `serve` | `zps.serve("hosted-loop", run)` | a model row: `endpoint` (OpenAI-compatible base URL) and `name` (the model id to send) |
 | `call` | `POST {endpoint}/chat/completions` with the account key as bearer | the trained model's reply |

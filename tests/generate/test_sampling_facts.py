@@ -7,7 +7,7 @@ import hashlib
 
 import zeroproof.simulations as zps
 from tests.generate.test_logprobs import POLICY, TOOLS, _simulate
-from tests.helpers import simulate_offline
+from tests.helpers import FakeWriter, simulate_offline
 from zeroproof.simulations import schema
 from zeroproof.simulations.export import training_rows
 from zeroproof.simulations.generate.agents import LOCAL_MODEL_TEMPERATURE
@@ -88,7 +88,7 @@ def test_token_logprobs_roll_up_from_steps_in_order(monkeypatch):
         budget=1,
         grade=False,
         concurrency=1,
-        simulator=False,
+        simulator=FakeWriter(),
         backend="vllm:fake@http://127.0.0.1:9",
         seed=0,
         time_budget=None,

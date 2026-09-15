@@ -133,7 +133,6 @@ def simulate_rows(
         grade=True,
         concurrency=concurrency,
         reproducible=True,
-        simulator=False,
         time_budget=None,
         mode="rl",
     )

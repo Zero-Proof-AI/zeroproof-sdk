@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.examples.example_helpers import requires_writer_key
+
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO / "examples"
 
@@ -81,6 +83,7 @@ def _run(script: Path, *args: str, cwd: Path, timeout: int = 120):
     )
 
 
+@requires_writer_key
 def test_every_example_directory_is_tracked_by_git():
     """``.gitignore`` has ``examples/*``; a new example is invisible until unignored."""
     tracked = subprocess.run(

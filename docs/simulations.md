@@ -87,9 +87,9 @@ you failed, which is the number that decides whether training on its
 labels teaches the behavior or the judge's blind spot.
 
 **Failure is loud.** If the writer, the world, or a judge cannot do its
-job, the run says so. Template fallbacks are never quietly substituted for
-model-written situations, because a dataset that looks real and is not is
-worse than no dataset.
+job, the run says so. There is no template writer: a wave the model fails is skipped,
+never filled in, because a dataset that looks real and is not is worse than
+no dataset.
 
 ## What you get
 

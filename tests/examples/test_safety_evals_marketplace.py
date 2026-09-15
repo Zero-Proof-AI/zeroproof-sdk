@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.examples.example_helpers import load_script
+from tests.examples.example_helpers import load_script, requires_writer_key
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO / "examples" / "safety-evals-marketplace"
@@ -191,6 +191,7 @@ def _offline_env() -> dict[str, str]:
     return env
 
 
+@requires_writer_key
 def test_cli_runs_offline_and_writes_json(tmp_path):
     out = tmp_path / "out.json"
     proc = subprocess.run(
@@ -210,6 +211,7 @@ def test_cli_runs_offline_and_writes_json(tmp_path):
     assert report["hardened"]["delta"]["ok"] is True
 
 
+@requires_writer_key
 def test_live_runner_imports_without_a_model(tmp_path):
     proc = subprocess.run(
         [sys.executable, "live.py", "--help"],

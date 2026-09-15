@@ -40,7 +40,6 @@ from .generate.generator import ModelSimulator, write_scene_brief
 from .generate.scenarios import (
     build_dimensions,
     novelty,
-    open_ended_probes,
     policy_sections,
     scenario_regions,
 )
@@ -307,7 +306,6 @@ __all__ = [
     "near_duplicate_prompts",
     "normalize_judge_result",
     "novelty",
-    "open_ended_probes",
     "optimize",
     "outcome_check",
     "pairwise_judge",

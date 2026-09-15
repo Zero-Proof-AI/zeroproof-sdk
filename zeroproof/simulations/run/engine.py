@@ -115,6 +115,10 @@ from .rows import (
 )
 from .spec import apply_spec, backend_spec, kind_from_spec
 
+# Rounds the writer may keep producing asks that never become a row
+# before the run is called off.
+_DRY_ROUNDS = 40
+
 _AUTH_ERROR_MARKS = (
     "rejected the API key",
     "Hosted models need a key",
@@ -254,14 +258,21 @@ class Run:
                 self.profile.tools = drafted
                 self.drafted_tools = [d["function"]["name"] for d in drafted]
             else:
-                # The run goes on with no tools, which is a different
-                # dataset from the one asked for. Say so instead of
-                # letting a tool-free run pass for the described agent.
+                # A note was not enough: a toolless run still graded and
+                # still handed rows to optimize()/select_for_sft(), so a
+                # dataset that teaches the agent to claim work it never did
+                # looked finished. Stop instead.
                 self.tool_draft_failed = True
+                raise RuntimeError(
+                    "could not draft tools for this agent, so the run would "
+                    "have no tool surface and every rollout would answer from "
+                    "nothing. Pass tools= explicitly, or retry: the drafting "
+                    "call failed or returned nothing usable."
+                )
         if c.agent is None and not self.tools and not self.policy:
             raise ValueError("simulate needs an agent, tools=, or a system prompt.")
         # Amplifies seed prompts only when seeds= is given; advanced["seed_prompts"]
-        # stays literal. Offline runs (simulator=False) make no network calls.
+        # stays literal.
         # Runs after inspect() so the writer hint carries the resolved policy.
         if (
             c.seeds
@@ -379,10 +390,8 @@ class Run:
 
     def _start_scene_thread(self) -> None:
         self.scene_thread: threading.Thread | None = None
-        use_model_writer = not (
-            self.simulator is False
-            or (callable(self.simulator) and not isinstance(self.simulator, str))
-        )
+        # A callable simulator is a test double; it gets no scene brief.
+        use_model_writer = not (callable(self.simulator) and not isinstance(self.simulator, str))
         if not use_model_writer:
             return
         scene_spec = self.simulator if isinstance(self.simulator, str) else None
@@ -550,10 +559,11 @@ class Run:
                 if auth_err:
                     raise RuntimeError(
                         auth_err + " The situation writer runs on hosted Qwen "
-                        "by default, even with your own agent=. Alternatives: "
-                        "agent='openai:<model>' with OPENAI_API_KEY runs writer "
-                        "and agent on your key; simulator=False uses the "
-                        "built-in template writer with no model at all."
+                        "by default, even with your own agent=. Every situation "
+                        "is model-written, so a run needs a key: "
+                        "agent='openai:<model>' with OPENAI_API_KEY runs the "
+                        "writer and the agent on your key, or "
+                        "simulator='openai:<model>' points the writer alone at it."
                     )
                 threading.Thread(
                     target=touch_hosted, args=(hosted_url,), kwargs={"timeout": 5.0}, daemon=True
@@ -815,6 +825,8 @@ class Run:
         self.agent_dead = False
         self.auth_error: str | None = None
         self.writer_idle = 0
+        self.dry_rounds = 0
+        self.dry_rounds = 0
         self.restart_count = 0
         # Starvation relief: when every situation slot is used but rows are
         # still owed because rollouts were discarded, lifts the situations
@@ -1330,6 +1342,13 @@ class Run:
             batch = self._build_batch(selected, take)
             self.round_index += 1
             if not batch:
+                # No row has landed and this round produced nothing to run.
+                # Only the offline arm used to end such a run; without it
+                # the loop spun until the clock, or forever with no clock.
+                # _finish names the stop writer_failed.
+                self.dry_rounds = 0 if data.trajectories else self.dry_rounds + 1
+                if self.dry_rounds >= _DRY_ROUNDS:
+                    break
                 verdict = self._on_empty_batch(remaining)
                 if verdict == "break":
                     break
@@ -1827,6 +1846,13 @@ class Run:
             # writer until the clock
             data.stopped_because = "situations_exhausted"
             return "break"
+        # The writer keeps producing asks and none of them ever becomes a
+        # row. Nothing bounded this except the offline arm, which used to
+        # end such a run; without it the loop span until the clock, or
+        # forever with no clock. _finish names the stop writer_failed.
+        self.dry_rounds = 0 if self.data.trajectories else self.dry_rounds + 1
+        if self.generated_pool and self.dry_rounds >= _DRY_ROUNDS:
+            return "break"
         # Unique ingest may drop exact/near-dupe cards. That is
         # not a run stop: the writer can invent another situation.
         if gen.model is not None and not self.generated_pool and self.empty_streak >= 8:
@@ -1855,6 +1881,11 @@ class Run:
                     data.stopped_because = "ask_exhausted"
                     return "break"
             slots = max(0, c.writer_flight - len(self.scenario_futs))
+            if len(self._available()) >= max(64, 2 * self.writer_buffer):
+                # An empty batch with a full pool is a selection problem,
+                # not a supply problem; more waves only grow the pool the
+                # selector has to rank. A fast writer made this quadratic.
+                slots = 0
             self._launch_writers(min(slots, c.writer_flight))
         elif gen.model is None:
             # The offline writer ran dry. Leaving the default

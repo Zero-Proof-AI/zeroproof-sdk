@@ -1,6 +1,7 @@
 """Conversation topology: who opens is an axis, never a hardcoded frame."""
 
 import zeroproof.simulations as zps
+from tests.helpers import FakeWriter
 from zeroproof.simulations.generate import agents as zagents
 from zeroproof.simulations.ingest.traces import opening_share
 
@@ -83,7 +84,7 @@ def test_opening_survives_the_full_simulate_path(monkeypatch):
         budget=2,
         seed=1,
         grade=False,
-        simulator=False,
+        simulator=FakeWriter(),
         time_budget=30,
         advanced={"opening": "agent"},
     )
