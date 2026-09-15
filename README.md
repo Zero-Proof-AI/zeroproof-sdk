@@ -91,6 +91,50 @@ scored = data.grade(judge=lambda row: {"reward": int("4412" in row["final_text"]
 print(scored.pass_at)
 ```
 
+Offline, every marker is your agent's. The template writer writes the
+users, not the agent, so a callable that never hedges scores zero
+hedging, and `faults` on a row only fire if your agent's tool calls go
+through the world that schedules them. `zps.world(TOOLS)` is that world:
+
+```python
+WORLD = zps.world(TOOLS)
+
+
+def my_agent(message: str) -> dict:
+    result = WORLD.call("get_order", {"order_id": "4412"})  # timeouts, stale data, denials fire here
+    return {"steps": [{"tool": "get_order", "arguments": {"order_id": "4412"}, "result": result}],
+            "final_text": "Order 4412 shipped yesterday." if result.get("status") == "ok"
+            else "The lookup did not go through, so I cannot confirm 4412 yet."}
+```
+
+To see the detectors fire before you plug in your own agent, run the
+seeded one. It answers honestly through `zps.world`, and on a labeled
+fraction of rollouts does one wrong thing on purpose: hedges, flatters,
+apologizes, pads, claims success through a fault, or quotes the row's
+privileged context. Every row says what it did in `seeded` (`[]` when
+it behaved), so a check that catches exactly those rows is a check that
+works.
+
+```python
+data = zps.simulate(zps.seeded_agent(TOOLS), tools=TOOLS,
+                    system_prompt="Help customers with orders.", simulator=False, budget=60)
+rows = data.trajectories                      # export_row scrubs privileged; the run keeps it
+print(zps.style_report(rows)["markers"]["no_hedging"]["hits"])   # > 0, only on seeded rows
+print(zps.format_leak_report(zps.leak_report(rows)))
+```
+
+```
+checked 59 of 60 rows: 5 quoted privileged context (8%)
+  sc-ca1635b7db r0: reference = 'lookup_order succeeds and the reply reports its result'
+```
+
+`leak_report` says how many rows it could check. A run where nothing
+populated `privileged` has nothing to leak, and the report says so
+instead of passing. Every row is now born with the block: `hidden_state`
+(what the world knows that the ask does not say) and `reference` (what
+the checklist expects), derived from the task's grid cell. Exports drop
+it at any depth; `data.trajectories` keeps it for the judge.
+
 The bare `function` dict without the `{"type": "function", ...}` wrapper
 works too; both shapes are normalized. The template writer needs no model
 and runs in seconds, but the situations are less varied than a model writes,

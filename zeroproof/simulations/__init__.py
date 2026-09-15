@@ -37,6 +37,7 @@ from .generate.adapters import AgentProfile, claude_code, connect, inspect
 from .generate.agents import hosted_model, local_model
 from .generate.diversity import adaptive_allocator, allocator_slot_counts
 from .generate.generator import ModelSimulator, write_scene_brief
+from .generate.offline_agent import SEEDED_BEHAVIORS, World, seeded_agent, world
 from .generate.scenarios import (
     build_dimensions,
     novelty,
@@ -100,7 +101,7 @@ from .schema import (
     validate,
 )
 from .score.agreement import judge_agreement
-from .score.checklist import outcome_check, task_checklist
+from .score.checklist import expected_outcome, outcome_check, privileged_context, task_checklist
 from .score.curriculum import curriculum, format_curriculum, retire_solved
 from .score.delta import delta_report, format_delta_report
 from .score.grading import behavior_signature, conduct_grade
@@ -143,6 +144,7 @@ from .score.optimize import (
 from .score.pairwise import judge_pairs, pairwise_judge
 from .score.passat import PassAt, pass_at
 from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
+from .score.privileged import format_leak_report, leak_report
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
 from .score.reference import reference_logprobs
@@ -192,6 +194,7 @@ __all__ = [
     "FAILURE_CLASSES",
     "HACK_THRESHOLD",
     "SCHEMA_VERSION",
+    "SEEDED_BEHAVIORS",
     "STAGES",
     "STOCK_MARKERS",
     "AgentProfile",
@@ -215,6 +218,7 @@ __all__ = [
     "TrainingRun",
     "Trait",
     "Verifier",
+    "World",
     "adaptive_allocator",
     "agents",
     "allocator_slot_counts",
@@ -253,6 +257,7 @@ __all__ = [
     "drop_leaky_rows",
     "eval_variance",
     "evaluate",
+    "expected_outcome",
     "export_dataset",
     "export_environment",
     "export_preference",
@@ -265,6 +270,7 @@ __all__ = [
     "format_hack_scan",
     "format_hack_scan_diff",
     "format_judge_trust",
+    "format_leak_report",
     "format_markers",
     "format_stages",
     "format_trace_report",
@@ -287,6 +293,7 @@ __all__ = [
     "judge_pairs",
     "judge_probes",
     "judge_trust",
+    "leak_report",
     "leakage_report",
     "length_report",
     "list_runs",
@@ -315,6 +322,7 @@ __all__ = [
     "policy_sections",
     "preflight",
     "preview",
+    "privileged_context",
     "profile",
     "publish",
     "publish_gate",
@@ -340,6 +348,7 @@ __all__ = [
     "run_judge",
     "scenario_regions",
     "score_row",
+    "seeded_agent",
     "select_for_rl",
     "select_for_sft",
     "send_score",
@@ -374,6 +383,7 @@ __all__ = [
     "validate",
     "verifier",
     "verify",
+    "world",
     "write_rubrics",
     "write_scene_brief",
 ]

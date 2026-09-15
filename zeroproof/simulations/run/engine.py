@@ -102,6 +102,7 @@ from ..ingest.traces import (
     region_progress,
 )
 from ..schema import SCHEMA_KEY, SCHEMA_VERSION, Judgment, ScorerRef, attach
+from ..score.checklist import privileged_context
 from ..score.grading import behavior_signature, conduct_grade
 from .config import DEAD_AGENT_MIN_ERRORS, RunConfig
 from .rows import (
@@ -660,6 +661,11 @@ class Run:
         current_rollout.prompt = prompt
         current_rollout.rollout_index = rollout
         current_rollout.seed = meta.get("seed", c.seed)
+        plan = clean_faults(faults)
+        current_rollout.faults = plan
+        current_rollout.world_state = row_world(assignment) or ""
+        current_rollout.tools = list(self.tools or [])
+        current_rollout.privileged = privileged_context(assignment, plan) if assignment else None
         try:
             raw = self.runner(prompt)
         except Exception as exc:
@@ -710,6 +716,17 @@ class Run:
         steering = meta.get("steering")
         if isinstance(steering, dict) and steering.get("origin"):
             t["steering"] = dict(steering)
+        # The teacher's block, born with the row: what the world knows and
+        # what the checklist expects. Exporters scrub it (_EXPORT_NEVER);
+        # leak_report reads it. Before this it was empty on every run that
+        # did not attach a rubric, so a leak check on it passed vacuously.
+        privileged = privileged_context(assignment, t["faults"])
+        if privileged:
+            t["privileged"] = privileged
+        # A seeded_agent says what it did wrong on purpose; the row keeps it.
+        seeded = raw.get("seeded")
+        if isinstance(seeded, list):
+            t["seeded"] = [str(x) for x in seeded]
         t.update(_row_conversation(meta, prompt, c.seed))
         t["behavior_signature"] = behavior_signature(t)
         # Sampling facts roll up from the agent turns: the summed logprob

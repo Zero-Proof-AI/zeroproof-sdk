@@ -4,7 +4,7 @@ import json
 
 import zeroproof.simulations as zps
 from tests.helpers import POLICY, TOOLS, scripted_agent
-from zeroproof.simulations.data import _export_row
+from zeroproof.simulations.data import _EXPORT_NEVER, _export_row
 
 
 def test_export_row_keeps_group_identity_and_reproduction_fields():
@@ -103,9 +103,11 @@ def test_graded_row_survives_rows_and_a_round_trip_through_output(tmp_path):
             assert row.get(key) == trajectory[key], f"{name} dropped {key}"
         assert row["world_state"] == trajectory["world_state"]
 
-    # nothing a trajectory carries goes missing on either path
+    # nothing a trajectory carries goes missing on either path, except the
+    # teacher's block, which every exporter scrubs by design
+    # (test_privileged_leakage pins that side)
     for row in (exported, on_disk[0]):
-        missing = {k for k, v in trajectory.items() if v is not None} - set(row)
+        missing = {k for k, v in trajectory.items() if v is not None} - set(row) - _EXPORT_NEVER
         assert not missing, missing
 
     # #56 on the rows() path: marker_summary needs the markers to be there

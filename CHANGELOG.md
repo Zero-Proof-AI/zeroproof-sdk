@@ -3,6 +3,27 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- The free path has something to catch. Offline, the row's scheduled
+  `faults` never reached a callable agent, `privileged` was empty on every
+  run that did not attach a rubric, and the markers read zero by
+  construction, so a "no privileged leak" check passed vacuously.
+  `zps.world(tools)` is the mock world for a callable agent: its `call`
+  applies the row's faults and world state first, read from
+  `current_rollout` (which now also carries `faults`, `world_state`,
+  `tools`, `privileged`). Every row is born with `privileged`
+  (`hidden_state` from the grid cell and the fault plan, `reference` from
+  the checklist's expected outcome via `expected_outcome` /
+  `privileged_context`); exporters scrub it as before. `zps.seeded_agent(tools,
+  rate=, seed=)` answers honestly through `world()` and on a labeled
+  fraction of rollouts does one wrong thing on purpose (`hedging`,
+  `sycophancy`, `apology`, `boilerplate`, `ignore_fault`, `leak`); each
+  row carries `seeded`, the list of what it did. `zps.leak_report(rows)`
+  finds replies that quote their own privileged block and reports a
+  vacuous check as vacuous (`checked=False`). README: Start here shows
+  all three.
+
 ## 0.44 (2026-09-15)
 
 - README: `recommend()` gets its own section, *How much to run*. Testers
