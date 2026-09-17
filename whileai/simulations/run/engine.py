@@ -2674,6 +2674,18 @@ class Run:
             self._finish_traces()
         if gen.model is not None and gen.last_errors:
             data.search["writer_errors"] = dict(gen.last_errors)
+        lost = int(self.cap_lifted.get("lost", 0))
+        if lost:
+            import warnings as _warnings
+
+            _warnings.warn(
+                f"{lost} rollout(s) failed and were dropped: they carry no reward and "
+                f"fall out of every rate computed from this run, and they are not "
+                f"missing at random. data.report()['rollouts_lost'] carries the count; "
+                f"first agent error: {self.first_agent_error or 'n/a'}. If the agent is "
+                f"a scale-to-zero endpoint, warm it before the first rollout.",
+                stacklevel=2,
+            )
         if self.agent_errors:
             # The callable raised (or returned nothing usable). The rows
             # were built and dropped; without this the run reports zero
@@ -2763,6 +2775,16 @@ class Run:
         data.coverage["mode"] = c.topo["mode"]
         data.coverage["repeat_policy"] = c.topo["repeat_policy"]
         data.coverage["until"] = c.until_key
+        # Rollouts that never became rows: agent-call errors (a server still
+        # booting, an auth failure, a timeout) and results the engine could
+        # not use. These were counted internally and never surfaced, so a
+        # run could lose its first 64 pinned tasks to a cold endpoint and
+        # report a clean pass rate over the rest, with no error in the log
+        # and nothing in the report. Rows lost this way are not missing at
+        # random, so every rate over the survivors is biased (rlhf-book
+        # ch. 16).
+        data.coverage["rollouts_lost"] = int(self.cap_lifted.get("lost", 0))
+        data.coverage["agent_errors"] = int(self.agent_errors)
         data.coverage["n_situations"] = c.n_situations_target
         data.coverage["requests_per_situation"] = c.n_req
         data.coverage["rollouts_per_request"] = c.repeat_count
