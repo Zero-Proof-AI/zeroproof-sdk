@@ -1,0 +1,87 @@
+# Is your eval any good?
+
+**What you learn:** whether a number your evaluation produced means anything,
+before you act on it. Six checks on the eval set itself, plus three on the
+comparison when you have a base arm and a trained arm.
+
+**Needs:** graded rows. Nothing else. No key, no GPU, no network.
+
+**Takes:** seconds.
+
+Most evaluations are not wrong, they are unreadable: too easy to show a gain,
+missing the behaviour they claim to test, noisier than the effect being
+measured, or run under two setups that differed in more than the weights. The
+score comes out either way. This recipe says which.
+
+## Run it
+
+```bash
+pip install whileai
+python check_eval.py                          # offline demo on a broken eval
+python check_eval.py holdout.jsonl            # your eval set
+python check_eval.py base.jsonl tuned.jsonl   # both arms, plus the comparison
+python check_eval.py base.jsonl tuned.jsonl --train train.jsonl
+```
+
+The demo needs no arguments. Both of its arms are the **same model on two
+different draws**, so the true difference is zero, and the 95% interval
+excludes zero anyway. That is the whole reason the other checks exist.
+
+## The six checks
+
+| check | the question | why it decides whether the number is readable |
+|---|---|---|
+| room to move | does the model already pass nearly everything? | an eval at 0.95 has nowhere to show an improvement; this is benchmark saturation (ch. 16) |
+| headroom | `pass@k - pass@1` | what repeats find that one run missed. Near zero means a grouped update has nothing to learn, whatever the training does |
+| contains the behaviour | how often does each criterion actually fail? | a criterion that cannot fail here cannot show an improvement here. The most common reason a real gain measures as nothing |
+| self-noise | how far does the number move when nothing changes? | the book puts post-training evals at 0.25 to 1.5 points of run-to-run deviation. A claim under twice that is indistinguishable from re-running |
+| the judge | did grading succeed, and is reward tracking a cheap feature? | an ungraded eval scores nothing, and a judge that rewards length is measuring length (ch. 14) |
+| contamination | did the training prompts already contain the eval? | 8-gram overlap, the Tülu 3 method (ch. 16) |
+
+## The three the comparison gets
+
+These only run when you pass two arms, and they are the ones that invalidate a
+result outright rather than weakening it.
+
+- **Are the two arms different models?** If both arms carry the same
+  `policy_version`, nothing in the rows says which weights produced which. Base
+  and every adapter can share a served model name, so pass
+  `advanced={"model_version": "my-agent-base"}` and `"my-agent-sft"` to tell
+  them apart.
+- **Did both arms face the same user?** If the simulated user runs on the model
+  under test, the trained arm talks to a different person than the base arm did.
+  The delta then measures the pair, not the policy. Pin `user_model=` to one
+  fixed model on both arms.
+- **The comparison itself**, reported but explicitly **not readable** when
+  either of the above failed. An interval that excludes zero is not a result
+  when the arms differed in something other than the weights.
+
+This is the agentic-evaluation problem from chapter 16 stated as a check: every
+layer (harness, sandbox, tools, system prompt, inference stack) moves the score,
+so every layer has to be pinned and recorded.
+
+## Reading it
+
+`ok` means the check passed. `WARN` means it could not be verified, usually
+because the rows do not carry what it needs. `BAD` means it failed and the
+number above it should not be quoted.
+
+The order matters. Work top down: there is no point tightening an interval on
+an eval that is at ceiling, and no point reading any interval at all if the two
+arms were not the same setup.
+
+Two things this deliberately does **not** do. It does not tell you your model is
+good, only whether your eval can tell you. And it never rewrites a number: when
+a comparison is unreadable it prints the delta and the interval anyway, next to
+the reason not to use them, because a number quietly suppressed is a number
+someone re-derives by hand later.
+
+## Where else it shows up
+
+`pass_at(rows)` for the first two checks and `.headroom`, `group_signal(rows)`
+for mixed-verdict counts, `eval_variance(a, b, c)` for self-noise,
+`reward_correlations(rows)` and `hack_scan(rows)` for the judge,
+`decontaminate(train, eval)` for overlap, and `delta_report(before, after)`
+for the full comparison with per-marker regressions and the over-optimization
+verdict. This recipe is those calls in the order that stops you wasting a GPU
+hour.
