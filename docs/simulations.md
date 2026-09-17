@@ -98,6 +98,33 @@ job, the run says so. Template fallbacks are never quietly substituted for
 model-written situations, because a dataset that looks real and is not is
 worse than no dataset.
 
+## Which model runs it
+
+Four roles can each take their own model: the agent (`agent=`), the
+situation writer (`simulator=`), the simulated person (`user_model=`) and
+the judge (`spec=`). Each one takes the same backend spec.
+
+| Spec | Backend | Key |
+| --- | --- | --- |
+| `ollama:<model>` | a local Ollama server | none |
+| `vllm:<model>@<url>` | vLLM, or any OpenAI-compatible endpoint you serve | `VLLM_API_KEY` when the endpoint wants one |
+| `openai:<model>` | OpenAI, or a compatible endpoint via `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
+| `anthropic:<model>` | the Claude Messages API | `ANTHROPIC_API_KEY`, or `WHILEAI_ANTHROPIC_API_KEY` to override it |
+
+```python
+data = wai.simulate(
+    agent="anthropic:claude-haiku-4-5",
+    tools=my_tools,
+    system_prompt=my_system_prompt,
+    simulator="anthropic:claude-sonnet-5",
+    output="rollout.jsonl",
+)
+```
+
+Omitting `agent=` runs the While-hosted model on your account key instead.
+One model in more than one role is the regime to avoid, and the run says so
+on `data.degraded`: a judge grading its own writing prefers it.
+
 ## What you get
 
 A JSONL file of conversations in chat format, with tool schemas, each

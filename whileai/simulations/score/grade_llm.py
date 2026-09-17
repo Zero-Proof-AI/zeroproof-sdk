@@ -137,7 +137,7 @@ def judge_spec(
     text = str(spec or "").strip()
     _, default_model = parse_backend_spec(default_judge_spec())
     if text:
-        if text.startswith(("vllm:", "ollama:", "openai:")):
+        if text.startswith(("vllm:", "ollama:", "openai:", "anthropic:")):
             return text
         return f"vllm:{default_model}@" + text.rstrip("/")
     url = str(base_url or "").strip().rstrip("/")

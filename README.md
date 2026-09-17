@@ -205,6 +205,33 @@ data = wai.simulate(
 )
 ```
 
+A model spec names the backend and the model. Four are built in:
+
+- `ollama:<model>`: a local Ollama server, no key.
+- `vllm:<model>@<url>`: any vLLM or OpenAI-compatible endpoint you serve.
+- `openai:<model>`: `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a
+  compatible endpoint that is not OpenAI's.
+- `anthropic:<model>`: the Claude Messages API on `ANTHROPIC_API_KEY`
+  (`WHILEAI_ANTHROPIC_API_KEY` overrides it).
+
+A spec works everywhere one is accepted: `agent=`, `simulator=` for the
+situation writer, `user_model=` for the simulated person, and `spec=` for the
+judge.
+
+```bash
+export ANTHROPIC_API_KEY=...
+```
+
+```python
+data = wai.simulate(
+    agent="anthropic:claude-haiku-4-5",
+    tools=my_tools,
+    system_prompt=my_system_prompt,
+    simulator="anthropic:claude-sonnet-5",  # the writer, on the same key
+    output="rollout.jsonl",
+)
+```
+
 ## Five calls
 
 Agent to gated dataset. Everything else in this README is one layer down.

@@ -200,6 +200,14 @@ For BYOK, set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`, then use
 completions with tool calls. The model writes the situations and plays the
 target agent, so both consume its endpoint.
 
+The same spec works for `simulator=` (the situation writer), `user_model=`
+(the simulated person) and the judge's `spec=`. Backends: `ollama:<model>`,
+`vllm:<model>@<url>`, `openai:<model>`, and `anthropic:<model>` for the Claude
+Messages API on `ANTHROPIC_API_KEY` (`WHILEAI_ANTHROPIC_API_KEY` overrides it),
+for example `agent="anthropic:claude-haiku-4-5"`. Use `anthropic:` when the
+developer's only credential is an Anthropic key, instead of falling back to
+the template writer.
+
 While normally builds a simulated world from the supplied tools, policy,
 and traces. That is appropriate for record-shaped tools and behavioral
 questions. If the evaluated agent edits code or correctness depends on a real

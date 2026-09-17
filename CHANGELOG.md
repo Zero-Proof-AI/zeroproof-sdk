@@ -28,6 +28,19 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - Recipe `02-measure/eval-your-agent`: `--gap` runs `coverage_gap` on the
   three-ask `OLD_TESTS` suite it replaces, with a README section and a
   `docs/evals.md` section 3b.
+- `anthropic:<model>` is a backend spec, so a developer whose only
+  credential is `ANTHROPIC_API_KEY` can point the situation writer
+  (`simulator=`), the simulated person (`user_model=`), a model-backed
+  agent (`agent=`) and the judge (`spec=`) at the model they already pay
+  for. Two coding agents evaluating a refund bot had neither an OpenAI key
+  nor a local server, so they fell back to the offline template writer or
+  spent the hosted trial quota. The Messages API calls go out over
+  `requests` (no new dependency) and are translated at the boundary: tool
+  definitions become `input_schema`, tool calls and results become
+  `tool_use` and `tool_result` blocks, the system prompt moves to `system`,
+  `stop_reason: "max_tokens"` becomes the engine's truncated marker, and
+  the reply keeps the OpenAI shape every loop already reads. There are no
+  log-probabilities from this API, so `logprobs=True` rows carry none.
 
 ## 0.59 (2026-09-17)
 
