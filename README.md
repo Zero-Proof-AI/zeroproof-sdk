@@ -15,7 +15,7 @@ Two ways in, one engine. Give it the agent's tools and system prompt and it samp
 
 ![How a row gets made: the draw, the coverage grid, the search arms, the rollout, the split](docs/how-a-row-gets-made.svg)
 
-A situation is drawn across the world axes (from the agent's tools) and the human axes (from a separate writer). It fills a cell in the coverage grid, nudges the five search arms, and the agent plays it against a world that breaks on schedule. The row that comes out splits into `Task`, `Rollout`, `Judgment`, and `Marker`, and every training target is a projection of some of those four. The engine on one page, with references: [docs/engine.md](docs/engine.md), also at [while.ai/docs/engine](https://while.ai/docs/engine).
+A situation is drawn across the world axes (from the agent's tools) and the human axes (from a separate writer). It fills a cell in the coverage grid, nudges the five search arms, and the agent plays it against a world that breaks on schedule. The row that comes out splits into `Task`, `Rollout`, `Judgment`, and `Marker`, and every training target is a projection of some of those four. The engine on one page, with references: [docs/engine.md](docs/engine.md), also at [zeroproofai.com/docs/engine](https://zeroproofai.com/docs/engine).
 
 ## Overview
 
