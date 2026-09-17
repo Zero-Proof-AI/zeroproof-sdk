@@ -40,7 +40,7 @@ from ..generate.actionspace import (
 )
 from ..generate.adapters import inspect, resolve
 from ..generate.agents import (
-    _hosted_qwen_url,
+    _account_url,
     current_rollout,
     default_agent_spec,
     default_max_turns,
@@ -644,10 +644,12 @@ class Run:
                 # Saying so after the run has spent them is no use, so the
                 # note lands before the first writer wave. Only for the
                 # writer this run picked for itself (simulator= brings its
-                # own model, and no quota of ours), and only for a saved
-                # key whose tier the credentials file recorded: reading it
-                # costs no network call.
-                if c.simulator is None and _hosted_qwen_url(hosted_url):
+                # own model, and no quota of ours) on the account route,
+                # which is what the allowance meters (VLLM_API_KEY goes to
+                # the shared pool and spends no trial), and only for a
+                # saved key whose tier the credentials file recorded:
+                # reading it costs no network call.
+                if c.simulator is None and _account_url(hosted_url):
                     trial = trial_prerun_note()
                     if trial:
                         self.data.warnings.append(trial)

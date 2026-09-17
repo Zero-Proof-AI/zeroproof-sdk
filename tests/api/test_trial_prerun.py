@@ -101,3 +101,20 @@ def test_a_full_key_runs_without_the_note(home):
         time_budget=1,
     )
     assert not [w for w in data.warnings if "trial key" in w]
+
+
+def test_the_shared_pool_spends_no_trial_so_it_says_nothing(home, monkeypatch):
+    # VLLM_API_KEY routes the writer to the shared pool, which the trial
+    # allowance does not meter
+    _save(home, tier="trial", daily_input_tokens=25000)
+    monkeypatch.setenv("VLLM_API_KEY", "pool-key")
+    data = wai.simulate(
+        scripted_agent,
+        tools=TOOLS,
+        system_prompt=POLICY,
+        budget=2,
+        seed=0,
+        grade=False,
+        time_budget=1,
+    )
+    assert not [w for w in data.warnings if "trial key" in w]
