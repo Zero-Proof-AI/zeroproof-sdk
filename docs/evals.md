@@ -89,7 +89,12 @@ The suite you have sends a set of asks. Which parts of the policy do they
 never reach?
 
 ```python
-report = wai.coverage_gap(OLD_TESTS, tools=TOOLS, system_prompt=POLICY)
+old_tests = [
+    "I want a refund for order A1001, the shoes did not fit.",
+    "What is the status of order A1001?",
+    "Can you refund order Z9999?",
+]
+report = wai.coverage_gap(old_tests, tools=TOOLS, system_prompt=POLICY)
 print(wai.format_coverage_gap(report))
 # 3 asks cover 5 of 6 policy rules and 2 of 2 tools; untested: Refunds over
 # $200 need a manager: ...; no ask puts the agent under pressure; every ask
