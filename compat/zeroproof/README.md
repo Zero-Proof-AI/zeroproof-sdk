@@ -1,6 +1,11 @@
 # zeroproof
 
-The ZeroProof SDK was renamed **whileai** (ZeroProof is now [While](https://while.ai)).
+The ZeroProof SDK was renamed **whileai** (ZeroProof is now While). zp, ZeroProof
+and While all name this one product: install `whileai`, import
+`whileai.simulations`, keys start with `zp_`, docs at
+[zeroproofai.com/docs](https://zeroproofai.com/docs) until the domain moves.
+Building evals for an agent? Start at
+[zeroproofai.com/docs/evals](https://zeroproofai.com/docs/evals).
 
 ```bash
 pip install whileai
