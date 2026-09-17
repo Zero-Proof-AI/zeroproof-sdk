@@ -41,6 +41,35 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `stop_reason: "max_tokens"` becomes the engine's truncated marker, and
   the reply keeps the OpenAI shape every loop already reads. There are no
   log-probabilities from this API, so `logprobs=True` rows carry none.
+- A trial key now says what it buys before a run spends it. `whileai
+  signup` and `whileai status` print one line under the trial allowance:
+  about how many hosted situations a day it covers (25,000 input tokens
+  at around 2,000 a situation for a four-tool spec, so about twelve),
+  that `simulate(..., simulator=False)` writes situations offline with no
+  quota, and that signing in once lifts the limit. The daily-quota error
+  the run dies with names the same two ways on. A twelve-situation eval
+  spent 28,490 input tokens and stopped with a number and no next step.
+- Return shapes are readable off the print and the docs instead of
+  guessed. `PassAt` prints `pass^k (pass_pow_k)` once (testers reached
+  for `pass_hat_k`), and its docstring is a field table with the printed
+  name of every field. `marker_summary` adds a `note` when `ci95` is
+  `None` for want of tasks, saying how many the marker has and that the
+  bootstrap needs three. `ScoredData` and `SimulationData.rows` each say
+  which spelling is which: `scored.rows` is a list, `data.rows()` also
+  works. docs/evals.md and docs/simulations.md carry a Return shapes
+  table (`PassAt` fields, marker stat keys, `ScoredData.warnings`,
+  `judge_trust` keys).
+- `judge_trust` and `judge_agreement` name the half that is missing.
+  "no rows carry both 'reward' and a gold label" is now "no row has a
+  reward: score them first with run_judge(rows, judge) or
+  evaluate(data, judge)" (adding that a `judge=` here only runs the
+  perturbation probes) or "no row has a gold label:
+  attach_labels(rows, labels, kind='human')", and rows with both on
+  different rows say that instead. Gold written by hand carries no
+  `gold_kind`, so it read as "the gold labels came from a model"; it now
+  says there is no record of who wrote it and names
+  `attach_labels(..., kind="human")` as the way to mark labels as a
+  person's.
 
 ## 0.59 (2026-09-17)
 

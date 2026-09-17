@@ -670,6 +670,10 @@ class SimulationData:
         ``ScoredData.rows`` is a list attribute and this used to be a
         method only, so ``for r in data.rows`` raised ``TypeError``
         without hinting at the missing parentheses.
+
+        The other direction still bites: ``ScoredData.rows``, what
+        ``evaluate`` and ``grade`` hand back, is a plain list, so
+        ``scored.rows()`` is a ``TypeError``. Method here, list there.
         """
         return RowList(export_row(t) for t in self.trajectories)
 

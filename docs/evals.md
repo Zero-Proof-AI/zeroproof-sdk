@@ -26,6 +26,15 @@ machine that had the old package, `~/.zeroproof/credentials.json` is
 still picked up; set `WHILEAI_HOME=/some/fresh/dir` to isolate a new
 account from it.
 
+**What the trial covers.** A fresh `signup` key is a trial: 25,000 input
+and 50,000 output tokens a day, which is about twelve hosted situations
+of a four-tool agent. One real run spends that, and the run then stops
+with `Hosted model daily quota exceeded`. Two ways around it:
+`simulate(..., simulator=False)` writes the situations offline with no
+quota and no network, which is how every recipe here runs; and signing
+in once at zeroproofai.com/sign-in lifts the daily limit. `whileai
+status` prints the same two facts while the key is on the trial.
+
 ## 2. Wrap your agent
 
 The engine calls your function once per rollout with the ask the writer
@@ -199,7 +208,49 @@ to clear 0.8 even at perfect agreement. Labels attached any other way
 count as model-made and keep `ok` false unless you say
 `allow_model_gold=True`.
 
-## 7. Then
+## 7. Return shapes
+
+The names in the print and the names on the object are not always the
+same word, and guessing costs a round trip. What each call hands back:
+
+| call | you get | read it as |
+| --- | --- | --- |
+| `simulate(...)` | `SimulationData` | `data.rows` or `data.rows()`, both work |
+| `evaluate(...)`, `grade(...)` | `ScoredData` | `scored.rows` is a **list**; `scored.rows()` is a `TypeError` |
+| | | `scored.warnings`: hollow-run notes, print them before the number |
+| `pass_at(rows)` | `PassAt` | fields below; `.to_dict()` for the same keys as JSON |
+| `marker_summary(rows)` | `{marker: stats}` | stats keys below |
+| `judge_trust(rows)` | `dict` | keys below |
+
+`PassAt` fields, with the name each prints as:
+
+| field | prints as | what it is |
+| --- | --- | --- |
+| `pass_at_1` | `pass@1` | mean per-task pass rate, the headline |
+| `pass_pow_k` | `pass^k (pass_pow_k)` | all k repeats pass. Not `pass_hat_k` |
+| `pass_at_k` | `pass@k` | at least one of k passes |
+| `headroom` | `headroom` | `pass_at_k - pass_at_1` |
+| `ci95` | `[lo..hi]` | task-bootstrap interval on pass@1 |
+| `pass_pow_k_ci95`, `pass_at_k_ci95` | `[lo..hi]` | the same for the k-way numbers |
+| `k`, `n_groups`, `n_rows` | `(N groups, k=4)` | draw size, tasks, graded rows |
+| `n_groups_at_k`, `n_groups_imputed` | not printed | tasks the k-way numbers used |
+| `per_task` | not printed | `{task key: pass rate}`, a dict, not a list |
+| `note` | tail of the line | why a number is missing, and the fix |
+| `config` | token-cap share | temperature, versions, prompt hash |
+
+Marker stats (`marker_summary(rows)["grounded"]`): `mean`, `ci95` (not
+`ci`), `n_tasks`, `n_rows` (not `n`), `n_rows_at_1`, `n_rows_at_0`,
+`degenerate`, and one of `note` (no interval, too few tasks: the
+bootstrap needs three) or `warning` (the marker never varied). `ci95` is
+`None` in both cases, and the sentence says which one you have.
+
+`judge_trust(rows)`: `ok` (measured and clean), `agreement.agreement`
+with `agreement.ci95` and `agreement.n`, `gold_kind` (`"human"`,
+`"model"`, `"unknown"`), `held_out_halves`, `length_sensitivity`,
+`perturbation`, `probes`, `disagreements`, and `warnings`, where every
+line names its own fix.
+
+## 8. Then
 
 - Every failure row is a training example: `simulate(traces=scored.failed_traces())`
   aims the next round at what broke. `evaluate` rows are stamped so the

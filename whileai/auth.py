@@ -34,10 +34,36 @@ from pathlib import Path
 from whileai._env import env_name, getenv
 
 DEFAULT_API_URL = "https://api.zeroproofai.com"
+SIGN_IN_URL = "https://www.zeroproofai.com/sign-in"
+#: the trial allowance the gate hands out, used when the reply does not say
+DEFAULT_TRIAL_INPUT_TOKENS = 25_000
+#: Input tokens one hosted situation spends, measured on a 4-tool spec: a
+#: 12-situation run of one cost 28,490, so round it to 2,000 a situation.
+#: The trial allowance is small enough that the count is the first thing
+#: anyone needs to know about it.
+INPUT_TOKENS_PER_SITUATION = 2_000
 
 
 class LoginError(RuntimeError):
     pass
+
+
+def trial_situations(daily_input_tokens: float | None = None) -> int:
+    """About how many hosted situations a trial day buys, in round numbers."""
+    tokens = float(daily_input_tokens or DEFAULT_TRIAL_INPUT_TOKENS)
+    return max(1, int(tokens / INPUT_TOKENS_PER_SITUATION))
+
+
+def trial_note(daily_input_tokens: float | None = None) -> str:
+    """The two facts a trial key needs before its first hosted run: how
+    far the daily allowance goes, and the offline writer that has no
+    allowance at all."""
+    return (
+        f"That is about {trial_situations(daily_input_tokens)} hosted situations a day "
+        f"(a 4-tool spec spends around {INPUT_TOKENS_PER_SITUATION:,} input tokens per "
+        "situation); simulate(..., simulator=False) writes situations offline with no quota "
+        f"and no network; signing in once at {SIGN_IN_URL} lifts the limit."
+    )
 
 
 def _api_url() -> str:
@@ -291,6 +317,7 @@ def signup(email: str, *, name: str | None = None, out: Callable[[str], None] | 
                 f"output tokens a day, {int(trial.get('storage_bytes', 104857600)) // 1048576} MB, "
                 f"{trial.get('datasets', 10)} datasets, expires {str(trial.get('expires_at', ''))[:10]}."
             )
+            say(trial_note(trial.get("daily_input_tokens")))
             say(
                 trial.get("lift")
                 or "Sign in once at https://www.zeroproofai.com/sign-in with an email code to lift trial limits."
@@ -321,7 +348,12 @@ def logout() -> bool:
 
 
 def status() -> dict:
-    """What the SDK would use right now, with the key masked."""
+    """What the SDK would use right now, with the key masked.
+
+    On a trial key ``trial_note`` says how many hosted situations the
+    daily allowance covers and names the offline writer that has none.
+    ``tier`` comes from ``GET /me``, so reading it costs one call.
+    """
     env = getenv("API_KEY")
     env_var = env_name("API_KEY")
     saved = _read(credentials_path()) or {}
@@ -354,4 +386,5 @@ def status() -> dict:
                 trial = me.get("trial") or {}
                 out["trial_expires_at"] = trial.get("expires_at")
                 out["lift"] = trial.get("lift")
+                out["trial_note"] = trial_note(trial.get("daily_input_tokens"))
     return out

@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         shown = auth.status()
         print(json.dumps(shown, indent=2))
+        if shown.get("trial_note"):
+            print(shown["trial_note"])
         if not shown.get("configured"):
             print(
                 "no API key configured: run `whileai login` or set WHILEAI_API_KEY",

@@ -60,7 +60,14 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from .agreement import GOLD_KIND_KEY, MIN_GOLD, MODEL_GOLD_REASON, judge_agreement
+from .agreement import (
+    GOLD_KIND_KEY,
+    MIN_GOLD,
+    MODEL_GOLD_REASON,
+    UNKNOWN_GOLD_REASON,
+    judge_agreement,
+    missing_side_note,
+)
 from .hygiene import reply_length
 from .stats import task_key, wilson_interval
 
@@ -74,7 +81,7 @@ MIN_KAPPA = 0.6
 #: what ``grade(trust=)`` accepts
 TRUST_MODES = ("warn", "require", "off")
 NO_HUMAN_GOLD_NOTE = (
-    "Judge accuracy not measured: no human labels on these rows. Label 50 with "
+    f"Judge accuracy not measured: no human labels on these rows. Label {MIN_GOLD} with "
     "attach_labels(rows, labels, kind='human') and grade again to measure it."
 )
 
@@ -467,10 +474,19 @@ def judge_trust(
     saying the judge is unmeasured, not failed. ``gold_kind`` in the
     report says where the labels came from; model or unknown gold makes
     ``ok`` false with the reason unless ``allow_model_gold=True``.
+
+    The keys a caller reads first: ``ok`` (measured and clean),
+    ``agreement["agreement"]`` and ``agreement["ci95"]`` (the number and
+    its Wilson interval, not ``ci``), ``agreement["n"]`` (labels
+    compared), ``gold_kind``, and ``warnings``, where every line names
+    its own fix. ``format_judge_trust(report)`` prints the whole thing.
     """
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if _label(r, gold) is not None and _label(r, "reward") is not None]
-    agree = _agreement(labeled, gold, allow_model_gold)
+    # Over every row, not just the labeled ones: the pairs are the same
+    # (``judge_agreement`` counts only rows with both sides), and it is
+    # what lets the report say which half is missing when there are none.
+    agree = _agreement(rows, gold, allow_model_gold)
     halves = {
         "a": _agreement([r for r in labeled if _half(_task(r)) == 0], gold, True),
         "b": _agreement([r for r in labeled if _half(_task(r)) == 1], gold, True),
@@ -595,12 +611,29 @@ def judge_trust(
     # that judge failed, and saying it is unmeasured would bury the result.
     flagged = _flagged(warnings)
     if not labeled and not flagged:
-        warnings.append(
-            "judge trust is unmeasured: no row carries a gold label, so `ok` is false for "
-            f"want of evidence, not for a failed check. Hand-label {MIN_GOLD} rows or more "
-            f'with {gold!r} (0/1) and re-run; `probes="all"` with `judge=` additionally '
-            "tries the shortcuts a policy would find."
+        # Which half is missing decides what to do next, and the two are
+        # not interchangeable: unscored rows need a judge run, unlabeled
+        # rows need a person. One sentence for both sent a tester to the
+        # wrong half. ``missing_side_note`` writes that half's fix, and
+        # this frames it as an absence of evidence rather than a failure;
+        # the agreement report already carries the bare note, so it is
+        # replaced in place instead of said twice.
+        n_scored = sum(1 for r in rows if _label(r, "reward") is not None)
+        n_gold_rows = sum(1 for r in rows if _label(r, gold) is not None)
+        note = missing_side_note(n_scored, n_gold_rows, gold=gold)
+        line = (
+            "judge trust is unmeasured: `ok` is false for want of evidence, not for a "
+            f"failed check. {note}"
         )
+        if n_scored and not n_gold_rows:
+            line += (
+                ' `probes="all"` with `judge=` tries the shortcuts a policy would find, '
+                "labels or not."
+            )
+        if note in warnings:
+            warnings[warnings.index(note)] = line
+        else:
+            warnings.append(line)
     ok = bool(labeled) and trusted and not flagged
     return {
         "ok": ok,
@@ -697,7 +730,10 @@ def format_judge_trust(report: dict[str, Any]) -> str:
     # absence of one. The headline says which of the two this is. A probe
     # that fired is a finding whether or not anything was hand-labeled;
     # model gold with nothing flagged is not a measurement.
-    unmeasured = not report.get("n_labeled") or MODEL_GOLD_REASON in report["warnings"]
+    not_a_persons_labels = (MODEL_GOLD_REASON, UNKNOWN_GOLD_REASON)
+    unmeasured = not report.get("n_labeled") or any(
+        w in not_a_persons_labels for w in report["warnings"]
+    )
     if not report["ok"] and unmeasured and not _flagged(report["warnings"]):
         lines = ["NOT MEASURED"]
     else:

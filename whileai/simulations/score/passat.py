@@ -127,7 +127,34 @@ def run_config(
 
 @dataclass(frozen=True)
 class PassAt:
-    """pass@1 / pass^k / pass@k over graded groups. See module docstring."""
+    """pass@1 / pass^k / pass@k over graded groups. See module docstring.
+
+    Every field, and the name it prints as in ``str(...)``. The printed
+    line and the attribute are not spelled the same: pass^k is
+    ``pass_pow_k`` (not ``pass_hat_k``), and the print says both once so
+    the attribute is readable off it.
+
+    | attribute            | prints as        | what it is                                 |
+    | -------------------- | ---------------- | ------------------------------------------ |
+    | ``k``                | ``k=4``          | draw size the k-way numbers used           |
+    | ``pass_at_1``        | ``pass@1``       | mean per-task pass rate, the headline      |
+    | ``pass_pow_k``       | ``pass^4``       | chance all k repeats pass (reliability)    |
+    | ``pass_at_k``        | ``pass@4``       | chance at least one of k passes            |
+    | ``headroom``         | ``headroom``     | property: pass@k minus pass@1              |
+    | ``ci95``             | ``[lo..hi]``     | task-bootstrap interval on pass@1          |
+    | ``pass_pow_k_ci95``  | ``[lo..hi]``     | same for pass^k; ``None`` under 3 groups   |
+    | ``pass_at_k_ci95``   | ``[lo..hi]``     | same for pass@k; ``None`` under 3 groups   |
+    | ``n_groups``         | ``N groups``     | tasks pass@1 averaged over                 |
+    | ``n_rows``           | not printed      | graded rows behind those tasks             |
+    | ``n_groups_at_k``    | not printed      | tasks the k-way numbers used               |
+    | ``n_groups_imputed`` | not printed      | short unanimous tasks counted in           |
+    | ``per_task``         | not printed      | ``{task key: pass rate}``, a dict          |
+    | ``note``             | tail of the line | why a number is missing, and the fix       |
+    | ``config``           | token-cap share  | how the rows were made (``run_config``)    |
+
+    ``to_dict()`` uses these same keys, with ``headroom`` added and the
+    intervals as lists.
+    """
 
     k: int
     pass_at_1: float | None
@@ -193,7 +220,9 @@ class PassAt:
 
         head = (
             f"pass@1 {fmt(self.pass_at_1)}{band(self.ci95)} | "
-            f"pass^{self.k} {fmt(self.pass_pow_k)}{band(self.pass_pow_k_ci95)} | "
+            # the attribute name once, where it is read: testers guessed
+            # pass_hat_k from the printed pass^k and lost a round trip
+            f"pass^{self.k} (pass_pow_k) {fmt(self.pass_pow_k)}{band(self.pass_pow_k_ci95)} | "
             f"pass@{self.k} {fmt(self.pass_at_k)}{band(self.pass_at_k_ci95)} | "
             f"headroom {fmt(self.headroom)}"
         )

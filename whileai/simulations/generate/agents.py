@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from whileai._env import getenv
+from whileai.auth import SIGN_IN_URL
 
 from ..world.sandbox import MockEnvironment
 from .anthropic_backend import ANTHROPIC_BASE_URL, is_anthropic_url
@@ -299,12 +300,20 @@ MISSING_HOSTED_KEY = (
     "VLLM_API_KEY for the shared pool."
 )
 QUOTA_MARK = "quota exceeded"
+#: What to do about a spent daily allowance. A trial day is about 12
+#: hosted situations (``auth.trial_note``), which one real run spends, so
+#: the error names the writer that has no allowance and the sign-in that
+#: lifts the limit instead of leaving the run dead with a number.
+QUOTA_FIX = (
+    "simulate(..., simulator=False) writes the situations offline with no quota and no "
+    f"network; signing in once at {SIGN_IN_URL} lifts a trial key's daily limit."
+)
 
 
 def _quota_error(status: int, body: str) -> str | None:
     """The proxy's 429 for a spent daily allowance, or None. Not transient:
     every later call today answers the same, so the run stops instead of
-    retrying into the clock."""
+    retrying into the clock. Carries ``QUOTA_FIX``, the two ways on."""
     if int(status) != 429:
         return None
     text = str(body or "")
@@ -314,7 +323,8 @@ def _quota_error(status: int, body: str) -> str | None:
         msg = json.loads(text).get("error", {}).get("message") or text
     except (ValueError, AttributeError):
         msg = text
-    return f"Hosted model daily {msg[msg.lower().find('quota') :]}"
+    head = f"Hosted model daily {msg[msg.lower().find('quota') :]}".rstrip(". ")
+    return f"{head}. {QUOTA_FIX}"
 
 
 def _client_metered(base_url: str | None) -> bool:

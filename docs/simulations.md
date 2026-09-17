@@ -175,6 +175,22 @@ the history: which While dataset each split came from, and what it
 replaced. `load_dataset(repo, split, revision="zp-ds_...")` loads exactly
 one push.
 
+## Return shapes
+
+One table, because these cost testers a round trip each:
+
+| call | you get | read it as |
+| --- | --- | --- |
+| `simulate(...)` | `SimulationData` | `data.rows` and `data.rows()` both work |
+| `evaluate(...)`, `grade(...)` | `ScoredData` | `scored.rows` is a **list**; `scored.rows()` is a `TypeError` |
+| | | `scored.warnings`: hollow-run notes, print them before any number |
+| `pass_at(rows)` | `PassAt` | `pass_at_1`, `pass_pow_k` (printed `pass^k`, not `pass_hat_k`), `pass_at_k`, `headroom`, `ci95` |
+| `marker_summary(rows)` | `{marker: stats}` | `mean`, `ci95` (not `ci`), `n_tasks`, `n_rows` (not `n`), `note` or `warning` |
+| `judge_trust(rows)` | `dict` | `ok`, `agreement.agreement`, `agreement.ci95`, `gold_kind`, `warnings` |
+
+The full field-by-field version, including which fields print and which
+do not, is in [evals.md](evals.md#7-return-shapes).
+
 ## What it is not
 
 It is not ground truth. Every row is a simulation, kept by a grader, and

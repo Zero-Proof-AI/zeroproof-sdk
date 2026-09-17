@@ -197,6 +197,12 @@ class ScoredData:
     Iterates as plain dicts, so it feeds ``simulate(traces=...)``,
     ``mine_traces``, ``export_training`` and JSONL writers directly —
     no conversion scripts.
+
+    ``.rows`` is a plain list here, so ``scored.rows()`` raises
+    ``TypeError: 'list' object is not callable``. On ``SimulationData``,
+    what ``simulate()`` returns, ``.rows`` is a property that works
+    called or uncalled. ``.warnings`` is the list of hollow-run notes
+    ``run_judge`` filled; print it before reading any number.
     """
 
     def __init__(

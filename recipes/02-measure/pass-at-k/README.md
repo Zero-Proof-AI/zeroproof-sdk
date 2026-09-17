@@ -24,7 +24,7 @@ python measure.py graded.jsonl     # any graded row file (reward 0/1, grouped by
 No key needed for the scripted run; it finishes in seconds. Output:
 
 ```
-pass@1 0.47 [0.19..0.74] | pass^8 0.42 | pass@8 0.50 | headroom 0.03 (12 groups, k=8)
+pass@1 0.47 [0.19..0.74] | pass^8 (pass_pow_k) 0.42 | pass@8 0.50 | headroom 0.03 (12 groups, k=8)
   never (p=0)          6
   sometimes (0<p<1)    1
   always (p=1)         5
