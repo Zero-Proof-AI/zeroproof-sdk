@@ -83,6 +83,45 @@ reads as one column then. A marker that does not apply to a row is
 `None`, so its rate counts only the rows it measured. A verifier
 (`wai.verify.*`) is a judge too, when the answer is checkable.
 
+## 3b. Find what your tests miss
+
+The suite you have sends a set of asks. Which parts of the policy do they
+never reach?
+
+```python
+report = wai.coverage_gap(OLD_TESTS, tools=TOOLS, system_prompt=POLICY)
+print(wai.format_coverage_gap(report))
+# 3 asks cover 5 of 6 policy rules and 2 of 2 tools; untested: Refunds over
+# $200 need a manager: ...; no ask puts the agent under pressure; every ask
+# runs once
+```
+
+`asks` is a list of prompt strings, a list of rows with a `prompt` key, or
+a path to a `.py` or `.jsonl` file holding either. From a `.py` file the
+asks are the string literals that look like asks (passed to a call or in a
+list, over fifteen characters, with a space): a heuristic, so read
+`report["asks"]` before trusting the counts.
+
+The axes are the ones `simulate` covers, so the report is in the engine's
+own words: `untested_rules` are the policy clauses no ask reaches,
+`untested_tools` the tools no ask names, `single_shot` says every ask runs
+once (one rollout cannot tell a flake from a failure), and `notes` names
+the fix for each. `world_state` and `tool_condition` are not readable from
+an ask at all, which is the honest reason a hand-written suite misses
+fault handling: a prompt never says the record is missing or the tool
+timed out.
+
+Rules are matched on the words an ask shares with the clause, so a branch
+that only the fixture data selects (an amount, a date) reads as untested
+even when an ask lands on it. Pass `rows=` from a graded run to check the
+world side: a rule whose every row ended in the same tool fault is one the
+asks reach but the fixtures never let happen, and the fix is a fixture
+case, not another ask.
+
+`preflight(tools, system_prompt)["rules"]` is the same rule axis on its
+own, which is the list of policy branches the engine extracted from your
+prompt.
+
 ## 4. Run it
 
 ```python

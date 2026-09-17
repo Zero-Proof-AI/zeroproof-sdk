@@ -53,7 +53,12 @@ start the engine then flips most fault cells to success (one cell per
 fault type stays), so the tool-condition axis is sampled, not covered,
 unless you raise `fault_rate` or pass `prefer_success=False`. What the
 run actually touched is a number: `data.coverage["pairwise"]` is
-planned pairs, covered pairs, and the fraction.
+planned pairs, covered pairs, and the fraction. Read it as what it
+counts: pairwise cells of the 6-axis grid, which is training-data
+coverage, not policy coverage. A 200-row run over a grid with thousands
+of pairs reports a small fraction and that is arithmetic, not a failed
+eval. Whether your policy is covered is a different question, and
+`coverage_gap(asks, tools=..., system_prompt=...)` answers it.
 
 **People are sampled, not described.** A coordinate says the customer is
 in a hurry and their order was already cancelled. A second layer decides

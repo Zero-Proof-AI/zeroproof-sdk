@@ -147,7 +147,14 @@ from .score.optimize import (
 )
 from .score.pairwise import judge_pairs, pairwise_judge
 from .score.passat import PassAt, pass_at
-from .score.preflight import FAILURE_CLASSES, classify_failure, dataset_report, preflight
+from .score.preflight import (
+    FAILURE_CLASSES,
+    classify_failure,
+    coverage_gap,
+    dataset_report,
+    format_coverage_gap,
+    preflight,
+)
 from .score.privileged import format_leak_report, leak_report
 from .score.publish_gate import PublishGateError, calibrate, publish_gate
 from .score.quality import rank_rows, score_row
@@ -252,6 +259,7 @@ __all__ = [
     "conduct_grade",
     "connect",
     "conversation",
+    "coverage_gap",
     "curriculum",
     "cut",
     "cuts",
@@ -277,6 +285,7 @@ __all__ = [
     "filter_rl_rows",
     "flaw_rows",
     "format_audit",
+    "format_coverage_gap",
     "format_curriculum",
     "format_delta_report",
     "format_hack_monitor",

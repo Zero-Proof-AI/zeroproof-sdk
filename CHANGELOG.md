@@ -3,6 +3,32 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `coverage_gap(asks, tools=, system_prompt=, rows=)` maps the asks a test
+  suite already sends onto the grid `simulate` covers, and names what they
+  never reach: `untested_rules` (policy clauses no ask touches),
+  `untested_tools`, the per-axis counts, and `single_shot` when every ask
+  runs once. `asks` is prompt strings, rows, or a path to a `.py` or
+  `.jsonl` file (from a `.py` file the asks are the string literals that
+  look like asks, a documented heuristic). `world_state` and
+  `tool_condition` cannot be read from an ask at all, and the report says
+  so with the fix. With `rows=` from a graded run it also names rules whose
+  every row ended in the same tool fault: the asks reach the rule but the
+  fixtures never let it happen. `format_coverage_gap` prints it.
+  Three cold-start agents asked to "find the situations our tests do not
+  cover" each hand-wrote this mapping, and each found the same untestable
+  policy branch by hand (2026-09-17).
+- `preflight()` reports `rules`, the rule axis the engine extracted from
+  the system prompt, so the policy branches are readable without running
+  a simulation.
+- `data.coverage["pairwise"]` is labeled in the docs as what it counts:
+  pairwise cells of the 6-axis grid, which is training-data coverage, not
+  policy coverage. A small fraction on a short run read as a failed eval.
+- Recipe `02-measure/eval-your-agent`: `--gap` runs `coverage_gap` on the
+  three-ask `OLD_TESTS` suite it replaces, with a README section and a
+  `docs/evals.md` section 3b.
+
 ## 0.59 (2026-09-17)
 
 - `judge_trust` on a judge that agrees with every human label but has

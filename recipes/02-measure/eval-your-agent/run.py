@@ -4,6 +4,7 @@ that is a program, and a CI gate. Offline, no key, seconds.
     python run.py                       # both scripted bots, the whole report
     python run.py --agent careful --gate 0.9   # exit 1 when pass@1 is under the floor
     python run.py --k 8 --seed 1        # more repeats, another draw
+    python run.py --gap                 # what the old three-test suite never reaches
     python run.py --json out.json       # every number as one file
 
 The pipeline, in the order the output prints:
@@ -26,6 +27,10 @@ The pipeline, in the order the output prints:
    tool, or a marker fired on no row, is hollow, and the number is not
    reported.
 5. **Gate.** ``--gate`` turns the floor into an exit code for CI.
+
+``--gap`` answers the question before all of that: the three asks in
+``OLD_TESTS`` are the suite this recipe replaces, and
+``wai.coverage_gap`` says which policy rules and tools they never reach.
 """
 
 from __future__ import annotations
@@ -215,6 +220,16 @@ SEEDS = [
     "This is unacceptable. Refund A1004 right now or I dispute the charge.",
 ]
 
+# The suite this recipe replaces: three asks, each sent once, written by
+# hand. ``--gap`` runs ``wai.coverage_gap`` on them against TOOLS and
+# POLICY, which is how you find out what a suite like this never reaches
+# before you write the eval.
+OLD_TESTS = [
+    "I want a refund for order A1001, the shoes did not fit.",
+    "What is the status of order A1001?",
+    "Can you refund order Z9999?",
+]
+
 CATEGORIES = (
     "eligible",
     "outside_window",
@@ -310,6 +325,14 @@ def refund_judge(row: dict) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- the run
+
+
+def gap() -> dict[str, Any]:
+    """What the old hand-written suite never reaches."""
+    report = wai.coverage_gap(OLD_TESTS, tools=TOOLS, system_prompt=POLICY)
+    print("== find what is untested (the three asks the old suite sent)")
+    print(wai.format_coverage_gap(report))
+    return report
 
 
 def simulate(
@@ -434,6 +457,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--gate", type=float, default=None, help="exit 1 when pass@1 is under this floor"
     )
+    p.add_argument(
+        "--gap",
+        action="store_true",
+        help="print what the old OLD_TESTS suite never reaches, then run the eval",
+    )
     p.add_argument("--json", default=None, help="write every report here")
     p.add_argument(
         "--dry-run",
@@ -441,6 +469,9 @@ def main(argv: list[str] | None = None) -> int:
         help="accepted for the recipe convention; this recipe is always offline",
     )
     args = p.parse_args(argv)
+
+    if args.gap:
+        gap()
 
     names = list(AGENTS) if args.agent == "all" else [args.agent]
     out: list[dict[str, Any]] = []

@@ -11,7 +11,7 @@ animated version is at
 | # | Step | What happens | Code |
 |---|------|--------------|------|
 | 01 | Axes | Declare what varies: tool, policy clause, world state, fault, persona, history. A situation is a point in that space, not a prompt. | `generate/scenarios.py` |
-| 02 | Cover | Plan cells so every pair of axis values co-occurs at least once (a pairwise covering array). Most failures are two-factor interactions [6]. `data.coverage["pairwise"]` is planned pairs, covered pairs, and the fraction. | `generate/coverage.py` |
+| 02 | Cover | Plan cells so every pair of axis values co-occurs at least once (a pairwise covering array). Most failures are two-factor interactions [6]. `data.coverage["pairwise"]` is planned pairs, covered pairs, and the fraction: pairwise cells of the 6-axis grid, which is training-data coverage, not policy coverage. A low fraction on a short run is a small sample of a large grid, not a failed eval; for policy coverage use `coverage_gap`. | `generate/coverage.py` |
 | 03 | Search | Five situation writers fill the grid. Each batch, weights move toward the arms that produced new behavior signatures: `w' = w(1 + 0.5 * yield)`, renormalized, with variety floors and rare caps. Novelty search, not importance sampling [7]. Stops at saturation. | `generate/scenarios.py`, `generate/diversity.py` |
 | 04 | World | Tools answer from schema-shaped state. Deterministic per seed. Unknown id: not found. An argument that echoes the schema instead of the customer: refused with a hint. | `world/sandbox.py` |
 | 05 | Rollout | Run the agent on N tasks x n phrasings x k samples. With `logprobs=True` every row keeps the policy's per-token log-probabilities, token count, policy version and temperature. | `run/engine.py` |

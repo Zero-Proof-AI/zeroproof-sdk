@@ -6,10 +6,11 @@ gate, not a push. Two scripted refund bots are included, one careful and
 one eager, so the eval visibly separates a good agent from a bad one
 before you plug in your own.
 
-What you will learn: the `agent(message) -> {steps, final_text}` contract,
-why the judge reads the trajectory and not the prose, what a hollow run
-looks like and how the SDK flags it, and how to turn a pass rate into an
-exit code. You need nothing; this recipe is offline. Seconds.
+What you will learn: which parts of your policy the asks you already send
+never reach (`--gap`), the `agent(message) -> {steps, final_text}`
+contract, why the judge reads the trajectory and not the prose, what a
+hollow run looks like and how the SDK flags it, and how to turn a pass
+rate into an exit code. You need nothing; this recipe is offline. Seconds.
 
 ## Run it
 
@@ -19,6 +20,7 @@ cd recipes/02-measure/eval-your-agent
 python run.py                              # both bots, the whole report
 python run.py --agent careful --gate 0.9   # exit 1 under the floor, exit 2 when the run is hollow
 python run.py --k 8 --seed 1               # more repeats, another draw
+python run.py --gap                        # what the old suite never reaches
 ```
 
 | flag | default | what it does |
@@ -28,7 +30,58 @@ python run.py --k 8 --seed 1               # more repeats, another draw
 | `--grid` | 4 | situations the writer adds on top of the seeds |
 | `--limit` | all | first N seeds only, for a smoke run |
 | `--gate` | off | pass@1 floor as an exit code |
+| `--gap` | off | what the old `OLD_TESTS` suite never reaches, before the eval |
 | `--json` | off | every number to one file |
+
+## Find what is untested
+
+Before writing the eval: `wai.coverage_gap` takes the asks a suite
+already sends and says which parts of the policy they never reach. The
+axes are the ones `simulate` covers, so the answer comes back in the
+engine's own words: which tool, which policy rule, what stance the person
+takes, what the world looks like, what condition the tool is in.
+`OLD_TESTS` in `run.py` is the three-ask suite this recipe replaces.
+
+```bash
+python run.py --gap
+```
+
+```
+== find what is untested (the three asks the old suite sent)
+3 asks cover 5 of 6 policy rules and 2 of 2 tools; untested: Refunds over $200 need a manager: do not issue them, say a...; no ask puts the agent under pressure; every ask runs once
+
+asks                  3  (each one once)
+policy rules covered  5 of 6
+tools covered         2 of 2
+stance                ordinary 3
+untested rules
+  - Refunds over $200 need a manager: do not issue them, say a manager wi...
+! 1 policy rule no ask reaches: write one ask per rule, or let the engine write them (simulate(seeds=asks, ...) covers the rule axis)
+! world_state and tool_condition are not readable from an ask: a prompt never says the record is missing or the tool timed out, so every ask sits on one point of those two axes. Run the asks through simulate(seeds=asks, tools=..., system_prompt=...) to vary them, or add a fixture case per branch
+! rules are matched on the words an ask shares with the rule, so a branch only the fixture data selects (an amount, a date) reads as untested even when an ask lands on it: confirm with rows= from a run
+! every ask appears once: one rollout cannot tell a flake from a failure. Roll each ask k times (repeats=k, repeat_policy='fixed') and read pass^k
+! no ask is hurried, adversarial or a retry: the suite tests the agent on a good day only. Add pressure asks, or take them from the stance axis
+```
+
+The over-limit branch is the one to act on: no ask in the old suite names
+an amount or a manager, so nothing tests it. The eval below confirms it
+from the other side (`escalates_over_limit` fires on 0 rows until a seed
+reaches it). Rule matching is word overlap, so a branch that only the
+fixture data selects reads as untested even when an ask lands on it: pass
+`rows=` from a graded run and the report also names the rules whose every
+row ended in the same tool fault, which is a missing fixture, not a
+missing ask.
+
+```python
+report = wai.coverage_gap(OLD_TESTS, tools=TOOLS, system_prompt=POLICY, rows=scored.rows)
+print(wai.format_coverage_gap(report))
+```
+
+Asks can also come from the file that holds them:
+`wai.coverage_gap("tests/test_refunds.py", ...)` reads the string
+literals that look like asks (passed to a call or sitting in a list,
+over fifteen characters, with a space in them), and
+`wai.coverage_gap("asks.jsonl", ...)` reads the `prompt` of every row.
 
 ## What you get
 
