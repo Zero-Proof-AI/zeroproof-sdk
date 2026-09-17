@@ -237,7 +237,9 @@ of scored 0. Twenty-five steps (12,800 samples, 3.5 h on one H100) moved the
 holdout as much as rounds 1-4 combined (8,000 steps, 32,000 samples). The
 step-25 row is served from the saved checkpoint through `serve_modal.py` on
 Modal rather than the hosted endpoint; the base was sampled through the same
-server as a control (row below when it lands). Steps 50, 75 and 100 follow.
+server as a control: base through that server is 0.53 (0.49..0.57), +0.004
+(-0.019..+0.029) against the hosted base, so the serving path adds nothing.
+Steps 50, 75 and 100 follow.
 
 ## Other bases on the same holdout (140 tasks, k=4)
 
