@@ -33,7 +33,9 @@ with `Hosted model daily quota exceeded`. Two ways around it:
 `simulate(..., simulator=False)` writes the situations offline with no
 quota and no network, which is how every recipe here runs; and signing
 in once at zeroproofai.com/sign-in lifts the daily limit. `whileai
-status` prints the same two facts while the key is on the trial.
+status` prints the same two facts while the key is on the trial, and a
+run that would spend the trial on the hosted writer says them once
+before it starts, in the log and in `data.warnings`.
 
 ## 2. Wrap your agent
 

@@ -66,6 +66,27 @@ def trial_note(daily_input_tokens: float | None = None) -> str:
     )
 
 
+def trial_prerun_note() -> str | None:
+    """The one line a trial key needs before a hosted run spends it, or ``None``.
+
+    Read from the tier the credentials file recorded at sign-up or at the
+    last ``whileai status`` / ``whileai login``, so a run can say this
+    without a network call. A key from the environment has no recorded
+    tier, so this says nothing rather than guess at one.
+    """
+    if getenv("API_KEY"):
+        return None
+    saved = _read(credentials_path()) or {}
+    if not saved.get("api_key") or str(saved.get("tier") or "") != "trial":
+        return None
+    tokens = int(float(saved.get("daily_input_tokens") or DEFAULT_TRIAL_INPUT_TOKENS))
+    return (
+        f"trial key: the hosted writer covers about {trial_situations(tokens)} situations a day "
+        f"({tokens // 1000}k input tokens); simulator=False writes them offline with no quota; "
+        f"sign in once at {SIGN_IN_URL} to lift it"
+    )
+
+
 def _api_url() -> str:
     return getenv("API_URL", DEFAULT_API_URL).rstrip("/")
 
@@ -110,6 +131,37 @@ def _read(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _tier_fields(payload: dict) -> dict:
+    """The tier facts worth keeping next to the key, from ``/signup`` or ``/me``."""
+    tier = str((payload or {}).get("tier") or "").strip()
+    if not tier:
+        return {}
+    fields: dict = {"tier": tier}
+    trial = (payload or {}).get("trial") or {}
+    if isinstance(trial, dict):
+        if trial.get("daily_input_tokens") is not None:
+            fields["daily_input_tokens"] = trial["daily_input_tokens"]
+        if trial.get("expires_at"):
+            fields["expires_at"] = str(trial["expires_at"])
+    return fields
+
+
+def remember_account(payload: dict) -> None:
+    """Record a ``/signup`` or ``/me`` reply's tier in the credentials file.
+
+    Only for the key that file holds: a key from the environment may belong
+    to another account, and writing its tier here would mislabel this one.
+    """
+    fields = _tier_fields(payload)
+    saved = _read(credentials_path())
+    if not fields or not saved or not saved.get("api_key"):
+        return
+    if all(saved.get(key) == value for key, value in fields.items()):
+        return
+    saved.update(fields)
+    _write_private(credentials_path(), saved)
 
 
 def stored_api_key() -> str | None:
@@ -264,6 +316,10 @@ def login(
             )
             with contextlib.suppress(OSError):
                 _pending_path().unlink()
+            # the tier the key carries, saved next to it, so a run can
+            # name a trial limit before it spends one
+            with contextlib.suppress(LoginError, OSError, ValueError):
+                remember_account(account(data["api_key"]))
             say(f"Logged in. Key saved to {credentials_path()}")
             return data["api_key"]
         error = data.get("error", "")
@@ -306,6 +362,9 @@ def signup(email: str, *, name: str | None = None, out: Callable[[str], None] | 
                 "user_id": data.get("user_id"),
                 "email": data.get("email", email),
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                # so simulate() can warn about the trial before a hosted
+                # run spends it, without a call to /me
+                **_tier_fields(data),
             },
         )
         say(f"Account created for {data.get('email', email)}. Key saved to {credentials_path()}")
@@ -382,6 +441,8 @@ def status() -> dict:
             out["tier"] = f"unknown ({err})"
         else:
             out["tier"] = me.get("tier")
+            if not env:
+                remember_account(me)
             if me.get("tier") == "trial":
                 trial = me.get("trial") or {}
                 out["trial_expires_at"] = trial.get("expires_at")

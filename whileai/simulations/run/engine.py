@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ...auth import trial_prerun_note
 from ..data import SimulationData, clean_faults, conversation, export_row, note_stage, row_world
 from ..generate.actionspace import (
     action_space_targets,
@@ -39,6 +40,7 @@ from ..generate.actionspace import (
 )
 from ..generate.adapters import inspect, resolve
 from ..generate.agents import (
+    _hosted_qwen_url,
     current_rollout,
     default_agent_spec,
     default_max_turns,
@@ -638,6 +640,18 @@ class Run:
                 threading.Thread(
                     target=touch_hosted, args=(hosted_url,), kwargs={"timeout": 5.0}, daemon=True
                 ).start()
+                # A trial key buys about a dozen hosted situations a day.
+                # Saying so after the run has spent them is no use, so the
+                # note lands before the first writer wave. Only for the
+                # writer this run picked for itself (simulator= brings its
+                # own model, and no quota of ours), and only for a saved
+                # key whose tier the credentials file recorded: reading it
+                # costs no network call.
+                if c.simulator is None and _hosted_qwen_url(hosted_url):
+                    trial = trial_prerun_note()
+                    if trial:
+                        self.data.warnings.append(trial)
+                        log.warning(trial)
         self.fault_plans.update(gen.fault_plans)
         self.declared = {
             str((t.get("function", t) or {}).get("name", "")) for t in self.tools or []

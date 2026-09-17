@@ -8,6 +8,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .scenarios import intent_for_tool
+
 ENUM_CAP = 400
 
 
@@ -22,9 +24,16 @@ def _tool_args(schema: dict) -> list[str]:
     return sorted(props)
 
 
-def _tool_desc(schema: dict) -> str:
-    fn = schema.get("function", schema) if isinstance(schema, dict) else {}
-    return str(fn.get("description") or _tool_name(schema).replace("_", " "))
+def _tool_job(schema: dict) -> str:
+    """What one tool does, said the way the person asking would say it.
+
+    The tool's name in plain words, never its description. A description is
+    written for the agent ("Look up an order by id. Returns item, total,
+    order date and status."), so an ask built from one reads as the schema
+    quoted back, not as a customer: a tester saw exactly that (2026-09-17).
+    """
+    name = _tool_name(schema)
+    return intent_for_tool(name) or name.replace("_", " ")
 
 
 @dataclass(frozen=True)
@@ -66,8 +75,8 @@ def shape_as_tags(shape: Shape, tool_schemas: Sequence[dict]) -> dict[str, Any]:
 
 
 def render_target_situation(shape: Shape, tool_schemas: Sequence[dict]) -> str:
-    """A short user request from this agent's tool descriptions."""
-    by_name = {_tool_name(s): _tool_desc(s) for s in tool_schemas}
+    """A short user request for the tools this shape calls, in plain words."""
+    by_name = {_tool_name(s): _tool_job(s) for s in tool_schemas}
     jobs = [by_name.get(c.tool, c.tool.replace("_", " ")) for c in shape.calls]
     jobs = [j.rstrip(".") for j in jobs if j]
     if not jobs:

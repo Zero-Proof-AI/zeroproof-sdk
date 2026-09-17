@@ -3,6 +3,24 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- A trial key is named before a hosted run spends it, not after. `whileai
+  signup` records the tier (and the trial's daily input tokens and expiry)
+  in `~/.whileai/credentials.json`, and `whileai status` and `whileai
+  login` refresh it from `/me`. When the situation writer is the hosted
+  model and the saved key is a trial one, `simulate()` logs one line and
+  puts it in `data.warnings` before generation starts: how many situations
+  a day the allowance covers, that `simulator=False` writes them offline
+  with no quota, and where to sign in to lift it. It reads the saved tier,
+  so it costs no extra call. A key from `WHILEAI_API_KEY` has no recorded
+  tier, so nothing is said about it.
+- The offline template writer no longer reads tool descriptions back as
+  customer speech. An action-shape ask is built from the tool's name in
+  plain words ("Can you check an order for me?") instead of its
+  description, which a tester saw quoted verbatim ("Can you look up an
+  order by id. Returns item, total, order date and status for me?").
+
 ## 0.60 (2026-09-17)
 
 - `coverage_gap(asks, tools=, system_prompt=, rows=)` maps the asks a test
