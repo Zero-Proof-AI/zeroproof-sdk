@@ -3,6 +3,15 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `tools_from_traces`, `opening_share`, `infer_harness` and `marker_names`
+  are exported from `whileai.simulations`. All four were public in their own
+  modules and reachable only through a private path. `tools_from_traces`
+  rebuilds the tool surface from the calls a trace set contains, which is
+  what a caller who brings traces and no harness needs, and what
+  `simulate_from_traces` already does internally.
+
 ## 0.58 (2026-09-17)
 
 - `split_pseudo_production` splits by `task_key` (the `scenario_id`,
