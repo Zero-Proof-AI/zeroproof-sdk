@@ -4,6 +4,8 @@ The SDK makes post-training data for an agent you already have, or one you
 can describe. You give it the agent's definition; it gives you graded
 conversations you can train on. This document is about how it thinks and
 why, not a tour of every option.
+The same engine on one page, with the estimators and the references, is
+[engine.md](engine.md).
 
 ## The problem it solves
 
