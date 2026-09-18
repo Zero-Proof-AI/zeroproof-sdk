@@ -3,6 +3,35 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `delta_report` keys comparability on the situations, not on which knob
+  supplied them. Two offline arms over the same task set failed with
+  `NOT COMPARABLE: writer_model was 'seed' before and 'pinned' after`
+  when one was drawn with `seeds=` and the other replayed it (#375); two
+  skills worked around it by drawing the tasks once with a placeholder
+  agent. The writer's only effect on a rollout is the situation it wrote,
+  so when every `task_key` is on both sides a writer difference is a
+  note ("the situations are the same set and the writer is not a
+  confound") and the delta stands; over different task sets it still
+  fails, and `user_model` (which plays turns inside every rollout) is
+  checked whatever the task sets are. `simulate(seeds=..., runs=N)` no
+  longer raises `tasks= ... cannot be combined with seeds=`: the first run
+  draws the task set from the seeds and the replays take the tasks.
+- `holdout_size(effect, before=rows)` on a saturated baseline no longer
+  answers `n_tasks=2`. Rows whose tasks all pass gave `p = 1`, a binomial
+  variance of 0 and the sizing formula's floor, with no warning; a golden
+  set at pass@1 = 1.00 was told two tasks prove a 5-point gain (#392).
+  When the measured base is at or above `CEILING_PASS_RATE` (0.9, now in
+  `defaults.py`, the same share `delta_report` flags as `ceiling`;
+  `ceiling_pass_rate=` is the knob) or the measured paired sd is 0, the
+  rows are not used: `n_tasks` is the binomial model's answer at
+  `BASE_PASS_RATE` with the rows' k, `saturated` is `True`, and a new
+  `warnings` key names the ceiling and the fix (harder situations so the
+  baseline sits inside the 20-80% difficulty band, rlhfbook.com ch. 14;
+  DAPO drops prompts at accuracy 0 and 1 for the same reason). Every path
+  now returns `saturated` and `warnings`.
+
 ## 0.76 (2026-09-18)
 
 - `ty` type-checks the package in CI beside mypy (`uv run ty check`,

@@ -401,6 +401,15 @@ MIN_RERUNS = 3
 # binary task carries the most variance and the sizing is most
 # conservative. Measured lanes sat between 0.5 and 0.7 (#288).
 BASE_PASS_RATE = 0.6
+# CEILING_PASS_RATE = 0.9: a before side passing this share of its tasks
+# has at most 10 points of room, under the noise band of most agent evals
+# (run_std 0.02-0.04 measured across our lanes gives a band of 0.06-0.11),
+# so ``delta_report`` flags ``ceiling`` and ``holdout_size(before=rows)``
+# refuses to size on the collapsed variance (a saturated suite read as
+# "2 tasks are enough", #392). Above DIFFICULTY_BAND's top (0.8) on
+# purpose: the band prunes training prompts, the ceiling flags an eval.
+# Convention on the exact share.
+CEILING_PASS_RATE = 0.9
 # ROLLOUTS_PER_TASK = 4: the per-task rollout count the sizing assumes and
 # the smallest k ``pass_at`` reports pass^k at. tau-bench (arXiv:2406.12045)
 # plots pass^k to k=8 from at least 3 trials; tau2-bench (arXiv:2506.07982)
@@ -1446,6 +1455,7 @@ __all__ = [
     "ALPHA",
     "BASE_PASS_RATE",
     "BOOTSTRAP_DRAWS",
+    "CEILING_PASS_RATE",
     "CHARS_PER_TOKEN",
     "CI_LEVEL",
     "DEAD_AGENT_BUDGET_MULTIPLE",

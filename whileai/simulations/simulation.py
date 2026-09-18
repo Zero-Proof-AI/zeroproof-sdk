@@ -263,8 +263,9 @@ def simulate(
     what ``delta_report`` needs before it will call a change real
     (rlhf-book ch. 16 and appendix C: one evaluation is a draw, three
     give a standard deviation). ``simulate(tasks=base, runs=3)`` is the
-    usual form; without ``tasks=`` the first run draws the task set and
-    the rest replay it. Between runs nothing changes but the agent's own
+    usual form; without ``tasks=`` the first run draws the task set (from
+    ``seeds=`` when given) and the rest replay it. Between runs nothing
+    changes but the agent's own
     sampling: same tasks, same faults, same world state, same seed, so a
     deterministic agent gives identical runs and a zero re-run band. The
     rows of every run come back in one ``SimulationData`` (``output=``
@@ -402,6 +403,14 @@ def _repeat_runs(agent: Any, n_runs: int, kwargs: dict[str, Any]) -> SimulationD
         if first is not None and run_kwargs.get("tasks") is None:
             run_kwargs["tasks"] = first
             replayed_from = 0
+            # The first run's task set carries the seeds it was drawn
+            # from; a replay takes the tasks and not the seeds again, or
+            # resolve_run_config refuses the pair (#375).
+            run_kwargs["seeds"] = None
+            advanced = dict(run_kwargs.get("advanced") or {})
+            for key in ("seed_prompts", "extra_situations"):
+                advanced.pop(key, None)
+            run_kwargs["advanced"] = advanced
         data = Run(resolve_run_config(agent, **run_kwargs)).run()
         _stamp_eval_run(data.trajectories, index, replayed_from=replayed_from)
         per_run.append({"rows": len(data.trajectories), "stopped_because": data.stopped_because})

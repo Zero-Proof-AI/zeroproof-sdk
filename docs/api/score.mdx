@@ -1157,6 +1157,7 @@ holdout_size(
     after: Sequence[dict] | None = None,
     task_std: float | None = None,
     rows: Sequence[dict] | None = None,
+    ceiling_pass_rate: float = 0.9,
 ) -> dict[str, Any]
 ```
 
@@ -1211,9 +1212,26 @@ ways to answer it, best first:
 name) reads `base` and `k` off the data. Returns `n_tasks`
 plus the inputs, `task_std`, `sd_source`, `half_width` (the 95%
 band on the delta at that `n`), `n_tasks_concentrated`,
-`base_spread`, `n_paired` and `notes`; every key is present on
-every path (`None` or `[]` where it does not apply). The default
-answer is unchanged; the honest paths are the two that measure.
+`base_spread`, `n_paired`, `saturated`, `notes` and
+`warnings`; every key is present on every path (`None`, `False`
+or `[]` where it does not apply). The default answer is unchanged;
+the honest paths are the two that measure.
+
+A saturated baseline cannot size anything. Rows whose tasks all pass
+give `p = 1`, the binomial variance `p(1-p)` is 0, and both arms
+all passing give a measured paired sd of 0; the formula then returns
+the floor, `MIN_HOLDOUT_TASKS`, which is the model collapsing, not
+evidence that two tasks are enough (#392). When the measured base is
+at or above `ceiling_pass_rate` (`CEILING_PASS_RATE`, the share
+`delta_report` flags as `ceiling`) or the measured sd is 0 (the
+paired difference identical on every task, `DEGENERATE`), the
+rows are not used: `n_tasks` is the binomial model's answer at
+`BASE_PASS_RATE` and the rows' `k`, `sd_source` is `"model"`,
+`saturated` is `True`, and `warnings` names the ceiling and the
+fix: harder situations, so the baseline sits inside the 20-80
+difficulty band (rlhfbook.com/c/14-reasoning.html; DAPO, arXiv
+2503.14476, drops prompts at accuracy 0 and 1 because they carry no
+signal), then size again on those rows.
 
 The recipe that asked for this had 140 tasks at k=4 around 0.6: a
 band of about +-0.06, so a real 3-point gain reads

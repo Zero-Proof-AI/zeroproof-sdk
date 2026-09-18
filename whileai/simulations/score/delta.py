@@ -29,7 +29,7 @@ from collections.abc import Callable, Mapping, Sequence
 from statistics import NormalDist
 from typing import Any
 
-from ..defaults import ALPHA, BASE_PASS_RATE, CI_LEVEL, MIN_RERUNS, POWER
+from ..defaults import ALPHA, BASE_PASS_RATE, CEILING_PASS_RATE, CI_LEVEL, MIN_RERUNS, POWER
 from .passat import answer_counts, pass_at
 from .stats import (
     DEFAULT_BOOT,
@@ -50,11 +50,8 @@ from .stats import (
 
 GROUP_KEYS = ("delta", "ci95", "verdict", "mean_a", "mean_b", "n_used", "n_paired", "paired")
 
-# CEILING_PASS_RATE = 0.9: a before side passing this share of its tasks
-# has at most 10 points of room, under the noise band of most agent evals
-# (run_std 0.02-0.04 measured across our lanes gives a band of 0.06-0.11),
-# so the report flags ``ceiling``. Convention on the exact share.
-CEILING_PASS_RATE = 0.9
+# CEILING_PASS_RATE: see ``defaults.CEILING_PASS_RATE`` (one home; ``holdout_size``
+# reads the same share). Importable from here as before.
 # CEILING_MIN_TASKS_WITH_ROOM = 20: below this many paired tasks that are
 # not already passed every time (and when they are under half of the
 # pairs), the same flag: 20 tasks at k=4 can prove a gain of about 0.2 at
@@ -962,8 +959,22 @@ def delta_report(
         and agent_a == agent_b
         and (cfg_a.get("policy_version") != cfg_b.get("policy_version"))
     )
+    # The writer's only effect on a rollout is the situation it wrote, so
+    # two arms over the same situations (every task_key on both sides) were
+    # written once, whichever knob supplied them: seeds= stamps "seed",
+    # tasks= keeps the source run's writer, a template run says "template".
+    # Comparability keys on the situation identity, not the stamp (#375).
+    # The user model plays turns inside every rollout, so it is checked
+    # whatever the task sets are.
+    same_situations = bool(n_paired) and not (n_only_a or n_only_b)
     for key, knob in (("user_model", "user_model="), ("writer_model", "simulator=")):
-        if _both(key) and cfg_a[key] != cfg_b[key]:
+        if _both(key) and cfg_a[key] != cfg_b[key] and key == "writer_model" and same_situations:
+            warnings.append(
+                f"writer_model was {cfg_a[key]!r} before and {cfg_b[key]!r} after, but every one "
+                f"of the {n_paired} tasks is on both sides (task_key), so the situations are the "
+                "same set and the writer is not a confound; the delta stands."
+            )
+        elif _both(key) and cfg_a[key] != cfg_b[key]:
             ok = False
             not_comparable.append(key)
             warnings.append(
