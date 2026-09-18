@@ -254,7 +254,10 @@ already find sometimes, every time, and to stop before the reply budget
 it is exactly the "reliable in production" property a customer is buying.
 Rounds 1-4 (one prompt per optimizer step, every prompt, truncation scored
 0) spent 8,000 steps to gain 0.03; the batch, the band and the mask did
-0.20 in 50. Steps 75 and 100 follow; a second eval run on step 50 is below.
+0.20 in 50. A second eval run of step 50 (another 1,836 samples) gives 0.73
+(0.70..0.77), +0.207 (+0.181..+0.234) vs base: two of two. Steps 75 and 100
+follow. Eval sets on the platform: step 25 `ds_215b1d5320a2d04a`, step 50
+`ds_99e38c55ac4eb56d`.
 
 ## Other bases on the same holdout (140 tasks, k=4)
 
