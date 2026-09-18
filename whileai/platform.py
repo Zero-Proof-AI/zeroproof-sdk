@@ -255,8 +255,8 @@ class Score(_Wire):
     """
 
     behavior: str = Field(min_length=1, max_length=64)
-    score: float
-    ci: float | None = Field(default=None, ge=0)
+    score: float = Field(allow_inf_nan=False)
+    ci: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     n: int | None = Field(default=None, ge=1)
     test_version: str | None = None
     version: str | None = None
@@ -332,8 +332,15 @@ class Verdict(_Wire):
     """The one line a person reads before Promote.
 
     rlhfbook.com, "Evaluation": a difference inside the run-to-run
-    spread is not a result. ``excludes_zero`` is whether the candidate's
-    and the served version's intervals fail to overlap.
+    spread is not a result. ``excludes_zero`` is whether the difference
+    interval, ``delta +- sqrt(ci_candidate^2 + ci_served^2)``, excludes
+    zero. "beats" or "trails" is said only when it does and the delta
+    also clears the behavior's declared ``noise_floor``; a missing
+    interval, an interval that includes zero, or a delta inside the
+    re-run band is said in those words. ``regressions`` counts the other
+    behaviors whose point estimate came out lower, with no interval on
+    that check yet. The line ends with what the number rests on (judge
+    agreement, n) and starts with "unproven:" when one is missing or short.
     """
 
     candidate: str | None = None
@@ -342,6 +349,13 @@ class Verdict(_Wire):
     excludes_zero: bool | None = None
     regressions: int = 0
     behavior: str | None = None
+    # Filled from the behavior block of the dashboard.
+    noise_floor: float | None = None
+    n: int | None = None
+    judge_agreement: float | None = None
+    judge_human_n: int | None = None
+    reward_is_judge: bool | None = None
+    contamination: int | None = None
 
     def __str__(self) -> str:
         b = self.behavior or "?"
@@ -349,19 +363,70 @@ class Verdict(_Wire):
             if self.serving and not self.candidate:
                 return f"{b}: {self.serving} is serving; no newer candidate yet"
             return f"{b}: no candidate scored against {self.serving or 'a served version'} yet"
-        word = "beats" if self.delta >= 0 else "trails"
+        if self.candidate == self.serving:
+            return f"{b}: {self.candidate} is the served version; no candidate to compare"
+        delta = float(self.delta)
+        signed = f"{delta:+g}"
+        floor = self.noise_floor
+        claim = False
         if self.excludes_zero is None:
-            interval = "no interval"
-        elif self.excludes_zero:
-            interval = "interval excludes zero"
+            head = (
+                f"{b}: {self.candidate} scored {signed} vs {self.serving}, no interval on one "
+                "side, not a result (pass ci= on both)"
+            )
+        elif not self.excludes_zero:
+            head = (
+                f"{b}: {self.candidate} about the same as {self.serving} "
+                f"({signed}, interval includes zero)"
+            )
+        elif floor is not None and abs(delta) <= floor:
+            head = (
+                f"{b}: {self.candidate} scored {signed} vs {self.serving}, interval excludes "
+                f"zero but inside the eval's re-run band ({floor:g}), not a result"
+            )
         else:
-            interval = "inside the noise"
-        tail = ""
+            claim = True
+            word = "beats" if delta > 0 else "trails"
+            note = (
+                f", clears the noise floor of {floor:g}"
+                if floor is not None
+                else ", no noise floor declared"
+            )
+            head = (
+                f"{b}: {self.candidate} {word} {self.serving} by {abs(delta):g} "
+                f"(interval excludes zero{note})"
+            )
         if self.regressions:
-            tail = f"; {self.regressions} regression{'' if self.regressions == 1 else 's'}"
-        return (
-            f"{b}: {self.candidate} {word} {self.serving} by {abs(self.delta):g} ({interval}){tail}"
-        )
+            head += (
+                f"; {self.regressions} behavior{'' if self.regressions == 1 else 's'} lower "
+                "(point estimates, no interval on that check)"
+            )
+        gaps: list[str] = []
+        if self.n is None:
+            gaps.append("n not declared")
+        elif self.n < 50:
+            gaps.append(f"n={self.n} under 50")
+        if self.judge_agreement is None:
+            gaps.append("judge agreement unmeasured")
+        elif self.judge_agreement < 0.8:
+            gaps.append(f"judge agreement {self.judge_agreement:g} under 0.8")
+        if self.reward_is_judge:
+            gaps.append("the training reward is the judge")
+        if self.contamination:
+            gaps.append(f"contamination {self.contamination}")
+        rests: list[str] = []
+        if self.judge_agreement is not None:
+            rests.append(
+                f"judge agreement {self.judge_agreement:g}"
+                + (f" on {self.judge_human_n}" if self.judge_human_n else "")
+            )
+        if self.n is not None:
+            rests.append(f"n={self.n}")
+        if rests:
+            head += "; " + ", ".join(rests)
+        if claim and gaps:
+            head = "unproven: " + head + " (" + "; ".join(gaps) + ")"
+        return head
 
 
 class TrackedInfo(_Wire):
@@ -387,8 +452,24 @@ class Dashboard(_Wire):
     verdict: Verdict = Field(default_factory=Verdict)
 
     def model_post_init(self, __context: Any) -> None:
-        if self.behavior is not None and self.verdict.behavior is None:
-            self.verdict.behavior = self.behavior.name
+        beh = self.behavior
+        if beh is None:
+            return
+        v = self.verdict
+        if v.behavior is None:
+            v.behavior = beh.name
+        # What the verdict rests on travels with it, so str() can say it.
+        v.noise_floor = beh.noise_floor if v.noise_floor is None else v.noise_floor
+        v.n = beh.n if v.n is None else v.n
+        if beh.judge is not None:
+            if v.judge_agreement is None:
+                v.judge_agreement = beh.judge.agreement
+            if v.judge_human_n is None:
+                v.judge_human_n = beh.judge.human_n
+        if v.reward_is_judge is None:
+            v.reward_is_judge = beh.reward_is_judge
+        if v.contamination is None:
+            v.contamination = beh.contamination
 
 
 # ----------------------------------------------------------------- transport
@@ -486,7 +567,7 @@ class Run:
         self._last_flush = time.monotonic()
         self._lock = threading.Lock()
         self._warned = False
-        self._ci_warned: set[str] = set()
+        self._ci_warned: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------ logging
 
@@ -554,13 +635,29 @@ class Run:
             if score is None:
                 raise TypeError("score(behavior, score, ci=..., n=...) needs the score")
             item = Score(behavior=behavior, score=score, **fields)
-        if item.ci is None and item.behavior not in self._ci_warned:
-            self._ci_warned.add(item.behavior)
+        if item.ci is None and ("ci", item.behavior) not in self._ci_warned:
+            self._ci_warned.add(("ci", item.behavior))
             log.warning(
                 "score(%r) has no interval; pass ci=<half-width of the 95%% interval> so the "
                 "platform can say whether the change is real.",
                 item.behavior,
             )
+        if ("n", item.behavior) not in self._ci_warned:
+            if item.n is None:
+                self._ci_warned.add(("n", item.behavior))
+                log.warning(
+                    "score(%r) has no n; pass n=<held-out items> so the verdict can say what "
+                    "the number rests on.",
+                    item.behavior,
+                )
+            elif item.n < 50:
+                self._ci_warned.add(("n", item.behavior))
+                log.warning(
+                    "score(%r) rests on n=%d held-out items; under 50 the interval is too wide "
+                    "to prove a gain of a few points (holdout_size() says how many you need).",
+                    item.behavior,
+                    item.n,
+                )
         out = self.tracked._call("POST", f"/runs/{self.id}/evals", [item.wire()])
         recorded = (out.get("evals") or [item.wire()])[0]
         self.scores[item.behavior] = Score.model_validate(recorded)

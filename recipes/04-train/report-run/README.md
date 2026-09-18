@@ -21,7 +21,12 @@ every behavior, marks v3 as served, posts two weeks of traffic, and reads
 the verdict back. Open while.ai/platform/runs afterwards: that is the screen
 the person decides on.
 
-Two rules the platform holds you to, both from rlhf-book's evaluation
-chapter: the held-out test for a behavior does not change under you (bump
-`test_version` when it does), and a score without an interval is not a
-result (`ci` is the half-width of the 95% interval).
+Three rules, from rlhf-book's evaluation chapter (ch. 16): the held-out
+test for a behavior does not change under you (bump `test_version` when it
+does; the platform does not yet refuse a score on another test version, so
+this one is on you), a score without an interval is not a result (`ci` is
+the half-width of the 95% interval, and `verdict()` says "not a result"
+without one), and a delta inside the eval's own re-run band is not a result
+either (`noise_floor` is the spread you saw scoring the same model twice;
+`verdict()` reads it). The `--offline` verdict is computed from the score
+table with the same difference-interval rule the platform uses.
