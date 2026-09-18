@@ -223,6 +223,7 @@ are what to read.
 | base (Qwen3-4B, thinking on) | 0.53 (0.49..0.56) | 0.25 | 0.76 | - |
 | r4 | 0.55 (0.52..0.59) | 0.27 | 0.77 | +0.026 (+0.001..+0.050); hard +0.07 (+0.03..+0.11) |
 | r5 at step 25 (from r4: 326 band prompts, 32 prompts x 16 samples a step, truncation masked) | 0.57 (0.54..0.61) | 0.27 | 0.78 | +0.044 (+0.020..+0.069); vs r4 +0.018 (-0.005..+0.043), medium +0.04 (+0.01..+0.08) |
+| r5 at step 50 | **0.73 (0.69..0.77)** | 0.65 | 0.79 | **+0.205 (+0.179..+0.231)**; vs r4 +0.179 (+0.157..+0.203); vs step 25 +0.161 (+0.138..+0.185); easy +0.18, medium +0.19, hard +0.25, every interval above zero |
 
 On the small holdout r4 vs base was +0.021 (-0.029..+0.068), "no change".
 On 459 tasks the same two checkpoints give +0.026 with an interval that
@@ -240,6 +241,20 @@ Modal rather than the hosted endpoint; the base was sampled through the same
 server as a control: base through that server is 0.53 (0.49..0.57), +0.004
 (-0.019..+0.029) against the hosted base, so the serving path adds nothing.
 Steps 50, 75 and 100 follow.
+
+**Step 50 is the result the lane was built to get.** pass@1 0.53 -> 0.73 on
+459 held-out tasks, paired, with the interval nowhere near zero, in 50
+optimizer steps (25,600 samples, about 7 GPU-hours on one H100). Read the
+other columns before calling it capability: pass@4 barely moved (0.76 ->
+0.79) while pass^4, all four samples right, went 0.25 -> 0.65. The policy
+did not learn many new queries; it learned to produce the query it could
+already find sometimes, every time, and to stop before the reply budget
+(replies with no query 13% -> 0%, SQL errors 12% -> 5%, median reply 1,400
+-> 850 tokens). That is what a verifier reward on a 20-80% band does, and
+it is exactly the "reliable in production" property a customer is buying.
+Rounds 1-4 (one prompt per optimizer step, every prompt, truncation scored
+0) spent 8,000 steps to gain 0.03; the batch, the band and the mask did
+0.20 in 50. Steps 75 and 100 follow; a second eval run on step 50 is below.
 
 ## Other bases on the same holdout (140 tasks, k=4)
 
