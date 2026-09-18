@@ -195,7 +195,9 @@ three plain principles returns the mean of its criteria — `0.0 / 0.333 / 0.667
 every partially-met row is dropped from the agreement sample and the number you get is
 computed on the rows the judge felt strongly about. Setting `kind="hard"` on every
 criterion makes a miss a `0` and all-met a `1`. This is stated in `Rubric.score`'s
-docstring and not in `rubric_judge`'s, which is where you are when you need it.
+docstring and not in `rubric_judge`'s, which is where you are when you need it. Filed as
+[#345] — on a synthetic check, 80 labelled rows became `n=40` and `judge_trust` printed
+`PASS` at 100% agreement, with `n_skipped=40` reaching neither the warnings nor `ok`.
 
 **2. A deterministic verifier is not a gold kind.** `attach_labels(kind=)` takes any string
 without validation, and only the literal `"human"` makes `judge_trust` report a
