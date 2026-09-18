@@ -28,6 +28,7 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -1328,6 +1329,100 @@ class Run:
         cov["sampling"] = None if c.sampling is None else dict(c.sampling)
         cov["timeout"] = c.rollout_timeout
         cov["logprobs"] = c.logprobs
+    def _delivered(self) -> dict:
+        """What the generation knobs actually produced, beside what was asked.
+
+        A knob that does not deliver is invisible from the data alone, and
+        every one of these has been measured missing its setting: fault_rate
+        0.5 reaching 29% of a pool and 0.0 still firing on 34 of 504 rows,
+        avg_turns 6 measuring 0.44 mean user turns, and a stance request
+        arriving as the easiest tier because ordinary is floored at half the
+        pool. A caller reading only the setting describes an intention, not
+        their data, and an agent driving these knobs cannot correct what it
+        cannot see.
+
+        Rows carry the truth: ``faults`` per row, ``tier`` per row, the
+        stance in ``scenario_dimensions``, and the user turns in
+        ``messages``. This reports both numbers so the gap is a fact rather
+        than an inference.
+        """
+        rows = list(self.data.trajectories)
+        n = len(rows)
+        if not n:
+            return {}
+
+        def share(pred) -> float:
+            return round(sum(1 for t in rows if pred(t)) / n, 4)
+
+        def mix(get) -> dict:
+            out: dict[str, int] = {}
+            for t in rows:
+                key = str(get(t) or "") or "unlabelled"
+                out[key] = out.get(key, 0) + 1
+            return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+        def dim(t: dict, name: str) -> Any:
+            d = t.get("scenario_dimensions")
+            return d.get(name) if isinstance(d, dict) else None
+
+        turns = [
+            sum(
+                1
+                for m in (t.get("messages") or [])
+                if isinstance(m, dict) and m.get("role") == "user"
+            )
+            for t in rows
+        ]
+        return {
+            "rows": n,
+            "fault_share": share(lambda t: bool(t.get("faults"))),
+            "tier_mix": mix(lambda t: t.get("tier")),
+            "stance_mix": mix(lambda t: dim(t, "stance")),
+            "mean_user_turns": round(sum(turns) / n, 2),
+            "user_turns_3plus_share": round(sum(1 for x in turns if x >= 3) / n, 4),
+        }
+
+    def _warn_on_undelivered(self, requested: dict, delivered: dict) -> None:
+        """Say so when a knob missed its setting by enough to change a result."""
+        if not delivered:
+            return
+        gaps = []
+        want_fault = requested.get("fault_rate")
+        got_fault = delivered.get("fault_share")
+        if isinstance(want_fault, (int, float)) and isinstance(got_fault, (int, float)):
+            if want_fault > 0 and got_fault < want_fault * 0.7:
+                gaps.append(
+                    f"fault_rate={want_fault} but {100 * got_fault:.0f}% of rows carry a fault"
+                )
+            elif want_fault == 0 and got_fault > 0.01:
+                gaps.append(f"fault_rate=0 but {100 * got_fault:.0f}% of rows carry a fault")
+        want_turns = requested.get("avg_turns")
+        got_turns = delivered.get("mean_user_turns")
+        if (
+            isinstance(want_turns, (int, float))
+            and isinstance(got_turns, (int, float))
+            and want_turns >= 2
+            and got_turns < want_turns * 0.5
+        ):
+            gaps.append(f"avg_turns={want_turns:g} but the mean is {got_turns} user turns")
+        asked = requested.get("stance")
+        if asked:
+            got = delivered.get("stance_mix") or {}
+            total = max(1, sum(got.values()))
+            hit = sum(v for k, v in got.items() if k in set(asked))
+            if hit / total < 0.5:
+                gaps.append(
+                    f"stance={sorted(asked)} but {100 * hit / total:.0f}% of rows carry one of them"
+                )
+        if gaps:
+            warnings.warn(
+                "the generation knobs did not deliver what was set: "
+                + "; ".join(gaps)
+                + ". data.report()['delivered'] carries the measured values beside "
+                "report()['requested']. Report the delivered numbers, not the settings: "
+                "a card that quotes the setting describes an intention rather than the data.",
+                stacklevel=2,
+            )
 
     def _rollouts_requested(self) -> int | None:
         """How many rows the run was asked for: pinned prompts times k
@@ -3500,6 +3595,18 @@ class Run:
         # counts stay in data.search["agent_errors"]. A run that asked for
         # 34 tasks x 4 and got 129 rows says so here instead of reporting
         # a clean pass rate over the 129 (#303).
+        # What the generation knobs were set to, and what they produced.
+        requested = {
+            "fault_rate": c.fault_rate,
+            "avg_turns": c.avg_turns,
+            "stance": (c.dimensions or {}).get("stance")
+            if isinstance(c.dimensions, dict)
+            else None,
+        }
+        delivered = self._delivered()
+        data.coverage["requested"] = requested
+        data.coverage["delivered"] = delivered
+        self._warn_on_undelivered(requested, delivered)
         data.coverage["rollouts_requested"] = self._rollouts_requested()
         data.coverage["rollouts_completed"] = len(data.trajectories)
         data.coverage["rollouts_lost"] = int(self.cap_lifted.get("lost", 0))
