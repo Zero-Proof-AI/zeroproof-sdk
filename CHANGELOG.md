@@ -10,6 +10,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   was written; and says when no real ids were read off the tool descriptions,
   since placeholder asks then stop at "which order?" and the run is hollow.
 
+## Unreleased
+
+- `local_model` gets `first_request_timeout=180`, used until an endpoint
+  answers once. A served model that has scaled to zero took 113s on its first
+  request against a `timeout` default of 60, so every rollout of the pass was
+  dropped and the run returned an empty result set that looked like a clean
+  eval. Raising the steady-state timeout instead would make a genuine hang take
+  three times as long to surface, so only the first request to each endpoint
+  gets the long budget. Pass `first_request_timeout=None` for the old
+  behaviour.
+
 ## 0.61 (2026-09-17)
 
 - `whileai init-evals` writes the eval harness, instead of a coding agent

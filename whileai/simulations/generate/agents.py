@@ -1445,6 +1445,27 @@ def reply_budget(max_tokens: int | None = None) -> int:
     return 768 if CONTEXT_TOKENS <= 8192 else 2048
 
 
+# Endpoints that have answered at least once this process. A served model that
+# has scaled to zero takes far longer on its FIRST request than on any after
+# it: measured at 113s against a 60s default, which dropped every rollout of
+# the pass and returned an empty result set that looked like a clean run.
+# Raising the steady-state timeout would make a genuine hang take three times
+# as long to surface, so only the first request to each endpoint gets the long
+# budget.
+_WARMED_ENDPOINTS: set[str] = set()
+
+
+def _request_timeout(base_url: str, timeout: float, first_timeout: float | None) -> float:
+    """The long budget until an endpoint answers once, the short one after."""
+    if base_url in _WARMED_ENDPOINTS:
+        return timeout
+    return max(float(timeout), float(first_timeout if first_timeout is not None else timeout))
+
+
+def _mark_warm(base_url: str) -> None:
+    _WARMED_ENDPOINTS.add(base_url)
+
+
 def local_model(
     base_url: str,
     model: str,
@@ -1464,6 +1485,7 @@ def local_model(
     human_tools: set | None = None,
     execute: Callable | None = None,
     timeout: float = 60,
+    first_request_timeout: float | None = 180,
     max_tokens: int | None = None,
     user_model: str | None = None,
     thinking: bool | None = None,
@@ -1564,11 +1586,13 @@ def local_model(
                 tools=tools,
                 api_key=api_key,
                 temperature=temperature,
-                timeout=timeout,
+                timeout=_request_timeout(base_url, timeout, first_request_timeout),
                 max_tokens=reply_budget(max_tokens),
                 logprobs=logprobs,
                 extra=extras,
             )
+            # It answered, so the cold start is paid for this endpoint.
+            _mark_warm(base_url)
             calls, assistant = _calls_from_reply(reply)
             # One agent turn, one set of sampling facts, on its first step.
             turn_meta = _turn_meta(reply)
