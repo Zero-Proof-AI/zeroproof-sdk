@@ -490,6 +490,14 @@ def run_arm(
         ],
     )
     last_batch: list[dict] = []
+    # TRL 0.19.1 builds the LoRA adapter (get_peft_model) before it applies
+    # GRPOConfig.seed, so the adapter's init is drawn from whatever RNG state
+    # the process is in. The first arm runs the base evals first and advances
+    # it; the second does not. Seed here so both arms draw the same A matrix.
+    # Rounds 1 to 3 in the README predate this line.
+    from transformers import set_seed
+
+    set_seed(17)
     trainer = adaptive_clip_trainer(GRPOTrainer)(
         model=model,
         reward_funcs=[make_reward(last_batch)],
@@ -677,7 +685,7 @@ def main() -> None:
     ap.add_argument(
         "--num-iterations",
         type=int,
-        default=1,
+        default=2,
         help="policy updates per batch of rollouts; at 1 the run is on-policy and no clip binds",
     )
     ap.add_argument("--selftest", action="store_true", help="the clip schedule, offline")

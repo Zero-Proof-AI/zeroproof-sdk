@@ -9,59 +9,59 @@
   "k": 4,
   "arms": {
     "base": {
-      "score": 0.34375,
+      "score": 0.3416666666666667,
       "ci": [
-        0.27708333333333335,
-        0.41041666666666665
+        0.2791666666666667,
+        0.40625
       ],
       "pass_at_k": 0.5833333333333334,
       "steps": 0,
       "gpu_minutes": 0
     },
     "baseline": {
-      "score": 0.5729166666666666,
+      "score": 0.4666666666666667,
       "ci": [
-        0.5041666666666667,
-        0.6416666666666667
+        0.3958333333333333,
+        0.5375
       ],
-      "pass_at_k": 0.8,
+      "pass_at_k": 0.7,
       "steps": 40,
-      "gpu_minutes": 20.5
+      "gpu_minutes": 12.8
     },
     "recipe": {
-      "score": 0.5083333333333333,
+      "score": 0.5166666666666667,
       "ci": [
-        0.44166666666666665,
-        0.58125
+        0.4479166666666667,
+        0.5875
       ],
-      "pass_at_k": 0.7666666666666667,
+      "pass_at_k": 0.7416666666666667,
       "steps": 40,
-      "gpu_minutes": 12.1
+      "gpu_minutes": 7.6
     }
   },
   "delta": {
-    "recipe_vs_baseline": -0.06458333333333334,
+    "recipe_vs_baseline": 0.05,
     "ci": [
-      -0.11666666666666667,
-      -0.0125
+      0.0,
+      0.1
     ],
     "verdict": "flat"
   },
   "checks": {
-    "run_std": 0.0032,
+    "run_std": 0.0087,
     "decontaminated_dropped": 0,
     "over_optimized": false,
-    "length_before": 715.2145833333333,
+    "length_before": 725.0375,
     "length_after": {
-      "baseline": 588.5979166666667,
-      "recipe": 608.0479166666667
+      "baseline": 412.98333333333335,
+      "recipe": 542.2
     },
-    "hack_scan_top": "contains:days AND contains:\\",
+    "hack_scan_top": "n:digits",
     "seed": 0
   },
   "gpu": "L40S",
-  "usd": 1.09,
-  "verified": "2026-09-17",
-  "whileai": "0.53",
-  "run_url": "https://www.zeroproofai.com/platform/training/run_b546f2c31dcbcf4e"
+  "usd": 0.68,
+  "verified": "2026-09-18",
+  "whileai": "0.64",
+  "run_url": "https://www.zeroproofai.com/platform/training/run_000dac972e53b532"
 }
