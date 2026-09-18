@@ -310,10 +310,12 @@ class RowList(list):
     """A list of rows that also answers to being called.
 
     ``SimulationData.rows`` was a method and ``ScoredData.rows`` a list,
-    so the two spellings were not interchangeable and ``for r in
+    so the two spellings were not interchangeable: ``for r in
     data.rows`` failed with ``TypeError: 'method' object is not
-    iterable``. Returning this from the property keeps every existing
-    ``data.rows()`` call working while ``data.rows`` behaves like a list.
+    iterable`` on one, and ``scored.rows()`` with ``TypeError: 'list'
+    object is not callable`` on the other (#344). Both now hold one of
+    these, so ``.rows`` and ``.rows()`` work on either type while
+    ``.rows`` still behaves like a plain list.
     """
 
     def __call__(self) -> RowList:
@@ -670,14 +672,12 @@ class SimulationData:
         """The exported rows: exactly what ``save()`` and ``output=`` write.
 
         One row per trajectory, through ``export_row``. Both spellings
-        work -- ``data.rows`` and ``data.rows()`` -- because
-        ``ScoredData.rows`` is a list attribute and this used to be a
-        method only, so ``for r in data.rows`` raised ``TypeError``
-        without hinting at the missing parentheses.
-
-        The other direction still bites: ``ScoredData.rows``, what
-        ``evaluate`` and ``grade`` hand back, is a plain list, so
-        ``scored.rows()`` is a ``TypeError``. Method here, list there.
+        work -- ``data.rows`` and ``data.rows()`` -- and both work on
+        ``ScoredData.rows`` too, what ``evaluate`` and ``grade`` hand
+        back, so a helper written against one can be handed the other.
+        The contents still differ by design: these rows are exported
+        (``export_row``, privileged fields scrubbed), ``ScoredData.rows``
+        are the scored trajectories as judged.
         """
         return RowList(export_row(t) for t in self.trajectories)
 

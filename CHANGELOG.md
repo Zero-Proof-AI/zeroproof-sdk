@@ -15,6 +15,13 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   when there is something to cut, `wai.send_score(...)` when the runs are
   grouped but unscored, so no state ends on a dead stop. `rl.support` stays in
   the payload and out of what gets printed.
+- Naming a dataset from the SDK works. `otel_env(dataset=...)` and
+  `ingest_traces(..., dataset=...)` set `whileai.dataset`, and the gate names
+  the dataset from `zeroproof.dataset` alone — so every batch sent the
+  documented way landed in a dataset called `traces` whatever name was asked
+  for, and the 202 said so in a field nobody reads twice. Both keys are now
+  written. Same one-line fix in `recipes/01-simulate/agent-behavior`, whose
+  `--dataset` flag was silently ignored for the same reason.
 
 ## 0.64 (2026-09-18)
 

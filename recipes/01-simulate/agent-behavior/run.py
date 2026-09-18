@@ -185,7 +185,8 @@ def build_trace(
         {
             "service.name": args.service,
             "service.version": VERSION,
-            "whileai.dataset": args.dataset,
+            # The name the gate files these traces under; it reads this key.
+            "zeroproof.dataset": args.dataset,
         },
         final_text=run.final_text,
         ended_ms=ended_ms,
