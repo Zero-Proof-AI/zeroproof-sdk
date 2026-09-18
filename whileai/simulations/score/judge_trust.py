@@ -335,20 +335,30 @@ def judge_probes(
 ) -> dict[str, Any]:
     """Try the reward hacks a policy finds first on the judge, on purpose.
 
-    Each probe in ``probes`` (``"all"`` or names from ``PROBES``) mutates
-    up to ``sample`` graded rows one way and re-judges them. An additive
-    probe (filler, the rubric's words, a success claim, the ask echoed,
-    a sycophantic opener) reports ``exploit_rate``: the share of
-    originally failing replies that pass once the text is added. A
-    replacement probe (a well-formed tool call with empty arguments, a
-    refusal) reports the share of replies that pass with the content
-    gone. ``rubric`` is the text the keyword probe draws words from;
-    without it the row's system prompt is used. A probe that applies to
-    no row is ``skipped`` with the reason.
+    Reach for it when a judge is about to become a training reward: a
+    policy trained on it will find these holes, so find them first
+    (rlhf-book ch. 14). It returns a dict: ``probes`` (per probe: ``n``,
+    ``kind``, ``pass_before``, ``pass_after``, ``flips_up``,
+    ``flips_down``, ``exploit_rate``, ``flagged``, ``errors``; a probe
+    that applies to no row is ``skipped`` with the reason),
+    ``exploitable_by`` (the probes at or over ``flip_flag``), and one
+    ``warnings`` line per exploit.
 
-    Returns per-probe counts and rates, ``exploitable_by`` (probes at or
-    over ``flip_flag``, ``FLIP_FLAG`` by default), and one warning per
-    exploit.
+    Each probe mutates up to ``sample`` graded rows one way and re-judges
+    them. An additive probe (filler, the rubric's words, a success claim,
+    the ask echoed, a sycophantic opener) reports ``exploit_rate``: the
+    share of originally failing replies that pass once the text is added.
+    A replacement probe (a well-formed tool call with empty arguments, a
+    refusal) reports the share of replies that pass with the content
+    gone.
+
+    * ``probes``: ``"all"`` (the default) or names from ``PROBES``.
+    * ``rubric``: the text the keyword probe draws words from; without it
+      the row's system prompt is used.
+    * ``sample`` (40), ``seed`` (0), ``concurrency`` (8): how many rows to
+      re-judge, which ones, and how many judge calls run at once.
+    * ``flip_flag`` (``FLIP_FLAG``, 0.10): the exploit rate at which a
+      probe is flagged.
     """
     from .judging import run_judge
 
@@ -492,34 +502,55 @@ def judge_trust(
     length_gap_flag: float = LENGTH_GAP_FLAG,
     flip_flag: float = FLIP_FLAG,
 ) -> dict[str, Any]:
-    """The judge-trust report. See the module docstring.
+    """Measure whether the judge can be trusted, against human labels and under attack.
 
-    The floors and flags are keywords with their defaults in
-    ``whileai.simulations.defaults``: ``min_agreement`` (0.8, the
-    human-human agreement of MT-Bench, arXiv:2306.05685), ``min_kappa``
-    (0.6, Landis and Koch "substantial"), ``length_gap_flag`` (0.15) and
-    ``flip_flag`` (0.10).
+    Reach for it before training on a judge's rewards: the reward is only
+    as good as the judge. It returns a dict. The keys a caller reads
+    first: ``ok`` (measured and clean), ``agreement["agreement"]`` and
+    ``agreement["ci95"]`` (the number and its Wilson interval, not
+    ``ci``), ``agreement["n"]`` (labels compared), ``gold_kind`` (where
+    the labels came from), and ``warnings``, where every line names its
+    own fix. The rest: ``held_out_halves`` (agreement on two task-hash
+    halves; if they diverge the rubric is fit to its examples),
+    ``length_sensitivity`` (judge pass rate on short versus long replies
+    among rows humans agreed on, a length bias the labels rule out as
+    real), ``perturbation`` and ``probes`` when a judge callable is
+    given, ``disagreements`` (the review queue of rows the judge and the
+    humans disagree on), ``floors``, ``n_labeled`` and ``n_rows``.
+    ``format_judge_trust(report)`` prints the whole thing. The module
+    docstring lays out each check and its rlhf-book chapter.
 
-    ``rows`` carry the judge's ``reward``; rows that also carry ``gold``
-    (0/1, default ``gold_reward``) feed the agreement, held-out, and
-    length checks. Pass ``judge`` to add the perturbation checks, which
-    call it on up to ``sample`` rows twice more. ``probes="all"`` (or a
-    list of names from ``PROBES``) adds ``judge_probes``, one more pass
-    over the sample per probe; ``rubric`` feeds the keyword probe.
+    * ``rows``: graded rows carrying the judge's ``reward``. Rows that also
+      carry ``gold`` (0/1, default column ``gold_reward``, what
+      ``attach_labels`` writes) feed the agreement, held-out and length
+      checks.
+    * ``judge``: the judge callable. With it the report re-judges up to
+      ``sample`` rows twice more, as-is for consistency and with neutral
+      filler appended; flips on the filler run mean the judge pays for
+      length.
+    * ``probes``: ``"all"`` (or a list of names from ``PROBES``) adds
+      ``judge_probes``, one more pass over the sample per probe;
+      ``rubric`` feeds the keyword probe.
+    * ``min_agreement`` (0.8, the human-human agreement of MT-Bench,
+      arXiv:2306.05685) and ``min_kappa`` (0.6, Landis and Koch
+      "substantial"): the floors ``ok`` requires. ``length_gap_flag``
+      (0.15) and ``flip_flag`` (0.10) are the flags. All four live in
+      ``whileai.simulations.defaults``.
+    * ``allow_model_gold``: ``False`` by default, so model or unknown gold
+      makes ``ok`` false with the reason; only a person's labels count as
+      a measurement.
 
     ``ok`` is true only when a gold-labeled check ran against a person's
     labels, the Wilson lower bound of agreement reached ``min_agreement``,
     kappa reached ``min_kappa``, and nothing else was flagged. With no
     labels every check has ``n=0``, so ``ok`` is false with a warning
-    saying the judge is unmeasured, not failed. ``gold_kind`` in the
-    report says where the labels came from; model or unknown gold makes
-    ``ok`` false with the reason unless ``allow_model_gold=True``.
+    saying the judge is unmeasured, not failed. The perturbation pass is
+    not a substitute: a judge that passes everything is perfectly
+    consistent (rlhf-book ch. 5, ch. 12).
 
-    The keys a caller reads first: ``ok`` (measured and clean),
-    ``agreement["agreement"]`` and ``agreement["ci95"]`` (the number and
-    its Wilson interval, not ``ci``), ``agreement["n"]`` (labels
-    compared), ``gold_kind``, and ``warnings``, where every line names
-    its own fix. ``format_judge_trust(report)`` prints the whole thing.
+    >>> rows = [{"task_id": str(i), "reward": i % 2, "gold_reward": i % 2} for i in range(20)]
+    >>> wai.judge_trust(rows)["agreement"]["agreement"]
+    1.0
     """
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if _label(r, gold) is not None and _label(r, "reward") is not None]

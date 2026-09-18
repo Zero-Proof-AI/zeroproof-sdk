@@ -31,7 +31,7 @@ Platform calls: datasets, traces, cuts, training runs, hosted models.
 | [`infer_harness`](#infer_harness) | Draft a harness from observed trace rows. |
 | [`issue_delegated_credential`](#issue_delegated_credential) | Create a short-lived delegated credential for SDK or backend use. |
 | [`leakage_report`](#leakage_report) | Near-copy check of generated prompts against source traces. |
-| [`load_traces`](#load_traces) | Normalize any supported trace source to the canonical schema above. |
+| [`load_traces`](#load_traces) | Normalize any supported trace source to the one trajectory schema the SDK reads. |
 | [`mine_traces`](#mine_traces) | What the deployed agent actually did, counted for grid focusing. |
 | [`opening_share`](#opening_share) | Share of traces whose conversation opens with the assistant. |
 | [`preview`](#preview) | Three sample rows and the analyzer report for one of your datasets. |
@@ -632,14 +632,32 @@ the full count.
 load_traces(source) -> list[dict]
 ```
 
-Normalize any supported trace source to the canonical schema above.
+Normalize any supported trace source to the one trajectory schema the SDK reads.
 
-`source` is a JSONL path or an iterable of dicts. Rows carrying
-`tool_trace`/`trace` instead of `steps`, `final`/`output`/
-`response` instead of `final_text`, or only OpenAI-style
-`messages` are converted; `reward` is kept only when it coerces
-cleanly to 0 or 1, and its absence is fine. Rows that are not dicts or
-carry neither an ask nor any steps are dropped.
+Reach for it when you have traces from somewhere else (a production
+log, an eval harness, an OpenAI-style `messages` export) and want
+`simulate(traces=...)`, `evaluate` or `decontaminate` to read
+them. It returns a list of dicts in the canonical schema: `prompt`
+(the first user ask), `steps` (a list of `{"user": str}`,
+`{"tool": str, "arguments": dict, "result": Any}` and
+`{"text": str}` agent turns), `final_text` (the agent's last
+message) and, optionally, `reward` (0 or 1). Every other key
+carries through untouched, and ungraded traces are first-class.
+
+* `source`: a JSONL path or an iterable of dicts. Rows carrying
+  `tool_trace`/`trace` instead of `steps`,
+  `final`/`output`/`response` instead of `final_text`, or only
+  OpenAI-style `messages` are converted (`PROMPT_KEYS`,
+  `STEP_KEYS`, `FINAL_KEYS`, `ARG_KEYS` and `RESULT_KEYS` list
+  the spellings read); `reward` is kept only when it coerces cleanly
+  to 0 or 1, and its absence is fine. Rows that are not dicts or carry
+  neither an ask nor any steps are dropped.
+
+```python
+>>> rows = wai.load_traces([{"question": "Where is order 4473?", "output": "Shipped."}])
+>>> rows[0]["prompt"], rows[0]["final_text"]
+('Where is order 4473?', 'Shipped.')
+```
 
 ### mine_traces
 
