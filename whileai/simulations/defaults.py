@@ -341,6 +341,25 @@ SAMPLING_TEMPERATURE_MAX = 2.0
 LOCAL_MODEL_TEMPERATURE = 0.8
 
 # ---------------------------------------------------------------------
+# generate/: the rule axis (scenarios.py; read by score/preflight.py)
+# ---------------------------------------------------------------------
+
+# RULE_AXIS_CAP_GRID = 16: policy clauses that become cells of the
+# generation grid's rule axis. The pairwise covering array grows with its
+# largest axis, so the grid stays bounded; the environment variable
+# ZP_RULE_CAP overrides it for one process. Clauses past the cap are
+# dropped in document order and the run says how many (#391).
+# (convention, untested)
+RULE_AXIS_CAP_GRID = 16
+# RULE_AXIS_CAP_REPORT = None: ``coverage_gap`` and ``preflight`` report
+# over a suite that already exists, so there is no grid to bound and every
+# clause is on the axis. A 68 KB production prompt had about 160
+# imperative clauses; the first 16 were banner text ("Read it.") and the
+# report said "14 of 16 covered" (#391). ``rule_cap=`` on either call
+# sets a number.
+RULE_AXIS_CAP_REPORT = None
+
+# ---------------------------------------------------------------------
 # generate/: context budgets (agents.py, generator.py)
 # ---------------------------------------------------------------------
 
@@ -1545,6 +1564,8 @@ __all__ = [
     "RL_ROLLOUTS_PER_ASK",
     "RL_ROLLOUTS_PER_PROMPT",
     "ROLLOUTS_PER_TASK",
+    "RULE_AXIS_CAP_GRID",
+    "RULE_AXIS_CAP_REPORT",
     "SAMPLING_TEMPERATURE_MAX",
     "SATURATION_CAP",
     "SCENARIO_ID_CHARS",

@@ -3,6 +3,26 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `coverage_gap` and `preflight` check every clause of the system prompt.
+  Both built their rule axis with the generation grid's cap, the first 16
+  clauses in document order, and said nothing, so a 68 KB production
+  policy with about 160 imperative clauses read as "14 of 16 policy rules
+  covered" with `Read it.` and `Follow it.` on the axis and every rule
+  further down never checked (#391). A report over an existing suite has
+  no grid to bound: the default is now every clause (`rule_cap=None`,
+  `defaults.RULE_AXIS_CAP_REPORT`). `rule_cap=` on either call sets a
+  number; the report then carries `n_rules_total`, `rules_truncated` and
+  `rule_cap`, the summary reads "16 of 16 policy rules (of 163 in the
+  prompt)", and a `warnings` (`preflight`) or `notes` (`coverage_gap`)
+  line says how many clauses were left off and how to widen the axis.
+  The grid keeps its cap under its own name (`defaults.RULE_AXIS_CAP_GRID`,
+  16, `ZP_RULE_CAP` overrides), and a run whose policy has more clauses
+  than that says so once in `data.warnings` with the count.
+  `policy_sections(cap=None)` returns every clause; `rule_axis(policy,
+  cap=)` returns the axis and the total.
+
 ## 0.76 (2026-09-18)
 
 - `ty` type-checks the package in CI beside mypy (`uv run ty check`,

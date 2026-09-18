@@ -530,6 +530,7 @@ coverage_gap(
     tools: Sequence[dict],
     system_prompt: str = '',
     rows: Sequence[dict] | None = None,
+    rule_cap: int | None = None,
 ) -> dict[str, Any]
 ```
 
@@ -555,6 +556,12 @@ suite leaves them at one point and `notes` says so.
 With `rows` (graded rollouts from a run) the report also checks the
 world side: rules whose rows all ended in the same tool fault are
 rules the asks reach but the fixtures never let happen.
+
+The rule axis is every clause of the policy (`rule_cap=None`, the
+default `RULE_AXIS_CAP_REPORT`): a report over an existing suite
+has no grid to bound. A number keeps the first that many clauses in
+document order; `n_rules_total` and `rules_truncated` say what
+was left off and `notes` carries the count (#391).
 
 ### `curriculum`
 
@@ -1706,14 +1713,24 @@ hash, with a `mixed` list naming any the rows disagree on.
 ### `preflight`
 
 ```python
-preflight(tools: Sequence[dict], system_prompt: str = '') -> dict[str, Any]
+preflight(
+    tools: Sequence[dict],
+    system_prompt: str = '',
+    rule_cap: int | None = None,
+) -> dict[str, Any]
 ```
 
 Spec-quality report for an agent. Report only; nothing is changed.
 
 `warnings` is the list a developer should read before generating
 thousands of rows; `cells` is the covering-grid size the same way
-`recommend` counts it.
+`recommend` counts it. `rules` is every clause of the policy
+(`rule_cap=None`, the default `RULE_AXIS_CAP_REPORT`); a number
+keeps the first that many in document order, `n_rules_total` says
+how many the policy has, `rules_truncated` whether any were left
+off, and a `warnings` line names the count (#391). The generation
+grid keeps its own cap (`RULE_AXIS_CAP_GRID`); `cells` is counted
+on the same axis `rules` shows.
 
 ### `privileged_context`
 
