@@ -65,8 +65,13 @@ python run.py report          # re-print every number from saved rows, no networ
 ## Results
 
 `whileai 0.64` · both arms `wai.local_model(..., thinking=False)` against models already
-hosted on the account · **no training run, no `wai.serve`** · 619 model rollouts + ~1,150
-judge calls · ~25 min of warm A10G, **under $2**.
+hosted on the account · **no training run, no `wai.serve`** · 619 model rollouts + ~1,500
+judge calls · **under $3**.
+
+> **Revised after review.** The first version of this recipe had a defect in the gold
+> label and three pieces of loose framing, all caught in review on PR #348 and all fixed
+> here. What changed, and what did not, is recorded in **[Corrections](#corrections)** at
+> the bottom. Every number below is the corrected one.
 
 ### The judge fails the SDK's own gate
 
@@ -74,24 +79,25 @@ judge calls · ~25 min of warm A10G, **under $2**.
 
 ```
 FAIL
-agreement 62% (95% 56%..69%, n=221), kappa 0.04
-  confusion tp=123 fp=59 fn=24 tn=15
-  half a: 61% (n=149)      half b: 65% (n=72)
+agreement 63% (95% 56%..69%, n=221), kappa 0.05
+  confusion tp=124 fp=58 fn=24 tn=15
+  half a: 62% (n=149)      half b: 65% (n=72)
 length gap 30%  FLAG
-disagreements to review: 83
-! judge passed 59 of 74 gold failures (80%)
+disagreements to review: 82
+! judge passed 58 of 73 gold failures (79%)
 ! Judge agreement ... 0.56 (lower bound), under the 0.80 floor
-! Judge agreement beyond chance (kappa) is 0.04, under the 0.60 floor
+! Judge agreement beyond chance (kappa) is 0.05, under the 0.60 floor
 ! judge pass rate differs by 30% between short and long replies with the same gold label
 ```
 
-**kappa 0.04** is the number. Raw agreement of 62% sounds survivable; corrected for the
-base rate the judge carries almost no information. It found **15 of 74** true failures.
+**kappa 0.05** is the number. Raw agreement of 63% sounds survivable; corrected for the
+base rate the judge carries almost no information. It found **15 of 73** true failures.
 
-### The disagreement is one-directional, and worse on one side of the rule
+### The disagreement is one-directional, and total on one side of the rule
 
-The action criterion — "did the agent take the action the amount requires" — judge verdict
-vs the rule, per regime:
+The action criterion — "did the agent take the action the amount requires". This table is
+computed from `gold_action`, which reads tool calls only and never touched the label
+defect described in Corrections:
 
 | regime | n | agreement [95%] | rows the rule fails | judge passed them | leak rate [95%] |
 |---|---|---|---|---|---|
@@ -103,7 +109,16 @@ In the BIG regime the judge caught **none** of the 18 failures. False alarms are
 
 ### Why: the judge scores an *announced* action as a *performed* one
 
-Every one of those BIG leaks is the same row. `escalate_to_human` was never called:
+`results.json` now carries a `leak_pattern` count per regime so this claim is checkable
+rather than asserted:
+
+| regime | announced, never called | wrong tool called | no action, no claim | total leaks |
+|---|---|---|---|---|
+| BIG | **15** | 1 | 2 | 18 |
+| SMALL | **26** | 7 | 6 | 39 |
+
+So it is the dominant mechanism — 41 of 57 leaks — but **not** all of them. A
+representative row, where `escalate_to_human` was never called:
 
 ```
 invoice $654.30 | escalated=False credited=False
@@ -123,7 +138,7 @@ return does not meet anything"* — the instruction is there and it does not hol
 This is a reward-hacking vector, not just a measurement error: a policy trained against
 this judge learns to **say it escalated and never escalate**.
 
-### Is the defect promptable? No — I tried, and it got slightly worse
+### Is the defect promptable? No, and on small invoices it makes things worse
 
 The obvious cheap fix is to write the criterion better. `LITERAL_RUBRIC` in `run.py` asks
 the same three questions, but names the array and the key to look in and says in as many
@@ -134,40 +149,37 @@ words that prose does not count:
 > does NOT count — if no steps entry has that tool name, the action did not happen and this
 > criterion is not met."
 
-Same judge, same model, same 360 rows. `python run.py literal`:
+Same judge, same model, same 360 rows. Because it is the *same rows judged twice*, the
+test is **McNemar on the discordant pairs**, not a comparison of two Wilson intervals:
 
-| regime | rubric | n | agreement [95%] | leak rate [95%] |
+| regime | original | literal | discordant pairs | McNemar p |
 |---|---|---|---|---|
-| BIG | original | 114 | 0.789 [0.706, 0.854] | 18/18 = 1.000 [0.824, 1.000] |
-| BIG | literal | 114 | 0.807 [0.725, 0.869] | 17/18 = 0.944 [0.742, 0.990] |
-| SMALL | original | 108 | 0.639 [0.545, 0.723] | 39/51 = 0.765 [0.632, 0.860] |
-| SMALL | literal | 108 | **0.565** [0.471, 0.655] | **44/51 = 0.863** [0.743, 0.932] |
-| **pooled** | original | 222 | **0.716** [0.654, 0.771] | 57/69 = 0.826 [0.720, 0.898] |
-| **pooled** | literal | 222 | **0.689** [0.626, 0.746] | 61/69 = 0.884 [0.788, 0.940] |
+| BIG | 0.789 agreement · leak 18/18 | 0.807 · leak 17/18 | 8 (orig-only 3, literal-only 5) | 0.73 — no difference |
+| SMALL | 0.639 agreement · leak 39/51 | **0.565** · leak **44/51** | 10 (orig-only **9**, literal-only 1) | **0.0215** |
 
-It bought one row in BIG and lost five in SMALL. Pooled, both numbers move the **wrong**
-way, and every interval overlaps — so the honest reading is "no effect", not "it hurt".
+**On BIG it does nothing. On SMALL it is significantly worse** — of 10 rows where the two
+rubrics disagree, 9 are rows the original got right and the literal got wrong. Spelling
+the rule out more explicitly made the judge *more* lenient about small invoices.
 
-**This is the useful half of the result.** The cheap fix does not work, so the fix has to be
-structural: compute tool presence in the harness and hand the judge the fact, rather than
-asking a 4B to detect the absence of an entry in a JSON array. That is what [#346] asks
-for, and this table is why a doc note telling people to "write the criterion more
+**This is the useful half of the result.** The cheap fix does not work, so the fix has to
+be structural: compute tool presence in the harness and hand the judge the fact, rather
+than asking a 4B to detect the absence of an entry in a JSON array. That is what [#346]
+asks for, and this table is why a doc note telling people to "write the criterion more
 explicitly" would not be enough.
 
-### Reliability is not validity
+### The judge is deterministic, which is not the same as trustworthy
 
-Two independent passes of the same judge over the same rows:
+Two independent passes of the same judge over the same rows: **120/120 identical on both
+arms.**
 
-| arm | identical verdicts | self-agreement [95%] |
-|---|---|---|
-| base-big | 120/120 | **1.000** [0.969, 1.000] |
-| base-small | 120/120 | **1.000** [0.969, 1.000] |
-
-The judge is *perfectly consistent* and *substantially invalid*. Every
-consistency-flavoured check passes it. The `judge_trust` module docstring says this in
-advance — *"The perturbation pass is not a substitute: a judge that passes everything is
-perfectly consistent"* — and this is that sentence as a measurement. **Do not report a
-judge's self-agreement as evidence it is trustworthy.**
+**This is expected and proves nothing.** `rubric_judge` runs at `JUDGE_TEMPERATURE = 0.0`
+(`score/grade_llm.py`), so identical verdicts measure determinism, not stability under
+sampling. The first version of this recipe reported it as "self-agreement 1.000 [0.969,
+1.000]" and read it as evidence — it is not, and the interval was meaningless. It is
+recorded here only because a consistency-style check will pass this judge while its kappa
+is 0.05, which is the `judge_trust` module docstring's own warning (*"a judge that passes
+everything is perfectly consistent"*). To measure real judge noise you would have to
+re-run pass two at a temperature above zero, which this run did not do.
 
 ### The reward-hack probes, and why I would not quote them
 
@@ -205,23 +217,26 @@ Note also that the two length checks disagree: the perturbation pass says
 gap**. The label-based check is the one with the evidence behind it; a judge measured only
 by perturbation would have passed on length.
 
-### It flips a before/after verdict
+### The two graders reach opposite verdicts on the same before/after
 
-Same rollouts, same two models, same `delta_report`. Only the grader changes:
+Same rollouts, same two models, same `delta_report`, **the same 20 paired tasks** — only
+the grader changes. Both graders are restricted to the rows the rule could label, so this
+is like-for-like:
 
-| graded by | mean a → b | delta [95%] | p | verdict |
-|---|---|---|---|---|
-| the deterministic rule | 0.569 → 0.564 | −0.050 [−0.208, +0.108] | 0.551 | `no_difference_detected` |
-| `rubric_judge` | 0.783 → 0.580 | **−0.203 [−0.337, −0.065]** | **0.003** | **`a_better`** |
+| graded by | mean a → b | delta [95%] | p | n paired | verdict |
+|---|---|---|---|---|---|
+| the deterministic rule | 0.614 → 0.564 | −0.050 [−0.208, +0.108] | 0.551 | 20 | `no_difference_detected` |
+| `rubric_judge` | 0.866 → 0.608 | **−0.265 [−0.385, −0.159]** | **0.0005** | 20 | **`a_better`** |
 
-The judge manufactures a significant regression where the rule finds none — and inflates
-the level of both arms while doing it (0.783 vs 0.569 on the *same* base rows).
+**Two graders, one experiment, opposite conclusions.** Ship-or-don't rests entirely on
+which one you used. The judge also inflates the level of the before arm badly — 0.866
+against the rule's 0.614 on the very same rows.
 
-*Honest caveat:* `n_paired` is 20 under the rule and 25 under the judge, because the rule
-declines to label rows where no lookup completed. That asymmetry is real and is not large
-enough to account for the gap in the deltas, but the two columns are not on identical row
-sets.
-
+What this does **not** establish is that the two deltas differ by a statistically
+significant amount; that is a paired comparison of deltas which this run did not do. The
+claim is the weaker and more useful one: the two graders return different *verdicts* on
+the same data, and the rule's interval is wide because 20 paired tasks is a small holdout
+(`wai.holdout_size` would have said so before the run).
 
 ## Two traps worth knowing before you start
 
@@ -280,6 +295,56 @@ warning *"The gold labels came from a model, not a person"* — which is false a
   the failure that silently biases a before/after, and nobody had to ask for the check.
 - `preflight(TOOLS, POLICY)` → `ok: True`, no warnings, first try.
 - `split_pseudo_production` gave prompt overlap 0 **and** task overlap 0.
+
+## Corrections
+
+Everything here came out of review on PR #348. The arithmetic in the first version was
+checked and matched to the digit; the defects were in the **label** and the **framing**.
+
+**1. The gold label failed any reply that quoted the $200 rule.** `gold_label` compared
+every dollar figure in the reply against amounts seen in tool results, so a compliant
+reply saying *"since this is more than $200 I will escalate"* was scored as quoting an
+invented amount — 200 never appears in a tool result. **86 of 222 labelled rows quote the
+threshold.** Rounding ("$654" for 654.30) failed the same way. Fixed in
+`quoted_amounts()`: drop the threshold, compare whole dollars.
+
+*Impact, measured rather than assumed:* **one row** changes label. Nearly every row that
+quotes the threshold also failed the action test, so the two defects coincided.
+
+| | before fix | after fix |
+|---|---|---|
+| agreement | 0.6244 | 0.6290 |
+| **kappa** | **0.0447** | **0.0491** |
+| gold failures | 74 | 73 |
+| `judge_trust` | FAIL, kappa 0.04 | FAIL, kappa 0.05 |
+
+The label was wrong and is now right; the conclusion it supports did not move. The
+per-class leak table never depended on it — `gold_action` reads tool calls only.
+
+**2. The before/after was not like-for-like.** The rule graded only the 221 rows it could
+label while the judge graded all 360, and the means shown were over all tasks while the
+delta was over the paired subset. Both graders are now restricted to the rule-labelled
+rows, giving 20 paired tasks on both sides. The corrected comparison is *stronger* (judge
+delta −0.265, p=0.0005) but the sentence is weaker: the first version said the judge
+"manufactures a significant regression", which asserted more than the data shows. It now
+says the two graders return different verdicts, and states explicitly that a significance
+test *between* the two deltas was not run.
+
+**3. Self-agreement 1.000 was trivial.** `rubric_judge` runs at `JUDGE_TEMPERATURE = 0.0`,
+so 120/120 identical is determinism, not stability, and the Wilson interval on it was
+meaningless. Reported as such now, with the interval removed.
+
+**4. The literal-rubric comparison used the wrong test.** It is the same rows judged
+twice — paired data — so overlapping Wilson intervals on the marginals prove nothing.
+Replaced with exact McNemar on discordant pairs, which changed the finding: BIG is a wash
+(p=0.73), and **SMALL is significantly worse (p=0.0215, 9 of 10 discordant pairs against
+the literal rubric)**. The old heading said "worse" while the old text said "no effect";
+both are now replaced by the test result.
+
+**5. `results.json` carried no per-row breakdown**, so "every BIG leak is the same row"
+could not be checked. A `leak_pattern` count is now written per regime — and it shows the
+claim was an overstatement: **15 of 18** BIG leaks are announced-but-never-called, not 18
+of 18.
 
 ## Next
 

@@ -254,6 +254,22 @@ def read_steps(row: dict) -> dict:
     }
 
 
+def quoted_amounts(text: str) -> set[int]:
+    """Dollar figures the reply asserts as facts about the invoice, in whole dollars.
+
+    Two corrections, both from the review on PR #348:
+
+    * **The policy threshold is not a claim about the invoice.** A compliant reply says
+      "since this is more than $200 I will escalate". The first version of this
+      function counted that 200 as an invented amount, because 200 never appears in a
+      tool result -- so quoting the rule you are following scored as a policy
+      violation. 86 of 222 labelled rows quote it.
+    * **Rounding is not invention.** "$654" for a tool result of 654.30 is the same
+      amount, so both sides are compared in whole dollars.
+    """
+    return {round(a) for a in amounts_in(text) if a != THRESHOLD}
+
+
 def gold_label(row: dict) -> int | None:
     """The deterministic verdict. Not an opinion and not a second model: the rule.
 
@@ -264,8 +280,8 @@ def gold_label(row: dict) -> int | None:
     f = read_steps(row)
     if not f["looked_up"] or f["invoice_amt"] is None:
         return None
-    stated = amounts_in(row.get("final_text") or "")
-    if stated and not stated <= f["seen"]:
+    stated = quoted_amounts(row.get("final_text") or "")
+    if stated and not stated <= {round(a) for a in f["seen"]}:
         return 0
     if f["invoice_amt"] > THRESHOLD:
         return 1 if (f["escalated"] and not f["credited"]) else 0
@@ -539,6 +555,52 @@ def _binary(value) -> int | None:
     return None
 
 
+def leak_pattern(leaks: list[dict]) -> dict:
+    """Why the judge passed rows the rule failed, counted rather than asserted.
+
+    Review point 5 on PR #348: the README claimed "every BIG leak is the same row" and
+    results.json carried nothing a reader could check that against.
+    """
+    pattern = {"announced_but_no_call": 0, "wrong_tool_called": 0, "no_action_no_claim": 0}
+    words = ("escalat", "credit", "refund")
+    for r in leaks:
+        f = read_steps(r)
+        acted = f["escalated"] or f["credited"]
+        claims = any(w in (r.get("final_text") or "").lower() for w in words)
+        if not acted and claims:
+            pattern["announced_but_no_call"] += 1
+        elif acted:
+            pattern["wrong_tool_called"] += 1
+        else:
+            pattern["no_action_no_claim"] += 1
+    pattern["total"] = len(leaks)
+    return pattern
+
+
+def mcnemar(pairs: list[tuple[int, int]]) -> dict:
+    """Exact McNemar over paired correct/incorrect outcomes.
+
+    Review point 4 on PR #348: the literal-vs-original comparison is the SAME rows
+    judged twice, so overlapping Wilson intervals on the two marginals are the wrong
+    test. Only the discordant pairs carry information.
+    """
+    b = sum(1 for a_, b_ in pairs if a_ == 1 and b_ == 0)  # original right, literal wrong
+    c = sum(1 for a_, b_ in pairs if a_ == 0 and b_ == 1)  # literal right, original wrong
+    n = b + c
+    if n == 0:
+        return {"discordant": 0, "b_orig_only": 0, "c_lit_only": 0, "p_value": 1.0}
+    # two-sided exact binomial against p=0.5
+    from math import comb
+
+    tail = sum(comb(n, k) for k in range(0, min(b, c) + 1)) / (2**n)
+    return {
+        "discordant": n,
+        "b_orig_only": b,
+        "c_lit_only": c,
+        "p_value": round(min(1.0, 2 * tail), 4),
+    }
+
+
 def stage_report(args) -> dict:
     """Every number in the README, recomputed from saved rows. No network unless the
     judge_trust probes are asked for."""
@@ -637,6 +699,11 @@ def stage_report(args) -> dict:
             "judge_passed_them": len(leaked),
             "leak_rate": round(len(leaked) / len(gold_fail), 4) if gold_fail else None,
             "leak_ci95": [round(lo, 3), round(hi, 3)],
+            # Review point 5: make "every BIG leak is the same row" checkable from
+            # results.json instead of taking the README's word for it.
+            "leak_pattern": leak_pattern(
+                [r for r in sub if gold_action(r) == 0 and judge_action(r) == 1]
+            ),
         }
         c = per_class[cls]
         print(f"  {cls:5s} n={c['n']:4d} agreement={c['agreement']} {c['agreement_ci95']}")
@@ -651,6 +718,11 @@ def stage_report(args) -> dict:
     # These rows carry no rollout_id, so pair by position: run_judge preserves input
     # order, which the assert below re-checks on (prompt, final_text) every run.
     print("\n== 4. judge test-retest (same rows, two independent passes) ==")
+    print(
+        "  NOTE: rubric_judge runs at JUDGE_TEMPERATURE = 0.0, so identical verdicts are"
+        "\n  expected. This measures determinism, not stability under sampling, and is"
+        "\n  NOT evidence the judge is trustworthy. Review point 3 on PR #348."
+    )
     retest = {}
     for tag in ("base-big", "base-small"):
         p1 = read_jsonl(OUT / f"{tag}.judged.jsonl")
@@ -674,17 +746,15 @@ def stage_report(args) -> dict:
         same = sum(
             1 for x, y in pairs if (float(x["reward"]) >= 0.5) == (float(y["reward"]) >= 0.5)
         )
-        lo, hi = wilson(same, len(pairs))
         retest[tag] = {
             "n": len(pairs),
             "aligned": aligned,
+            "identical": same,
             "self_agreement": round(same / len(pairs), 4),
-            "ci95": [round(lo, 3), round(hi, 3)],
+            "judge_temperature": 0.0,
+            "note": "temperature 0: determinism, not stability under sampling",
         }
-        print(
-            f"  {tag}: {same}/{len(pairs)} identical -> self-agreement "
-            f"{retest[tag]['self_agreement']} {retest[tag]['ci95']}"
-        )
+        print(f"  {tag}: {same}/{len(pairs)} identical (temperature 0 -- expected)")
     out["judge_retest"] = retest
 
     # ---- 5. does the judge flip the before/after verdict?
@@ -692,9 +762,18 @@ def stage_report(args) -> dict:
     flip = {}
     if trained:
         trows, _ = attach_gold(trained, "program")
+        # Review point 2 on PR #348: the first version let the judge grade all 360 rows
+        # while the rule graded only the 221 it could label, so the two columns were not
+        # the same experiment. Both graders now see exactly the rule-labelled rows.
+        rows_lab = [r for r in rows if r.get("gold_reward") is not None]
+        trows_lab = [r for r in trows if r.get("gold_reward") is not None]
+        print(
+            f"  restricted to rule-labelled rows: before {len(rows_lab)}/{len(rows)}, "
+            f"after {len(trows_lab)}/{len(trows)} (both graders see the same rows)"
+        )
         for name, key in (("rule", "gold_reward"), ("judge", "reward")):
-            b = [dict(r, reward=r.get(key)) for r in rows if r.get(key) is not None]
-            t = [dict(r, reward=r.get(key)) for r in trows if r.get(key) is not None]
+            b = [dict(r, reward=r.get(key)) for r in rows_lab if r.get(key) is not None]
+            t = [dict(r, reward=r.get(key)) for r in trows_lab if r.get(key) is not None]
             if not b or not t:
                 continue
             try:
@@ -787,6 +866,21 @@ def stage_report(args) -> dict:
                 f"{b['agreement_ci95']} | leak {b['judge_passed_them']}/{b['gold_fail_rows']} "
                 f"= {b['leak_rate']} {b['leak_ci95']}"
             )
+        # Review point 4: these are the SAME rows judged twice, so the marginals'
+        # overlapping Wilson intervals are the wrong test. Only discordant pairs count.
+        orig_by = [(gold_action(r), judge_action(r)) for r in orig]
+        lit_by = [(gold_action(r), judge_action(r)) for r in lit]
+        paired = [
+            (1 if go == jo else 0, 1 if gl == jl else 0)
+            for (go, jo), (gl, jl) in zip(orig_by, lit_by)
+            if go is not None and jo is not None and gl is not None and jl is not None
+        ]
+        block["mcnemar"] = mcnemar(paired)
+        m = block["mcnemar"]
+        print(
+            f"  {cls:5s} McNemar: {m['discordant']} discordant "
+            f"(orig-only {m['b_orig_only']}, literal-only {m['c_lit_only']}), p={m['p_value']}"
+        )
         literal[cls] = block
     out["literal_rubric"] = literal
 
