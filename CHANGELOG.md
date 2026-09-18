@@ -3,6 +3,19 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.71 (2026-09-18)
+
+- `skills/`: six tested playbooks, one per way to train, that a coding agent
+  reads to go from data to a reported run: `sft-from-traces`, `dpo-pairs`,
+  `grpo-verifier`, `character`, `tool-call-efficiency`, `watch`. Each folder
+  is a `SKILL.md` and a `check.py` that runs the same steps offline with no
+  key; `tests/skills` fails CI when a code block in a playbook drifts from
+  the code that ran. Every skill ends the same way: frozen held-out test
+  first, noise floor, score every behavior, report with `whileai.platform`.
+  `scripts/skill_trial.py` runs a cold coding agent on a skill and grades
+  what reached the platform. `examples/` (a pointer) is gone; `recipes/` is
+  the one folder.
+
 ## 0.70 (2026-09-18)
 
 - README: the wordmark links to withwhile.com, matching the repo homepage.
