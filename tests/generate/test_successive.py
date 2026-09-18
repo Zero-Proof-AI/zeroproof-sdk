@@ -149,31 +149,47 @@ def test_rl_reports_time_spent_idle_waiting_on_verdicts():
     # out and a verdict is still outstanding. Racing a judge sleep against
     # the rollouts only makes that likely: under CPU contention the rollouts
     # slow down too, the pool stays busy, and the branch is never reached
-    # (#216). So make it structural instead — the judge holds its verdict
-    # until the pool has provably drained, which no amount of load changes.
+    # (#216). So make it structural instead: the judge holds its verdict
+    # until every probe rollout has landed, which no amount of load changes.
+    # An "inflight is zero" check is not enough, because the two situations'
+    # probes launch in a stagger and the count touches zero between them.
+    first_wave = 2 * 2  # situations x probe rollouts per situation
     lock = threading.Lock()
-    rollouts_inflight = 0
-    pool_drained = threading.Event()
+    landed = 0
+    probes_landed = threading.Event()
 
     def counted_agent(message: str) -> dict:
-        nonlocal rollouts_inflight
-        with lock:
-            rollouts_inflight += 1
-            pool_drained.clear()
+        nonlocal landed
         try:
             return scripted_agent(message)
         finally:
             with lock:
-                rollouts_inflight -= 1
-                if rollouts_inflight == 0:
-                    pool_drained.set()
+                landed += 1
+                if landed >= first_wave:
+                    probes_landed.set()
+
+    started = time.monotonic()
+    hold_s: list[float] = []
+    judged = 0
 
     def blocking_judge(row: dict) -> dict:
+        nonlocal judged
         # rollouts never wait on a verdict, so this always releases
-        assert pool_drained.wait(timeout=30.0), "rollout pool never drained"
-        # and then hold long enough to clear the 0.1s rounding on the
-        # reported figure (engine.py: round(idle_on_judge_s, 1))
-        time.sleep(0.2)
+        assert probes_landed.wait(timeout=30.0), "probe rollouts never landed"
+        with lock:
+            judged += 1
+            first_wave_verdict = judged <= first_wave
+            if not hold_s:
+                # The note fires only when idle time is over a tenth of the
+                # whole run (engine.py: idle_on_judge_s > 0.1 * elapsed).
+                # Under load the rollouts stretch the run while a fixed hold
+                # would not, so hold for a multiple of what has elapsed so
+                # far; the floor clears the 0.1s rounding on the reported
+                # figure. Only the first wave holds: the later verdicts land
+                # after the last rollout and would only lengthen the run.
+                hold_s.append(max(0.3, 3.0 * (time.monotonic() - started)))
+        if first_wave_verdict:
+            time.sleep(hold_s[0])
         return _judge(row)
 
     data = wai.simulate(
@@ -190,7 +206,7 @@ def test_rl_reports_time_spent_idle_waiting_on_verdicts():
     # then the pool waits on the judge before it can decide the next rollout
     assert groups["idle_on_judge_s"] > 0
     note = [s for s in data.stages if s.startswith("rl pool idle on judge")]
-    assert note and "situations>=2" in note[0], data.stages
+    assert note and "situations>=2" in note[0], (groups, hold_s, data.stages)
 
 
 def test_truncated_rollouts_are_not_judged_and_do_not_stall_their_group():

@@ -1308,7 +1308,7 @@ Internals are grouped by stage and may move between releases.
 
 ```bash
 uv sync --extra dev
-uv run pytest           # about two minutes, no network
+uv run pytest           # under a minute on four cores, no network; -n0 runs it serially
 uv run ruff check .     # lint; `--fix` for the mechanical ones
 uv run mypy             # type check
 pre-commit install      # optional: ruff and whitespace hooks on commit

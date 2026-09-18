@@ -9,7 +9,7 @@ uv sync --extra dev
 ## The checks CI runs
 
 ```bash
-uv run pytest -q            # the suite, on 3.10 / 3.11 / 3.12 / 3.13
+uv run pytest -q            # the suite, on 3.10 / 3.11 / 3.12 / 3.13; add -n0 for serial or --pdb
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
