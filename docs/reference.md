@@ -1391,11 +1391,12 @@ Internals are grouped by stage and may move between releases.
 uv sync --extra dev
 uv run pytest           # under a minute on four cores, no network; -n0 runs it serially
 uv run ruff check .     # lint; `--fix` for the mechanical ones
-uv run mypy             # type check
+uv run mypy             # type check (the gate)
+uv run ty check         # same check, under a second; mypy stays the gate until ty is 1.0
 pre-commit install      # optional: ruff and whitespace hooks on commit
 ```
 
-CI runs the suite on Python 3.10 through 3.13, ruff, mypy, and a plain-pip
+CI runs the suite on Python 3.10 through 3.13, ruff, mypy, ty, and a plain-pip
 install of the built wheel into a clean venv.
 
 ## License
