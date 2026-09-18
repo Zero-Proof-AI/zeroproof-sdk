@@ -16,7 +16,7 @@ from typing import Any
 from whileai._env import getenv
 
 from ..generate.adapters import resolve_system_prompt
-from ..generate.diversity import adaptive_allocator, set_ordinary_share
+from ..generate.diversity import adaptive_allocator
 from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS
 from .spec import spec_rubric
 
@@ -53,7 +53,7 @@ _ALIAS_NAMES = {
 }
 _MOVED_NAMES = {
     "concurrency",
-    "ordinary_share",
+    "hard_share",
     "dimensions",
     "arm_weights",
     "simulator",
@@ -349,9 +349,10 @@ class RunConfig:
     rubric: str | None
     # engine knobs
     concurrency: int
-    # the difficulty dial: share of situations drawn from the ordinary tier;
-    # None when the caller left it at the default
-    ordinary_share: float | None
+    # the difficulty dial: share of situations drawn from the hard tiers
+    # (ambiguous, boundary, adversarial); None when the caller left it at
+    # the default. Travels to the writer and mixer as a plain argument.
+    hard_share: float | None
     dimensions: Any
     # how the situation search splits across arms: structured, llm_guided,
     # open_ended, behavior_targeted, failure_mutation. None uses SEARCH_ARMS.
@@ -487,21 +488,17 @@ def resolve_run_config(
         if sum(arm_weights.values()) <= 0:
             raise ValueError("arm_weights= must have a positive total")
     simulator = writer_spec_for(agent, cfg.pop("simulator", None))
-    ordinary_share = cfg.pop("ordinary_share", None)
-    if ordinary_share is not None:
+    hard_share = cfg.pop("hard_share", None)
+    if hard_share is not None:
         try:
-            ordinary_share = float(ordinary_share)
+            hard_share = float(hard_share)
         except (TypeError, ValueError):
-            raise ValueError("ordinary_share= is a fraction between 0 and 1") from None
-        if not 0.0 <= ordinary_share <= 1.0:
+            raise ValueError("hard_share= is a fraction between 0 and 1") from None
+        if not 0.0 <= hard_share <= 1.0:
             raise ValueError(
-                f"ordinary_share={ordinary_share} is outside 0..1; it is the share of "
-                "situations drawn from the ordinary tier, not a count"
+                f"hard_share={hard_share} is outside 0..1; it is the share of "
+                "situations drawn from the hard tiers, not a count"
             )
-    # Main-thread mixer calls read the context variable; the engine sets it
-    # again in each worker pool, which does not inherit it on 3.10 to 3.13.
-    set_ordinary_share(ordinary_share)
-
     user_model = cfg.pop("user_model", None)
     if user_model is not None:
         if not isinstance(user_model, str):
@@ -696,7 +693,7 @@ def resolve_run_config(
         llm_spec=llm_spec,
         rubric=(str(rubric).strip() or None) if rubric else spec_rubric(spec),
         concurrency=concurrency,
-        ordinary_share=ordinary_share,
+        hard_share=hard_share,
         dimensions=dimensions,
         arm_weights=arm_weights,
         simulator=simulator,

@@ -1278,8 +1278,10 @@ def make_candidate_generator(
     mode: str | None = None,
     prefer_success: bool | None = None,
     steering_weight: float | None = None,
+    hard_share: float | None = None,
 ) -> Callable[..., list[str]]:
-    """Structured region samples plus open-ended probes. Adaptive arm split."""
+    """Structured region samples plus open-ended probes. Adaptive arm split.
+    ``hard_share`` is the run's difficulty dial (``simulate(hard_share=)``)."""
     regions = scenario_regions(
         tools,
         policy,
@@ -1335,7 +1337,10 @@ def make_candidate_generator(
         keyed.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
         ranked = [region for _, region in keyed]
         picked = mix_items_by_tier(
-            ranked, structured_budget, lambda region: behavior_tier(region.get("assignment") or {})
+            ranked,
+            structured_budget,
+            lambda region: behavior_tier(region.get("assignment") or {}),
+            hard_share=hard_share,
         )
         picked, steered = steer_region_picks(
             picked, ranked, seed=seed, round_index=round_index, weight=steer_w, front=steer_front

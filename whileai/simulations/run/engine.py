@@ -60,9 +60,9 @@ from ..generate.coverage import (
     space_saturated,
 )
 from ..generate.diversity import (
+    HARD_SHARE,
     MAX_NOVELTY_RESTARTS,
     NOVELTY_RESTART_FLOOR,
-    ORDINARY_SHARE,
     adaptive_allocator,
     allocator_slot_counts,
     behavior_tier,
@@ -71,7 +71,6 @@ from ..generate.diversity import (
     record_turns,
     sampling_plan,
     scenario_family,
-    set_ordinary_share,
 )
 from ..generate.embeddings import (
     EmbeddingArchive,
@@ -224,7 +223,7 @@ PROGRESS_EVERY_ROWS = 10
 PROGRESS_MIN_BUDGET = 10
 #: Rows before the realized difficulty mix is compared with the ask.
 TIER_MIX_MIN_ROWS = 20
-#: How far (in share) the shipped rows may land above the ask before the run says so.
+#: How far (in share) the shipped rows may land below the ask before the run says so.
 TIER_MIX_TOLERANCE = 0.10
 
 
@@ -713,6 +712,7 @@ class Run:
             dimensions=self.dimensions,
             arm_weights=self.arm_weights,
             simulator=self.simulator,
+            hard_share=c.hard_share,
             kind=self.writer_kind,
             scenarios_per_request=c.scenarios_per_request,
             completions_per_request=c.completions_per_request,
@@ -1164,12 +1164,8 @@ class Run:
         self.walked_lock = threading.Lock()
         self.seen_prints: set[str] = set()
         self.generation_started = self.started
-        # ordinary_share lives in a context variable that a worker thread
-        # does not inherit (Python 3.10 to 3.13), so each pool sets it.
         self.scenario_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, c.scenario_concurrency),
-            initializer=set_ordinary_share,
-            initargs=(c.ordinary_share,),
+            max_workers=max(1, c.scenario_concurrency)
         )
         self.scenario_futs = []
         self.next_producer_round = 0
@@ -1189,11 +1185,7 @@ class Run:
         typical_n = min(c.completions_per_request, 3)
         self.writer_batch = max(1, c.scenarios_per_request * typical_n)
         self.writer_buffer = max(self.writer_batch * 2, min(self.flight * 2, 96))
-        self.pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.flight,
-            initializer=set_ordinary_share,
-            initargs=(c.ordinary_share,),
-        )
+        self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=self.flight)
         self.inflight = {}
         self.inflight_started: dict = {}
 
@@ -1484,6 +1476,7 @@ class Run:
             seed=c.seed,
             dimensions=self.dimensions,
             simulator=self.simulator,
+            hard_share=c.hard_share,
             kind=self.writer_kind,
             scenarios_per_request=n_cards,
             completions_per_request=n_comp,
@@ -3117,39 +3110,38 @@ class Run:
 
         Rows the mixer never sees (seeds, open asks, the per-arm quota,
         cells with no stance) carry the ordinary label, so a run lands
-        above the share it asked for; a small run more so. The gap is
+        below the hard share it asked for; a small run more so. The gap is
         recorded, and when the caller set the dial and the gap passes ten
         points the run says so and names the pin.
         """
         c = self.c
         data = self.data
-        requested = ORDINARY_SHARE if c.ordinary_share is None else float(c.ordinary_share)
+        requested = HARD_SHARE if c.hard_share is None else float(c.hard_share)
         counts: dict[str, int] = {}
         for t in data.trajectories:
             dims = t.get("scenario_dimensions")
             tier = str(t.get("tier") or "") or behavior_tier(dims if isinstance(dims, dict) else {})
             counts[tier] = counts.get(tier, 0) + 1
         rows = sum(counts.values())
-        realized = counts.get("ordinary", 0) / rows if rows else None
+        hard = sum(counts.get(tier, 0) for tier in ("ambiguous", "boundary", "adversarial"))
+        realized = hard / rows if rows else None
         mix: dict[str, Any] = {
-            "requested_ordinary_share": round(requested, 4),
-            "realized_ordinary_share": None if realized is None else round(realized, 4),
+            "hard_share_requested": round(requested, 4),
+            "hard_share_realized": None if realized is None else round(realized, 4),
             "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
             "rows": rows,
         }
-        if c.ordinary_share is not None and realized is not None and rows >= TIER_MIX_MIN_ROWS:
-            gap = realized - requested
-            if gap > TIER_MIX_TOLERANCE:
-                mix["note"] = (
-                    f"ordinary_share={requested:g} asked, {realized:.2f} drawn "
-                    f"({counts.get('ordinary', 0)} of {rows} rows). Open asks and cells "
-                    "with no stance count as ordinary, and the grid holds a fixed number of "
-                    "hard cells. For a set that is hard "
-                    "throughout, pin the axis: dimensions={'stance': ['boundary', "
-                    "'ambiguous', 'adversarial']}."
-                )
-                data.warnings.append(mix["note"])
-                log.warning(mix["note"])
+        asked = c.hard_share is not None and rows >= TIER_MIX_MIN_ROWS
+        if asked and realized is not None and requested - realized > TIER_MIX_TOLERANCE:
+            mix["note"] = (
+                f"hard_share={requested:g} asked, {realized:.2f} drawn "
+                f"({hard} of {rows} rows from the hard tiers). Open asks and cells "
+                "with no stance count as ordinary, and the grid holds a fixed number of "
+                "hard cells. For a set that is hard throughout, pin the axis: "
+                "dimensions={'stance': ['boundary', 'ambiguous', 'adversarial']}."
+            )
+            data.warnings.append(mix["note"])
+            log.warning(mix["note"])
         data.search["tier_mix"] = mix
 
     def _finish_traces(self) -> None:

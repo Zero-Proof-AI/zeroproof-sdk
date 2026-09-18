@@ -100,6 +100,7 @@ def simulate(
     temperature: float | None = None,
     timeout: float | None = None,
     logprobs: bool | None = None,
+    hard_share: float | None = None,
     **passed: Any,
 ) -> SimulationData:
     """Inspect an agent, generate situations, and roll them out.
@@ -148,13 +149,10 @@ def simulate(
     so held-out traces stay out of training. Without it the grid comes
     from the agent's tools and policy alone (cold start).
 
-    ``ordinary_share=`` is the difficulty dial: the fraction of situations
-    drawn from the ordinary tier, the rest split across ambiguous, boundary
-    and adversarial. Default 0.60. A base agent passes ordinary asks most
-    often (0.685 against 0.577 on boundary, one agent, 289 rollouts), so a
-    mostly-ordinary set has the least headroom to train into.
-    ``search["tier_mix"]`` reports the share asked for and the share the rows
-    carry; ``dimensions={"stance": [...]}`` pins the axis outright.
+    ``hard_share=`` is the difficulty dial: the fraction of situations drawn
+    from the ambiguous, boundary and adversarial tiers (default 0.40), where
+    a base fails most often. ``search["tier_mix"]`` reports the share asked
+    for and the share drawn; ``dimensions={"stance": [...]}`` pins the axis.
 
     ``execute=`` is the caller's world: a function ``(tool, arguments) ->
     result`` that answers every tool call for real, against their repo,
@@ -280,6 +278,7 @@ def simulate(
         ("temperature", temperature),
         ("timeout", timeout),
         ("logprobs", logprobs),
+        ("hard_share", hard_share),
     ):
         if _val is not None:
             passed[_name] = _val
