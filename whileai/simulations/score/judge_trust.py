@@ -44,6 +44,14 @@ with no record of who wrote it, is not a measurement either, and says
 so. Measured means a floor, not a hint: the Wilson lower bound of
 agreement must reach ``min_agreement`` (0.8) and kappa ``min_kappa``
 (0.6), or ``ok`` is false with the number, the floor, and what to do.
+Measured also means measured on the whole labeled sample:
+``judge_agreement`` counts exact 0/1 rewards only, so a judge that
+returns fractions (a ``Rubric`` of principles scores the mean of its
+criteria) loses every partially met row, and the rows that survive are
+the ones it was sure about. The report counts them (``skipped``); over
+``max_skipped_share`` (0.1) ``ok`` is false, ``format_judge_trust``
+prints ``INCONCLUSIVE`` instead of ``PASS``, and the warning names the
+fix (``Criterion(kind="hard")``) (#345).
 
 ``trust_after_grade`` is the same check run by ``grade`` on the default
 path (rlhf-book ch. 5 "Suggested Experiments"): measure the judge on
@@ -65,6 +73,8 @@ from ..defaults import (
     JUDGE_CHECK_SAMPLE,
     LENGTH_GAP_FLAG,
     MAX_GOLD_ASK,
+    MAX_SKIPPED_SHARE,
+    MESSAGE_EXAMPLES,
     MIN_AGREEMENT,
     MIN_KAPPA,
 )
@@ -173,6 +183,43 @@ def _label(row: dict, key: str) -> int | None:
     except (TypeError, ValueError):
         return None
     return int(f) if f in (0.0, 1.0) else None
+
+
+def _fraction(row: dict) -> float | None:
+    """A numeric reward that is neither 0 nor 1: what ``_label`` refuses
+    and ``judge_agreement`` skips. ``None`` for a missing, boolean or
+    exact 0/1 reward."""
+    v = row.get("reward")
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if f in (0.0, 1.0) else f
+
+
+def _skipped(
+    gold_rows: Sequence[dict], labeled: Sequence[dict], max_skipped_share: float
+) -> dict[str, Any]:
+    """The labeled rows the agreement count left out, and whether that
+    share breaks the floor. ``fractional`` is the judge's doing (a reward
+    that is not 0/1); ``unscored`` rows have gold and no judge reward at
+    all, which ``missing_side_note`` already handles."""
+    fractions = [f for f in (_fraction(r) for r in gold_rows) if f is not None]
+    n_gold = len(gold_rows)
+    n_frac = len(fractions)
+    share = round(n_frac / n_gold, 4) if n_gold else 0.0
+    return {
+        "n_gold": n_gold,
+        "n_used": len(labeled),
+        "fractional": n_frac,
+        "unscored": n_gold - len(labeled) - n_frac,
+        "share": share,
+        "floor": float(max_skipped_share),
+        "over_floor": bool(n_frac) and share > float(max_skipped_share),
+        "examples": sorted({round(f, 4) for f in fractions})[:MESSAGE_EXAMPLES],
+    }
 
 
 def _task(row: dict) -> str:
@@ -491,14 +538,18 @@ def judge_trust(
     allow_model_gold: bool = False,
     length_gap_flag: float = LENGTH_GAP_FLAG,
     flip_flag: float = FLIP_FLAG,
+    max_skipped_share: float = MAX_SKIPPED_SHARE,
 ) -> dict[str, Any]:
     """The judge-trust report. See the module docstring.
 
     The floors and flags are keywords with their defaults in
     ``whileai.simulations.defaults``: ``min_agreement`` (0.8, the
     human-human agreement of MT-Bench, arXiv:2306.05685), ``min_kappa``
-    (0.6, Landis and Koch "substantial"), ``length_gap_flag`` (0.15) and
-    ``flip_flag`` (0.10).
+    (0.6, Landis and Koch "substantial"), ``length_gap_flag`` (0.15),
+    ``flip_flag`` (0.10) and ``max_skipped_share`` (0.10, the share of
+    labeled rows the judge may leave out of the agreement count with a
+    fractional reward before ``ok`` is false; ``report["skipped"]``
+    carries the counts).
 
     ``rows`` carry the judge's ``reward``; rows that also carry ``gold``
     (0/1, default ``gold_reward``) feed the agreement, held-out, and
@@ -523,6 +574,8 @@ def judge_trust(
     """
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if _label(r, gold) is not None and _label(r, "reward") is not None]
+    gold_rows = [r for r in rows if _label(r, gold) is not None]
+    skipped = _skipped(gold_rows, labeled, max_skipped_share)
     # Over every row, not just the labeled ones: the pairs are the same
     # (``judge_agreement`` counts only rows with both sides), and it is
     # what lets the report say which half is missing when there are none.
@@ -568,6 +621,33 @@ def judge_trust(
     )
 
     warnings: list[str] = list(agree.get("warnings") or [])
+    # Rows the judge scored between 0 and 1 never reach the agreement
+    # count, and they are the rows it was least sure about, so the rows
+    # that remain agree more than the sample would (#345). Over the floor
+    # that is a finding against the measurement, not the judge.
+    if skipped["fractional"]:
+        examples = ", ".join(f"{f:g}" for f in skipped["examples"])
+        fix = (
+            "A Rubric of plain principles scores the mean of its criteria; give each "
+            "Criterion kind='hard' for a 0/1 verdict (or threshold the reward yourself "
+            "before judge_trust), then run it again."
+        )
+        if skipped["over_floor"]:
+            warnings.append(
+                f"Judge agreement skipped {skipped['fractional']} of {skipped['n_gold']} "
+                f"labeled rows: the judge gave them a fractional reward ({examples}) and "
+                f"agreement counts exact 0/1 only. That is {skipped['share']:.0%} of the "
+                f"sample, over the {max_skipped_share:.0%} max_skipped_share floor "
+                f"(MAX_SKIPPED_SHARE), and the {skipped['n_used']} rows kept are the ones "
+                "the judge was sure about, so the agreement above reads high by "
+                f"construction; `ok` is false. {fix}"
+            )
+        else:
+            warnings.append(
+                f"skipped {skipped['fractional']} of {skipped['n_gold']} labeled rows with a "
+                f"fractional reward ({examples}); under the {max_skipped_share:.0%} "
+                f"max_skipped_share floor, so `ok` stands. {fix}"
+            )
     # Gold labels of one class only: agreement is a pass-rate check, kappa
     # is undefined in spirit (no chance level to beat), and the length
     # split within the other class has nothing to compare. Say so instead
@@ -684,7 +764,12 @@ def judge_trust(
         "n_labeled": len(labeled),
         "gold_kind": gold_kind,
         "gold_degenerate": degenerate_gold,
-        "floors": {"min_agreement": min_agreement, "min_kappa": min_kappa},
+        "floors": {
+            "min_agreement": min_agreement,
+            "min_kappa": min_kappa,
+            "max_skipped_share": max_skipped_share,
+        },
+        "skipped": skipped,
         "agreement": agree,
         "held_out_halves": halves,
         "length_sensitivity": length,
@@ -702,6 +787,7 @@ def _flagged(warnings: Sequence[str]) -> bool:
         w.startswith(
             (
                 "Judge agreement with human labels",
+                "Judge agreement skipped",
                 "Judge kappa with human labels",
                 "judge pass rate differs",
                 "judge passed",
@@ -777,15 +863,30 @@ def format_judge_trust(report: dict[str, Any]) -> str:
     unmeasured = not report.get("n_labeled") or any(
         w in not_a_persons_labels for w in report["warnings"]
     )
-    if not report["ok"] and unmeasured and not _flagged(report["warnings"]):
+    skipped = report.get("skipped") or {}
+    if skipped.get("over_floor"):
+        # Not PASS and not FAIL: the sample the number rests on is the
+        # judge's own selection, so there is no verdict to print (#345).
+        lines = [
+            f"INCONCLUSIVE: {skipped['fractional']} of {skipped['n_gold']} labeled rows "
+            f"skipped ({skipped['share']:.0%}, over MAX_SKIPPED_SHARE {skipped['floor']:.0%}); "
+            f"usable n={skipped['n_used']}"
+        ]
+    elif not report["ok"] and unmeasured and not _flagged(report["warnings"]):
         lines = ["NOT MEASURED"]
     else:
         lines = ["PASS" if report["ok"] else "FAIL"]
     if a["n"]:
         ci = a["ci95"]
         kappa = f", kappa {a['kappa']:.2f}" if a["kappa"] is not None else ""
+        left_out = (
+            f", {skipped['fractional']} of {skipped['n_gold']} labeled rows skipped"
+            if skipped.get("fractional")
+            else ""
+        )
         lines.append(
-            f"agreement {a['agreement']:.0%} (95% {ci[0]:.0%}..{ci[1]:.0%}, n={a['n']}){kappa}"
+            f"agreement {a['agreement']:.0%} (95% {ci[0]:.0%}..{ci[1]:.0%}, n={a['n']}"
+            f"{left_out}){kappa}"
         )
         c = a["confusion"]
         lines.append(f"  confusion tp={c['tp']} fp={c['fp']} fn={c['fn']} tn={c['tn']}")
@@ -824,6 +925,7 @@ __all__ = [
     "ADDITIVE_PROBES",
     "FILLER",
     "GOLD_KEY",
+    "MAX_SKIPPED_SHARE",
     "MIN_AGREEMENT",
     "MIN_KAPPA",
     "NO_HUMAN_GOLD_NOTE",

@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..defaults import (
@@ -200,6 +200,25 @@ def _tool_names(tools: Sequence | None) -> list[str]:
     return names
 
 
+def tools_called(trajectory: Mapping[str, Any]) -> list[str]:
+    """The tools the agent ran, in order, each once: the ``tool`` of every
+    step that carries a ``result`` (a fault result counts; the call was
+    made). A step with a tool name and no result never reached the tool,
+    and a tool named only in prose (``"I will now escalate this"``) was
+    not called. This is the fact the judge reads a claim against (#346:
+    a 4B judge asked to establish that a name is absent from a JSON array
+    passed 18 of 18 announced-but-never-made calls; handed the list, it
+    does not have to)."""
+    out: list[str] = []
+    for step in trajectory.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        name = str(step.get("tool") or "")
+        if name and step.get("result") is not None and name not in out:
+            out.append(name)
+    return out
+
+
 #: the judge payload cap; ``defaults.JUDGE_PAYLOAD_CHARS`` (8000 chars, about
 #: 2000 tokens, the budget an 8k-window hosted judge leaves for evidence).
 #: Every render takes ``payload_chars=`` to move it per call.
@@ -375,6 +394,8 @@ def _fit_payload(blob: dict, limit: int) -> str:
             "payload_reduced": True,
             "note": "trajectory too large to render; judging the final reply only",
             "tools": blob.get("tools"),
+            "tools_called": blob.get("tools_called"),
+            "tools_not_called": blob.get("tools_not_called"),
             "final_text": _cut(
                 str(blob.get("final_text") or ""),
                 max(REPLY_ONLY_MIN_CHARS, limit // REPLY_ONLY_SHARE),
@@ -412,11 +433,18 @@ def _render_payload(
             item["user"] = step.get("user")
         if item:
             steps.append(item)
+    declared = _tool_names(tools)
+    called = tools_called(trajectory)
     # final_text and agent_policy come BEFORE steps: on an oversized
     # payload the tail is what gets cut, and the verdict needs what the
     # agent finally said and the rules it was under more than step 14.
+    # tools_called sits in the head for the same reason: it is the fact
+    # a claim in final_text is checked against (#346), and it must not
+    # be the part that goes when the steps are cut.
     blob: dict[str, Any] = {
-        "tools": _tool_names(tools),
+        "tools": declared,
+        "tools_called": called,
+        "tools_not_called": [name for name in declared if name not in called],
         "situation": str(trajectory.get("prompt", ""))[:JUDGE_SITUATION_CHARS],
         "world_state": trajectory.get("world_state"),
         "injected_faults": trajectory.get("faults"),
