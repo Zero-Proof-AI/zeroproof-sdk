@@ -16,7 +16,7 @@ from typing import Any
 from whileai._env import getenv
 
 from ..generate.adapters import resolve_system_prompt
-from ..generate.diversity import adaptive_allocator
+from ..generate.diversity import adaptive_allocator, set_ordinary_share
 from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS
 from .spec import spec_rubric
 
@@ -53,6 +53,12 @@ _ALIAS_NAMES = {
 }
 _MOVED_NAMES = {
     "concurrency",
+    # Difficulty mixture. Measured on 289 base rollouts over two runs: base
+    # pass rate by tier was ordinary 0.685, adversarial 0.667, ambiguous 0.590,
+    # boundary 0.577. The default put ~69% of rows in the EASIEST tier, and the
+    # mixer floored ordinary at 50% regardless of what was asked for, so no
+    # lane could buy a harder set.
+    "ordinary_share",
     "dimensions",
     "arm_weights",
     "simulator",
@@ -483,6 +489,19 @@ def resolve_run_config(
         if sum(arm_weights.values()) <= 0:
             raise ValueError("arm_weights= must have a positive total")
     simulator = writer_spec_for(agent, cfg.pop("simulator", None))
+    ordinary_share = cfg.pop("ordinary_share", None)
+    if ordinary_share is not None:
+        try:
+            ordinary_share = float(ordinary_share)
+        except (TypeError, ValueError):
+            raise ValueError("ordinary_share= is a fraction between 0 and 1") from None
+        if not 0.0 <= ordinary_share <= 1.0:
+            raise ValueError(
+                f"ordinary_share={ordinary_share} is outside 0..1; it is the share of "
+                "situations drawn from the ordinary tier, not a count"
+            )
+    set_ordinary_share(ordinary_share)
+
     user_model = cfg.pop("user_model", None)
     if user_model is not None:
         if not isinstance(user_model, str):

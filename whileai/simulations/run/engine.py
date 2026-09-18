@@ -3115,6 +3115,28 @@ class Run:
         state_record["allocation_gain"] = ALLOC_GAIN
         # region_progress is attached at the very end of simulate(), so
         # it measures the rows that ship: graded, leak-pruned.
+        # What mixture the run ACTUALLY drew, next to what was asked for.
+        # A dial that silently does not take is worse than no dial: the old
+        # mixer floored ordinary at 50% whatever the caller requested, and
+        # nothing in the output said so. Difficulty lives here -- measured on
+        # one agent, base pass rate was 0.685 on ordinary against 0.577 on
+        # boundary -- so a lane reading a flat result should be able to see
+        # whether it simply bought an easy set.
+        from ..generate.diversity import behavior_tier, current_ordinary_share
+
+        realized: dict[str, int] = {}
+        for t in data.trajectories:
+            tier = str(t.get("tier") or "") or behavior_tier(
+                t.get("scenario_dimensions") if isinstance(t.get("scenario_dimensions"), dict) else {}
+            )
+            realized[tier] = realized.get(tier, 0) + 1
+        total = sum(realized.values()) or 1
+        data.search["tier_mix"] = {
+            "requested_ordinary_share": round(current_ordinary_share(), 4),
+            "realized_ordinary_share": round(realized.get("ordinary", 0) / total, 4),
+            "counts": dict(sorted(realized.items(), key=lambda kv: -kv[1])),
+            "rows": total,
+        }
         data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(
             data.trajectories, self.trace_rows, embedder=self.resolved_embedder

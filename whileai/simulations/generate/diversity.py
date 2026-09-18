@@ -7,6 +7,7 @@ import os
 import random
 import re
 import threading
+import contextvars
 from typing import Any
 
 _LENGTHS = ("short prompt", "medium prompt", "long prompt")
@@ -14,6 +15,7 @@ _VAGUENESS = ("specific", "vague", "underspecified")
 _WEIRD = ("incomplete", "specific", "rambling")
 # Generic search tiers. Domain comes from tools+policy, not these names.
 _TIERS = ("ordinary", "ambiguous", "boundary", "adversarial")
+_HARD_TIERS = ("ambiguous", "boundary", "adversarial")
 _TIER_ALIASES = {
     "ordinary": "ordinary",
     "vague": "ambiguous",
@@ -34,6 +36,43 @@ _TIER_ALIASES = {
 # Ordinary majority; other tiers stay in the bag so a short run still hits them.
 _TIER_BAG = ("ordinary",) * 6 + ("ambiguous",) + ("boundary",) + ("adversarial",) * 2
 ORDINARY_SHARE = 0.60
+
+# The mixture is a DIFFICULTY dial, so it belongs to the caller.
+#
+# rlhf-book ch. 7 (difficulty filtering): what a run can teach is set by where
+# its prompts sit on the difficulty axis, so difficulty has to be steerable
+# rather than fixed. ch. 9 (rejection sampling): selection keeps only passing
+# rows, so on prompts the base already handles there is nothing left to imitate
+# however many rows attack them.
+#
+# Measured on one agent, 289 base rollouts over two independent runs: base pass
+# rate by tier was ordinary 0.685, adversarial 0.667, ambiguous 0.590, boundary
+# 0.577, with ambiguous and boundary below ordinary in both runs separately.
+# The default drew ~69% ordinary, which is the easy end of that axis.
+#
+# What this is NOT: on the same pool, mixed-group rate barely moved by tier
+# (ordinary 38.4%, ambiguous 43.5%, boundary 36.0%, adversarial 25.0% over 392
+# groups). So the ch. 6 dead-group argument does not support this change and is
+# deliberately not claimed here -- the case is headroom, not group contrast.
+#
+# A ContextVar rather than a parameter on nine call sites: the mixture is a
+# property of the RUN, every caller wants the same value, and threading it
+# through `_sample_regions` -> `mix_items_by_tier` at each site is churn that
+# would still miss the next call site someone adds.
+_ordinary_share: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "whileai_ordinary_share", default=None
+)
+
+
+def set_ordinary_share(share: float | None) -> None:
+    """Set the run's ordinary share. ``None`` restores the default."""
+    _ordinary_share.set(None if share is None else max(0.0, min(1.0, float(share))))
+
+
+def current_ordinary_share() -> float:
+    """What the mixer will actually use."""
+    value = _ordinary_share.get()
+    return ORDINARY_SHARE if value is None else value
 # Human texture: how the message is typed, independent of what it asks.
 _TEXTURES = ("lowercase", "abbreviations", "typo", "no_punctuation", "run_on", "clipped")
 _TONES = ("impatient", "frustrated", "chatty", "polite", "curt", "sarcastic")
@@ -361,7 +400,7 @@ def conversation_features(
 
 
 def mix_items_by_tier(
-    items: list, n: int, tier_of, *, ordinary_share: float = ORDINARY_SHARE
+    items: list, n: int, tier_of, *, ordinary_share: float | None = None
 ) -> list:
     """Breadth-first across tiers, then fill ordinary-majority.
 
@@ -370,6 +409,9 @@ def mix_items_by_tier(
     """
     if not items or n <= 0:
         return []
+    if ordinary_share is None:
+        ordinary_share = current_ordinary_share()
+    ordinary_share = max(0.0, min(1.0, float(ordinary_share)))
     n = min(int(n), len(items))
     buckets: dict[str, list] = {tier: [] for tier in _TIERS}
     for item in items:
@@ -402,16 +444,32 @@ def mix_items_by_tier(
             if tier not in have:
                 take(tier)
 
-    target_ordinary = max((n + 1) // 2, round(n * ordinary_share))
+    # Honour the share instead of overriding it. The old line was
+    # `max((n + 1) // 2, round(n * ordinary_share))`, a hard 50% floor: shares
+    # of 0.2, 0.3 and 0.5 all produced exactly 50% ordinary at n=20 and n=100,
+    # so the parameter moved the mixture in one direction only and no caller
+    # could ask for a harder set than the default.
+    target_ordinary = min(n, max(0, round(n * ordinary_share)))
+    hard_cursor = 0
     while len(picked) < n:
         ordinary_count = sum(1 for item in picked if tier_of(item) == "ordinary")
         if ordinary_count < target_ordinary and take("ordinary"):
             continue
+        # Round-robin the hard tiers instead of draining them in a fixed order.
+        # The old loop always tried "ambiguous" first, which was invisible while
+        # ordinary was floored at 50% and the remainder was small. Once the
+        # share is turnable, it is the whole point: asking for 25% ordinary
+        # returned ambiguous 60 / boundary 14 / adversarial 1, so a caller
+        # buying a harder set got one hard tier rather than a hard MIX.
         progressed = False
-        for tier in ("ambiguous", "boundary", "adversarial", "ordinary"):
+        for offset in range(len(_HARD_TIERS)):
+            tier = _HARD_TIERS[(hard_cursor + offset) % len(_HARD_TIERS)]
             if take(tier):
+                hard_cursor = (hard_cursor + offset + 1) % len(_HARD_TIERS)
                 progressed = True
                 break
+        if not progressed and take("ordinary"):
+            progressed = True
         if not progressed:
             break
     return picked
