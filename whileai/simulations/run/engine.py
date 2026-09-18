@@ -105,7 +105,7 @@ from ..ingest.traces import (
 )
 from ..schema import SCHEMA_KEY, SCHEMA_VERSION, Judgment, ScorerRef, attach
 from ..score.checklist import privileged_context
-from ..score.grading import behavior_signature, conduct_grade
+from ..score.grading import as_dict, behavior_signature, conduct_grade
 from .config import DEAD_AGENT_MIN_ERRORS, RunConfig
 from .rows import (
     _row_conversation,
@@ -3113,6 +3113,45 @@ class Run:
         state_record["allocation_gain"] = ALLOC_GAIN
         # region_progress is attached at the very end of simulate(), so
         # it measures the rows that ship: graded, leak-pruned.
+        # Per-tool outcomes, and the tools that never work.
+        #
+        # A declared tool with no dispatch branch in execute= fails exactly
+        # like a genuine world fault, and an honesty rubric REWARDS the agent
+        # for reporting it, so the pass rate looks healthy while the tool is
+        # dead. Measured on one agent: run_query was attempted 612 times and
+        # succeeded 4 times. That survived 978 rows, a probe, a holdout and a
+        # published dataset card before anyone looked. Two criteria reported as
+        # "no contrast" were vacuous rather than solved, because both need a
+        # successful query that never happened.
+        #
+        # The rate rule is why a zero-success test is not enough: 4-in-612
+        # would pass it. And a step with no recorded result is not evidence and
+        # must never accuse a tool, or this fires on every offline run.
+        tool_calls: dict[str, dict[str, int]] = {}
+        for t in data.trajectories:
+            for step in t.get("steps") or []:
+                if not isinstance(step, dict) or not step.get("tool"):
+                    continue
+                result = step.get("result")
+                if result is None:
+                    continue
+                slot = tool_calls.setdefault(str(step["tool"]), {"calls": 0, "ok": 0})
+                slot["calls"] += 1
+                status = str(as_dict(result).get("status", "")).lower()
+                if status in ("", "ok", "success", "succeeded"):
+                    slot["ok"] += 1
+        dead = sorted(
+            name
+            for name, slot in tool_calls.items()
+            if (slot["ok"] == 0 and slot["calls"] >= 3)
+            or (slot["calls"] >= 10 and slot["ok"] / slot["calls"] < 0.05)
+        )
+        if tool_calls:
+            data.search["tools"] = dict(sorted(tool_calls.items()))
+        if dead:
+            data.search["dead_tools"] = dead
+            if "dead_tools" not in data.degraded:
+                data.degraded.append("dead_tools")
         data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(
             data.trajectories, self.trace_rows, embedder=self.resolved_embedder

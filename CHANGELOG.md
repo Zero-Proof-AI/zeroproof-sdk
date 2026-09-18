@@ -10,6 +10,19 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   was written; and says when no real ids were read off the tool descriptions,
   since placeholder asks then stop at "which order?" and the run is hollow.
 
+## Unreleased
+
+- `search["tools"]` reports calls and successes per tool, `search["dead_tools"]`
+  names the ones that never work, and `degraded` gains `dead_tools`. A declared
+  tool with no dispatch branch in `execute=` fails exactly like a world fault,
+  and an honesty rubric rewards the agent for reporting it, so the pass rate
+  looks healthy while the tool is dead. Measured on one agent, `run_query` was
+  attempted 612 times and succeeded 4; it survived 978 rows, a probe, a holdout
+  and a published dataset card. A tool is called dead on no successes in 3+
+  calls, or under a 5% success rate in 10+ — a zero-success test alone would
+  have missed 4-in-612. Steps carrying no recorded result never accuse a tool,
+  so offline runs are unaffected.
+
 ## 0.61 (2026-09-17)
 
 - `whileai init-evals` writes the eval harness, instead of a coding agent
