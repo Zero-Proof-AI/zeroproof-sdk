@@ -5,6 +5,25 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `whileai init-evals` writes the eval harness, instead of a coding agent
+  copying the recipe into the project by hand. It reads the project's
+  Python with `ast` (never imports it), picks the tool list, the system
+  prompt and the callable that answers a message, and writes
+  `evals/agent.py` (the wrapper, with the tools converted to OpenAI
+  function shape and the bot's tool runner wrapped in a thread-local
+  recorder, because rollouts run concurrently), `evals/judge.py` (the
+  contract, two example markers, a `classify` stub), `evals/run.py`
+  (pass@1 with an interval per branch, the marker table, `scored.warnings`,
+  `--gap`, and a CI gate that exits 1 under the floor and 2 on a hollow
+  run) and `evals/test_judge.py` (the judge on hand-written rows, no model
+  calls). It prints what it picked, so a wrong guess is one flag away
+  (`--agent module:callable`, `--tools module:NAME`, `--system-prompt
+  module:NAME`), and when it finds nothing the files are still written
+  with every place that needs your code marked TODO. Three cold-start
+  agents asked to build evals for a refund bot each spent ten to thirteen
+  minutes transplanting `recipes/02-measure/eval-your-agent/run.py` by
+  hand, and asked for this command by name (2026-09-17).
+
 - A trial key is named before a hosted run spends it, not after. `whileai
   signup` records the tier (and the trial's daily input tokens and expiry)
   in `~/.whileai/credentials.json`, and `whileai status` and `whileai

@@ -68,6 +68,17 @@ Tools go in OpenAI function-calling shape (`{"type": "function",
 records calls through a shared global, wrap the recorder in a
 `threading.local`, because rollouts run concurrently.
 
+Or run `whileai init-evals` in the project and edit the three files it
+writes. It reads your Python with `ast`, never imports it, picks the tool
+list, the system prompt and the callable that answers a message, and
+writes `evals/agent.py` (this wrapper, with your tools converted to
+OpenAI shape and your tool runner wrapped in the thread-local recorder),
+`evals/judge.py`, `evals/run.py` and `evals/test_judge.py` wired to them.
+It prints what it picked, so a wrong guess is one flag away: `--agent
+module:callable`, `--tools module:NAME`, `--system-prompt module:NAME`.
+When it finds nothing the files are still written, with every place that
+needs your code marked TODO.
+
 ## 3. Write the judge as a program
 
 The judge reads the trajectory, not the prose. A polite reply that issued

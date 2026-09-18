@@ -1,4 +1,4 @@
-"""``whileai`` command line: login, signup, logout, status."""
+"""``whileai`` command line: login, signup, logout, status, init-evals."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import sys
 
 from . import auth
+from .init_evals import add_arguments as init_evals_args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +33,12 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("logout", help="delete the saved key")
     sub.add_parser("status", help="show which key the SDK will use")
+
+    p_init = sub.add_parser(
+        "init-evals",
+        help="write an eval harness (agent, judge, run, test) wired to this project",
+    )
+    init_evals_args(p_init)
 
     p_purge = sub.add_parser(
         "purge", help="delete an agent's traces, datasets and record, or empty datasets"
@@ -71,6 +78,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {err}", file=sys.stderr)
             return 1
         return 0
+
+    if args.command == "init-evals":
+        from .init_evals import init_evals
+
+        return init_evals(
+            agent=args.agent,
+            tools=args.tools,
+            system_prompt=args.system_prompt,
+            out=args.dir,
+            force=args.force,
+        )
 
     if args.command == "logout":
         print("Logged out." if auth.logout() else "No saved key.")

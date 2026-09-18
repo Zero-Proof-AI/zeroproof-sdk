@@ -159,7 +159,9 @@ that reads the trajectory, run the asks `k` times each, and read pass@1
 with its interval. Offline first, then the hosted writer. The how-to is
 [docs/evals.md](docs/evals.md); the runnable version is
 [`recipes/02-measure/eval-your-agent`](recipes/02-measure/eval-your-agent),
-which ends at a CI gate, not a push.
+which ends at a CI gate, not a push. `whileai init-evals` writes those
+four files for you, wired to the tools, system prompt and callable it
+finds in the project, and prints what it picked.
 
 ```python
 data = wai.simulate(
