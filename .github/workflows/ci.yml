@@ -70,8 +70,12 @@ jobs:
           # pin or the env var without re-timing the job.
           python-version: "3.12"
       - run: uv sync --extra dev
+      # The floor is the last measured coverage on main, rounded down, and
+      # is raised whenever that number moves a whole point: 90.49% at
+      # 882201c (19707 statements, 1874 missed). Raise it in the same PR
+      # that raises coverage; never lower it to make a red job green.
       - run: uv run pytest -q --cov=whileai --cov-report=term
-              --cov-fail-under=88
+              --cov-fail-under=90
         env:
           COVERAGE_CORE: sysmon
 
