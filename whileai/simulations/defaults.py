@@ -951,6 +951,18 @@ TRAINING_BATCH_PROMPTS = 256
 # TRAINING_SFT_EPOCHS = 2: reference SFT epochs; rlhfbook gives no number
 # and the hosted trainer owns its own. Convention, untested.
 TRAINING_SFT_EPOCHS = 2
+# TRAIN_MIN_MIXED_TASKS = 32: tasks with both a pass and a fail a grouped
+# or paired method (grpo, dpo, rm) should have before ``train`` starts a
+# hosted run without a warning. A unanimous group carries no advantage
+# (GRPO's baseline is the group mean, rlhfbook.com/c/11-policy-gradients.html),
+# so DAPO (arXiv 2503.14476, eq. 11) and ProRL (arXiv 2505.24864) keep
+# only mixed prompts, and they draw them from tens of thousands; the
+# hosted trainer steps one prompt group at a time, so under this count a
+# default run is several passes over a handful of groups (#397: 6 mixed
+# tasks, 20 steps, 3.3 epochs, grad_norm 0). 32 is the same count as
+# MONITOR_N_PROMPTS, the fewest prompts the package reads a curve on;
+# ``train(min_mixed_tasks=)`` moves it. (convention, untested)
+TRAIN_MIN_MIXED_TASKS = 32
 
 # ---------------------------------------------------------------------
 # monitor
@@ -1584,6 +1596,7 @@ __all__ = [
     "TRAINING_POLL_MIN_S",
     "TRAINING_POLL_S",
     "TRAINING_SFT_EPOCHS",
+    "TRAIN_MIN_MIXED_TASKS",
     "TRANSIENT_BACKOFF_S",
     "TRANSIENT_TRIES",
     "TRUNCATED_REPLY_CHARS",

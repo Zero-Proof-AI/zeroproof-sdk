@@ -34,7 +34,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from .defaults import (
+    PASS_THRESHOLD,
     PLATFORM_REWARD_MODEL_BATCH,
+    RL_ROLLOUTS_PER_PROMPT,
+    TRAIN_MIN_MIXED_TASKS,
     TRAINING_ERROR_CHARS,
     TRAINING_FLUSH_EVERY,
     TRAINING_FLUSH_SECONDS,
@@ -221,6 +224,10 @@ class TrainingRun:
         self.dataset_id: str | None = None
         self.call_id: str | None = None
         self.method: str | None = None
+        #: ``selection_report`` of the pushed set, read by ``train`` before
+        #: the run started (``None`` under ``check="off"`` or an unreadable
+        #: profile)
+        self.selection: dict[str, Any] | None = None
         #: the holdout numbers with their uncertainty: filled by ``delta``
         #: from the rows, or by ``refresh`` from the platform's two numbers
         #: (then every interval field is ``None`` and ``note`` says so)
@@ -582,6 +589,185 @@ def _measured_temperature(
 
 #: what GRPO does with a sampled reply the token cap cut
 TRUNCATED = ("mask", "zero")
+#: what ``train(check=)`` does with a set the trainer would misuse:
+#: refuse it, say so and start anyway, or not look
+CHECK_MODES = ("require", "warn", "off")
+#: methods that learn from a pass and a fail of the same prompt
+GROUPED_METHODS = ("grpo", "dpo", "rm")
+
+
+class TrainingSelectionError(ValueError):
+    """``train(check="require")`` refused to start: the hosted trainer would
+    learn the failure (SFT on failing rows) or nothing at all (a grouped
+    method with no mixed task). The message names the counts, the reason
+    per dropped class, and the knob."""
+
+
+def _count(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def selection_report(
+    profile: Mapping[str, Any],
+    *,
+    method: str,
+    dataset: str = "ds",
+    steps: int | None = None,
+    min_mixed_tasks: int = TRAIN_MIN_MIXED_TASKS,
+) -> dict[str, Any]:
+    """What the hosted trainer will use of a profiled set, before the GPU.
+
+    ``profile`` is ``wai.profile(dataset)`` (``rows``, ``split``, ``tasks``,
+    ``tasks_with_repeats``, ``mixed_tasks``, ``per_task``). Returns
+    ``given`` and ``used`` (rows for ``sft``, tasks for a grouped method,
+    with ``used_rows`` when the per-task table is complete), ``dropped``
+    (count per reason), ``refuse`` (lines that stop a ``check="require"``
+    run) and ``warn`` (lines said either way). Pure: ``train`` reads the
+    profile and decides.
+
+    ``sft`` clones every row it is given, so a failing row is a refusal
+    (rejection sampling keeps the passes,
+    rlhfbook.com/c/10-rejection-sampling.html). ``grpo``, ``dpo`` and
+    ``rm`` learn from prompts with both a pass and a fail; none is a
+    refusal, fewer than ``min_mixed_tasks`` (``TRAIN_MIN_MIXED_TASKS``,
+    32) is a warning with the count.
+    """
+    rows = _count(profile.get("rows"))
+    raw_split = profile.get("split")
+    split: Mapping[str, Any] = raw_split if isinstance(raw_split, Mapping) else {}
+    n_fail = _count(split.get("fail"))
+    n_ungraded = _count(split.get("ungraded"))
+    knob = 'check="warn"'
+    out: dict[str, Any] = {"method": method, "given": rows, "refuse": [], "warn": []}
+    if method == "sft":
+        out["used"] = rows
+        out["dropped"] = {}
+        if n_fail:
+            ungraded = f" and {n_ungraded} ungraded" if n_ungraded else ""
+            out["refuse"].append(
+                f"sft on {dataset} would train on all {rows} rows, {n_fail} of which fail "
+                f"(reward under {PASS_THRESHOLD:g}){ungraded}. The hosted trainer clones every "
+                "row it is given, so the model learns the failure; rejection sampling keeps the "
+                "passing completions (rlhfbook.com/c/10-rejection-sampling.html). Push "
+                f"scored.passes() (the rows with reward >= {PASS_THRESHOLD:g}) as the train set, "
+                f"or pass {knob} to train on the failures on purpose."
+            )
+        return out
+
+    tasks = _count(profile.get("tasks"))
+    with_repeats = _count(profile.get("tasks_with_repeats"))
+    mixed = _count(profile.get("mixed_tasks"))
+    per_task = [t for t in (profile.get("per_task") or []) if isinstance(t, Mapping)]
+    complete = tasks > 0 and len(per_task) == tasks
+    dropped: dict[str, int] = {}
+    if complete:
+        repeated = [t for t in per_task if _count(t.get("graded")) >= 2]  # noqa: PLR2004  # a pair is the least that can disagree
+        all_pass = sum(1 for t in repeated if t.get("pass_rate") == 1)
+        all_fail = sum(1 for t in repeated if t.get("pass_rate") == 0)
+        used_rows: int | None = sum(
+            _count(t.get("graded")) for t in repeated if t.get("pass_rate") not in (0, 1, None)
+        )
+        if all_pass:
+            dropped["tasks all pass"] = all_pass
+        if all_fail:
+            dropped["tasks all fail"] = all_fail
+    else:
+        used_rows = None
+        if with_repeats - mixed > 0:
+            dropped["tasks unanimous (all pass or all fail)"] = with_repeats - mixed
+    if tasks - with_repeats > 0:
+        dropped["tasks with one graded rollout"] = tasks - with_repeats
+    if n_ungraded:
+        dropped["rows ungraded"] = n_ungraded
+    out.update({"given": tasks, "used": mixed, "used_rows": used_rows, "dropped": dropped})
+    reasons = ", ".join(f"{n} {why}" for why, n in dropped.items()) or "no dropped class named"
+    if method == "grpo":
+        why = (
+            "a group with one reward has zero advantage: GRPO's baseline is the group mean "
+            "(rlhfbook.com/c/11-policy-gradients.html), which is why DAPO (arXiv 2503.14476) "
+            "drops prompts at accuracy 0 and 1"
+        )
+    else:
+        why = (
+            f"{method} learns from a pass paired with a fail of the same prompt "
+            "(rlhfbook.com/c/12-direct-alignment.html), so a unanimous prompt gives no pair"
+        )
+    size = (
+        f"wai.profile({dataset!r})['mixed_tasks'] is how to size the set: simulate(mode='rl') "
+        f"with repeats= (RL_ROLLOUTS_PER_PROMPT, {RL_ROLLOUTS_PER_PROMPT}) samples each prompt "
+        "enough times to split, and wai.optimize(rows, mode='rl') keeps the prompts that did"
+    )
+    counts = f"{mixed} of {tasks} tasks" + (
+        f" ({used_rows} of {rows} rows)" if used_rows is not None else f" of {rows} rows"
+    )
+    if mixed == 0:
+        out["refuse"].append(
+            f"{method} on {dataset} would use {counts}: {reasons}. The run has nothing to "
+            f"learn from ({why}); it would spend the GPU and finish with reward_std 0 and "
+            f"grad_norm 0. {size}. {knob} starts it anyway."
+        )
+        return out
+    if mixed < tasks or mixed < min_mixed_tasks:
+        line = f"{method} on {dataset} will use {counts}: {reasons}."
+        if mixed < min_mixed_tasks:
+            passes = (
+                f"; at one prompt group per step, {int(steps)} steps is {int(steps) / mixed:.1f} "
+                "passes over them"
+                if steps
+                else ""
+            )
+            line += (
+                f" That is under min_mixed_tasks ({min_mixed_tasks}, TRAIN_MIN_MIXED_TASKS)"
+                f"{passes}; {why}. {size}; train(min_mixed_tasks=) moves the floor."
+            )
+        out["warn"].append(line)
+    return out
+
+
+def _check_selection(
+    dataset: str,
+    method: str,
+    *,
+    steps: int | None,
+    check: str,
+    min_mixed_tasks: int,
+    api_key: str | None,
+    call: Callable[..., Any],
+) -> dict[str, Any] | None:
+    """Read the set's profile and apply ``selection_report`` under
+    ``check``: ``"require"`` raises ``TrainingSelectionError`` on a
+    refusal line and warns the rest, ``"warn"`` warns every line. A
+    profile that cannot be read is said, not a stop: the trainer still
+    owns the run."""
+    try:
+        out = call("GET", f"/datasets/{dataset}/profile", api_key)
+        profile = out.get("profile") if isinstance(out, dict) else None
+    except Exception as exc:  # the platform, not the caller's data
+        profile = None
+        reason = f"{type(exc).__name__}: {exc}"
+    else:
+        reason = "the reply carried no profile"
+    if not isinstance(profile, Mapping):
+        warnings.warn(
+            f"could not read wai.profile({dataset!r}) before training ({reason}), so the "
+            "selection check did not run; read it yourself before spending the GPU, or pass "
+            'check="off" to skip it on purpose.',
+            stacklevel=3,
+        )
+        return None
+    report = selection_report(
+        profile, method=method, dataset=dataset, steps=steps, min_mixed_tasks=min_mixed_tasks
+    )
+    if check == "require" and report["refuse"]:
+        raise TrainingSelectionError(" ".join(report["refuse"] + report["warn"]))
+    for line in report["refuse"] + report["warn"]:
+        warnings.warn(line, stacklevel=3)
+    return report
+
+
 #: Rollout temperatures closer than this are the same temperature.
 _TEMPERATURE_TOLERANCE = 1e-9
 
@@ -626,6 +812,8 @@ def train(
     temperature: float | None = None,
     truncated: str | None = None,
     config: Mapping[str, Any] | None = None,
+    check: str = "require",
+    min_mixed_tasks: int = TRAIN_MIN_MIXED_TASKS,
     wait: bool = False,
     timeout: float | None = None,
     poll: float = TRAINING_POLL_S,
@@ -634,16 +822,35 @@ def train(
 ) -> TrainingRun:
     """Start a hosted fine-tune on a pushed dataset and return the run.
 
-    ``method`` is ``"sft"`` (LoRA on the passing rows), ``"grpo"`` (the
-    reference-first-action reward over the graded rows), ``"dpo"`` (a
-    pass against a fail per prompt, length matched) or ``"rm"`` (a reward
-    model on those same pairs; ``reward_model(run)`` is then a judge).
-    ``steps`` sets the optimizer steps for GRPO, DPO and RM, ``epochs``
-    the SFT epochs; each
-    method has a default. ``holdout`` names the eval set; it defaults to
-    the train set's split sibling from ``datasets.cut``. ``base_model``
-    overrides the trainer's base; only ``SERVED_BASES`` can be served
-    afterwards, and ``train`` warns when the run will not be.
+    ``method`` is ``"sft"`` (LoRA on every row of the set, as pushed: the
+    trainer does not filter on reward, so push ``scored.passes()``),
+    ``"grpo"`` (a grouped update over the prompts that have both a pass
+    and a fail; the reward is the trainer's own, ``reference first
+    action`` against the judge's gold, and is not a parameter on this
+    path), ``"dpo"`` (a pass against a fail per prompt, length matched) or
+    ``"rm"`` (a reward model on those same pairs; ``reward_model(run)`` is
+    then a judge). ``steps`` sets the optimizer steps for GRPO, DPO and
+    RM, ``epochs`` the SFT epochs; each method has a default. ``holdout``
+    names the eval set; it defaults to the train set's split sibling from
+    ``datasets.cut``. ``base_model`` overrides the trainer's base; only
+    ``SERVED_BASES`` can be served afterwards, and ``train`` warns when
+    the run will not be.
+
+    Which rows survive is checked before the GPU is spent (``check``,
+    default ``"require"``): ``train`` reads ``wai.profile(dataset)`` and
+    runs ``selection_report`` on it. SFT with failing rows is refused
+    (``TrainingSelectionError``): the trainer clones every row and the
+    model learns the failure (rlhfbook.com/c/10-rejection-sampling.html;
+    #396 measured it, tool use 0.99 to 0.49). A grouped method with no
+    mixed task is refused too, since a unanimous group carries no
+    advantage (#397 trained on 6 of 84 rows and ended at grad_norm 0).
+    Fewer mixed tasks than ``min_mixed_tasks`` (``TRAIN_MIN_MIXED_TASKS``,
+    32), or any dropped class at all, is a warning naming the count used
+    against the count given and the reason per class;
+    ``profile(dataset)["mixed_tasks"]`` is the number to size a grouped
+    set by. ``check="warn"`` says the same and starts the run;
+    ``check="off"`` does not read the profile. The report is on
+    ``run.selection``.
 
     The run is the same record ``training_run`` makes, so ``run.url`` is
     the loss curve, ``run.delta`` and ``get_run`` work unchanged, and the
@@ -684,6 +891,10 @@ def train(
         raise ValueError(f"method must be one of {', '.join(METHODS)}; got {method!r}")
     if not dataset:
         raise ValueError("dataset: the ds_... id of a pushed dataset")
+    if check not in CHECK_MODES:
+        raise ValueError(f"check must be one of {', '.join(CHECK_MODES)}; got {check!r}")
+    if int(min_mixed_tasks) < 1:
+        raise ValueError("min_mixed_tasks: at least 1 (TRAIN_MIN_MIXED_TASKS is 32)")
     if base_model not in SERVED_BASES:
         which = f"base_model={base_model!r}" if base_model else "the trainer's default base"
         warnings.warn(
@@ -731,6 +942,19 @@ def train(
             raise ValueError(f"config[{key!r}] collides with a named argument")
         body[str(key)] = value
     call = transport or _call
+    selection = (
+        _check_selection(
+            dataset,
+            method,
+            steps=int(steps) if steps else None,
+            check=check,
+            min_mixed_tasks=int(min_mixed_tasks),
+            api_key=api_key,
+            call=call,
+        )
+        if check != "off"
+        else None
+    )
     if temperature is not None:
         measured = _measured_temperature(dataset, api_key, call)
         if measured is not None and abs(measured - float(temperature)) > _TEMPERATURE_TOLERANCE:
@@ -751,6 +975,7 @@ def train(
     run._hosted = True
     run.dataset_id = str(dataset)
     run.method = method
+    run.selection = selection
     run._absorb(state)
     if isinstance(out, dict) and out.get("alreadyRunning"):
         warnings.warn(
@@ -1183,12 +1408,14 @@ class TrainerCallback(_callback_base()):  # type: ignore[misc]  # ty: ignore[uns
 __all__ = [
     "TrainerCallback",
     "TrainingRun",
+    "TrainingSelectionError",
     "attach_delta",
     "attach_holdout",
     "delete_run",
     "get_run",
     "list_runs",
     "models",
+    "selection_report",
     "serve",
     "train",
     "training_run",

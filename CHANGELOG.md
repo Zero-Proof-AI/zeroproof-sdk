@@ -3,6 +3,30 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `train` reads the set's profile before the GPU is spent (#396, #397).
+  `method="sft"` on a set with failing rows is refused with
+  `TrainingSelectionError`: the hosted trainer clones every row, so the
+  model learns the failure (#396 measured it: tool use 0.99 -> 0.49 on a
+  set that was 86% failures), and rejection sampling keeps the passes
+  (rlhf-book ch. 10). The message names the counts (all 84 rows, 72 of
+  which fail), the fix (`scored.passes()`) and the knob (`check="warn"`
+  trains on them anyway). A grouped method (`grpo`, `dpo`, `rm`) with no
+  task that has both a pass and a fail is refused the same way, since a
+  unanimous group carries no advantage (rlhf-book ch. 11, DAPO); fewer
+  than `min_mixed_tasks` (`TRAIN_MIN_MIXED_TASKS`, 32) or any dropped
+  class is a warning naming the count used against the count given, the
+  reason per dropped class (tasks all pass, all fail, one rollout, rows
+  ungraded), how many passes `steps` makes over the survivors, and that
+  `profile(ds)["mixed_tasks"]` is the number to size the set by (#397
+  trained on 6 of 84 rows, 3.3 passes, grad_norm 0, and said nothing).
+  `check="off"` skips the read; an unreadable profile is said and does
+  not stop the run. `selection_report(profile, method=)` is the pure
+  function behind it and lands on `run.selection`. The `train` docstring
+  now says what each method trains on and that hosted GRPO's reward is
+  the trainer's own.
+
 ## 0.76 (2026-09-18)
 
 - `ty` type-checks the package in CI beside mypy (`uv run ty check`,
