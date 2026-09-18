@@ -485,7 +485,10 @@ def stage_judge(args) -> None:
             print(f"  {tag}: no rows on disk, skipped")
             continue
         scored = wai.run_judge(rows, judge, judge_name="rubric_judge/qwen", tools=TOOLS)
-        out = list(scored)  # ScoredData.rows is a LIST, not a method (unlike SimulationData)
+        # On 0.64 ScoredData.rows was a plain list while SimulationData.rows was a
+        # method, so the usual `.rows()` idiom raised (#344, fixed on main in #351).
+        # list() works on both, so it stays.
+        out = list(scored)
         jsonl(OUT / f"{tag}.judged.jsonl", out)
         ok = sum(1 for r in out if r.get("reward") is not None)
         print(f"  judged {tag}: {ok}/{len(out)} rows returned a reward")
@@ -496,7 +499,10 @@ def stage_judge(args) -> None:
         if not rows:
             continue
         scored = wai.run_judge(rows, judge, judge_name="rubric_judge/qwen-pass2", tools=TOOLS)
-        out = list(scored)  # ScoredData.rows is a LIST, not a method (unlike SimulationData)
+        # On 0.64 ScoredData.rows was a plain list while SimulationData.rows was a
+        # method, so the usual `.rows()` idiom raised (#344, fixed on main in #351).
+        # list() works on both, so it stays.
+        out = list(scored)
         jsonl(OUT / f"{tag}.judged2.jsonl", out)
         print(f"  judged {tag} pass 2 (test-retest, n={len(out)})")
 

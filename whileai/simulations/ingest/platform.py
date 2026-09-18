@@ -23,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import warnings as _warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from whileai._env import getenv
@@ -594,9 +594,66 @@ def cuts(
     ``prompts`` seen, ``rl`` (the ones worth training on, with the train and
     holdout counts), ``sft``, and ``more`` (prompts that need more runs).
     Read it before ``cut()`` when you want to know what you would get.
+    ``format_cuts()`` prints it as the three lines the traces page shows.
     """
     query = urllib.parse.urlencode(_trace_filter(agent, since, filters))
     return _call("GET", f"/traces/cuts?{query}", api_key)
+
+
+def format_cuts(report: Mapping[str, Any], *, agent: str | None = None) -> str:
+    """What ``cuts()`` says, as the sentence the traces page leads with.
+
+    The answer, the counts behind it, and the line to run next::
+
+        3 prompts are worth training on
+        9 runs · 3 train · none held out
+        next: wai.cut(agent="my-agent", kind="rl")
+    """
+    rl = report.get("rl") or {}
+    sft = report.get("sft") or {}
+    kinds = report.get("kinds") or {}
+    more = report.get("more") or {}
+
+    def n(d: Any, key: str) -> int:
+        return int((d or {}).get(key) or 0)
+
+    def held(count: int) -> str:
+        return f"{count} held out" if count else "none held out"
+
+    # Which cut the sentence is about, the same rule the panel uses: RL when it
+    # has prompts, SFT when it does not.
+    if n(rl, "prompts"):
+        kind = "rl"
+        say = f"{n(rl, 'prompts')} prompts are worth training on"
+        counts = f"{n(rl, 'rows')} runs · {n(rl, 'train')} train · {held(n(rl, 'holdout'))}"
+    elif n(sft, "prompts"):
+        kind = "sft"
+        say = f"{n(sft, 'prompts')} prompts have a run worth copying"
+        counts = f"best run each · {n(sft, 'train')} train · {held(n(sft, 'holdout'))}"
+    elif not int(report.get("prompts") or 0):
+        # Nothing grouped at all. Which half is missing decides the next line:
+        # runs that are grouped but unscored can be graded now, from here.
+        kind = None
+        say = "Nothing to train on yet"
+        if int(report.get("noReward") or 0):
+            counts = f"{int(report['noReward'])} runs have a prompt, none has a pass or fail"
+            nxt = 'wai.send_score("<trace id>", 1.0)'
+        else:
+            counts = f"{int(report.get('runs') or 0)} runs, none says which prompt it ran"
+            nxt = "tag runs with zeroproof.scenario_id, see zeroproofai.com/docs/traces"
+    else:
+        kind = None
+        say = "Nothing to train on yet"
+        counts = (
+            f"{n(more, 'prompts')} prompts need more runs · "
+            f"{n(kinds.get('solved'), 'prompts')} already solved"
+        )
+        nxt = "send more runs of the same prompts, then read wai.cuts() again"
+
+    if kind:
+        where = f'agent="{agent}", ' if agent else ""
+        nxt = f'wai.cut({where}kind="{kind}")'
+    return f"  {say}\n  {counts}\n  next: {nxt}"
 
 
 def cut(

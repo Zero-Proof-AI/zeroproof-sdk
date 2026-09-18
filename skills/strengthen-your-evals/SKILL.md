@@ -6,10 +6,10 @@ description: >
   situation mix with arm_weights= and dimensions=, sizing a holdout, reporting a
   base-versus-trained delta, or deciding whether a straddling result needs more
   data. Covers how to find which knobs make YOUR agent fail and steer toward
-  them, eval sizing and power, the four ways an eval silently lies, and what
-  belongs on a card.
+  them, eval sizing and per-criterion power, the five ways an eval silently
+  lies, how to read a tie count, and what belongs on a card.
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # Strengthen your evals
@@ -126,7 +126,15 @@ assumed the middle planned for 6.5 points resolvable when its own data resolved
 4.4. **Effective sample is PROMPTS, not rollouts** — raising `repeats` sharpens
 each prompt's estimate and does not narrow a bootstrap over prompts.
 
-## 4. The four ways an eval silently lies
+**Size per criterion, not per row.** Count how many times each criterion
+actually FAILS in the source set. Under about 30 failures it cannot be
+measured, so it cannot show improvement either: a model could fix it
+completely and the eval would not move. One 12-criterion rubric had six
+criteria failing 0-9 times in 337 trajectories — half the rubric invisible to
+its own holdout while the aggregate pass rate looked healthy. Over-sample those
+situations deliberately, or say on the card that the criterion is unmeasured.
+
+## 4. The five ways an eval silently lies
 
 **The simulated user runs on the model under test.** Pin it: `user_model=`, the
 same on both arms. Unpinned, the two arms face different customers and the delta
@@ -139,6 +147,23 @@ failing, so the loss is never random and always flatters. One lane's base moved
 
 **A fixed task set pins less than you think.** `tasks=` pins the opening prompt;
 everything after it is still generated. Check turn counts across arms.
+
+**An arm answered but did not FINISH.** Checking that both arms produced text
+is not enough. One run had both arms answer 150/150 with zero empty replies and
+passed its gate, while the base was cut off mid-sentence on **96 of 150 rows
+(64%)** against 16 for the trained arm. A judge reads an unfinished reply as
+worse, so a 53-point completion gap is a confound wearing the shape of a result.
+
+Record `finish_reason` **at generation time**; it cannot be recovered from text
+afterwards. Gate on three numbers per arm, not one: answer rate, truncation
+rate, and the **gap between arms** (fail above 10 points). A per-arm threshold
+alone will pass 14/139 against 0/139.
+
+Raising the budget once is usually not enough: one lane measured 64% base
+truncation at 512 tokens, 10.7% at 1024, and 0.0% only at 2048. And when the
+trait being judged is itself about length, the cap bounds the quantity under
+measurement — too low clips the base toward brevity, too high lets it ramble.
+The only defensible cap is one **neither arm reaches**.
 
 **The world confirms what the agent claims.** A mocked world that echoes call
 arguments back as record fields will confirm any assertion, and a grounding
@@ -157,14 +182,71 @@ sample size: "the effect is smaller than +0.045 on this task" is a finding.
 
 On binary rewards, report how many prompts actually moved alongside the interval.
 
+### A narrow interval around zero is the one to distrust
+
+Normally that is the strongest null there is: measured precisely, no effect.
+It is also what a **diluted** eval looks like, and then it means the opposite.
+
+Rows where the criterion cannot fail add no variance, so they narrow the
+interval while shrinking the estimate. At fixed n the mean scales as `(1-f)`
+and the width as `sqrt(1-f)`, so the effect shrinks FASTER than the interval
+and significance goes in both the bootstrap and the sign test. Measured on 118
+real paired deltas: at f=0 the delta was +0.071 excluding zero with 53 ties; at
+f=0.4, +0.048 and no longer excluding zero, with 76 ties.
+
+**Report the tie count next to every interval.** It is the only thing that
+separates the readings, and it is usually already in your sign test, unread.
+A high tie count has three causes and the count alone cannot tell them apart:
+
+| ties mostly at | cause | what to do |
+|---|---|---|
+| **1** | saturation, nothing could fail | you need a HARDER eval |
+| **0**, criterion could not fire | dilution, no information | recompose; more prompts buys more ties |
+| **0**, criterion COULD fire, both arms fail | **floor — a real shared failure** | **report it. This is a result.** |
+
+The last two are identical in the count. Only knowing whether the criterion
+could fire separates "we asked a question the situation could not answer" from
+"both models genuinely cannot do this". Getting it wrong is expensive in one
+direction: a lane that hits a floor effect and files it as dilution will
+recompose its eval and delete a true negative.
+
+### Never average a measure the model should pass with one it is expected to fail
+
+This presents identically — high ties, narrow straddling interval — and has a
+different fix. A voice eval of 150 prompts read **+0.067 with a failing sign
+test (p=0.064)** and 126 ties. Split by kind:
+
+| subset | n | base -> trained | sign test |
+|---|---|---|---|
+| ask: does it hold the trait | 97 | 0.062 -> 0.186 | **p=0.017, clears** |
+| strip: does it survive being told to drop it | 53 | 0.038 -> **0.000** | p=1 |
+
+The headline failed only because a robustness probe the trained model fails
+**by construction** sat in the denominator: 51 of its 53 rows tied. Recomposing
+would not have helped — both measures are legitimate and they point opposite
+ways. Report them separately and say which is the headline. The strip half was
+also the more interesting result: training COST the model the ability to drop
+the trait on request.
+
 ## 6. On the card
 
 The numbers, the eval size, the resolvable effect at that size, the arm and tier
-mix the set was drawn with, and graded-count per arm. That mix is what lets a
+mix the set was drawn with, graded-count per arm, **truncation rate per arm**,
+and **the tie count next to the interval**. That mix is what lets a
 reader know whether a 0.95 pass rate means a strong model or an easy holdout.
 
 ## Grounding
 
+- **ch. 6 (policy gradients)**: filter out groups whose rollouts all score alike
+  (DAPO dynamic sampling) — they carry no signal. This is why the
+  failure-capable fraction in section 1 is the ceiling, not a nice-to-have.
+- **ch. 7 (reasoning)**: difficulty-filter to the 0.2-0.8 solve band, since 0%
+  and 100% solve rates give no gradient. This backs sections 1 and 2.
+- **ch. 9 (rejection sampling)**: a score-selected run needs a random-selection
+  control at the same row count. Without it, "the base had no headroom" and
+  "our selection carried no signal" are the same observation. Measured on one
+  lane: reward-selected beat random-selected by **+0.246 [+0.185, +0.307]**
+  while random-selected did not beat base at all.
 - ch. 16 (evaluation): bootstrap over prompts, pass@1 with pass^k, decontamination.
 - ch. 14 (over-optimization): the symptoms to watch beside any delta.
 - ch. 5 and ch. 12: a judge is a reward model; measure agreement, length bias and

@@ -3,6 +3,57 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `str(tracked.verdict())` says "beats" or "trails" only when the difference
+  interval excludes zero and the delta clears the behavior's declared
+  `noise_floor`. It said "beats" with no interval on one side and with an
+  interval that included zero, stored the noise floor and never read it, and
+  never said what the number rests on. A missing interval now reads "not a
+  result", an interval that includes zero reads "about the same", a delta
+  inside the re-run band reads "not a result", the count of other behaviors
+  that came out lower says it is on point estimates, and the line ends with
+  judge agreement and n, prefixed "unproven:" when n is under 50, agreement
+  is under 0.8 or unmeasured, or the training reward is the judge (rlhf-book
+  ch. 16: a difference inside the run-to-run spread is not a result). `Score`
+  refuses NaN and inf; `run.score()` warns on a missing or short `n`. The
+  README states the difference-interval rule the platform applies, and the
+  report-run recipe computes its offline verdict from the score table with
+  that rule instead of printing a canned one.
+- `format_cuts(wai.cuts(...))` prints the summary as the sentence the traces
+  page leads with, instead of the dict a researcher was left to read. The call
+  answers the right question and printing it was 3.5 KB of JSON ending in
+  `groups`, one entry per prompt with its text; the twin of `format_markers`
+  and `format_stages` was the missing half. Three lines: the answer
+  (`3 prompts are worth training on`), the counts behind it (`9 runs · 3 train
+  · none held out`), and the line to run next — `wai.cut(agent=..., kind="rl")`
+  when there is something to cut, `wai.send_score(...)` when the runs are
+  grouped but unscored, so no state ends on a dead stop. `rl.support` stays in
+  the payload and out of what gets printed.
+- Naming a dataset from the SDK works. `otel_env(dataset=...)` and
+  `ingest_traces(..., dataset=...)` set `whileai.dataset`, and the gate names
+  the dataset from `zeroproof.dataset` alone — so every batch sent the
+  documented way landed in a dataset called `traces` whatever name was asked
+  for, and the 202 said so in a field nobody reads twice. Both keys are now
+  written. Same one-line fix in `recipes/01-simulate/agent-behavior`, whose
+  `--dataset` flag was silently ignored for the same reason.
+
+## 0.65 (2026-09-18)
+
+- `whileai.platform`: report what you trained so a person can decide on
+  while.ai/platform/runs. `track(name_or_agent_object, model=, harness=,
+  frontier=)` returns a `Tracked` handle (no `Agent` class: your framework
+  has one); it reads name, model, instructions and tools off an OpenAI
+  Agents SDK, Pydantic AI, LangGraph or Claude Agent SDK object by
+  attribute, and the harness fingerprint is the harness version. Typed
+  end to end with pydantic (now a core dependency): `Behavior` (frozen
+  `test_version`, `n`, `Judge` agreement and length bias, `noise_floor`,
+  `contamination`, `reward_is_judge`), `RunSpec`, `TrainPoint`, `Score`,
+  `LiveDay` out; `Dashboard` and `Verdict` back. `tracked.run(...)` gives
+  a `Run` with buffered `log`, `score` on every behavior, `finish`, and
+  the shape `wai.TrainerCallback` calls. Each model's docstring names the
+  rlhfbook.com chapter it comes from. Recipe `recipes/04-train/report-run/`.
+
 ## 0.64 (2026-09-18)
 
 - `holdout_size` measures the per-task paired sd instead of modelling it

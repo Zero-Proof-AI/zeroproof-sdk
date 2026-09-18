@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import sys
+from unittest import mock
+
 import pytest
 
 from whileai.simulations.score.logprobs import mean_kl
-from whileai.simulations.score.reference import reference_logprobs, score_turns
+from whileai.simulations.score.reference import (
+    REF_KEYS,
+    _chat_url,
+    _post,
+    reference_logprobs,
+    score_turns,
+)
 
 END = "<|im_end|>"
 
@@ -159,3 +168,290 @@ def test_endpoint_without_prompt_logprobs_is_a_clear_error():
             post=plain,
             model="m",
         )
+
+
+# --------------------------------------------------- reaching the endpoint
+
+
+@pytest.mark.parametrize(
+    "spec, expected",
+    [
+        ("serve.example", "https://serve.example/v1/chat/completions"),
+        ("https://serve.example", "https://serve.example/v1/chat/completions"),
+        ("https://serve.example/v1", "https://serve.example/v1/chat/completions"),
+        ("https://serve.example/v1/", "https://serve.example/v1/chat/completions"),
+        (
+            "https://serve.example/v1/chat/completions",
+            "https://serve.example/v1/chat/completions",
+        ),
+    ],
+)
+def test_every_spelling_of_a_base_url_reaches_one_endpoint(spec, expected):
+    # A caller writes the endpoint four different ways; all four must hit
+    # the same URL, or the reference is silently scored somewhere else.
+    assert _chat_url(spec) == expected
+
+
+def test_a_failing_endpoint_names_the_url_and_the_status():
+    class Res:
+        status_code = 503
+        text = "upstream is warming up" * 40
+
+    sent: dict = {}
+
+    class FakeRequests:
+        @staticmethod
+        def post(url, headers, json, timeout):
+            sent.update(url=url, headers=headers, body=json, timeout=timeout)
+            return Res()
+
+    with (
+        mock.patch.dict(sys.modules, {"requests": FakeRequests}),
+        pytest.raises(RuntimeError) as err,
+    ):
+        _post("https://serve.example/v1/chat/completions", "zp_key", {"model": "m"}, 30.0)
+    message = str(err.value)
+    assert "https://serve.example/v1/chat/completions" in message
+    assert "503" in message and "upstream is warming up" in message
+    # The body is truncated, so a megabyte of HTML cannot become the error.
+    assert len(message) < 400
+    assert sent["headers"]["Authorization"] == "Bearer zp_key"
+    assert sent["timeout"] == 30.0
+
+
+def test_no_key_sends_no_authorization_header():
+    class Res:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"ok": True}
+
+    seen: dict = {}
+
+    class FakeRequests:
+        @staticmethod
+        def post(url, headers, json, timeout):
+            seen.update(headers)
+            return Res()
+
+    with mock.patch.dict(sys.modules, {"requests": FakeRequests}):
+        assert _post("https://serve.example/v1/chat/completions", "", {}, 5.0) == {"ok": True}
+    assert "Authorization" not in seen
+    assert seen["Content-Type"] == "application/json"
+
+
+def test_without_a_transport_the_endpoint_comes_from_the_backend_spec(monkeypatch):
+    # The default path: no transport=, so the URL and key are built from
+    # ``ref`` and the environment. Only the HTTP call itself is replaced.
+    server = FakeServer()
+    calls: list[tuple[str, str, float]] = []
+
+    def fake_post(url, key, body, timeout):
+        calls.append((url, key, timeout))
+        return server(body)
+
+    monkeypatch.setattr("whileai.simulations.score.reference._post", fake_post)
+    monkeypatch.setenv("WHILEAI_API_KEY", "zp_from_env")
+    rows = [
+        {
+            "prompt": "p",
+            "final_text": "r",
+            "steps": [],
+            "messages": [{"role": "user", "content": "p"}, {"role": "assistant", "content": "r"}],
+        }
+    ]
+    report = reference_logprobs(
+        rows, "vllm:Qwen/Qwen3-4B@https://serve.zeroproofai.com/v1", timeout=42.0
+    )
+    assert report["n_rows"] == 1
+    url, key, timeout = calls[0]
+    assert url == "https://serve.zeroproofai.com/v1/chat/completions"
+    assert key == "zp_from_env"
+    assert timeout == 42.0
+
+
+def test_an_explicit_api_key_wins_over_the_environment(monkeypatch):
+    server = FakeServer()
+    keys: list[str] = []
+
+    monkeypatch.setattr(
+        "whileai.simulations.score.reference._post",
+        lambda url, key, body, timeout: (keys.append(key), server(body))[1],
+    )
+    monkeypatch.setenv("WHILEAI_API_KEY", "zp_from_env")
+    rows = [
+        {
+            "prompt": "p",
+            "final_text": "r",
+            "steps": [],
+            "messages": [{"role": "user", "content": "p"}, {"role": "assistant", "content": "r"}],
+        }
+    ]
+    reference_logprobs(rows, "vllm:m@https://serve.zeroproofai.com/v1", api_key="zp_explicit")
+    assert keys and set(keys) == {"zp_explicit"}
+
+
+# ------------------------------------------- what the reference is shown
+
+
+def test_system_prompt_and_tools_override_what_the_source_carried():
+    # A row list carries neither, so these are the only way the reference
+    # sees the prompt the policy saw. Scoring under a different prompt is
+    # not a KL, and nothing else in the report would say so.
+    server = FakeServer()
+    tools = [{"type": "function", "function": {"name": "lookup_invoice", "parameters": {}}}]
+    rows = [
+        {
+            "prompt": "p",
+            "final_text": "r",
+            "steps": [],
+            "messages": [{"role": "user", "content": "p"}, {"role": "assistant", "content": "r"}],
+        }
+    ]
+    reference_logprobs(
+        rows,
+        "vllm:m@https://x/v1",
+        system_prompt="you are a billing agent",
+        tools=tools,
+        transport=server,
+    )
+    assert server.calls, "nothing was sent"
+    for body in server.calls:
+        assert body["messages"][0] == {"role": "system", "content": "you are a billing agent"}
+        assert body["tools"] == tools and body["tool_choice"] == "none"
+
+
+def test_chat_template_kwargs_reach_every_request():
+    # Qwen3 samples with enable_thinking=False; if the reference renders
+    # with thinking on, the token spans do not line up and mean_kl is a
+    # template artifact. Both calls per turn must carry it.
+    server = FakeServer()
+    rows = [
+        {
+            "prompt": "p",
+            "final_text": "r",
+            "steps": [],
+            "messages": [{"role": "user", "content": "p"}, {"role": "assistant", "content": "r"}],
+        }
+    ]
+    reference_logprobs(
+        rows,
+        "vllm:m@https://x/v1",
+        chat_template_kwargs={"enable_thinking": False},
+        transport=server,
+    )
+    assert len(server.calls) == 2
+    for body in server.calls:
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+# ------------------------------------------------- degenerate server replies
+
+
+def test_positions_the_server_cannot_explain_are_skipped_not_guessed():
+    # A position with no usable record contributes nothing: no token is
+    # counted and no logprob is invented. Under-counting is recoverable
+    # (token_count_gap shows it); a guessed logprob is not.
+    class Sparse(FakeServer):
+        def __call__(self, body):
+            out = super().__call__(body)
+            entries = out.get("prompt_logprobs")
+            if entries:
+                out["prompt_token_ids"] = None
+                # Inside the scored span: not a mapping; a mapping holding
+                # no record; a record whose logprob is not a number.
+                entries[-5] = "junk"
+                entries[-4] = {"a": 1}
+                entries[-3] = {"7": {"logprob": None, "rank": 1, "decoded_token": "x"}}
+            return out
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "a b c d e"},
+    ]
+    # The reply is 5 tokens plus the end token; 3 of those 6 positions
+    # come back unusable.
+    total, count, turns = score_turns(messages, post=Sparse(), model="m")
+    assert (turns, count) == (1, 3)
+    assert total == pytest.approx(-3.0)
+
+
+def test_an_entry_keyed_by_the_token_id_itself_is_still_found():
+    # vLLM keys prompt_logprobs by token id; JSON makes those strings, but
+    # a transport that hands back parsed objects keeps them as ints.
+    class IntKeyed(FakeServer):
+        def __call__(self, body):
+            out = super().__call__(body)
+            entries = out.get("prompt_logprobs")
+            if entries:
+                out["prompt_logprobs"] = [
+                    e if e is None else {int(k) if k.isdigit() else k: v for k, v in e.items()}
+                    for e in entries
+                ]
+            return out
+
+    messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "a b"}]
+    total, count, turns = score_turns(messages, post=IntKeyed(), model="m")
+    assert (count, turns) == (3, 1) and total == pytest.approx(-3.0)
+
+
+def test_a_row_with_no_assistant_turn_is_skipped_without_an_error():
+    server = FakeServer()
+    rows = [{"prompt": "p", "final_text": "", "steps": [], "messages": [{"role": "user", "x": 1}]}]
+    report = reference_logprobs(rows, "vllm:m@https://x/v1", transport=server)
+    assert report == {
+        "n_rows": 0,
+        "n_skipped": 1,
+        "n_tokens": 0,
+        "model": "m",
+        "token_count_gap": None,
+        "errors": [],
+    }
+    assert not any(key in rows[0] for key in REF_KEYS)
+
+
+def test_the_error_list_is_capped_but_every_skip_is_counted():
+    # A batch where the endpoint is down must not return a 200-line report;
+    # n_skipped is the number to read, errors is the sample.
+    def broken(body):
+        raise RuntimeError("endpoint refused the connection")
+
+    rows = [
+        {
+            "prompt": f"p{i}",
+            "final_text": "r",
+            "steps": [],
+            "messages": [
+                {"role": "user", "content": f"p{i}"},
+                {"role": "assistant", "content": "r"},
+            ],
+        }
+        for i in range(12)
+    ]
+    report = reference_logprobs(rows, "vllm:m@https://x/v1", transport=broken, concurrency=2)
+    assert report["n_rows"] == 0 and report["n_skipped"] == 12
+    assert len(report["errors"]) == 5
+    assert all("endpoint refused the connection" in e for e in report["errors"])
+
+
+def test_token_count_gap_reports_the_mean_distance_from_the_policy():
+    # n_tokens on the row is the policy's count; the gap is the check that
+    # the two sides share a tokenizer, and so that mean_kl is a KL.
+    server = FakeServer()
+    rows = [
+        {
+            "prompt": "p",
+            "final_text": "a b",
+            "steps": [],
+            "n_tokens": n,
+            "messages": [
+                {"role": "user", "content": "p"},
+                {"role": "assistant", "content": "a b"},
+            ],
+        }
+        for n in (3, 5)
+    ]
+    report = reference_logprobs(rows, "vllm:m@https://x/v1", transport=server)
+    # The reference counts 3 tokens ("a", "b", end): gaps of 0 and 2.
+    assert report["n_rows"] == 2 and report["token_count_gap"] == 1.0
