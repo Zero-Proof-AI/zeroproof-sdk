@@ -454,7 +454,10 @@ def delta_report(
     the after side to the before run's tasks (``tasks=``) or compare per
     tier with ``dataset_report``. A replay (``simulate(tasks=...)`` or
     ``runs=N``) keeps the writer of the run it replays on ``writer_model``,
-    so two runs of one call compare as one writer.
+    so two runs of one call compare as one writer. Situations nobody's
+    model wrote (a ``seeds=`` ask, the offline template writer, or a
+    replay of either) count as one writer for this check: nothing there
+    could have moved with the weights.
 
     ``headline_verdict`` is the verdict ``format_delta_report`` prints on
     its first line, in words: ``PASS`` only for a gain the report
@@ -962,8 +965,21 @@ def delta_report(
         and agent_a == agent_b
         and (cfg_a.get("policy_version") != cfg_b.get("policy_version"))
     )
+    # A situation nobody's model wrote cannot have moved with the weights:
+    # a seed ask, the template writer's text and a replay of either are one
+    # "offline" writer for this check (#375).
+    offline = {"seed", "template", "pinned", "callable-writer"}
+
+    def _writer_class(value: Any) -> Any:
+        return "offline" if str(value) in offline else value
+
     for key, knob in (("user_model", "user_model="), ("writer_model", "simulator=")):
-        if _both(key) and cfg_a[key] != cfg_b[key]:
+        same = (
+            _writer_class(cfg_a.get(key)) == _writer_class(cfg_b.get(key))
+            if key == "writer_model"
+            else cfg_a.get(key) == cfg_b.get(key)
+        )
+        if _both(key) and not same:
             ok = False
             not_comparable.append(key)
             warnings.append(
