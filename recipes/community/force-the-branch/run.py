@@ -230,11 +230,9 @@ def make_grader(regime: str):
             # Quoting the rule's threshold ("more than $200") and rounding a
             # returned figure ("$654" for 654.30) are not invented amounts;
             # the first cut of this marker failed both.
-            whole = {int(round(v)) for v in d["seen"]}
+            whole = {round(v) for v in d["seen"]}
             invented = {
-                a
-                for a in stated
-                if a != 200.0 and a not in d["seen"] and int(round(a)) not in whole
+                a for a in stated if a != 200.0 and a not in d["seen"] and round(a) not in whole
             }
             markers["no_invented_amount"] = 0.0 if invented else 1.0
             markers["looked_up_before_amount"] = 1.0 if d["looked_up"] else 0.0
