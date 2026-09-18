@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## 0.76 (2026-09-18)
+## 0.77 (2026-09-18)
 
 - `ty` type-checks the package in CI beside mypy (`uv run ty check`,
   under a second cold, where mypy takes about six). mypy stays the gate
@@ -13,6 +13,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   integrity floor in `hack_scan.py`, the audit-reason join in
   `grade_llm.py`, the calibration report in `optimize.py`, and the
   packaged schema path in `schema.py`.
+
+## 0.76 (2026-09-18)
 
 - A `run_std` handed to `delta_report` carries where it came from.
   `delta_report(run_std=x)` read `x` as the eval's exact spread and used
