@@ -85,3 +85,12 @@ for mixed-verdict counts, `eval_variance(a, b, c)` for self-noise,
 for the full comparison with per-marker regressions and the over-optimization
 verdict. This recipe is those calls in the order that stops you wasting a GPU
 hour.
+
+## Next
+
+Every check `ok` on your own arms: the interval is a result, so pick the rows
+worth training on with [`03-select/schema`](../../03-select/schema). A `BAD`
+on room to move or contains the behaviour: the eval needs harder situations
+before another run means anything, and
+[`eval-your-agent`](../eval-your-agent) is where the markers that make a
+criterion fail get written.
