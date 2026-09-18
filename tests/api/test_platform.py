@@ -325,7 +325,17 @@ def test_dashboard_and_verdict_are_typed():
         "a",
         transport=Fake(dashboard={"agent": {"id": "a", "name": "a"}, "verdict": {"serving": "v3"}}),
     )
-    assert str(empty.verdict()) == "?: no candidate scored against v3 yet"
+    assert str(empty.verdict()) == "?: v3 is serving; no newer candidate yet"
+    unscored = track(
+        "a",
+        transport=Fake(
+            dashboard={
+                "agent": {"id": "a", "name": "a"},
+                "verdict": {"serving": "v3", "candidate": "v4"},
+            }
+        ),
+    )
+    assert str(unscored.verdict()) == "?: no candidate scored against v3 yet"
 
 
 def test_missing_key_names_the_fix(monkeypatch, tmp_path):

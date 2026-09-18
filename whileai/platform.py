@@ -346,6 +346,8 @@ class Verdict(_Wire):
     def __str__(self) -> str:
         b = self.behavior or "?"
         if self.delta is None:
+            if self.serving and not self.candidate:
+                return f"{b}: {self.serving} is serving; no newer candidate yet"
             return f"{b}: no candidate scored against {self.serving or 'a served version'} yet"
         word = "beats" if self.delta >= 0 else "trails"
         if self.excludes_zero is None:
