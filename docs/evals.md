@@ -1,10 +1,13 @@
-# Evals for the agent you already have
+---
+title: "Evals for the agent you already have"
+description: "A pass rate with an interval, a table of where the agent fails, and a CI check that turns red when it gets worse. Offline, no key, seconds."
+---
 
 You have an agent. You want a number that says how often it does the job,
 an interval on that number, a table of where it fails, and a check that
 turns red in CI when it gets worse. This page is that path, start to
 finish. The runnable version is
-[`recipes/02-measure/eval-your-agent`](../recipes/02-measure/eval-your-agent)
+[`recipes/02-measure/eval-your-agent`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/eval-your-agent)
 (offline, no key, seconds).
 
 Names first, because they cost testers ten minutes: **zp, ZeroProof and
@@ -211,9 +214,8 @@ for note in scored.warnings:  # hollow-run checks; fix before reading the number
   tool returns an amount over $200, and the situation writer invents the
   amount, so on an unforced run the branch is reached at random: a
   marker that never fires, or reads 1.000 because it never had a chance
-  to fail. `wai.local_model(..., result_shapes={"lookup_invoice":
-  {"invoice_id": "INV-1000", "amount_usd": 900.0, "status": "open"}})`
-  pins it. Numbers move by up to about a third per call (`900.0` lands in
+  to fail. Pin it:
+  `wai.local_model(..., result_shapes={"lookup_invoice": {"invoice_id": "INV-1000", "amount_usd": 900.0, "status": "open"}})`. Numbers move by up to about a third per call (`900.0` lands in
   roughly 600 to 1200, `90.0` in 60 to 120), so pick a value whose whole
   range sits on one side of the threshold, and run the same pinned
   `tasks=` once per side. Measured on a billing agent: 44 lookups over

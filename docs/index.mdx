@@ -1,0 +1,115 @@
+---
+title: "whileai"
+description: "Training and eval data for agents that call tools. Install, run the sixty-second offline example, then pick a path."
+---
+
+`whileai` makes training and eval data for agents that call tools. Give it
+an agent, or just the agent's tools and system prompt. It writes the
+situations the agent might meet, runs the agent through them against a fake
+world that fails on purpose, and hands back every conversation as a row.
+You grade the rows with your own judge or a verifier. The package then does
+the bookkeeping that is easy to skip and expensive to get wrong: pass rates
+with intervals, difficulty bands for RL, a check that your judge agrees with
+people, decontamination against your eval set, and a scan for rewards the
+policy can game.
+
+```bash
+uv add whileai
+```
+
+Or `pip install whileai`. Python 3.10 to 3.13, one dependency, typed.
+This package used to be called `zeroproof`; that name still installs it.
+
+## Two ways in
+
+<CardGroup cols={2}>
+  <Card title="You only want evals" icon="flask" href="/evals">
+    Run `whileai init-evals` in your project. A pass rate with a 95% interval,
+    a table of where the agent fails, and a test that goes red in CI when it
+    gets worse.
+  </Card>
+  <Card title="You want to train" icon="dumbbell" href="/simulations">
+    Grade the same rows, keep the ones that carry signal, export to your
+    trainer or ours.
+  </Card>
+</CardGroup>
+
+## Sixty seconds, offline
+
+No key, no network. `seeded_agent` is a stand-in agent. It answers
+honestly most of the time and, on a labeled fraction of rollouts, does one
+thing wrong on purpose: hedges, flatters, or claims success after a tool
+failed. Each row records what it did in `seeded`, so you can check that
+your judge catches exactly those rows before you trust it on real ones.
+
+```python
+import whileai.simulations as wai
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_order",
+            "description": "Look up an order by id.",
+            "parameters": {
+                "type": "object",
+                "properties": {"order_id": {"type": "string"}},
+                "required": ["order_id"],
+            },
+        },
+    }
+]
+
+data = wai.simulate(
+    wai.seeded_agent(TOOLS),
+    tools=TOOLS,
+    system_prompt="Help customers with orders.",
+    simulator=False,  # no model
+    mode="rl",
+    repeats=4,
+    repeat_policy="fixed",
+    budget=64,
+)
+scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})
+print(scored.pass_at)
+```
+
+```
+pass@1 0.67 [0.55..0.78] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.33 (16 groups, k=4)
+```
+
+pass@1 is the pass rate over tasks with a bootstrap interval. pass^4 is
+how often all four rollouts of a task pass. Headroom is pass@4 minus
+pass@1, the gap an RL update could close.
+
+To use your own agent, pass any callable that takes the user message and
+returns `{"steps": [...], "final_text": "..."}`. To use a model, pass a
+spec string: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
+or `ollama:<model>`. With no `agent=` at all, the run uses the Qwen we
+host, on your key from `whileai login`, and Phi-4 grades. The judge is
+never the model it is judging.
+
+## The loop
+
+| Step | Call | What it computes |
+|---|---|---|
+| Simulate | `simulate(agent, tools=, system_prompt=, mode="rl", repeats=k)` | covering array over tools, world state and user stance; k rollouts per prompt; scheduled tool faults |
+| Grade | `data.grade(judge=)`, `verify.MathEqual`, `verify.CodeExec` | reward per rollout under one contract; verifiable rewards |
+| Validate the judge | `judge_trust`, `judge_probes` | agreement and Cohen's kappa against human gold; length bias; exploit probes |
+| Measure | `pass_at`, `delta_report`, `eval_variance`, `holdout_size` | pass@1, pass^k, pass@k with bootstrap intervals over tasks; paired delta with a permutation p-value; noise band; power |
+| Select | `optimize(mode="rl"\|"sft")`, `build_preference_pairs`, `curriculum` | 20 to 80% difficulty band, unanimous-group drop, rejection sampling, length-matched pairs, curriculum |
+| Guard | `decontaminate`, `hack_scan`, `trace_markers`, `HackMonitor` | overlap with the eval set; reward-feature correlation within task against a shuffle floor; trajectory lies |
+| Train and export | `export_dataset`, `export_environment`, `train`, `serve` | loss masks; a `verifiers` environment for GRPO; hosted LoRA SFT, GRPO, DPO, RM |
+
+Where each method comes from, with numbered references, is in the
+[README](https://github.com/whilehq/whileai-sdk#references). The knob
+tables and every gate are in the [reference](/reference). Every public
+call, with its signature and docstring, is under API in the sidebar; those
+pages are generated from the package on each release, so they cannot drift.
+
+## Worked recipes
+
+Runnable, one folder each, offline where the method allows it:
+[recipes/](https://github.com/whilehq/whileai-sdk/tree/main/recipes). The
+same paths as skills a coding agent can load are in
+[skills/](https://github.com/whilehq/whileai-sdk/tree/main/skills).

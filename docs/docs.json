@@ -1,0 +1,98 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "While",
+  "description": "The whileai Python SDK: post-training data, evals and training loops for language-model agents.",
+  "colors": {
+    "primary": "#3F8F6B",
+    "light": "#5CB08A",
+    "dark": "#3F8F6B"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "https://withwhile.com"
+  },
+  "favicon": "/favicon.png",
+  "fonts": {
+    "heading": {
+      "family": "Inter"
+    },
+    "body": {
+      "family": "Inter"
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "PyPI",
+        "href": "https://pypi.org/project/whileai/"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/whilehq/whileai-sdk"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Platform",
+      "href": "https://withwhile.com/platform"
+    }
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Start",
+        "pages": [
+          "index",
+          "evals"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "simulations",
+          "engine",
+          "character-training",
+          "reward-hacking",
+          "safety-evals"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference"
+        ]
+      },
+      {
+        "group": "API",
+        "pages": [
+          "api/index",
+          "api/whileai",
+          "api/constants",
+          "api/data",
+          "api/environment",
+          "api/export",
+          "api/generate",
+          "api/ingest",
+          "api/monitor",
+          "api/run",
+          "api/schema",
+          "api/score",
+          "api/simulation",
+          "api/training",
+          "api/verify",
+          "api/world"
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/whilehq/whileai-sdk"
+    }
+  },
+  "seo": {
+    "indexing": "all"
+  }
+}

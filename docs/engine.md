@@ -1,8 +1,11 @@
-# The engine on one page
+---
+title: "The engine on one page"
+description: "How simulate() makes evals and training data in eight steps: coverage, a sandbox world with failure modes, and a judge validated before training."
+---
 
 How `simulate()` makes evals and training data. Combinatorial coverage of
 situations, a sandbox world with failure modes, and a judge validated
-before training. The longer read is [simulations.md](simulations.md); the
+before training. The longer read is [simulations.md](/simulations); the
 animated version is at
 [zeroproofai.com/docs/engine](https://zeroproofai.com/docs/engine).
 

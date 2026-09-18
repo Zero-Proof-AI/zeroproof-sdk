@@ -1,4 +1,7 @@
-# Character training with whileai
+---
+title: "Character training with whileai"
+description: "Change the weights so a model has a stable way of talking without a system prompt: sources, the recipe, and what to measure."
+---
 
 Character training changes the weights so a model has a stable way of
 talking without a system prompt telling it to. It is the same post-training
@@ -6,7 +9,7 @@ machinery as everything else (rlhfbook.com ch. 17), aimed at the manner of
 a reply instead of its correctness, and it is mostly a data pipeline: which
 phrases never appear, which replies get chosen over which. This page is the
 recipe as the SDK runs it. The worked example is
-[`recipes/03-select/character`](../recipes/03-select/character).
+[`recipes/03-select/character`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/character).
 
 ## What the sources say
 
