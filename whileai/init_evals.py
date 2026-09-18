@@ -174,13 +174,30 @@ def _returns_str(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool | None:
 
 
 def _takes_one_string(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """One required positional (the message), anything after it defaulted.
+
+    ``answer(message)``, ``answer(user_message: str, history=None)`` and
+    ``chat(text, *, session=None)`` all qualify: the wrapper calls the
+    function with one positional argument and lets the defaults stand.
+    """
     args = node.args
-    if args.vararg or args.kwonlyargs or len(args.posonlyargs) + len(args.args) != 1:
+    positional = args.posonlyargs + args.args
+    if args.vararg or not positional:
         return False
-    only = (args.posonlyargs + args.args)[0]
-    if only.annotation is None:
+    required = len(positional) - len(args.defaults)
+    if required != 1:
+        return False
+    if any(d is None for d in args.kw_defaults):
+        return False
+    first = positional[0]
+    if first.annotation is None:
         return True
-    return isinstance(only.annotation, ast.Name) and only.annotation.id == "str"
+    ann = first.annotation
+    if isinstance(ann, ast.Name):
+        return ann.id == "str"
+    if isinstance(ann, ast.Constant):
+        return ann.value == "str"
+    return True
 
 
 def _read_module(path: Path, root: Path) -> ModuleFacts | None:
@@ -496,6 +513,16 @@ def init_evals(
     if found.ids:
         print(
             _line("seed ids", ", ".join(found.ids) + " (read off your tool descriptions)"),
+            file=out_stream,
+        )
+    else:
+        print(
+            _line(
+                "seed ids",
+                f"none found: put the ids your world has (order numbers, account names) in "
+                f"SEEDS in {where}/run.py or in the tool descriptions, or every ask stops at "
+                "'which order?'",
+            ),
             file=out_stream,
         )
 

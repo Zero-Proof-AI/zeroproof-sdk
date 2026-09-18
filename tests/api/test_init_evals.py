@@ -260,3 +260,38 @@ def _load(path: Path, name: str):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_an_agent_with_defaulted_extra_parameters_is_found(tmp_path):
+    src = "\n".join(
+        [
+            "TOOLS = [{'name': 'lookup', 'description': 'x', 'input_schema': {'type': 'object'}}]",
+            "SYSTEM = 'Refund desk.'",
+            "def _run_tool(name, args):",
+            "    return {}",
+            "def answer(user_message: str, history: list | None = None) -> str:",
+            "    return 'ok'",
+            "",
+        ]
+    )
+    (tmp_path / "bot.py").write_text(src, encoding="utf-8")
+    from whileai.init_evals import scan
+
+    found = scan(tmp_path, tmp_path / "evals")
+    assert found.agent is not None and found.agent.ref == "bot:answer"
+    assert found.recorder is not None and found.recorder.ref == "bot:_run_tool"
+
+
+def test_an_agent_with_a_second_required_parameter_is_not_the_agent(tmp_path):
+    src = "\n".join(
+        [
+            "TOOLS = [{'name': 'lookup', 'description': 'x', 'parameters': {'type': 'object'}}]",
+            "def answer(message, session):",
+            "    return 'ok'",
+            "",
+        ]
+    )
+    (tmp_path / "bot.py").write_text(src, encoding="utf-8")
+    from whileai.init_evals import scan
+
+    assert scan(tmp_path, tmp_path / "evals").agent is None

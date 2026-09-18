@@ -3,6 +3,13 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `init-evals` finds an agent whose extra parameters have defaults
+  (`answer(message, history=None)`), which is how the first real bot it met
+  was written; and says when no real ids were read off the tool descriptions,
+  since placeholder asks then stop at "which order?" and the run is hollow.
+
 ## 0.61 (2026-09-17)
 
 - `whileai init-evals` writes the eval harness, instead of a coding agent
