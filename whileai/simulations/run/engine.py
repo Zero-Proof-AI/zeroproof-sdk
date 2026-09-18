@@ -62,13 +62,16 @@ from ..generate.coverage import (
 from ..generate.diversity import (
     MAX_NOVELTY_RESTARTS,
     NOVELTY_RESTART_FLOOR,
+    ORDINARY_SHARE,
     adaptive_allocator,
     allocator_slot_counts,
+    behavior_tier,
     cap_scenario_families,
     new_turn_stats,
     record_turns,
     sampling_plan,
     scenario_family,
+    set_ordinary_share,
 )
 from ..generate.embeddings import (
     EmbeddingArchive,
@@ -219,6 +222,10 @@ PROGRESS_EVERY_S = 10.0
 PROGRESS_EVERY_ROWS = 10
 #: runs smaller than this say nothing: they are over before a line helps
 PROGRESS_MIN_BUDGET = 10
+#: Rows before the realized difficulty mix is compared with the ask.
+TIER_MIX_MIN_ROWS = 20
+#: How far (in share) the shipped rows may land above the ask before the run says so.
+TIER_MIX_TOLERANCE = 0.10
 
 
 def progress_line(rows: int, cap: int, situations: int, elapsed: float) -> str:
@@ -1157,8 +1164,12 @@ class Run:
         self.walked_lock = threading.Lock()
         self.seen_prints: set[str] = set()
         self.generation_started = self.started
+        # ordinary_share lives in a context variable that a worker thread
+        # does not inherit (Python 3.10 to 3.13), so each pool sets it.
         self.scenario_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, c.scenario_concurrency)
+            max_workers=max(1, c.scenario_concurrency),
+            initializer=set_ordinary_share,
+            initargs=(c.ordinary_share,),
         )
         self.scenario_futs = []
         self.next_producer_round = 0
@@ -1178,7 +1189,11 @@ class Run:
         typical_n = min(c.completions_per_request, 3)
         self.writer_batch = max(1, c.scenarios_per_request * typical_n)
         self.writer_buffer = max(self.writer_batch * 2, min(self.flight * 2, 96))
-        self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=self.flight)
+        self.pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.flight,
+            initializer=set_ordinary_share,
+            initargs=(c.ordinary_share,),
+        )
         self.inflight = {}
         self.inflight_started: dict = {}
 
@@ -3044,6 +3059,7 @@ class Run:
             data.search["behavior_state"]["region_progress"] = region_progress(
                 data.search["behavior_state"], data.trajectories
             )
+        self._record_tier_mix()
         data.writer_model = self.writer_model
         data.user_model = self.user_model
         # One model writing the exam, sitting it, and playing the examiner's
@@ -3096,6 +3112,46 @@ class Run:
             data.save(str(c.out_path), meta=True)
         return data
 
+    def _record_tier_mix(self) -> None:
+        """What difficulty mixture the shipped rows carry, next to the ask.
+
+        Rows the mixer never sees (seeds, open asks, the per-arm quota,
+        cells with no stance) carry the ordinary label, so a run lands
+        above the share it asked for; a small run more so. The gap is
+        recorded, and when the caller set the dial and the gap passes ten
+        points the run says so and names the pin.
+        """
+        c = self.c
+        data = self.data
+        requested = ORDINARY_SHARE if c.ordinary_share is None else float(c.ordinary_share)
+        counts: dict[str, int] = {}
+        for t in data.trajectories:
+            dims = t.get("scenario_dimensions")
+            tier = str(t.get("tier") or "") or behavior_tier(dims if isinstance(dims, dict) else {})
+            counts[tier] = counts.get(tier, 0) + 1
+        rows = sum(counts.values())
+        realized = counts.get("ordinary", 0) / rows if rows else None
+        mix: dict[str, Any] = {
+            "requested_ordinary_share": round(requested, 4),
+            "realized_ordinary_share": None if realized is None else round(realized, 4),
+            "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+            "rows": rows,
+        }
+        if c.ordinary_share is not None and realized is not None and rows >= TIER_MIX_MIN_ROWS:
+            gap = realized - requested
+            if gap > TIER_MIX_TOLERANCE:
+                mix["note"] = (
+                    f"ordinary_share={requested:g} asked, {realized:.2f} drawn "
+                    f"({counts.get('ordinary', 0)} of {rows} rows). Open asks and cells "
+                    "with no stance count as ordinary, and the grid holds a fixed number of "
+                    "hard cells. For a set that is hard "
+                    "throughout, pin the axis: dimensions={'stance': ['boundary', "
+                    "'ambiguous', 'adversarial']}."
+                )
+                data.warnings.append(mix["note"])
+                log.warning(mix["note"])
+        data.search["tier_mix"] = mix
+
     def _finish_traces(self) -> None:
         """Record what the traces did to the run and drop generated rows
         that near-copy a source trace."""
@@ -3115,28 +3171,6 @@ class Run:
         state_record["allocation_gain"] = ALLOC_GAIN
         # region_progress is attached at the very end of simulate(), so
         # it measures the rows that ship: graded, leak-pruned.
-        # What mixture the run ACTUALLY drew, next to what was asked for.
-        # A dial that silently does not take is worse than no dial: the old
-        # mixer floored ordinary at 50% whatever the caller requested, and
-        # nothing in the output said so. Difficulty lives here -- measured on
-        # one agent, base pass rate was 0.685 on ordinary against 0.577 on
-        # boundary -- so a lane reading a flat result should be able to see
-        # whether it simply bought an easy set.
-        from ..generate.diversity import behavior_tier, current_ordinary_share
-
-        realized: dict[str, int] = {}
-        for t in data.trajectories:
-            tier = str(t.get("tier") or "") or behavior_tier(
-                t.get("scenario_dimensions") if isinstance(t.get("scenario_dimensions"), dict) else {}
-            )
-            realized[tier] = realized.get(tier, 0) + 1
-        total = sum(realized.values()) or 1
-        data.search["tier_mix"] = {
-            "requested_ordinary_share": round(current_ordinary_share(), 4),
-            "realized_ordinary_share": round(realized.get("ordinary", 0) / total, 4),
-            "counts": dict(sorted(realized.items(), key=lambda kv: -kv[1])),
-            "rows": total,
-        }
         data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(
             data.trajectories, self.trace_rows, embedder=self.resolved_embedder

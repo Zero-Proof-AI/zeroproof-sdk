@@ -53,11 +53,6 @@ _ALIAS_NAMES = {
 }
 _MOVED_NAMES = {
     "concurrency",
-    # Difficulty mixture. Measured on 289 base rollouts over two runs: base
-    # pass rate by tier was ordinary 0.685, adversarial 0.667, ambiguous 0.590,
-    # boundary 0.577. The default put ~69% of rows in the EASIEST tier, and the
-    # mixer floored ordinary at 50% regardless of what was asked for, so no
-    # lane could buy a harder set.
     "ordinary_share",
     "dimensions",
     "arm_weights",
@@ -354,6 +349,9 @@ class RunConfig:
     rubric: str | None
     # engine knobs
     concurrency: int
+    # the difficulty dial: share of situations drawn from the ordinary tier;
+    # None when the caller left it at the default
+    ordinary_share: float | None
     dimensions: Any
     # how the situation search splits across arms: structured, llm_guided,
     # open_ended, behavior_targeted, failure_mutation. None uses SEARCH_ARMS.
@@ -500,6 +498,8 @@ def resolve_run_config(
                 f"ordinary_share={ordinary_share} is outside 0..1; it is the share of "
                 "situations drawn from the ordinary tier, not a count"
             )
+    # Main-thread mixer calls read the context variable; the engine sets it
+    # again in each worker pool, which does not inherit it on 3.10 to 3.13.
     set_ordinary_share(ordinary_share)
 
     user_model = cfg.pop("user_model", None)
@@ -696,6 +696,7 @@ def resolve_run_config(
         llm_spec=llm_spec,
         rubric=(str(rubric).strip() or None) if rubric else spec_rubric(spec),
         concurrency=concurrency,
+        ordinary_share=ordinary_share,
         dimensions=dimensions,
         arm_weights=arm_weights,
         simulator=simulator,

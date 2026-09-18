@@ -21,10 +21,10 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   25 / 25 / 25.
 - Every run records `search["tier_mix"]`: the share asked for, the share the
   shipped rows carry, and per-tier counts. Rows the mixer never sees (open
-  asks, arm quotas, cells with no stance) count as ordinary, so a small run
-  lands above the share it asked for; when the gap is over ten points the run
-  says so in `data.warnings` and names `dimensions={"stance": [...]}` as the
-  way to pin it.
+  asks, arm quotas, seeds, cells with no stance) count as ordinary, so a
+  small run lands above the share it asked for; when `ordinary_share=` was
+  set and the gap is over ten points, the run says so in `data.warnings` and
+  names `dimensions={"stance": [...]}` as the way to pin it.
 - The share reaches the writer threads. It is carried in a context variable,
   which a worker thread does not inherit on Python 3.10 to 3.13, so a hosted
   writer would have mixed at the default whatever was asked for.
