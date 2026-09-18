@@ -555,23 +555,47 @@ def _sft_report(
     if report["eval_sourced"]:
         report["warning"] = _eval_sourced_warning(report["eval_sourced"], "selected row(s)")
     # Rejection sampling picks the best of N completions per prompt, and
-    # the published recipes use 10 to 30 (rlhf-book ch. 9); fewer makes
-    # the pick biased or noisy. With k=1 there is no pick at all, only a
-    # pass/fail filter, which is fine for a first SFT set but worth saying.
+    # the published recipes use 10 to 30 (REJECTION_SAMPLING_MIN_K,
+    # rlhfbook.com/c/10-rejection-sampling.html); fewer makes the pick
+    # biased or noisy. The note reads the MEAN, not the max: the max is the
+    # most optimistic statistic in the pool, and one prompt with 12
+    # completions silenced it for 500 prompts with one each (a measured
+    # pool ran mean k=1.07 and produced a null). When the median prompt has
+    # one completion there is no pick on most prompts, only a pass/fail
+    # filter, and ``top_per_prompt`` and ``random_per_prompt`` (the book's
+    # chance control) return the same rows; ``selection_effective`` says
+    # which operation ran so a card cannot claim a selection that did not
+    # happen.
     per_prompt: dict[str, int] = {}
     for row in rows:
         if isinstance(row, dict):
             key = " ".join(str(row.get("prompt") or "").lower().split())
             per_prompt[key] = per_prompt.get(key, 0) + 1
-    max_k = max(per_prompt.values(), default=0)
+    counts = sorted(per_prompt.values())
+    max_k = counts[-1] if counts else 0
+    mean_k = round(sum(counts) / len(counts), 2) if counts else 0.0
+    median_k = counts[len(counts) // 2] if counts else 0
+    singles = sum(1 for c in counts if c <= 1)
     report["completions_per_prompt_max"] = max_k
-    if 0 < max_k < REJECTION_SAMPLING_MIN_K:
+    report["completions_per_prompt_mean"] = mean_k
+    report["completions_per_prompt_median"] = median_k
+    report["prompts_with_one_completion"] = singles
+    if counts:
+        report["selection_effective"] = "pass_filter" if median_k <= 1 else select
+    if counts and mean_k < REJECTION_SAMPLING_MIN_K:
         report["note"] = (
-            f"at most {max_k} completion(s) per prompt; rejection-sampling selection "
+            f"completions per prompt: mean {mean_k}, median {median_k}, max {max_k}; "
+            f"{singles} of {len(counts)} prompts have one. Rejection-sampling selection "
             f"wants {REJECTION_SAMPLING_MIN_K} to 30 so the pick is not biased "
-            "(rlhfbook.com/c/10-rejection-sampling.html; Llama 3 samples 10 to 30). "
-            "Raise repeats= if you mean to choose among "
-            "completions rather than filter."
+            "(rlhfbook.com/c/10-rejection-sampling.html; Llama 3 samples 10 to 30)"
+            + (
+                ", and with one completion on the median prompt there is no pick at all, "
+                "only a pass/fail filter: top_per_prompt and random_per_prompt return the "
+                "same rows, so the random-selection control says nothing"
+                if median_k <= 1
+                else ""
+            )
+            + ". Raise repeats= if you mean to choose among completions rather than filter."
         )
     return report
 
