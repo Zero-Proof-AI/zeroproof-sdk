@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+from ..defaults import TRUNCATED_REPLY_CHARS
 from ..world.sandbox import placeholder_arguments
 
 _REFERENCE_KEY = re.compile(r"(^id$|_id$|^ref$|^key$)", re.I)
@@ -478,16 +479,22 @@ def trace_fault(trajectory: dict) -> str:
     return NO_FAULT
 
 
-#: A tool is dead when the Wilson 95% upper bound on its success rate is
-#: under DEAD_TOOL_R_MIN. Below three in ten a tool cannot carry a
-#: behaviour: the agent that calls it meets a miss on most turns, reports
-#: the miss, and the rubric grades the report instead of the behaviour.
-#: The bound, not the point rate, is the test, so a short run cannot
-#: accuse a tool on a handful of misses and a long run cannot excuse one
-#: on a handful of hits (4 of 612 succeeded in #287). Fewer than
-#: DEAD_TOOL_MIN_CALLS answered calls is no evidence at all.
+# DEAD_TOOL_R_MIN = 0.30: a tool is dead when the Wilson 95% upper bound
+# on its success rate is under it. Below three in ten a tool cannot carry
+# a behaviour: the agent that calls it meets a miss on most turns,
+# reports the miss, and the rubric grades the report instead of the
+# behaviour. The bound, not the point rate, is the test, so a short run
+# cannot accuse a tool on a handful of misses and a long run cannot
+# excuse one on a handful of hits (4 of 612 succeeded in #287). The cut
+# at 0.30 is convention, untested against neighbours.
 DEAD_TOOL_R_MIN = 0.30
+# DEAD_TOOL_MIN_CALLS = 3: fewer answered calls is no evidence at all;
+# with two, one miss puts the Wilson upper bound over any sane floor
+# (convention).
 DEAD_TOOL_MIN_CALLS = 3
+# REPEATED_CALL_LIMIT = 3: an identical call made this many times, when
+# the user did not ask for a repeat, is a loop and scores 0.5 (convention).
+REPEATED_CALL_LIMIT = 3
 
 
 def _planned_for(row: dict, tool: str) -> bool:
@@ -804,9 +811,11 @@ def conduct_grade(trajectory: dict, declared_tools: set[str] | None = None) -> d
         return _verdict(0.5, "repeated an earlier reply verbatim", fault_detected)
     if duplicate_call and not repetition_requested:
         return _verdict(0.5, "repeated identical call with identical result", fault_detected)
-    if max(counts.values(), default=0) >= 3 and not repetition_requested:
-        return _verdict(0.5, "repeated identical call 3+ times", fault_detected)
-    if len(raw_final.rstrip()) > 600 and not looks_finished(raw_final):
+    if max(counts.values(), default=0) >= REPEATED_CALL_LIMIT and not repetition_requested:
+        return _verdict(
+            0.5, f"repeated identical call {REPEATED_CALL_LIMIT}+ times", fault_detected
+        )
+    if len(raw_final.rstrip()) > TRUNCATED_REPLY_CHARS and not looks_finished(raw_final):
         return _verdict(0.5, "reply truncated at token cap", fault_detected)
     if fault_detected:
         return _verdict(1.0, "tool fault observed; conduct ok", True)

@@ -45,8 +45,10 @@ DEFAULT_CONCURRENCY = 32
 # PASS_THRESHOLD = 0.5: a reward under this is a failure. The outcome
 # label is binary, r in {0, 1} (rlhf-book ch. 7, outcome reward models;
 # ch. 14, verifiable rewards), so 0.5 is its midpoint and a partial
-# rubric score rounds to the nearer verdict. No source names another
-# cut.
+# rubric score (or the conduct advisory 0.5 for a truncated reply) rounds
+# to the nearer verdict. No source names another cut. The run loop's
+# graded-failure gate, score/ audits and the exporters count fails the
+# same way; import this rather than writing 0.5 again.
 PASS_THRESHOLD = 0.5
 
 # PASS_REWARD = 1.0: the reward a fully passing row carries; anything
@@ -66,13 +68,15 @@ SHORT_HASH_CHARS = 16
 # (convention, untested)
 MAX_COMPLETIONS_PER_REQUEST = 8
 
-# FAULT_STATUSES: a tool result ``status`` that means the call failed
+# FAULT_STATUSES = {error, timeout, not_found, denied, malformed}: a tool
+# result ``status`` that means the call failed
 # (the run's own vocabulary; a status outside this set is the tool's own
 # word, not a fault, #261). ``score.grading._KNOWN_FAULTS`` is the wider
 # alias table; this is the subset the engine re-rolls and mutates on.
 FAULT_STATUSES = frozenset({"error", "timeout", "not_found", "denied", "malformed"})
 
-# OK_STATUSES: a tool result ``status`` that means the call worked.
+# OK_STATUSES = {ok, success}: a tool result ``status`` that means the call
+# worked (the run's own vocabulary, #261).
 OK_STATUSES = frozenset({"ok", "success"})
 
 # LEAK_MIN_QUOTE_CHARS = 12: the shortest run of characters that counts as
@@ -184,6 +188,9 @@ STOP_GRACE_S = 5.0
 # DEAD_AGENT_BUDGET_MULTIPLE x budget, whichever is larger (#88).
 # (convention, untested)
 DEAD_AGENT_MIN_ERRORS = 16
+# DEAD_AGENT_BUDGET_MULTIPLE = 2: the budget multiple in that rule; twice
+# the rows asked for is more failures than any live agent produces.
+# (convention, untested)
 DEAD_AGENT_BUDGET_MULTIPLE = 2
 
 # ALLOC_GAIN = 4.0: how hard a hot trace region pulls cell weight toward
@@ -282,6 +289,223 @@ MAX_SAMPLES_PER_CALL = 8
 # tokenizers sit at 3.5 to 4.5 chars per token, so this over-counts and
 # the budget errs on the safe side (convention, untested on this data).
 CHARS_PER_TOKEN = 3
+
+# ---------------------------------------------------------------------
+# score: statistics
+# ---------------------------------------------------------------------
+#
+# The statistics every verdict in ``score/`` rests on. ``holdout_size``,
+# ``detectable_effect``, ``noise_band``, ``bootstrap_ci``, ``compare_runs``
+# and ``delta_report`` take these as keywords (``alpha=``, ``power=``,
+# ``level=``, ``n_boot=``); the constants are only their defaults.
+
+# ALPHA = 0.05: two-sided false-positive rate behind every interval and
+# verdict. The convention the evaluation literature runs on (Miller 2024,
+# arXiv:2411.00640, section 5, plugs alpha=0.05 into its power formula;
+# rlhf-book ch. 16 reports 95% intervals). Untested against any other value.
+ALPHA = 0.05
+# CI_LEVEL = 0.95: the interval every ``ci95`` key carries. ``1 - ALPHA`` so
+# the interval and the verdict agree: a delta whose interval excludes zero
+# at CI_LEVEL is the one a test at ALPHA rejects.
+CI_LEVEL = 1.0 - ALPHA
+# Z_95 = 1.96: the normal quantile at CI_LEVEL, rounded to the two decimals
+# every table prints (Miller 2024 writes the interval as 1.96 x SE). Kept
+# at 1.96 rather than 1.959964 so a printed band can be checked by hand;
+# the difference moves a band in the fourth decimal.
+Z_95 = 1.96
+# POWER = 0.8: the chance a holdout of the size ``holdout_size`` names
+# detects a real gain. beta = 0.20 is the example Miller 2024 (section 5)
+# and the classical power literature use; rlhf-book ch. 16 says the point
+# of a better eval is statistical power without naming a number.
+POWER = 0.8
+# BOOTSTRAP_DRAWS = 2000: resamples behind a percentile interval. Efron and
+# Tibshirani put the floor for percentile intervals at 1000; 2000 halves
+# the Monte Carlo error on the endpoints and still runs in well under a
+# second on a few hundred tasks. Convention above the floor, untested
+# against 1000.
+BOOTSTRAP_DRAWS = 2000
+# MIN_CI_TASKS = 3: tasks a bootstrap interval needs. Below three the
+# resampled statistic is one of a handful of arrangements of the data
+# itself, so the interval says nothing (convention, untested).
+MIN_CI_TASKS = 3
+# MIN_RERUNS = 3: re-runs of one eval before ``run_std`` is read as a
+# spread. Two runs give one difference, not a distribution; three is the
+# fewest that give a sample sd with two degrees of freedom (rlhf-book
+# ch. 16 on re-run variance; convention on the count).
+MIN_RERUNS = 3
+# BASE_PASS_RATE = 0.6: the before-side pass rate ``holdout_size`` assumes
+# when no rows are given. The centre of the 20-80 difficulty band, where a
+# binary task carries the most variance and the sizing is most
+# conservative. Measured lanes sat between 0.5 and 0.7 (#288).
+BASE_PASS_RATE = 0.6
+# ROLLOUTS_PER_TASK = 4: the per-task rollout count the sizing assumes and
+# the smallest k ``pass_at`` reports pass^k at. tau-bench (arXiv:2406.12045)
+# plots pass^k to k=8 from at least 3 trials; tau2-bench (arXiv:2506.07982)
+# runs every task 4 times and reports pass^1 and pass^4. Four is the
+# smallest count those benchmarks report a k-way number on.
+ROLLOUTS_PER_TASK = 4
+
+# ---------------------------------------------------------------------
+# score: difficulty band
+# ---------------------------------------------------------------------
+#
+# DIFFICULTY_BAND = (0.2, 0.8): keep tasks the current policy passes between
+# 20% and 80% of the time. rlhf-book ch. 14 ("Common Practices in Training
+# Reasoning Models"): difficulty filtering restricts RL prompts to those
+# the starting model solves 20-80% of the time, measured from N=16
+# samples. DAPO (arXiv:2503.14476) is the online form: groups with
+# accuracy 0 or 1 are dropped from the batch (G=16). The band edges are a
+# reported practice, not an ablation, so every selector takes ``band=``.
+DIFFICULTY_BAND: tuple[float, float] = (0.2, 0.8)
+# DIFFICULTY_BAND_ROLLOUTS = 16: rollouts per task the band is measured
+# from in the sources above (rlhf-book ch. 14 N=16; DAPO G=16). Below it
+# a task's band assignment carries a Wilson half-width near 0.3 at k=8.
+DIFFICULTY_BAND_ROLLOUTS = 16
+# REJECTION_SAMPLING_MIN_K = 10: completions per prompt a best-of-N pick
+# wants. Llama 3 (arXiv:2407.21783, section 4.2.2) samples K between 10 and
+# 30 per prompt; rlhf-book ch. 9 repeats the range. Fewer makes the pick a
+# filter, not a choice.
+REJECTION_SAMPLING_MIN_K = 10
+# RL_ROLLOUTS_PER_ASK = 8: the rollouts per ask ``recommend`` sizes an RL
+# run for; the same quantity as RL_ROLLOUTS_PER_PROMPT (mode="rl" k) under
+# the score/ name, so the two cannot drift. One value, one home.
+RL_ROLLOUTS_PER_ASK = RL_ROLLOUTS_PER_PROMPT
+
+# ---------------------------------------------------------------------
+# score: decontamination
+# ---------------------------------------------------------------------
+#
+# DECONTAM_NGRAM = 8: word n-gram behind the near-copy rule. Tulu 3
+# (arXiv:2411.15124) decontaminates on 8-gram overlap between training
+# prompts and evaluation prompts; rlhf-book ch. 16 cites the same rule.
+DECONTAM_NGRAM = 8
+# DECONTAM_OVERLAP = 0.8: share of a row's words one eval text has to
+# cover with shared 8-grams. The Llama 2 rule (80% of tokens). Tulu 3 uses
+# 50%; this package keeps 80% on purpose: template-written situations
+# share whole sentences that say nothing about which question was asked,
+# and at 50% the near-copy rule flags rows that never saw the eval
+# question (#286). ``overlap=`` sets it per call.
+DECONTAM_OVERLAP = 0.8
+# SEMANTIC_SIMILARITY = 0.85: cosine at or above which two prompts read as
+# one task to an embedder. Read off BGE-small (unrelated prompts score
+# about 0.55 there, paraphrases above 0.85, #286). SemDeDup
+# (arXiv:2303.09540) removes pairs within eps 0.03 to 0.07 of each other
+# on CLIP and OPT embeddings (cosine 0.93 or higher); that is a duplicate
+# threshold for pretraining text, not a paraphrase threshold for task
+# prompts, so this package sits lower and calibrates against the eval
+# set's own distinct-task similarity at run time.
+SEMANTIC_SIMILARITY = 0.85
+
+# ---------------------------------------------------------------------
+# score: judge floors
+# ---------------------------------------------------------------------
+#
+# MIN_GOLD = 50: human labels before a judge's accuracy number means
+# anything. rlhf-book ch. 7 ("Suggested Experiments"): a 50- to 200-example
+# held-out set is the useful size for tuning a reward model; below 50 the
+# Wilson interval on agreement is about +/-0.1 wide.
+MIN_GOLD = 50
+# MAX_GOLD_ASK = 200: the most labels the trust report will ask a person
+# for before it says the judge itself is the problem (the top of the same
+# 50-200 range).
+MAX_GOLD_ASK = 200
+# MIN_AGREEMENT = 0.8: Wilson lower bound of judge-human agreement a judge
+# has to reach. Zheng et al. (arXiv:2306.05685, MT-Bench): human-human
+# agreement is 81% and GPT-4 reaches 85% against humans, so a judge under
+# 80% agrees with people less than people do with each other.
+MIN_AGREEMENT = 0.8
+# MIN_KAPPA = 0.6: chance-corrected agreement floor. Landis and Koch (1977)
+# call 0.61-0.80 "substantial"; 0.6 is the bottom of that band. A 2025
+# sweep of 21 judges on MT-Bench measured kappa 0.38-0.51 against human
+# preference labels (arXiv:2606.19544), so this floor is demanding on
+# purpose: it asks for agreement beyond what raw accuracy hides.
+MIN_KAPPA = 0.6
+# JUDGE_CHECK_SAMPLE = 40: rows a judge check (perturbation, probes, the
+# verifier audit) re-judges by default. Enough that a 10% effect shows as
+# four flips; kept under MIN_GOLD because these checks cost a judge call
+# per row (convention, untested).
+JUDGE_CHECK_SAMPLE = 40
+# LENGTH_GAP_FLAG = 0.15: judge pass rate gap between short and long
+# replies with the same human label that reads as length bias. Zheng et
+# al. (arXiv:2306.05685) found a 91% failure rate on a verbosity attack
+# for GPT-3.5 and 9% for GPT-4; a 2025 sweep (arXiv:2606.19544) measured
+# verbosity correlations under 0.011 on current judges. 15 points sits
+# between the two eras: a judge over it is behaving like a 2023 judge.
+# Convention on the exact number.
+LENGTH_GAP_FLAG = 0.15
+# FLIP_FLAG = 0.10: share of verdicts that change on an identical re-judge,
+# on appended filler, or under a probe, before the judge is called
+# exploitable. Test-retest consistency of current judges is 0.89-0.99
+# (arXiv:2606.19544), so a tenth of verdicts moving is far outside the
+# measured range. Convention on the exact number.
+FLIP_FLAG = 0.10
+# POSITION_FLIP_FLAG = 0.2: share of pairs a pairwise judge decides
+# differently when A and B are swapped before its position bias is a
+# warning. Zheng et al. (arXiv:2306.05685, Table 2) measured 65%
+# consistency for GPT-4 (35% flipped) and 46% for GPT-3.5; the swap-both-
+# ways rule already turns a flip into a tie, so the flag marks a judge
+# whose prompt needs work, not a broken report. Convention on the number.
+POSITION_FLIP_FLAG = 0.2
+
+# ---------------------------------------------------------------------
+# score: judge payload
+# ---------------------------------------------------------------------
+#
+# What the LLM judge is shown. Every cap is a character budget on the JSON
+# the judge reads; ``grade_one``, ``apply_grade_llm`` and ``audit_grades``
+# take ``payload_chars=`` to move the total.
+
+# JUDGE_PAYLOAD_CHARS = 8000: the whole judge payload. About 2000 tokens,
+# which leaves a 4B hosted judge with an 8k window room for its system
+# prompt and reply. Measured: at this cap 37 of 120 rows on one paired
+# eval were being cut mid-JSON before #290 taught the payload to shrink
+# structure instead; the cap itself is the window, not a finding.
+JUDGE_PAYLOAD_CHARS = 8000
+# JUDGE_SITUATION_CHARS = 4000: the user request as the judge sees it.
+# Half the payload: a situation longer than this is a document, and the
+# verdict needs the reply and the steps more (convention, untested).
+JUDGE_SITUATION_CHARS = 4000
+# JUDGE_FINAL_TEXT_CHARS = 2000: the agent's final reply. A quarter of the
+# payload; a reply past it is judged on its first 2000 characters and the
+# cut is announced in the text (convention, untested).
+JUDGE_FINAL_TEXT_CHARS = 2000
+# JUDGE_POLICY_CHARS = 2000: the agent's policy or harness text, and each
+# judge-only field (principle, reference). Same budget as the reply
+# (convention, untested).
+JUDGE_POLICY_CHARS = 2000
+# JUDGE_MAX_TOKENS = 120: the judge's reply budget. Reason first, then a
+# score, in one sentence: 4B judges needed room for the sentence and
+# 120 tokens held every reply measured; a pairwise verdict is the same
+# shape. Raise it for a judge asked to explain at length.
+JUDGE_MAX_TOKENS = 120
+# JUDGE_TEMPERATURE = 0.0: a judge is read at zero for stable ratings
+# (rlhf-book ch. 7, LLM-as-judge prompt rules; Zheng et al.
+# arXiv:2306.05685 use temperature 0 for judging).
+JUDGE_TEMPERATURE = 0.0
+
+# ---------------------------------------------------------------------
+# score: reply truncation
+# ---------------------------------------------------------------------
+#
+# TRUNCATED_REPLY_CHARS = 600: a final reply longer than this that does not
+# end on terminal punctuation or a sign-off is read as cut by the token
+# cap (conduct advisory 0.5; junk for SFT). Short replies get the benefit
+# of the doubt: a one-line answer often ends on a number or a name.
+# Convention, untested; ``hygiene.is_truncated`` uses a looser 200 for its
+# report-only count.
+TRUNCATED_REPLY_CHARS = 600
+
+# ---------------------------------------------------------------------
+# score: reward hacks
+# ---------------------------------------------------------------------
+#
+# HACK_THRESHOLD = 0.3: |corr(reward, feature)| at or above this is flagged
+# as a shortcut the policy will learn. From the RLVR signal sweeps the
+# scan descends from: the endorsed feature cleared 0.5 and delimiter
+# hacks sat near 0.9, so 0.3 catches a hack before it dominates. Gao et
+# al. (arXiv:2210.10760) is the mechanism: optimising a proxy the gold
+# reward does not credit. Measured on our own lanes, not published.
+HACK_THRESHOLD = 0.3
 
 
 def knob(default: Any, *, lo: float | None = None, hi: float | None = None) -> Any:
@@ -574,3 +798,92 @@ def laplace(successes: float, trials: float, alpha: float = 1.0) -> float:
     """Laplace's rule of succession: ``(s + a) / (n + 2a)``. With ``a = 1``
     a rate seen 0 of 0 times is 1/2, 0 of 1 is 1/3, and so on."""
     return (float(successes) + alpha) / (float(trials) + 2.0 * alpha)
+
+
+__all__ = [
+    "AGENT_MAX_TOKENS_FLOOR",
+    "ALLOC_GAIN",
+    "ALPHA",
+    "BASE_PASS_RATE",
+    "BOOTSTRAP_DRAWS",
+    "CHARS_PER_TOKEN",
+    "CI_LEVEL",
+    "DEAD_AGENT_BUDGET_MULTIPLE",
+    "DEAD_AGENT_MIN_ERRORS",
+    "DECONTAM_NGRAM",
+    "DECONTAM_OVERLAP",
+    "DEFAULT_AVG_TURNS",
+    "DEFAULT_BUDGET",
+    "DEFAULT_CARDS_PER_WAVE",
+    "DEFAULT_COMPLETIONS_PER_REQUEST",
+    "DEFAULT_CONCURRENCY",
+    "DEFAULT_EXTRA_CARDS",
+    "DEFAULT_LLM_JUDGE_CONCURRENCY",
+    "DEFAULT_MIN_USER_TURNS",
+    "DEFAULT_POOL_SIZE",
+    "DEFAULT_PROBE",
+    "DEFAULT_SEED",
+    "DEFAULT_SELECT_TARGET",
+    "DEFAULT_WRITER_FLIGHT",
+    "DIFFICULTY_BAND",
+    "DIFFICULTY_BAND_ROLLOUTS",
+    "FAULT_STATUSES",
+    "FINGERPRINT_STEM_MIN_LEN",
+    "FLIP_FLAG",
+    "HACK_THRESHOLD",
+    "HOLDOUT_BUCKET_HEX_CHARS",
+    "HUNG_SLOT_S",
+    "JUDGE_CHECK_SAMPLE",
+    "JUDGE_CONCURRENCY_CAP",
+    "JUDGE_FINAL_TEXT_CHARS",
+    "JUDGE_MAX_TOKENS",
+    "JUDGE_PAYLOAD_CHARS",
+    "JUDGE_POLICY_CHARS",
+    "JUDGE_SITUATION_CHARS",
+    "JUDGE_TEMPERATURE",
+    "LEAK_MIN_QUOTE_CHARS",
+    "LENGTH_GAP_FLAG",
+    "MAX_COMPLETIONS_PER_REQUEST",
+    "MAX_GOLD_ASK",
+    "MAX_SAMPLES_PER_CALL",
+    "MIN_AGREEMENT",
+    "MIN_CI_TASKS",
+    "MIN_GOLD",
+    "MIN_KAPPA",
+    "MIN_RERUNS",
+    "OK_STATUSES",
+    "PARENT_HEAD_CHARS",
+    "PASS_REWARD",
+    "PASS_THRESHOLD",
+    "POSITION_FLIP_FLAG",
+    "POWER",
+    "PROGRESS_MIN_BUDGET",
+    "PROGRESS_MIN_ROWS_FOR_ESTIMATE",
+    "REJECTION_SAMPLING_MIN_K",
+    "REPORT_LIST_ITEMS",
+    "RL_FAULT_RATE",
+    "RL_ROLLOUTS_PER_ASK",
+    "RL_ROLLOUTS_PER_PROMPT",
+    "ROLLOUTS_PER_TASK",
+    "SATURATION_CAP",
+    "SCENARIO_ID_CHARS",
+    "SEMANTIC_SIMILARITY",
+    "SFT_PHRASINGS_PER_SITUATION",
+    "SHORT_HASH_CHARS",
+    "STOP_GRACE_S",
+    "SYSTEM_PROMPT_HEAD_CHARS",
+    "TIER_MIX_MIN_ROWS",
+    "TIER_MIX_TOLERANCE",
+    "TOOL_SCHEMA_SPAN_CHARS",
+    "TRANSIENT_BACKOFF_S",
+    "TRANSIENT_TRIES",
+    "TRUNCATED_REPLY_CHARS",
+    "Z_95",
+    "RunKnobs",
+    "knob",
+    "knob_bounds",
+    "knob_default",
+    "knob_names",
+    "laplace",
+    "resolve_knobs",
+]

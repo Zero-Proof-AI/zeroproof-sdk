@@ -60,6 +60,7 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
+from ..defaults import DIFFICULTY_BAND
 from .hygiene import coverage_warnings
 
 log = logging.getLogger("whileai.simulations")
@@ -331,9 +332,17 @@ class ScoredData:
         )
 
     def select_for_rl(
-        self, *, target: int = 1000, lo: float = 0.3, hi: float = 0.7, has_tools: bool = True
+        self,
+        *,
+        target: int = 1000,
+        lo: float = DIFFICULTY_BAND[0],
+        hi: float = DIFFICULTY_BAND[1],
+        has_tools: bool = True,
     ) -> tuple[list[dict], dict[str, Any]]:
-        """Whole mixed-reward groups for RL; groups never split."""
+        """Whole mixed-reward groups for RL; groups never split. ``lo`` and
+        ``hi`` default to ``DIFFICULTY_BAND`` (0.2, 0.8), the same band
+        ``select_for_rl`` and ``optimize`` use; they used to be 0.3 and
+        0.7 here alone."""
         from .optimize import select_for_rl
 
         return select_for_rl(self.rows, target=target, lo=lo, hi=hi, has_tools=has_tools)

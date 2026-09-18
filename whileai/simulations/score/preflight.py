@@ -253,7 +253,7 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
             "no system prompt: rule axes of the grid will be "
             "generic and grading has no policy to hold against"
         )
-    elif len(policy) < 200:
+    elif len(policy) < THIN_POLICY_CHARS:
         warnings.append(
             f"system prompt is {len(policy)} chars: thin policies give the "
             "grid few rules to test and graders little to enforce"
@@ -304,16 +304,35 @@ def classify_failure(row: dict) -> str | None:
     return None
 
 
-#: Below this share of boundary, ambiguous and adversarial rows the set is easy.
+# HARD_SHARE_FLOOR = 0.3: below this share of boundary, ambiguous and
+# adversarial rows the set is easy. The generator's own default mix draws
+# 40% from the hard tiers (``generate.diversity.HARD_SHARE``); 0.3 is that
+# less the share the mixer measurably loses to cells it never reaches, so
+# a run at the default mix does not warn about itself (#319; convention
+# on the exact floor).
 HARD_SHARE_FLOOR = 0.3
-#: Rows before the hard share is worth a warning.
+# HARD_SHARE_MIN_ROWS = 20: rows before the hard share is worth a warning;
+# under twenty one row moves the share by five points (convention).
 HARD_SHARE_MIN_ROWS = 20
+# UNLABELLED_SHARE_WARN = 0.1: share of rows with no stance before the
+# report says their difficulty is unknown, not ordinary (convention).
+UNLABELLED_SHARE_WARN = 0.1
+# THIN_POLICY_CHARS = 200: a system prompt shorter than this gives the
+# grid few rules to test; 200 characters is two or three rules
+# (convention, untested).
+THIN_POLICY_CHARS = 200
 
 
 def dataset_report(
-    rows: Sequence[dict], *, tools: Sequence[dict] | None = None, system_prompt: str = ""
+    rows: Sequence[dict],
+    *,
+    tools: Sequence[dict] | None = None,
+    system_prompt: str = "",
+    hard_share_floor: float = HARD_SHARE_FLOOR,
 ) -> dict[str, Any]:
-    """One report a developer reads after simulate/grade: size, signal, mix."""
+    """One report a developer reads after simulate/grade: size, signal, mix.
+    ``hard_share_floor`` (``HARD_SHARE_FLOOR``, 0.3) is the share of hard-
+    tier rows under which the set is called easy."""
     from ..generate.coverage import cell_key
     from ..generate.diversity import behavior_tier
     from .grading import behavior_signature
@@ -368,7 +387,7 @@ def dataset_report(
     }
     if (
         hard_share is not None
-        and hard_share < HARD_SHARE_FLOOR
+        and hard_share < hard_share_floor
         and len(rows) >= HARD_SHARE_MIN_ROWS
     ):
         report["warnings"].append(
@@ -380,7 +399,7 @@ def dataset_report(
             "dimensions={'stance': ['boundary', 'ambiguous', 'adversarial']} pins the axis "
             "to hard tiers only (rlhf-book ch. 7 on difficulty filtering)."
         )
-    if tiers.get("unlabelled") and tiers["unlabelled"] / max(1, len(rows)) > 0.1:
+    if tiers.get("unlabelled") and tiers["unlabelled"] / max(1, len(rows)) > UNLABELLED_SHARE_WARN:
         report["warnings"].append(
             f"{tiers['unlabelled']} rows carry no stance, so their difficulty is unknown, "
             "not ordinary. Label it with dimensions={'stance': [...]} on the run, or "

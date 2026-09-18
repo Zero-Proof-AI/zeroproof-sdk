@@ -50,6 +50,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from .defaults import DIFFICULTY_BAND
 from .export import _resolve
 from .score.checklist import _task_has_outcome_rule
 from .score.judging import normalize_judge_result
@@ -57,7 +58,7 @@ from .score.stats import decontaminate
 
 SPEC_FILE = "spec.json"
 DEFAULT_REWARD = "whileai.simulations.score.checklist:task_checklist"
-DEFAULT_BAND = (0.2, 0.8)
+DEFAULT_BAND = DIFFICULTY_BAND
 _TASK_META = (
     "scenario_dimensions",
     "stance",

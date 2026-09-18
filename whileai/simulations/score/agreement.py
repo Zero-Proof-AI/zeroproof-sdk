@@ -23,11 +23,14 @@ import hashlib
 from collections.abc import Sequence
 from typing import Any
 
-# Below this the accuracy estimate has a +/-0.1 error bar and the book's
-# own guidance (50-200 held-out pairs) is not met.
-MIN_GOLD = 50
-# A judge that passes one in ten gold failures leaks that many bad rows
-# into a training set at the pass rate of the run.
+from ..defaults import MIN_GOLD
+
+# MIN_GOLD = 50 (``defaults``): below it the accuracy estimate has a
+# +/-0.1 Wilson error bar and the book's own guidance (rlhf-book ch. 7,
+# 50-200 held-out pairs) is not met.
+# LEAK_THRESHOLD = 0.1: a judge that passes one in ten gold failures leaks
+# that many bad rows into a training set at the pass rate of the run; ten
+# points is the same sensitivity as FLIP_FLAG (convention).
 LEAK_THRESHOLD = 0.1
 # Where a row's gold label came from: "human" from attach_labels(kind="human"),
 # "model" from a model's labels or a second judge pass, "unknown" when a row
