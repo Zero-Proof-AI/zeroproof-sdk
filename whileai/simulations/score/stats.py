@@ -44,6 +44,7 @@ from __future__ import annotations
 import math
 import random
 import re
+import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -366,6 +367,114 @@ def _paired_sd_from_rows(
     base = _mean([_mean(means_a[t]) for t in shared])
     k = min(min(len(means_a[t]), len(means_b[t])) for t in shared)
     return _sample_sd(diffs), len(shared), base, k
+
+
+def eval_power(
+    rows: Sequence[dict],
+    *,
+    effect: float = 0.05,
+    power: float = POWER,
+    alpha: float = ALPHA,
+) -> dict[str, Any]:
+    """Can this held-out set prove anything? Ask before you train, not after.
+
+    A paired before-and-after is carried entirely by the tasks whose
+    rollouts DISAGREE. A task the base passes every time and a task it
+    fails every time both contribute a zero difference on the pairing,
+    so they add no variance and no evidence: they narrow the interval
+    while telling you nothing. An eval made only of those returns a
+    tight interval around zero, which reads as "no effect" and means
+    "could not have seen one".
+
+    That failure has two ends and the pass rate alone cannot tell them
+    apart. Measured on one agent, same world and same rubric, base model
+    on both sides:
+
+    ======================  ==============  ==============
+    ..                      default set     "harder" set
+    ======================  ==============  ==============
+    base pass@1             0.589           0.000
+    tasks that disagree     23 of 59        0 of 60
+    per-task spread         0.403           0.000
+    ======================  ==============  ==============
+
+    The second set is not a harder eval, it is a dead one, and its base
+    score is the only number that looks like progress.
+
+    Pass the graded rows of a BASE-ONLY run. ``informative`` is the
+    count that matters; ``resolvable`` is the smallest true effect this
+    set could exclude zero on at ``power``, from the measured spread of
+    per-task pass rates; ``n_needed`` is how many tasks ``effect`` would
+    want. ``verdict`` is one of ``"usable"``, ``"dead"``, ``"saturated"``
+    or ``"floored"``, and a set that cannot measure warns (rlhf-book
+    ch. 16: the eval's own variance decides what a delta can mean;
+    ch. 7 on keeping tasks inside the band where an update can learn).
+    """
+    by_task = _by_task(rows, _binary)
+    n_tasks = len(by_task)
+    if not n_tasks:
+        return {
+            "n_tasks": 0,
+            "n_rollouts": 0,
+            "informative": 0,
+            "tied_pass": 0,
+            "tied_fail": 0,
+            "single_rollout": 0,
+            "base_pass": None,
+            "task_sd": None,
+            "resolvable": None,
+            "n_needed": None,
+            "verdict": "empty",
+            "reason": "no graded rows",
+        }
+
+    means = [_mean(v) for v in by_task.values()]
+    informative = sum(1 for v in by_task.values() if len(v) > 1 and 0.0 < _mean(v) < 1.0)
+    singles = sum(1 for v in by_task.values() if len(v) == 1)
+    tied_pass = sum(1 for v in by_task.values() if _mean(v) == 1.0)
+    tied_fail = sum(1 for v in by_task.values() if _mean(v) == 0.0)
+    base = _mean(means)
+    sd = math.sqrt(sum((m - base) ** 2 for m in means) / (n_tasks - 1)) if n_tasks > 1 else 0.0
+    z = _z_level(1.0 - alpha) + _z_level(2.0 * power - 1.0)
+    resolvable = round(z * sd / math.sqrt(n_tasks), 4) if sd > 0 else None
+    n_needed = (
+        max(MIN_HOLDOUT_TASKS, math.ceil((z * sd / effect) ** 2)) if sd > 0 and effect > 0 else None
+    )
+
+    if informative == 0 and tied_pass == n_tasks:
+        verdict, why = "saturated", "every task passes every rollout: nothing left to gain"
+    elif informative == 0 and tied_fail == n_tasks:
+        verdict, why = "floored", "every task fails every rollout: no change could register"
+    elif informative == 0:
+        verdict, why = "dead", "no task's rollouts disagree, so the pairing carries no evidence"
+    else:
+        verdict, why = "usable", f"{informative} of {n_tasks} tasks carry evidence"
+
+    out = {
+        "n_tasks": n_tasks,
+        "n_rollouts": sum(len(v) for v in by_task.values()),
+        "informative": informative,
+        "tied_pass": tied_pass,
+        "tied_fail": tied_fail,
+        "single_rollout": singles,
+        "base_pass": round(base, 4),
+        "task_sd": round(sd, 4),
+        "resolvable": resolvable,
+        "n_needed": n_needed,
+        "verdict": verdict,
+        "reason": why,
+    }
+    if verdict != "usable":
+        warnings.warn(
+            f"this held-out set cannot prove a gain: {why}. Base pass is {base:.3f} over "
+            f"{n_tasks} tasks and {sum(len(v) for v in by_task.values())} rollouts, and a "
+            "paired comparison on it will return a tight interval around zero whatever the "
+            "training did. Fix the set before spending on training: keep tasks the base "
+            "sometimes passes and sometimes fails, and raise k so a task can disagree with "
+            "itself.",
+            stacklevel=2,
+        )
+    return out
 
 
 def holdout_size(
