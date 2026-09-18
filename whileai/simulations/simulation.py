@@ -402,6 +402,10 @@ def _repeat_runs(agent: Any, n_runs: int, kwargs: dict[str, Any]) -> SimulationD
         if first is not None and run_kwargs.get("tasks") is None:
             run_kwargs["tasks"] = first
             replayed_from = 0
+            # The first run drew the task set from these; a replay takes the
+            # set as drawn, so the seeds must not be handed over again (#375).
+            for drawn in ("seeds", "seed_prompts", "extra_situations", "situations"):
+                run_kwargs.pop(drawn, None)
         data = Run(resolve_run_config(agent, **run_kwargs)).run()
         _stamp_eval_run(data.trajectories, index, replayed_from=replayed_from)
         per_run.append({"rows": len(data.trajectories), "stopped_because": data.stopped_because})

@@ -47,6 +47,7 @@ import importlib
 import json
 import re
 import statistics
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -114,21 +115,23 @@ def _ref_of(obj: Any) -> str:
         return obj
     module = getattr(obj, "__module__", None)
     qualname = getattr(obj, "__qualname__", None) or getattr(type(obj), "__qualname__", None)
+    if not isinstance(obj, type) and not callable(obj):
+        raise ValueError(f"{obj!r} is not callable")
+    # An instance (a Verifier) is referenced by the module-level name it is
+    # bound to. Its ``__module__`` is the SDK class's, not the caller's, so
+    # look where the caller would have bound it: the module of the function
+    # it wraps, then every loaded module (#374).
+    if not isinstance(obj, type) and not hasattr(obj, "__name__"):
+        bound = _bound_name(obj)
+        if bound:
+            return bound
     if not module or not qualname or "<locals>" in str(qualname) or module == "__main__":
         raise ValueError(
             "the reward and the world must be importable by name in the trainer "
             "process: pass 'module:attr' (or a module-level function or Verifier "
             "instance defined in an importable module), not a lambda or a local"
         )
-    if not isinstance(obj, type) and not callable(obj):
-        raise ValueError(f"{obj!r} is not callable")
-    # An instance (a Verifier) is referenced by its module-level name when it
-    # has one; otherwise by its class, which load_environment instantiates.
     if not isinstance(obj, type) and not hasattr(obj, "__name__"):
-        mod = importlib.import_module(module)
-        for name, value in vars(mod).items():
-            if value is obj:
-                return f"{module}:{name}"
         # No name to import it by, so the trainer would build a bare
         # instance. That is only the same object when this one carries no
         # configuration a bare one lacks: CodeExec(tests=...) written inline
@@ -147,6 +150,47 @@ def _ref_of(obj: Any) -> str:
             )
         return f"{module}:{cls.__qualname__}"
     return f"{module}:{qualname}"
+
+
+def _bound_name(obj: Any) -> str | None:
+    """``module:name`` where a module binds ``obj`` at top level, or None.
+
+    Tries the module of the function the instance wraps first, then every
+    loaded module outside this package. A binding in ``__main__`` is named
+    by the script's file stem, which the trainer process imports when the
+    script's directory is on its path; the name is what a trainer would
+    write by hand anyway.
+    """
+    wrapped = None
+    for attr in ("_fn", "fn", "func", "__wrapped__"):
+        wrapped = getattr(obj, attr, None)
+        if wrapped is not None:
+            break
+    candidates: list[str] = []
+    if wrapped is not None and getattr(wrapped, "__module__", None):
+        candidates.append(str(wrapped.__module__))
+    candidates.extend(
+        name
+        for name in list(sys.modules)
+        if name not in candidates and not name.startswith(("whileai", "_", "importlib"))
+    )
+    for mod_name in candidates:
+        mod = sys.modules.get(mod_name)
+        if mod is None:
+            continue
+        try:
+            names = vars(mod)
+        except TypeError:
+            continue
+        for name, value in list(names.items()):
+            if value is obj and not name.startswith("_"):
+                if mod_name == "__main__":
+                    file = getattr(mod, "__file__", None)
+                    if not file:
+                        return None
+                    return f"{Path(file).stem}:{name}"
+                return f"{mod_name}:{name}"
+    return None
 
 
 def resolve_ref(ref: str) -> Any:
