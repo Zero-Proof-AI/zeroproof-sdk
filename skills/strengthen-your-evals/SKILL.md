@@ -77,13 +77,22 @@ a floor and the interval is still wide there.
 
 ```python
 wai.simulate(..., arm_weights={"structured": 0.70, "llm_guided": 0.20, "open_ended": 0.10})
-wai.simulate(..., dimensions={"tier": ["adversarial", "boundary"]})
+wai.simulate(..., hard_share=0.7)  # 70% of cards from ambiguous, boundary, adversarial
+wai.simulate(..., dimensions={"stance": ["adversarial", "boundary"]})  # pin the axis
 ```
 
 Arms: `structured`, `llm_guided`, `open_ended`, `behavior_targeted`,
 `failure_mutation`. A caller's weights win and stay won, because a stated intent
 about an eval is not a hypothesis for the search to relearn. `open_ended` is held
 to a 5-10% band whatever is asked.
+
+Tiers are set through the `stance` axis (`ordinary`, `ambiguous`, `boundary`,
+`adversarial`, plus `hurried`, `unsure`, `retry`, `mistaken`, `exploratory`,
+`conflicting`). `dimensions=` overrides the axis you name and keeps the tool,
+rule and world axes, so a pinned set is still a covering grid. There is no
+`tier` axis; passing one is refused with the fix. `hard_share=` is a dial,
+`dimensions={"stance": [...]}` is a pin. Open-ended probes carry no stance;
+`dataset_report` counts them `unlabelled`, not ordinary.
 
 **4. Re-measure.** The steered set should have a lower base pass rate and a
 higher failure-capable fraction than the probe. If it does not, the knob did not
@@ -95,6 +104,17 @@ bite on your agent and the next one is worth trying instead.
 against base pass rate: one set trends harder with more fields, one is flat, and
 on a third the *emptiest* cards are hardest. It is which axes are set, not how
 many, so do not reach for "more detail" as a proxy for "harder".
+
+### Steer by axis, then freeze
+
+Steer with the two knobs above, on axes, before training, and freeze the
+steered set. Do not hand-pick the prompts the base failed into the holdout:
+a prompt selected for a bad draw scores better on the re-draw with no
+training at all, and the gain you report is that regression, not the
+policy (the winner's curse in adaptive benchmarking, arXiv 2605.05973).
+Keep an ordinary slice in the holdout as the control: it is where
+over-refusal and regressions show up, and a set with no easy rows cannot
+see them.
 
 ## 3. Size the holdout before you run it
 

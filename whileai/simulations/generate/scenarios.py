@@ -346,6 +346,66 @@ def _tool_dimension(tools: list[dict]) -> list[str]:
     return list(dict.fromkeys(names + extras))
 
 
+#: The coverage axes ``build_dimensions`` produces. ``simulate(dimensions=)``
+#: overrides one or more of these; an axis outside this set is refused
+#: rather than replacing the grid.
+COVERAGE_AXES = ("tool", "rule", "stance", "world_state", "tool_condition", "history")
+
+
+def merge_dimensions(base: dict[str, list[str]], override: dict | None) -> dict[str, list[str]]:
+    """A caller's axes over the built grid, other axes kept.
+
+    ``dimensions={"stance": ["adversarial", "boundary"]}`` used to replace the
+    whole grid: two regions, no tool or rule axis, and every cell read as
+    ordinary when the key was not ``stance``. A caller steering difficulty
+    lost tool and rule coverage without a word. Now the named axis changes
+    and the rest of the grid stands.
+    """
+    out = {axis: list(values) for axis, values in base.items()}
+    for axis, values in (override or {}).items():
+        vals = [str(v) for v in (values or [])]
+        if vals:
+            out[str(axis)] = vals
+    return out
+
+
+def check_dimensions(dimensions: Any) -> None:
+    """Refuse a ``dimensions=`` that would do nothing, and name the fix."""
+    if dimensions is None:
+        return
+    if not isinstance(dimensions, dict) or not dimensions:
+        raise ValueError(
+            "dimensions= must be a non-empty dict of axis -> list of values, "
+            f"for example dimensions={{'stance': ['adversarial', 'boundary']}}; got {dimensions!r}"
+        )
+    from .diversity import _TIER_ALIASES
+
+    for axis, values in dimensions.items():
+        if axis not in COVERAGE_AXES:
+            hint = ""
+            if axis == "tier":
+                hint = (
+                    " Difficulty tiers are set through the stance axis: "
+                    "dimensions={'stance': ['adversarial', 'boundary', 'ambiguous']}."
+                )
+            raise ValueError(
+                f"dimensions= axis {axis!r} is not a coverage axis, so it would steer nothing. "
+                f"Axes: {', '.join(COVERAGE_AXES)}.{hint}"
+            )
+        if not isinstance(values, (list, tuple)) or not values:
+            raise ValueError(
+                f"dimensions= axis {axis!r} needs a non-empty list of values; got {values!r}"
+            )
+        if axis == "stance":
+            unknown = [str(v) for v in values if str(v) not in _TIER_ALIASES]
+            if unknown:
+                raise ValueError(
+                    f"dimensions= stance values {unknown} are not stances the sampler knows, "
+                    "so those cells would read as ordinary. Known stances: "
+                    f"{', '.join(sorted(_TIER_ALIASES))}."
+                )
+
+
 def build_dimensions(tools: list[dict], policy: str = "") -> dict[str, list[str]]:
     """Coverage axes from this agent. Length and vagueness are writer-only."""
     rules = policy_sections(policy, cap=int(os.environ.get("ZP_RULE_CAP") or 16)) or ["unspecified"]
@@ -680,7 +740,7 @@ def scenario_regions(
     ``prefer_success`` defaults off in ``mode="rl"`` so fault cells survive
     for covering-grid RL data. Explicit True/False always wins.
     """
-    dimensions = dimensions or build_dimensions(tools, policy)
+    dimensions = merge_dimensions(build_dimensions(tools, policy), dimensions)
     counts = observed_counts or {}
     regions = []
     assignments = _covering_assignments(dimensions, strength)

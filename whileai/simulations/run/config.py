@@ -17,7 +17,7 @@ from whileai._env import getenv
 
 from ..generate.adapters import resolve_system_prompt
 from ..generate.diversity import adaptive_allocator
-from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS
+from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS, check_dimensions
 from .spec import spec_rubric
 
 # Rows a saturation-bounded run may produce before the loop gives up.
@@ -470,6 +470,7 @@ def resolve_run_config(
 
     concurrency = int(cfg.pop("concurrency", 32))
     dimensions = cfg.pop("dimensions", None)
+    check_dimensions(dimensions)
     arm_weights = cfg.pop("arm_weights", None)
     if arm_weights is not None:
         if not isinstance(arm_weights, dict) or not arm_weights:

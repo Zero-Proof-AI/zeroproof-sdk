@@ -5,6 +5,20 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `simulate(dimensions=)` overrides the axis it names and keeps the rest of
+  the coverage grid. It used to replace the grid: `dimensions={'stance':
+  ['adversarial', 'boundary']}` produced two regions with no tool or rule
+  axis, and `dimensions={'tier': [...]}` steered nothing, since no cell reads
+  a `tier` key and every region then counted as ordinary. A caller steering
+  difficulty lost tool and rule coverage without a word. On a two-tool agent
+  the stance pin now yields 44 regions across all six axes, all hard, where
+  it yielded 2. An axis outside the grid, a stance the sampler does not know,
+  or an empty list is refused before the run starts, and the message names
+  the fix (`tier` -> `stance`). The strengthen-your-evals skill shows
+  `hard_share=` and the stance pin, and says to steer by axis before
+  training and freeze the set: prompts hand-picked for a base failure score
+  better on the re-draw with no training at all (the winner's curse in
+  adaptive benchmarking, arXiv 2605.05973).
 - `dataset_report` reports the difficulty mix: `tier_counts`, `hard_share`
   (the same direction as the run's `search["tier_mix"]`) and
   `tier_fail_rate` per tier, and `warnings` (always a list, beside the tool

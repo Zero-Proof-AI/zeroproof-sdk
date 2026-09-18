@@ -152,7 +152,8 @@ def simulate(
     ``hard_share=`` is the difficulty dial: the fraction of situations drawn
     from the ambiguous, boundary and adversarial tiers (default 0.40), where
     a base fails most often. ``search["tier_mix"]`` reports the share asked
-    for and the share drawn; ``dimensions={"stance": [...]}`` pins the axis.
+    for and the share drawn; ``dimensions={"stance": [...]}`` pins the axis
+    and keeps the other axes of the grid.
 
     ``execute=`` is the caller's world: a function ``(tool, arguments) ->
     result`` that answers every tool call for real, against their repo,
