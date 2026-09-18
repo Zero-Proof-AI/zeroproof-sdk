@@ -832,7 +832,22 @@ a reasoning base against a reasoning-suppressed adapter under one
 shared `max_tokens` runs out of budget inside `<think>` and never
 answers, so the adapter wins every row the base did not reply to
 (#297). `not_comparable` lists every such cause under one prefix,
-`NOT COMPARABLE:`.
+`NOT COMPARABLE:`. `situations` is the cause when fewer than half
+the tasks are on both sides (`paired_share` under 0.5 with tasks on
+one side only): the arms drew different situation sets, so the delta
+over the few that pair is between two evals, and the fix is to pin
+the after side to the before run's tasks (`tasks=`) or compare per
+tier with `dataset_report`. A replay (`simulate(tasks=...)` or
+`runs=N`) keeps the writer of the run it replays on `writer_model`,
+so two runs of one call compare as one writer.
+
+`headline_verdict` is the verdict `format_delta_report` prints on
+its first line, in words: `PASS` only for a gain the report
+supports, `NO DIFFERENCE` for an interval over zero, `NOT
+COMPARABLE (causes)` when the arms cannot be compared, `FAIL` for a
+regression, a guard, or over-optimization. `ok` is the gate (no
+regression, no failed guard, comparable arms); it does not say the
+change helped.
 
 ### `detectable_effect`
 

@@ -23,7 +23,7 @@ from .run.config import (  # noqa: F401
     resolve_topology,
     writer_spec_for,
 )
-from .run.engine import Run
+from .run.engine import Run, tier_mix_of
 from .run.rows import (  # noqa: F401
     _collect_finished,
     _prompt_arm,
@@ -270,7 +270,16 @@ def simulate(
     rows of every run come back in one ``SimulationData`` (``output=``
     holds them all); ``search["eval_runs"]`` lists the rows and stop
     reason per run, and ``eval_variance(data.rows())`` splits by
-    ``eval_run`` on its own.
+    ``eval_run`` on its own. ``budget`` is a per-run cap: ``runs=3,
+    budget=100`` returns up to 300 rows, and ``report()["budget_per_run"]``
+    carries the cap under that name. Replayed rows keep the writer of the
+    run they replay on ``writer_model`` and say ``lineage.replayed_from_run``,
+    so ``delta_report`` on two runs of one call sees one writer.
+
+    With ``situations=N`` the run stops once every one of the N
+    situations has all its rollouts (``stopped_because=
+    "situations_exhausted"``), whatever ``budget`` still allows; a budget
+    above ``situations x phrasings x repeats`` is not spent.
 
     A run
     otherwise draws its tasks from the grid by seed and, above
@@ -356,33 +365,45 @@ def simulate(
     return _repeat_runs(agent, n_runs, kwargs)
 
 
-def _stamp_eval_run(rows: list[dict], index: int) -> None:
+def _stamp_eval_run(rows: list[dict], index: int, *, replayed_from: int | None = None) -> None:
     for row in rows:
         lineage = row.get("lineage")
         if not isinstance(lineage, dict):
             lineage = {}
         lineage["eval_run"] = index
+        if replayed_from is not None:
+            # the run whose task set this run replayed; writer_model on
+            # the row stays the writer of that run
+            lineage["replayed_from_run"] = replayed_from
         row["lineage"] = lineage
 
 
 def _repeat_runs(agent: Any, n_runs: int, kwargs: dict[str, Any]) -> SimulationData:
     """``simulate(runs=N)``: the same task set N times, one result.
 
-    Each run is a full ``Run`` on the same config; runs after the first
+    Each run is a full ``Run`` on the same config, ``budget`` included
+    (it is a per-run cap, so the call returns up to ``N x budget`` rows
+    and ``report()["budget_per_run"]`` says so); runs after the first
     replay the first run's task set when none was pinned. Rows are
-    stamped ``lineage.eval_run`` and gathered on the first run's
-    ``SimulationData``, which is written to ``output=`` once, at the end,
-    so the file holds every run.
+    stamped ``lineage.eval_run`` (and ``lineage.replayed_from_run = 0``
+    on the replays) and gathered on the first run's ``SimulationData``,
+    which is written to ``output=`` once, at the end, so the file holds
+    every run. ``degraded`` and ``warnings`` are the union over runs;
+    ``search["tier_mix"]`` is recounted over every run's rows with a
+    ``per_run`` breakdown, so it describes what the call returned and
+    not run 0 alone.
     """
     output = kwargs.pop("output", None)
     first: SimulationData | None = None
     per_run: list[dict[str, Any]] = []
     for index in range(n_runs):
         run_kwargs = dict(kwargs)
+        replayed_from: int | None = None
         if first is not None and run_kwargs.get("tasks") is None:
             run_kwargs["tasks"] = first
+            replayed_from = 0
         data = Run(resolve_run_config(agent, **run_kwargs)).run()
-        _stamp_eval_run(data.trajectories, index)
+        _stamp_eval_run(data.trajectories, index, replayed_from=replayed_from)
         per_run.append({"rows": len(data.trajectories), "stopped_because": data.stopped_because})
         if first is None:
             first = data
@@ -393,9 +414,23 @@ def _repeat_runs(agent: Any, n_runs: int, kwargs: dict[str, Any]) -> SimulationD
         first.scenario_generation_seconds += data.scenario_generation_seconds
         first.row_seconds.extend(data.row_seconds)
         first.degraded.extend(d for d in data.degraded if d not in first.degraded)
+        # a flag without its line would be a flag nobody can act on
+        first.warnings.extend(w for w in data.warnings if w not in first.warnings)
     assert first is not None
     first.search["eval_runs"] = {"runs": n_runs, "per_run": per_run}
     first.coverage["runs"] = n_runs
+    mix = first.search.get("tier_mix")
+    if isinstance(mix, dict) and n_runs > 1:
+        # run 0 counted its own rows; the call returns every run's
+        requested = float(mix.get("hard_share_requested") or 0.0)
+        by_run: dict[int, list[dict]] = {}
+        for row in first.trajectories:
+            by_run.setdefault(int((row.get("lineage") or {}).get("eval_run", 0)), []).append(row)
+        total = tier_mix_of(first.trajectories, requested)
+        mix.update(total)
+        mix["per_run"] = [
+            {"eval_run": i, **tier_mix_of(rows, requested)} for i, rows in sorted(by_run.items())
+        ]
     if output:
         first.save(str(output), meta=True)
     return first

@@ -19,6 +19,40 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   is held to the t band. filter-metric's base was re-evaluated ten times
   (run_std 0.0169 from 3 runs -> see its README); the verdict is re-read
   against the honest band there (rlhf-book ch. 16, appendix C).
+- A hosted run with `situations=N` stops when every situation has its
+  rollouts. The `situations_exhausted` stop required no writer wave in
+  flight, and the hosted writer always had one (each wave that landed
+  started another), so `simulate(situations=24, repeats=4, runs=2,
+  budget=192)` sat at 96 rows for ten minutes and wrote 1,900 situations
+  it never rolled out. The run now stops launching waves once the
+  situations are complete and takes the stop with waves still running
+  (`stop_grace` drains them). `budget` is a per-run cap under `runs=N`;
+  the docstring, README and `report()["budget_per_run"]` say so.
+- Replayed rows keep their writer. `runs=N` and `tasks=` stamped
+  `writer_model="pinned"` on the replays, so `delta_report` on two runs of
+  one call failed with `NOT COMPARABLE: writer_model` and told the user to
+  pin `simulator=`. A replay now carries the writer of the run it replays
+  (the situation was written once), with `lineage.replayed` and, under
+  `runs=`, `lineage.replayed_from_run`; rows saved by 0.75 with `pinned`
+  compare as no writer instead of as a model name.
+- `writer_waves_abandoned` in `data.degraded` comes with a `warnings`
+  line: how many waves, the stop reason, the grace they were given, and
+  the knobs (`stop_grace`, `scenario_concurrency`). Under `runs=N` the
+  warnings of every run are gathered, as `degraded` already was.
+- Two arms that drew different situation sets are not a delta.
+  `delta_report` adds `situations` to `not_comparable` when fewer than
+  half the tasks are on both sides (a `hard_share=0.4` baseline against
+  `hard_share=0.8` paired 7 of 41 and read `-0.143` under `PASS`), and
+  the warning says to pin `tasks=` from the baseline or compare per tier
+  with `dataset_report`. `format_delta_report` prints the verdict it
+  reached on its first line (`report["headline_verdict"]`): `PASS` only
+  for a gain (`moved`, `moved_unreplicated`), `NO DIFFERENCE` for an
+  interval over zero, `FAIL` for a regression, `NOT COMPARABLE (causes)`
+  when the arms cannot be compared.
+- `search["tier_mix"]` under `runs=N` counted run 0 only (96 of 192
+  rows). It now counts every run's rows and lists `per_run`.
+- `report()["writer_model"]` is on the record next to `simulator` (the
+  same value, under the name every row carries).
 
 ## 0.75 (2026-09-18)
 

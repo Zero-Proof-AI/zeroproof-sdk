@@ -25,7 +25,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -329,6 +329,31 @@ def _hit_length_cap(row: dict) -> bool:
     if any(isinstance(s, dict) and s.get("truncated") for s in steps):
         return True
     return is_truncated(row)
+
+
+HARD_TIERS = ("ambiguous", "boundary", "adversarial")
+
+
+def tier_mix_of(rows: Sequence[dict], requested: float) -> dict[str, Any]:
+    """The difficulty mixture a set of rows carries against the share
+    asked for: ``counts`` per tier, ``rows``, ``hard_share_requested``
+    and ``hard_share_realized`` (the share of rows from ``HARD_TIERS``).
+    One function so a single run and ``simulate(runs=N)`` (every run's
+    rows together) count the same way."""
+    counts: dict[str, int] = {}
+    for t in rows:
+        dims = t.get("scenario_dimensions")
+        tier = str(t.get("tier") or "") or behavior_tier(dims if isinstance(dims, dict) else {})
+        counts[tier] = counts.get(tier, 0) + 1
+    n = sum(counts.values())
+    hard = sum(counts.get(tier, 0) for tier in HARD_TIERS)
+    realized = hard / n if n else None
+    return {
+        "hard_share_requested": round(float(requested), 4),
+        "hard_share_realized": None if realized is None else round(realized, 4),
+        "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "rows": n,
+    }
 
 
 class Run:
@@ -957,15 +982,18 @@ class Run:
 
     def _writer_of(self, meta: dict) -> str:
         """The model tag that wrote one prompt. Rows a model did not write
-        say so: ``seed`` is the caller's own opener, ``pinned`` a replay from
-        ``tasks=``, ``template`` the built-in writer and its mutations."""
+        say so: ``seed`` is the caller's own opener, ``template`` the
+        built-in writer and its mutations. A replay from ``tasks=`` keeps
+        the writer of the run it replays (the prompt was written once, by
+        that model); ``lineage.replayed`` says it is a replay. ``pinned``
+        only when the source rows carried no writer at all."""
         origin = str(meta.get("generator") or "")
         if origin == "model":
             return self.writer_model
         if origin == "user":
             return "seed"
         if origin == "pinned":
-            return "pinned"
+            return str(meta.get("writer_model") or "pinned")
         return "template"
 
     def _build_row(self, job: tuple) -> dict:
@@ -1046,6 +1074,10 @@ class Run:
                 "system_prompt_sha": self.system_prompt_sha,
                 "system_prompt_head": self.system_prompt_head,
                 "system_prompt_chars": self.system_prompt_chars,
+                # A replay from tasks= keeps the original writer's name on
+                # writer_model (the situation was written once); this is
+                # where the fact that it is a replay lives.
+                **({"replayed": True} if meta.get("generator") == "pinned" else {}),
             },
             "seed": meta.get("seed", c.seed),
             "semantic_cluster": None if not semantic else selection.get("cluster"),
@@ -1207,6 +1239,10 @@ class Run:
         cov["fault_rate"] = float(c.fault_rate)
         cov["seed"] = int(c.seed)
         cov["runs"] = 1
+        # ``budget`` is the row cap of one Run. simulate(runs=N) repeats the
+        # Run N times with the same kwargs, so the cap applies per run and
+        # the rows returned are up to N x budget; the key says so.
+        cov["budget_per_run"] = int(c.cap)
         cov["strategy"] = c.resolved_strategy
         cov["time_budget"] = c.time_budget
         cov["reproducible"] = bool(c.reproducible)
@@ -1230,6 +1266,9 @@ class Run:
         # who did which job: the situation writer ("template" offline),
         # the agent's model (a callable agent's name), the simulated user
         cov["simulator"] = self.writer_model
+        # the same value under the name every row carries, so a reader who
+        # knows the row key finds it on the report too
+        cov["writer_model"] = self.writer_model
         cov["agent_model"] = c.model_version_tag
         cov["user_model"] = self.user_model
         cov["max_turns"] = c.max_turns
@@ -1449,6 +1488,8 @@ class Run:
             self.pinned_prompts.append(prompt)
             self.generated_pool.append(prompt)
             meta: dict[str, Any] = {"arm": task["arm"], "generator": "pinned", "seed": c.seed}
+            if task.get("writer_model"):
+                meta["writer_model"] = task["writer_model"]
             if task.get("scenario_id"):
                 meta["region_id"] = task["scenario_id"]
             if task.get("assignment"):
@@ -1981,6 +2022,18 @@ class Run:
             data.search["abandoned_writer_waves"] = len(still_writing)
             if "writer_waves_abandoned" not in data.degraded:
                 data.degraded.append("writer_waves_abandoned")
+                n = len(still_writing)
+                note = (
+                    f"{n} writer wave{'s were' if n != 1 else ' was'} still talking to the "
+                    f"writer model when the run stopped ({data.stopped_because}) and "
+                    f"{'were' if n != 1 else 'was'} abandoned after the {c.stop_grace_s:g}s "
+                    "stop grace; the situations it was writing were never rolled out and "
+                    "cost writer tokens. Raise advanced={'stop_grace': <seconds>} to wait "
+                    "for them, or lower advanced={'scenario_concurrency': <n>} so fewer "
+                    "waves are in flight when the run stops."
+                )
+                data.warnings.append(note)
+                log.warning(note)
         self.scenario_futs[:] = []
         for fut in [f for f in list(self.inflight) if f.done()]:
             job = self.inflight.pop(fut)
@@ -2061,7 +2114,8 @@ class Run:
                     and not c.unique_cards
                     and c.time_budget is None
                 )
-                if exhausted:
+                if exhausted or self._situations_complete():
+                    # nothing a new wave writes can be rolled out
                     refill = 0
                 elif low or pipeline < need:
                     refill = min(slots, max(0, c.writer_flight - len(self.scenario_futs)))
@@ -2384,6 +2438,16 @@ class Run:
         c = self.c
         data = self.data
         gen = self.generator
+        if not self.inflight and self._situations_complete():
+            # Every situation the run was asked for exists and has all
+            # its rollouts; a bigger budget cannot be met. Writer waves
+            # still in flight do not change that: the hosted writer kept
+            # this branch from firing (a wave was always in flight, so the
+            # loop waited on it, then launched another) and a runs=2 call
+            # at budget=192 wrote 1,900 situations it never rolled out.
+            # _settle_inflight cancels or drains the waves.
+            data.stopped_because = "situations_exhausted"
+            return "break"
         if self.inflight or self.scenario_futs:
             self.empty_streak = 0
             return "proceed"
@@ -2422,20 +2486,6 @@ class Run:
             self.empty_streak = 0
             note_stage(data, "situation cap lifted to fill lost rollouts")
             return "continue"
-        if (
-            c.n_situations_target
-            and len(self.used_situations) >= c.n_situations_target
-            and not self.inflight
-            and not self.scenario_futs
-            and self.cap_lifted["lost"] == 0
-            and all(self.prompt_rollouts.get(p, 0) >= c.repeat_count for p in self.used)
-        ):
-            # every situation the run was asked for exists and
-            # has all its rollouts; a bigger budget cannot be
-            # met, so stop and say so instead of spinning the
-            # writer until the clock
-            data.stopped_because = "situations_exhausted"
-            return "break"
         # Unique ingest may drop exact/near-dupe cards. That is
         # not a run stop: the writer can invent another situation.
         if (
@@ -3070,6 +3120,21 @@ class Run:
                 (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})
             )
 
+    def _situations_complete(self) -> bool:
+        """Every situation the run was asked for (``situations=N``) has
+        been drawn and every prompt drawn has all its rollouts, with no
+        lost rollout owed. Nothing the writer adds can be rolled out, so
+        the run stops launching waves and takes ``situations_exhausted``.
+        Under ``tasks=`` the pinned set is the target, not this."""
+        c = self.c
+        return bool(
+            c.n_situations_target
+            and not self.pinned_prompts
+            and len(self.used_situations) >= c.n_situations_target
+            and self.cap_lifted["lost"] == 0
+            and all(self.prompt_rollouts.get(p, 0) >= c.repeat_count for p in self.used)
+        )
+
     def _fresh_available(self) -> bool:
         """Can the run still open a new prompt? When it cannot, finishing
         a unanimous group costs nothing else."""
@@ -3534,20 +3599,10 @@ class Run:
         c = self.c
         data = self.data
         requested = HARD_SHARE if c.hard_share is None else float(c.hard_share)
-        counts: dict[str, int] = {}
-        for t in data.trajectories:
-            dims = t.get("scenario_dimensions")
-            tier = str(t.get("tier") or "") or behavior_tier(dims if isinstance(dims, dict) else {})
-            counts[tier] = counts.get(tier, 0) + 1
-        rows = sum(counts.values())
-        hard = sum(counts.get(tier, 0) for tier in ("ambiguous", "boundary", "adversarial"))
+        mix = tier_mix_of(data.trajectories, requested)
+        rows = int(mix["rows"])
+        hard = sum(mix["counts"].get(tier, 0) for tier in HARD_TIERS)
         realized = hard / rows if rows else None
-        mix: dict[str, Any] = {
-            "hard_share_requested": round(requested, 4),
-            "hard_share_realized": None if realized is None else round(realized, 4),
-            "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
-            "rows": rows,
-        }
         asked = c.hard_share is not None and rows >= c.knobs.tier_mix_min_rows
         if asked and realized is not None and requested - realized > c.knobs.tier_mix_tolerance:
             mix["note"] = (

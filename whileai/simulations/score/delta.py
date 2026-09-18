@@ -34,6 +34,7 @@ from .passat import answer_counts, pass_at
 from .stats import (
     DEFAULT_BOOT,
     MIN_HOLDOUT_TASKS,
+    UNPAIRED_MAJORITY_SHARE,
     _t_quantile,
     _z_level,
     compare_runs,
@@ -92,6 +93,36 @@ _VERDICT_WORDS = {
     "no_difference_detected": "no_change_detected",
     "insufficient_data": "insufficient_data",
 }
+
+# The first line of ``format_delta_report``: the headline verdict in the
+# words a person reads. ``PASS`` is reserved for a gain the report
+# supports; a delta the interval cannot distinguish from zero reads as
+# what it is, not as a pass (a negative point estimate under ``PASS``
+# was the 2026-09-18 live test).
+_HEADLINE_WORDS = {
+    "moved": "PASS",
+    "moved_unreplicated": "PASS",
+    "within_eval_noise": "NO DIFFERENCE (within eval noise)",
+    "no_change_detected": "NO DIFFERENCE",
+    "insufficient_data": "INSUFFICIENT DATA",
+    "moved_the_wrong_way": "FAIL",
+    "target_not_measured": "TARGET NOT MEASURED",
+}
+
+
+def headline_word(report: Mapping[str, Any]) -> str:
+    """The one-word reading of a ``delta_report``: ``NOT COMPARABLE``
+    with the causes when the arms cannot be compared, ``FAIL`` when a
+    guard failed, else the headline verdict spelled out (``PASS`` only
+    for a supported gain, ``NO DIFFERENCE`` for an interval over zero)."""
+    causes = list(report.get("not_comparable") or [])
+    gate = "" if report.get("ok") else "FAIL: "
+    if causes:
+        return f"{gate}NOT COMPARABLE ({', '.join(causes)})"
+    if gate:
+        return "FAIL"
+    verdict = report.get("headline_verdict")
+    return _HEADLINE_WORDS.get(str(verdict), "PASS")
 
 
 def _verdict_word(result: dict[str, Any], replicated: bool) -> str:
@@ -416,7 +447,22 @@ def delta_report(
     shared ``max_tokens`` runs out of budget inside ``<think>`` and never
     answers, so the adapter wins every row the base did not reply to
     (#297). ``not_comparable`` lists every such cause under one prefix,
-    ``NOT COMPARABLE:``.
+    ``NOT COMPARABLE:``. ``situations`` is the cause when fewer than half
+    the tasks are on both sides (``paired_share`` under 0.5 with tasks on
+    one side only): the arms drew different situation sets, so the delta
+    over the few that pair is between two evals, and the fix is to pin
+    the after side to the before run's tasks (``tasks=``) or compare per
+    tier with ``dataset_report``. A replay (``simulate(tasks=...)`` or
+    ``runs=N``) keeps the writer of the run it replays on ``writer_model``,
+    so two runs of one call compare as one writer.
+
+    ``headline_verdict`` is the verdict ``format_delta_report`` prints on
+    its first line, in words: ``PASS`` only for a gain the report
+    supports, ``NO DIFFERENCE`` for an interval over zero, ``NOT
+    COMPARABLE (causes)`` when the arms cannot be compared, ``FAIL`` for a
+    regression, a guard, or over-optimization. ``ok`` is the gate (no
+    regression, no failed guard, comparable arms); it does not say the
+    change helped.
     """
     if not 0 < alpha < 1 or not 0 < power < 1:
         raise ValueError("alpha and power are probabilities strictly between 0 and 1")
@@ -670,6 +716,30 @@ def delta_report(
     headline_key = target_key if target_result else "pass_at_1"
     if headline.get("note"):
         warnings.append(f"{headline_key}: {headline['note']}")
+    # The two arms have to be the same eval. Two runs that drew their own
+    # situations (a hard_share or dimensions change, a different seed, a
+    # writer that moved) share only some tasks, and a delta over the few
+    # that pair is a delta between two situation sets, not between two
+    # policies: the 2026-09-18 live test paired 7 of 41 and read -0.143
+    # under PASS. Fewer than half paired is the same "most" as the note.
+    pairing = results["pass_at_1"]
+    paired_share = pairing.get("paired_share")
+    n_only_a, n_only_b = int(pairing.get("n_only_a") or 0), int(pairing.get("n_only_b") or 0)
+    if (
+        paired_share is not None
+        and paired_share < UNPAIRED_MAJORITY_SHARE
+        and (n_only_a or n_only_b)
+    ):
+        ok = False
+        not_comparable.append("situations")
+        n_shared = int(pairing.get("n_paired") or 0)
+        warnings.append(
+            f"NOT COMPARABLE: the two arms drew different situation sets; {n_shared} of "
+            f"{n_shared + n_only_a + n_only_b} tasks are on both sides ({n_only_a} only before, "
+            f"{n_only_b} only after), so the delta is between two evals, not two policies. Pin "
+            "the after side to the before run's tasks (simulate(agent, tasks=before_rows, ...)) "
+            "and re-run, or compare pass rate per tier with dataset_report on each arm."
+        )
     # Eval size: a no-change verdict is only as strong as the band the
     # task count allows. Say what this holdout can prove and what the
     # delta seen here would have needed (#257).
@@ -916,6 +986,8 @@ def delta_report(
         "not_comparable": not_comparable,
         "target": target_key,
         "target_verdict": target_verdict,
+        #: the verdict format_delta_report prints: the target's, else pass@1's
+        "headline_verdict": verdict_word,
         "target_delta": target_result["delta"] if target_result else None,
         "target_ci95": target_result["ci95"] if target_result else None,
         "n_metrics": n_metrics,
@@ -1038,7 +1110,7 @@ def format_delta_report(report: dict[str, Any]) -> str:
             )
         else:
             lines.append(f"proxy {report['proxy']}: {report['proxy_verdict']}")
-    lines.append("PASS" if report["ok"] else "FAIL")
+    lines.append(headline_word(report))
     floors = report.get("run_std_by_metric") or {}
     if report.get("run_std") is not None or report.get("run_std_source") is not None:
         runs = report.get("eval_runs") or {}
