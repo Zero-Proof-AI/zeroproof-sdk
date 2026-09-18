@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.73 (2026-09-18)
 
 - A run records what it ran under. `data.report()` (and `data.coverage`)
   now carries `knobs` (every `RunKnobs` field as resolved), `patience`,
