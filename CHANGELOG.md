@@ -3,6 +3,13 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.78 (2026-09-18)
+
+- `whileai agents | agent <id> | runs <id> | verdict <id> | promote <id> <v> |
+  keys | live <id> ...`: the platform objects a coding agent manages from a
+  terminal, each a thin call into `whileai.platform`, `--json` on every one.
+  `whileai purge` (ZeroProof traces and datasets) is removed.
+
 ## 0.77 (2026-09-18)
 
 - `ty` type-checks the package in CI beside mypy (`uv run ty check`,
