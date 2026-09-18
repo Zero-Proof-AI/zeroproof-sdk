@@ -30,6 +30,19 @@ from typing import Any
 
 from ...auth import trial_prerun_note
 from ..data import SimulationData, clean_faults, conversation, export_row, note_stage, row_world
+from ..defaults import (
+    FINGERPRINT_STEM_MIN_LEN,
+    MAX_COMPLETIONS_PER_REQUEST,
+    OK_STATUSES,
+    PARENT_HEAD_CHARS,
+    PASS_THRESHOLD,
+    PROGRESS_MIN_BUDGET,
+    PROGRESS_MIN_ROWS_FOR_ESTIMATE,
+    REPORT_LIST_ITEMS,
+    SCENARIO_ID_CHARS,
+    SHORT_HASH_CHARS,
+    laplace,
+)
 from ..generate.actionspace import (
     action_space_targets,
     induced_keys_from_trajectory,
@@ -115,7 +128,7 @@ from ..score.grading import (
     dead_tools_note,
     tool_outcomes,
 )
-from .config import DEAD_AGENT_MIN_ERRORS, RunConfig
+from .config import RunConfig
 from .rows import (
     LOST_REASONS,
     _row_conversation,
@@ -168,9 +181,10 @@ def _timeout_error(message: str) -> bool:
     return any(mark in text for mark in _TIMEOUT_MARKS)
 
 
-def _graded_failure(row: dict) -> bool:
-    """Did the grader fail this row? A reward under 0.5, OR any single
-    rubric criterion failed.
+def _graded_failure(row: dict, threshold: float = PASS_THRESHOLD) -> bool:
+    """Did the grader fail this row? A reward under ``threshold``
+    (``PASS_THRESHOLD``, 0.5) -- a 0 from a 0/1 judge, a failed verifier, a
+    rubric below half -- OR any single rubric criterion failed.
 
     The scalar alone is not enough. ``rubric_judge`` scores a rubric as the
     mean of its criteria, so a row that breaks one rule of three still scores
@@ -191,7 +205,7 @@ def _graded_failure(row: dict) -> bool:
     if reward is None or isinstance(reward, bool):
         return False
     try:
-        return float(reward) < 0.5
+        return float(reward) < threshold
     except (TypeError, ValueError):
         return False
 
@@ -202,8 +216,9 @@ def _stop_reason(side: str, message: str) -> str:
 
 log = logging.getLogger("whileai.simulations")
 
-# How hard a hot trace region pulls cell weight toward itself.
-ALLOC_GAIN = 4.0
+# Every number this module reads lives in ``whileai.simulations.defaults``
+# with the reason for its value; the per-run ones are ``advanced`` keys on
+# ``RunConfig.knobs``.
 _FINGERPRINT_STOPWORDS = {"the", "a", "an", "to", "for", "and", "of", "on"}
 
 
@@ -262,21 +277,14 @@ def _left_text(seconds: float) -> str:
     return _clock_text(seconds)
 
 
-#: rollouts a run needs before its rate is worth extrapolating from
-PROGRESS_MIN_ROWS_FOR_ESTIMATE = 5
-#: never more than this long between progress lines
-PROGRESS_EVERY_S = 10.0
-#: never more than this many finished rollouts between progress lines
-PROGRESS_EVERY_ROWS = 10
-#: runs smaller than this say nothing: they are over before a line helps
-PROGRESS_MIN_BUDGET = 10
-#: Rows before the realized difficulty mix is compared with the ask.
-TIER_MIX_MIN_ROWS = 20
-#: How far (in share) the shipped rows may land below the ask before the run says so.
-TIER_MIX_TOLERANCE = 0.10
-
-
-def progress_line(rows: int, cap: int, situations: int, elapsed: float) -> str:
+def progress_line(
+    rows: int,
+    cap: int,
+    situations: int,
+    elapsed: float,
+    *,
+    min_rows_for_estimate: int = PROGRESS_MIN_ROWS_FOR_ESTIMATE,
+) -> str:
     """One line of run progress, in the words a waiting person wants:
 
     ``12/64 rollouts, 3 situations written, 1m40s elapsed, ~5m left``
@@ -290,7 +298,7 @@ def progress_line(rows: int, cap: int, situations: int, elapsed: float) -> str:
         f"{situations} situations written",
         f"{_clock_text(elapsed)} elapsed",
     ]
-    if rows >= PROGRESS_MIN_ROWS_FOR_ESTIMATE and rows < cap and elapsed > 0:
+    if rows >= min_rows_for_estimate and rows < cap and elapsed > 0:
         rate = rows / elapsed
         if rate > 0:
             parts.append(f"~{_left_text((cap - rows) / rate)} left")
@@ -487,7 +495,7 @@ class Run:
                 if ask and ask not in seen:
                     seen.add(ask)
                     failing.append(ask)
-                if len(failing) >= 40:
+                if len(failing) >= c.knobs.failing_seeds_cap:
                     break
             self.failure_seeds = len(failing)
             self.seed_prompts.extend(failing)
@@ -520,6 +528,7 @@ class Run:
         )
 
     def _allocation_boost(self, assignment: dict) -> float:
+        knobs = self.c.knobs
         factor = 1.0
         for region in self.optimizer_state["regions"]:
             share = region.get("budget_share") or 0.0
@@ -529,12 +538,12 @@ class Run:
             match = 0.0
             tools_r = recipe.get("tool") or []
             if tools_r and str(assignment.get("tool")) in tools_r:
-                match += 0.6
+                match += knobs.allocation_tool_weight
             conds = recipe.get("tool_condition") or []
             if conds and str(assignment.get("tool_condition")) in conds:
-                match += 0.4
+                match += knobs.allocation_condition_weight
             if match:
-                factor += ALLOC_GAIN * share * match
+                factor += knobs.allocation_gain * share * match
         return factor
 
     def _apply_allocation(self, region_list) -> None:
@@ -826,7 +835,10 @@ class Run:
                         "built-in template writer with no model at all."
                     )
                 threading.Thread(
-                    target=touch_hosted, args=(hosted_url,), kwargs={"timeout": 5.0}, daemon=True
+                    target=touch_hosted,
+                    args=(hosted_url,),
+                    kwargs={"timeout": c.knobs.hosted_touch_s},
+                    daemon=True,
                 ).start()
                 # A trial key buys about a dozen hosted situations a day.
                 # Saying so after the run has spent them is no use, so the
@@ -903,7 +915,7 @@ class Run:
         for s in steps or []:
             result = s.get("result") if isinstance(s, dict) else None
             status = str(result.get("status")) if isinstance(result, dict) else ""
-            if status and status not in ("ok", "success"):
+            if status and status not in OK_STATUSES:
                 condition = status
                 break
         else:
@@ -988,7 +1000,7 @@ class Run:
             # Born stamped: the streamed file and a later save() must agree.
             SCHEMA_KEY: SCHEMA_VERSION,
             "scenario_id": meta.get("region_id")
-            or "probe_" + hashlib.sha256(str(prompt).encode()).hexdigest()[:6],
+            or "probe_" + hashlib.sha256(str(prompt).encode()).hexdigest()[:SCENARIO_ID_CHARS],
             "scenario_dimensions": assignment,
             "arm": meta.get("arm") or "unattributed",
             "prompt": prompt,
@@ -1212,7 +1224,9 @@ class Run:
         self.agent_errors = 0
         self.first_agent_error = ""
         self.timeout_noted = False
-        self.agent_error_allowance = max(DEAD_AGENT_MIN_ERRORS, 2 * int(c.cap or 0))
+        self.agent_error_allowance = max(
+            c.knobs.dead_agent_errors, c.knobs.dead_agent_budget_multiple * int(c.cap or 0)
+        )
         self.agent_dead = False
         self.auth_error: str | None = None
         self.writer_idle = 0
@@ -1230,7 +1244,9 @@ class Run:
         self.over_cap = 0
         # Restarts scale with the job: a 10k-row budget cannot live on the
         # same retry allowance as a smoke run.
-        self.max_restarts = max(MAX_NOVELTY_RESTARTS, int(c.cap or 0) // 100)
+        self.max_restarts = max(
+            MAX_NOVELTY_RESTARTS, int(c.cap or 0) // c.knobs.rows_per_extra_restart
+        )
         # A dormant switch: nothing sets it, so the region and fingerprint
         # dedup branches below never fire. Kept so the paths stay readable
         # next to the code that would flip it.
@@ -1312,6 +1328,8 @@ class Run:
         # plain-words progress on the logger, for a run long enough that
         # silence reads as a hang. Small budgets stay quiet.
         self.progress_on = int(c.cap or 0) >= PROGRESS_MIN_BUDGET
+        self.progress_every_s = c.knobs.progress_every_s
+        self.progress_every_rows = c.knobs.progress_every_rows
         self.progress_rows = 0
         self.progress_at = self.started
         # named so a test can hand the throttle a clock of its own
@@ -1339,9 +1357,12 @@ class Run:
         # saw, which drifted the round counter that seeds selection and
         # made two same-seed runs in one process draw different situations.
         self.sync = bool(c.reproducible) or self.flight == 1
-        typical_n = min(c.completions_per_request, 3)
+        typical_n = min(c.completions_per_request, c.knobs.writer_typical_completions)
         self.writer_batch = max(1, c.scenarios_per_request * typical_n)
-        self.writer_buffer = max(self.writer_batch * 2, min(self.flight * 2, 96))
+        waves = c.knobs.writer_buffer_waves
+        self.writer_buffer = max(
+            self.writer_batch * waves, min(self.flight * waves, c.knobs.writer_buffer_cap)
+        )
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=self.flight)
         self.inflight = {}
         self.inflight_started: dict = {}
@@ -1383,17 +1404,30 @@ class Run:
         vals = [float(r["novelty"]) for r in rows if r.get("novelty") is not None]
         return sum(vals) / len(vals) if vals else 1.0
 
+    def _novelty_parents(self) -> list[dict]:
+        """The failing rows the writer mutates from: the newest
+        ``writer_context_parents`` of them, or none with mutation off."""
+        if not self.c.mutate_failures:
+            return []
+        n = self.c.knobs.writer_context_parents
+        return self.failing_rows[-n:] if n else []
+
+    def _behavior_gaps(self) -> list[str]:
+        """The newest ``writer_context_items`` behavior-gap prompts."""
+        n = self.c.knobs.writer_context_items
+        return list(self.behavior_gap_prompts[-n:]) if n else []
+
     def _novelty_restart(self, round_id: int, info: dict, *, clear_avoid: bool) -> int:
         gen = self.generator
         if self.restart_count >= self.max_restarts or gen.model is None:
             return round_id
         self.restart_count += 1
-        bump = round_id + self.restart_count * 997
+        bump = round_id + self.restart_count * self.c.knobs.restart_seed_stride
         ctx_kwargs = {
-            "novelty_parents": ([] if not self.c.mutate_failures else self.failing_rows[-10:]),
+            "novelty_parents": self._novelty_parents(),
             "avoid": [] if clear_avoid else (info.get("concentrated") or []),
             "underexplored": info.get("sparse") or [],
-            "behavior_gaps": list(self.behavior_gap_prompts[-8:]),
+            "behavior_gaps": self._behavior_gaps(),
         }
         if hasattr(gen, "set_search_context"):
             missing = uncovered_action_shapes(
@@ -1504,8 +1538,8 @@ class Run:
             return
         rows = len(self.data.trajectories)
         now = self.progress_clock()
-        stale = now - self.progress_at >= PROGRESS_EVERY_S
-        many = rows - self.progress_rows >= PROGRESS_EVERY_ROWS
+        stale = now - self.progress_at >= self.progress_every_s
+        many = rows - self.progress_rows >= self.progress_every_rows
         if not (force or stale or many):
             return
         log.info(
@@ -1557,8 +1591,8 @@ class Run:
         should_report = (
             stage != "rollout"
             or len(rows) >= c.cap
-            or len(rows) - self.reported_rows >= 25
-            or now - self.reported_at >= 5.0
+            or len(rows) - self.reported_rows >= c.knobs.flush_report_rows
+            or now - self.reported_at >= c.knobs.flush_report_s
         )
         if should_report:
             elapsed = now - self.started
@@ -1599,10 +1633,10 @@ class Run:
         for word in words:
             if word in _FINGERPRINT_STOPWORDS:
                 continue
-            if len(word) > 4 and word.endswith("s"):
+            if len(word) > FINGERPRINT_STEM_MIN_LEN and word.endswith("s"):
                 word = word[:-1]
             norm.append(word)
-        return hashlib.sha256(" ".join(norm).encode()).hexdigest()[:16]
+        return hashlib.sha256(" ".join(norm).encode()).hexdigest()[:SHORT_HASH_CHARS]
 
     def _produce(
         self,
@@ -1617,14 +1651,27 @@ class Run:
         gen = self.generator
         if self.stopping:
             return [], {}, {}, {}
-        n_cards = max(2, int(cards or c.scenarios_per_request))
+        knobs = c.knobs
+        n_cards = max(knobs.min_cards_per_wave, int(cards or c.scenarios_per_request))
         n_comp = max(
-            1, min(8, int(completions if completions is not None else c.completions_per_request))
+            1,
+            min(
+                MAX_COMPLETIONS_PER_REQUEST,
+                int(completions if completions is not None else c.completions_per_request),
+            ),
         )
-        # ~130 tokens per card: long-prompt cards must be realizable.
-        # The old 768 ceiling gave 12-card batches 64 tokens per message.
+        # About tokens_per_card per card: long-prompt cards must be
+        # realizable (the old 768 ceiling gave 12-card batches 64 tokens
+        # per message).
         token_cap = (
-            out_tokens if out_tokens is not None else max(256, min(2048, 130 * n_cards + 128))
+            out_tokens
+            if out_tokens is not None
+            else max(
+                knobs.wave_tokens_floor,
+                min(
+                    knobs.wave_tokens_cap, knobs.tokens_per_card * n_cards + knobs.wave_tokens_base
+                ),
+            )
         )
         local = make_default_generator(
             self.tools,
@@ -1742,10 +1789,15 @@ class Run:
             self.generated_pool.extend(texts)
         else:
             self._note_writer_start()
-            # Tiny batches first so rollouts start ~5s.
-            initial_writers = min(2, max(1, self.c.writer_flight))
+            # Tiny batches first so the first rollouts start early.
+            knobs = self.c.knobs
+            initial_writers = min(knobs.first_wave_writers, max(1, self.c.writer_flight))
             for i in range(initial_writers):
-                self.scenario_futs.append(self.scenario_pool.submit(self._produce, i, 4, None, 320))
+                self.scenario_futs.append(
+                    self.scenario_pool.submit(
+                        self._produce, i, knobs.first_wave_cards, None, knobs.first_wave_tokens
+                    )
+                )
             self.next_producer_round = initial_writers
             self._ingest_finished_writers()
         data.scenario_generation_seconds = time.monotonic() - self.generation_started
@@ -1791,7 +1843,7 @@ class Run:
             if left is not None and left <= 0:
                 data.stopped_because = "time_budget"
                 break
-            gen.novelty_parents = [] if not c.mutate_failures else self.failing_rows[-10:]
+            gen.novelty_parents = self._novelty_parents()
             self._update_closing(left)
             remaining = c.cap - len(data.trajectories) - len(self.inflight)
             take = min(max(0, self.flight - len(self.inflight)), max(0, remaining))
@@ -1911,6 +1963,7 @@ class Run:
             self.writer_idle = 0
         elif self.generated_pool:
             self.writer_idle += 1
+        knobs = c.knobs
         if gen.model is not None:
             slots = max(0, c.writer_flight - len(self.scenario_futs))
             pipeline = len(unused) + len(self.scenario_futs) * self.writer_batch
@@ -1921,11 +1974,14 @@ class Run:
                 # situations are eligible, not whether the buffer
                 # refills. Writer flight stays small so rollouts
                 # share the GPU.
-                low = len(unused) < max(16, min(64, self.flight // 4))
+                low = len(unused) < max(
+                    knobs.pool_low_floor,
+                    min(knobs.pool_low_cap, self.flight // knobs.pool_low_flight_divisor),
+                )
                 exhausted = (
                     not unused
                     and self.generated_pool
-                    and self.writer_idle >= 2
+                    and self.writer_idle >= knobs.writer_idle_rounds_to_rest
                     and not c.unique_cards
                     and c.time_budget is None
                 )
@@ -1935,7 +1991,7 @@ class Run:
                     refill = min(slots, max(0, c.writer_flight - len(self.scenario_futs)))
             self._launch_writers(refill)
         unused = self._available()
-        if gen.model is None and len(unused) < take * 2:
+        if gen.model is None and len(unused) < take * knobs.offline_topup_multiple:
             for prompt in gen(None, self.round_index, include_model=False) or []:
                 if prompt and prompt not in self.generated_pool:
                     self.generated_pool.append(prompt)
@@ -1945,17 +2001,18 @@ class Run:
             bounce = 0
             while len(unused) < take:
                 bounce += 1
-                for prompt in gen(None, self.round_index + bounce * 17, include_model=False) or []:
+                stride = bounce * knobs.offline_bounce_stride
+                for prompt in gen(None, self.round_index + stride, include_model=False) or []:
                     if prompt and prompt not in self.generated_pool:
                         self.generated_pool.append(prompt)
                 unused = self._available()
-                if bounce >= 20:
+                if bounce >= knobs.offline_bounce_limit:
                     break
         if gen.model is not None and not unused and self.scenario_futs and not self.inflight:
-            wait_s = 0.5
+            wait_s = knobs.writer_wait_s
             left = self._clock_left()
             if left is not None:
-                wait_s = max(0.2, min(wait_s, left))
+                wait_s = max(knobs.writer_wait_floor_s, min(wait_s, left))
             done, _ = concurrent.futures.wait(
                 self.scenario_futs, timeout=wait_s, return_when=concurrent.futures.FIRST_COMPLETED
             )
@@ -1993,7 +2050,7 @@ class Run:
                 for p in unused[: max(0, take)]
             ], info
         if unused:
-            pick_n = take if self.explore_only else max(take * 3, take)
+            pick_n = take if self.explore_only else max(take * c.knobs.select_oversample, take)
             selected, info = self._select(
                 unused,
                 batch_size=min(len(unused), pick_n),
@@ -2018,7 +2075,9 @@ class Run:
         if not data.semantic and not c.unique_cards:
             family_batch = list(self.scenario_families)
             selected, family_rejected = cap_scenario_families(
-                selected, family_batch, cap=max(16, c.n_req * 4)
+                selected,
+                family_batch,
+                cap=max(c.knobs.family_cap_floor, c.n_req * c.knobs.family_cap_per_phrasing),
             )
             if gen.model is None:
                 fill_to = min(take, len(selected) + len(family_rejected))
@@ -2043,14 +2102,15 @@ class Run:
                 limit=int(self.search_plan["shape_limit"]),
             )
             if hasattr(gen, "set_search_context"):
+                items = c.knobs.writer_context_items
                 gen.set_search_context(
-                    novelty_parents=[] if not c.mutate_failures else self.failing_rows[-10:],
+                    novelty_parents=self._novelty_parents(),
                     avoid=(
-                        [row["text"] for row in family_rejected[:6]]
+                        [row["text"] for row in family_rejected[: c.knobs.family_avoid_items]]
                         + list(info.get("concentrated") or [])
-                    )[:8],
+                    )[:items],
                     underexplored=info.get("sparse") or [],
-                    behavior_gaps=list(self.behavior_gap_prompts[-8:]),
+                    behavior_gaps=self._behavior_gaps(),
                     action_targets=[shape_as_tags(s, self.tools) for s in missing],
                     arm_weights=self.search,
                 )
@@ -2207,7 +2267,7 @@ class Run:
                     "arm": "failure_mutation",
                     "seed": c.seed,
                     "generator": name,
-                    "parent": parents[0][:80],
+                    "parent": parents[0][:PARENT_HEAD_CHARS],
                 }
                 self._append_jobs(
                     batch,
@@ -2254,7 +2314,7 @@ class Run:
         if self.judge_inflight:
             # nothing to roll out until a verdict lands; wait on the judge
             waited = time.monotonic()
-            self._drain_judgments(wait_s=0.35)
+            self._drain_judgments(wait_s=c.knobs.collect_wait_s)
             self.idle_on_judge_s += time.monotonic() - waited
             self.empty_streak = 0
             return "continue"
@@ -2302,13 +2362,17 @@ class Run:
             return "break"
         # Unique ingest may drop exact/near-dupe cards. That is
         # not a run stop: the writer can invent another situation.
-        if gen.model is not None and not self.generated_pool and self.empty_streak >= 8:
+        if (
+            gen.model is not None
+            and not self.generated_pool
+            and self.empty_streak >= c.knobs.empty_rounds_to_stop
+        ):
             err = gen.last_errors.get("llm_guided") or "empty response"
             if "Hosted Qwen" in err:
                 raise RuntimeError(err[err.find("Hosted Qwen") :]) from None
             raise RuntimeError(f"hosted Qwen produced no situations: {err}")
         if gen.model is not None and remaining > 0:
-            if self.writer_idle >= 4 and not c.unique_cards:
+            if self.writer_idle >= c.knobs.writer_idle_rounds_to_restart and not c.unique_cards:
                 # Writer stalled on duplicates. Restart it
                 # with a rotated seed AND a rotating window
                 # of already-used asks as avoid pressure:
@@ -2316,8 +2380,9 @@ class Run:
                 # asks (measured: 26 vs the old ceiling 28).
                 if self.restart_count < self.max_restarts:
                     seen = sorted(self.used)
-                    lo_i = (self.restart_count * 8) % max(1, len(seen))
-                    window = seen[lo_i : lo_i + 8] or seen[:8]
+                    width = c.knobs.restart_avoid_window
+                    lo_i = (self.restart_count * width) % max(1, len(seen))
+                    window = seen[lo_i : lo_i + width] or seen[:width]
                     self.round_index = self._novelty_restart(
                         self.round_index, {"concentrated": window}, clear_avoid=False
                     )
@@ -2357,15 +2422,16 @@ class Run:
         c = self.c
         data = self.data
         rollout_started = time.monotonic()
-        wait_s = 0.35
+        wait_s = c.knobs.collect_wait_s
+        floor = c.knobs.collect_wait_floor_s
         left = self._clock_left()
         if left is not None:
-            wait_s = max(0.1, min(wait_s, left))
+            wait_s = max(floor, min(wait_s, left))
         if self.inflight:
             if self.sync:
                 # Re-rolled rollouts land here too: take the whole set,
                 # bounded by the hung-slot limit and the clock.
-                wait_s = c.hung_slot_s if left is None else max(0.1, min(c.hung_slot_s, left))
+                wait_s = c.hung_slot_s if left is None else max(floor, min(c.hung_slot_s, left))
                 concurrent.futures.wait(self.inflight, timeout=wait_s)
             else:
                 concurrent.futures.wait(
@@ -2507,28 +2573,32 @@ class Run:
             nov = sel.get("novelty") if isinstance(sel, dict) else None
             if nov is not None:
                 prev = self.region_novelty.get(rid, float(nov))
-                self.region_novelty[rid] = 0.5 * prev + 0.5 * float(nov)
+                w = c.knobs.region_novelty_smoothing
+                self.region_novelty[rid] = (1.0 - w) * prev + w * float(nov)
 
         assign_id = {
             json.dumps(r["assignment"], sort_keys=True, default=str): r["id"] for r in gen.regions
         }
 
+        knobs = c.knobs
+
         def novelty_fn(assignment):
             rid = assign_id.get(json.dumps(assignment, sort_keys=True, default=str), "")
-            return float(self.region_novelty.get(rid, 0.5))
+            return float(self.region_novelty.get(rid, knobs.gap_value_unknown))
 
         def behavior_fn(assignment):
             rid = assign_id.get(json.dumps(assignment, sort_keys=True, default=str), "")
             count = self.region_counts.get(rid, 0)
             nsig = len(self.region_sigs.get(rid, ()))
             fails = self.region_fails.get(rid, 0)
-            if count >= 3 and nsig <= 1:
-                gap = 1.0
-            elif nsig >= 3:
-                gap = 0.2
+            if count >= knobs.gap_min_rows and nsig <= 1:
+                gap = knobs.gap_value_stuck
+            elif nsig >= knobs.gap_rich_signatures:
+                gap = knobs.gap_value_rich
             else:
-                gap = 0.5
-            return min(1.0, 0.7 * gap + 0.3 * (fails / (count + 1.0)))
+                gap = knobs.gap_value_unknown
+            fault_rate = fails / (count + 1.0)
+            return min(1.0, knobs.gap_weight * gap + (1.0 - knobs.gap_weight) * fault_rate)
 
         axis_counts: dict[str, dict[str, int]] = {}
         for t in data.trajectories:
@@ -2621,7 +2691,7 @@ class Run:
                 )
                 # Short/messy clocks peek for different outcomes.
                 # Long/saturation only re-rolls when behavior already differs.
-                if nsig > 1 or live["explore"] < 0.55:
+                if nsig > 1 or live["explore"] < knobs.adaptive_verify_explore_floor:
                     want_verify = True
             if not want_verify:
                 continue
@@ -2639,10 +2709,12 @@ class Run:
         axis_gaps = self._axis_gaps()
         if hasattr(gen, "set_search_context"):
             gen.set_search_context(
-                novelty_parents=[] if not c.mutate_failures else self.failing_rows[-10:],
+                novelty_parents=self._novelty_parents(),
                 avoid=list(getattr(gen, "avoid", []) or []),
-                underexplored=(list(info.get("sparse") or []) + axis_gaps)[:8],
-                behavior_gaps=list(self.behavior_gap_prompts[-8:]),
+                underexplored=(list(info.get("sparse") or []) + axis_gaps)[
+                    : knobs.writer_context_items
+                ],
+                behavior_gaps=self._behavior_gaps(),
                 action_targets=[shape_as_tags(s, self.tools) for s in missing],
                 arm_weights=self.search,
             )
@@ -2762,7 +2834,7 @@ class Run:
             self.group_state[prompt] = state
             return
         p_next = self._hazard(n_done)
-        mixed_rate = (self.groups_mixed + 1.0) / (self.groups_probed + 2.0)
+        mixed_rate = self._mixed_rate()
         if not self._fresh_available() or p_next > mixed_rate / probe:
             self.group_state[prompt] = "probing"
             self._queue_verify(prompt, job, 1)
@@ -2833,7 +2905,11 @@ class Run:
                 if key in verdict:
                     row[key] = verdict[key]
             prompt = str(row.get("prompt") or job[0] or "")
-            if self.c.mutate_graded_failures and _graded_failure(row) and not mutation_worthy(row):
+            if (
+                self.c.mutate_graded_failures
+                and _graded_failure(row, self.c.knobs.pass_threshold)
+                and not mutation_worthy(row)
+            ):
                 # The grader's verdict steers like a tool fault (#285): the
                 # row becomes a mutation parent, its situation counts as
                 # failing, and it is re-rolled under the same gate a
@@ -2870,7 +2946,7 @@ class Run:
             self.failure_criteria[name] = self.failure_criteria.get(name, 0) + 1
         prompt = str(row.get("prompt") or "")
         if prompt:
-            self.failure_aim[prompt[:80]] = aim
+            self.failure_aim[prompt[:PARENT_HEAD_CHARS]] = aim
         rid = row.get("scenario_id")
         if rid:
             self.failure_aim[str(rid)] = aim
@@ -2897,13 +2973,18 @@ class Run:
 
     def _hazard(self, n: int) -> float:
         """Chance the next rollout of a group unanimous after ``n`` splits
-        it: the run's own count at that n, with Laplace's 1/(n+2) as a
-        one-observation prior. A run where continuations never split
-        learns quickly that a unanimous group is a consistent cell."""
-        prior = 1.0 / (n + 2.0)
+        it: the run's own count at that n, with Laplace's rule on n
+        unanimous draws (``1/(n+2)`` at alpha 1) as a one-observation
+        prior. A run where continuations never split learns quickly that
+        a unanimous group is a consistent cell."""
+        prior = laplace(0, n, self.c.knobs.smoothing_alpha)
         seen = self.hazard_seen.get(n, 0)
         split = self.hazard_split.get(n, 0)
         return (split + prior) / (seen + 1.0)
+
+    def _mixed_rate(self) -> float:
+        """Share of probed groups that split, Laplace-smoothed."""
+        return laplace(self.groups_mixed, self.groups_probed, self.c.knobs.smoothing_alpha)
 
     def _queue_verify(self, prompt: str, job: tuple, count: int) -> None:
         meta = job[2] if len(job) > 2 else {}
@@ -2935,9 +3016,9 @@ class Run:
             return
         if self.c.topo["repeat_policy"] != "successive" or self.c.k_immediate:
             return
-        recent = sorted(self.rollout_durations[-20:])
+        recent = sorted(self.rollout_durations[-self.c.knobs.closing_window_rollouts :])
         est = recent[len(recent) // 2]
-        if left < 2.0 * est:
+        if left < self.c.knobs.closing_margin * est:
             self.closing = True
             note_stage(self.data, "closing: finishing groups before the clock")
 
@@ -2985,7 +3066,7 @@ class Run:
             "groups": len(groups),
             **counts,
             "rollouts_saved": saved,
-            "mixed_rate": round((self.groups_mixed + 1.0) / (self.groups_probed + 2.0), 4),
+            "mixed_rate": round(self._mixed_rate(), 4),
             "hazard": {str(n): round(self._hazard(n), 4) for n in sorted(self.hazard_seen)},
             "idle_on_judge_s": round(self.idle_on_judge_s, 1),
             "truncated_skipped": self.skipped_truncated,
@@ -3013,10 +3094,11 @@ class Run:
             for t in data.trajectories
             if isinstance(t.get("scenario_dimensions"), dict)
         }
+        knobs = self.c.knobs
         axis_gaps: list[str] = []
-        if short_n / n_rows < 0.08:
+        if short_n / n_rows < knobs.short_share_floor:
             axis_gaps.append("You keep it brief.")
-        if long_n / n_rows < 0.10:
+        if long_n / n_rows < knobs.long_share_floor:
             axis_gaps.append("You use more words.")
         for tone, line in (
             ("frustrated", "You are frustrated."),
@@ -3029,12 +3111,12 @@ class Run:
             axis_gaps.append("You are pushing a constraint.")
         if "ambiguous" not in tiers:
             axis_gaps.append("You are confused.")
-        for name in sorted(self.declared)[:8]:
+        for name in sorted(self.declared)[: knobs.writer_context_items]:
             if name and name not in tools_hit:
                 intent = intent_for_tool(name)
                 if intent:
                     axis_gaps.append(f"You want to {intent}.")
-        return axis_gaps[:8]
+        return axis_gaps[: knobs.writer_context_items]
 
     def _shutdown(self) -> None:
         data = self.data
@@ -3044,10 +3126,11 @@ class Run:
         self.pool.shutdown(wait=False, cancel_futures=True)
         self.judge_pool.shutdown(wait=False, cancel_futures=True)
         if self.scene_thread is not None:
-            left = 8.0
+            knobs = self.c.knobs
+            left = knobs.scene_join_s
             clock = self._clock_left()
             if clock is not None:
-                left = max(0.2, min(1.0, clock))
+                left = max(knobs.writer_wait_floor_s, min(knobs.scene_join_clocked_s, clock))
             self.scene_thread.join(timeout=left)
             data.scene_brief = self.scene_box["brief"]
             if not data.scene_brief and "scene_brief_unavailable" not in data.degraded:
@@ -3130,8 +3213,8 @@ class Run:
         if misses:
             data.search["followup_misses"] = misses
             if (
-                misses >= 8
-                and misses >= len(data.trajectories) // 4
+                misses >= c.knobs.followup_starved_min
+                and misses >= len(data.trajectories) // c.knobs.followup_starved_divisor
                 and "followups_starved" not in data.degraded
             ):
                 data.degraded.append("followups_starved")
@@ -3166,8 +3249,9 @@ class Run:
         data.unique_prompts = len({t["prompt"] for t in data.trajectories})
         data.unique_behavior_signatures = len({t["behavior_signature"] for t in data.trajectories})
         if data.semantic and data.trajectories:
+            floor = c.knobs.semantic_duplicate_novelty
             duplicate = sum(
-                1 for t in data.trajectories if float(t.get("semantic_novelty") or 0.0) < 0.05
+                1 for t in data.trajectories if float(t.get("semantic_novelty") or 0.0) < floor
             )
             data.semantic_duplicate_rate = duplicate / len(data.trajectories)
         if data.coverage_curve:
@@ -3230,7 +3314,7 @@ class Run:
                 "prompts": len(pinned),
                 "tasks": len({t["scenario_id"] for t in c.pinned_tasks if t.get("scenario_id")}),
                 "ran": len(pinned & ran),
-                "missing": sorted(pinned - ran)[:20],
+                "missing": sorted(pinned - ran)[:REPORT_LIST_ITEMS],
             }
         if self.drafted_tools:
             data.search["drafted_tools"] = self.drafted_tools
@@ -3263,7 +3347,7 @@ class Run:
             self._stamp_groups()
             data.search["groups"] = self._group_summary()
             elapsed = max(1e-9, time.monotonic() - self.started)
-            if self.idle_on_judge_s > 0.1 * elapsed:
+            if self.idle_on_judge_s > c.knobs.idle_judge_share * elapsed:
                 # every asked situation was probed and the pool waited on
                 # verdicts; breadth, not the judge, is the fix
                 need = -(-max(1, int(c.concurrency)) // max(1, min(c.repeat_count, c.probe)))
@@ -3380,8 +3464,8 @@ class Run:
             "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
             "rows": rows,
         }
-        asked = c.hard_share is not None and rows >= TIER_MIX_MIN_ROWS
-        if asked and realized is not None and requested - realized > TIER_MIX_TOLERANCE:
+        asked = c.hard_share is not None and rows >= c.knobs.tier_mix_min_rows
+        if asked and realized is not None and requested - realized > c.knobs.tier_mix_tolerance:
             mix["note"] = (
                 f"hard_share={requested:g} asked, {realized:.2f} drawn "
                 f"({hard} of {rows} rows from the hard tiers). Open asks and cells "
@@ -3409,7 +3493,7 @@ class Run:
         # applied means a cell weight actually changed, not merely that
         # regions existed; the gain reads the one constant that steers.
         state_record["applied"] = self.allocation_hits["n"] > 0
-        state_record["allocation_gain"] = ALLOC_GAIN
+        state_record["allocation_gain"] = self.c.knobs.allocation_gain
         # region_progress is attached at the very end of simulate(), so
         # it measures the rows that ship: graded, leak-pruned.
         data.search["behavior_state"] = state_record

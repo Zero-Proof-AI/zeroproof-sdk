@@ -3,7 +3,9 @@ message: "If you use whileai in research, please cite it as below."
 title: "whileai: post-training data and evaluation for tool-using agents"
 type: software
 authors:
-  - name: "While"
+  - family-names: Weiss
+    given-names: Jacob
+    affiliation: While
 repository-code: "https://github.com/whilehq/whileai-sdk"
 url: "https://zeroproofai.com"
 license: Apache-2.0

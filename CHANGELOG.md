@@ -3,6 +3,75 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- No number in the run engine is inline any more. Every value
+  `simulate()`'s engine used to carry as a bare literal (the eight empty
+  rounds before a writer failure, the four idle rounds before a writer
+  restart, the 0.35 s scheduler tick, the 130 tokens per situation card,
+  the 0.6 / 0.4 trace-region match weights, the 0.5 graded-failure cut,
+  the Laplace priors on the group hazard, and sixty more) is now a named
+  field on `whileai.simulations.defaults.RunKnobs` with a comment that
+  says why that value: a measurement, an rlhf-book chapter, an arXiv id
+  (DAPO 2503.14476, Dr. GRPO 2503.20783, ProRL 2505.24864, GRESO
+  2506.02177, tau-bench 2406.12045, APIGen-MT 2504.03601, Miller
+  2411.00640, and the 2026 tool-RL fault-injection studies 2603.21972 and
+  2604.06111), or the words "convention, untested". Each is an
+  `advanced={...}` key of the same name, type-checked and bounded, and
+  the `docs/reference.md` table lists all of them with their defaults (a test keeps
+  the two in step). Values that mean the same thing in two files
+  (`budget=1000`, the judge concurrency, the 0.5 pass cut, the 16-char
+  short hash, the fault status vocabulary) come from one constant in
+  `defaults.py`. No default changed: `scripts/golden.py` is identical
+  across all 13 configurations before and after. The science defaults
+  stay where they were, with the disagreement written down: `mode="rl"`
+  keeps k=8 (Dr. GRPO's setting; DAPO, ProRL and Skywork-OR1 use 16, and
+  Miller shows resampling past K=4 buys little eval variance), and the
+  fault rate stays 0.5 / 0.8 because it is a share of fault-tagged cells
+  (under about 10% of rows), not the per-call rate the injection papers
+  bound at 0.05 to 0.3.
+
+## 0.71 (2026-09-18)
+
+- `skills/`: six tested playbooks, one per way to train, that a coding agent
+  reads to go from data to a reported run: `sft-from-traces`, `dpo-pairs`,
+  `grpo-verifier`, `character`, `tool-call-efficiency`, `watch`. Each folder
+  is a `SKILL.md` and a `check.py` that runs the same steps offline with no
+  key; `tests/skills` fails CI when a code block in a playbook drifts from
+  the code that ran. Every skill ends the same way: frozen held-out test
+  first, noise floor, score every behavior, report with `whileai.platform`.
+  `scripts/skill_trial.py` runs a cold coding agent on a skill and grades
+  what reached the platform. `examples/` (a pointer) is gone; `recipes/` is
+  the one folder.
+
+## 0.70 (2026-09-18)
+
+- README: the wordmark links to withwhile.com, matching the repo homepage.
+
+## 0.69 (2026-09-18)
+
+- `uv run pytest` runs one worker per core (pytest-xdist in the dev extra,
+  `-n auto` as the pytest default; `-n0` for a serial run or `--pdb`). The
+  suite went from about three minutes to under a minute on four cores, and
+  CI wall clock from about three minutes to under two. One timing-dependent
+  test (the rl idle-on-judge note) now waits for every probe rollout and
+  holds the judge for a multiple of elapsed time, so it holds under load.
+
+
+## 0.68 (2026-09-18)
+
+- README prose rewritten in plain voice: what each call does and why, in
+  sentences a person would say. Downloads badge moved to pepy (pypistats
+  was rate limited on shields).
+
+## 0.67 (2026-09-18)
+
+- README: While wordmark (light and dark) and brand-colored badges, `uv add`
+  first, an evals-and-harness entry point for teams that do not train, 30%
+  fewer words. Author is Jacob Weiss in the cite block, `CITATION.cff` and
+  `pyproject.toml`.
+
+
 ## 0.66 (2026-09-18)
 
 - `str(tracked.verdict())` says "beats" or "trails" only when the difference

@@ -1226,6 +1226,83 @@ Measured at `avg_turns=4`. The default is now `12`, so a row carries more turns 
 | `mutate_graded_failures` | on with `grader=` | `False` grades beside the loop without steering by the verdict: only tool faults make mutation parents. A row the grader fails (reward under 0.5) is otherwise re-rolled and its ask mutated the way a tool fault's is; `search["mutation_aims"]` counts each aim. `True` without `grader=` is an error |
 | `patience` | `"normal"` | How long the person keeps answering the agent's questions. The first question is always attempted; from the second on the person may walk away (`normal`: 35% then 60%; `short`: 60% then 90%; `endless`: never, the pre-knob behaviour). At any question the person may also leave when it asks for something they could not know. A row the person left ends on the agent's question and carries `ended_by="user_left"`; `search["ended_on_question"]` counts them. |
 
+Every other number the engine uses is an `advanced` key too, named after
+its field on `whileai.simulations.defaults.RunKnobs`, where a comment
+above each states why the default is what it is (a measurement, an
+rlhf-book chapter, an arXiv id, or "convention, untested"). None of
+these needs touching for a normal run; they are here so nothing in the
+engine is a number you cannot change. A value outside its bounds is a
+`ValueError` that names the floor or ceiling and the default.
+
+| `advanced` key | Default | |
+|---|---|---|
+| `empty_rounds_to_stop` | `8` | Consecutive scheduler rounds with nothing to run and nothing in flight before a run whose model writer wrote nothing gives up |
+| `writer_idle_rounds_to_restart` | `4` | Rounds the pool stays empty on duplicate waves before the writer is restarted with a rotated seed and an avoid window |
+| `writer_idle_rounds_to_rest` | `2` | Idle rounds after which a plain run (not unique, no clock) stops launching waves and lets the restart rule decide |
+| `restart_avoid_window` | `8` | Used asks handed to a restarted writer as avoid pressure |
+| `rows_per_extra_restart` | `100` | One extra writer restart per this many budgeted rows, above the base allowance |
+| `dead_agent_errors` | `16` | Lost rollouts with no row landed before an agent that raises on every call is called off (or `dead_agent_budget_multiple` x budget, whichever is larger) |
+| `dead_agent_budget_multiple` | `2` | See `dead_agent_errors` |
+| `closing_margin` | `2.0` | Under a clock, stop opening groups when the time left is under this many median rollout durations |
+| `closing_window_rollouts` | `20` | Recent rollouts the median duration is read from |
+| `collect_wait_s` | `0.35` | The loop's tick: how long a round waits for a rollout or verdict before re-planning |
+| `collect_wait_floor_s` | `0.1` | The shortest tick when the clock is nearly out |
+| `writer_wait_s` | `0.5` | How long the loop waits on a writer wave when the pool is empty and nothing is in flight |
+| `writer_wait_floor_s` | `0.2` | The shortest writer or scene wait when the clock is nearly out |
+| `hosted_touch_s` | `5.0` | Timeout on the warm-up ping to the hosted writer |
+| `scene_join_s` | `8.0` | How long shutdown waits for the scene-brief thread with no clock |
+| `scene_join_clocked_s` | `1.0` | The same wait under a clock |
+| `writer_buffer_waves` | `2` | Waves of prompts kept in the pipe ahead of the rollouts |
+| `writer_buffer_cap` | `96` | The most prompts the buffer plans for |
+| `writer_typical_completions` | `3` | Completions per card the buffer math assumes |
+| `pool_low_floor` | `16` | The pool is low (refill now) under `max(pool_low_floor, min(pool_low_cap, concurrency / pool_low_flight_divisor))` eligible prompts |
+| `pool_low_cap` | `64` | See `pool_low_floor` |
+| `pool_low_flight_divisor` | `4` | See `pool_low_floor` |
+| `offline_topup_multiple` | `2` | The template writer tops up under this many batches of eligible prompts |
+| `offline_bounce_limit` | `20` | Extra template rounds tried before a short batch is accepted |
+| `offline_bounce_stride` | `17` | Seed step between those rounds |
+| `restart_seed_stride` | `997` | Round-id step per writer restart, so restarted draws reuse no round's temperature and tags |
+| `first_wave_writers` | `2` | Writer waves launched at start, tiny so the first rollouts start early |
+| `first_wave_cards` | `4` | Cards per first wave |
+| `first_wave_tokens` | `320` | Reply budget of a first wave |
+| `min_cards_per_wave` | `2` | A wave asks for at least this many cards |
+| `tokens_per_card` | `130` | A wave's reply budget is `clamp(tokens_per_card x cards + wave_tokens_base, wave_tokens_floor, wave_tokens_cap)` |
+| `wave_tokens_base` | `128` | See `tokens_per_card` |
+| `wave_tokens_floor` | `256` | See `tokens_per_card` |
+| `wave_tokens_cap` | `2048` | See `tokens_per_card` |
+| `failing_seeds_cap` | `40` | Failing asks mined from `traces=` that seed the run |
+| `select_oversample` | `3` | The diversity selector picks this many times the batch so the family cap and the situation quota have slack |
+| `family_cap_floor` | `16` | Near-copy scenario families are capped at `max(family_cap_floor, phrasings x family_cap_per_phrasing)` rows |
+| `family_cap_per_phrasing` | `4` | See `family_cap_floor` |
+| `writer_context_items` | `8` | Items of each kind (avoid, underexplored, behavior gaps, axis gaps, tools) the writer prompt carries |
+| `writer_context_parents` | `10` | Failing rows the writer mutates from |
+| `family_avoid_items` | `6` | Family-rejected prompts shown to the writer as avoid pressure |
+| `allocation_gain` | `4.0` | How hard a hot trace region pulls cell weight toward itself: a full match at budget share s multiplies the weight by `1 + gain x s` |
+| `allocation_tool_weight` | `0.6` | Match credit for a cell on a hot region's tool |
+| `allocation_condition_weight` | `0.4` | Match credit for a cell on a hot region's tool condition |
+| `region_novelty_smoothing` | `0.5` | Weight on the newest novelty score in a region's running novelty |
+| `gap_min_rows` | `3` | Rows a region needs before one signature counts as stuck |
+| `gap_rich_signatures` | `3` | Distinct signatures at which a region counts as explored |
+| `gap_value_stuck` | `1.0` | Behavior-gap score of a stuck region |
+| `gap_value_rich` | `0.2` | Behavior-gap score of an explored region |
+| `gap_value_unknown` | `0.5` | Behavior-gap score (and starting novelty) of an undecided region |
+| `gap_weight` | `0.7` | Share of a region's behavior value from its gap score; the rest from its fault rate |
+| `adaptive_verify_explore_floor` | `0.55` | Under `mode="adaptive"`, an explore share below this re-rolls a prompt to peek for a different outcome |
+| `pass_threshold` | `0.5` | A reward under this is a graded failure (the search steers by it with `grader=`) |
+| `smoothing_alpha` | `1.0` | Laplace smoothing `(s + a) / (n + 2a)` on the group hazard and the mixed rate |
+| `short_share_floor` | `0.08` | Under this share of short asks the writer is nudged to keep it brief |
+| `long_share_floor` | `0.1` | Under this share of long asks the writer is nudged to use more words |
+| `followup_starved_min` | `8` | `followups_starved` needs at least this many missed follow-ups that are also at least rows / `followup_starved_divisor` |
+| `followup_starved_divisor` | `4` | See `followup_starved_min` |
+| `semantic_duplicate_novelty` | `0.05` | A row under this semantic novelty counts as a duplicate |
+| `idle_judge_share` | `0.1` | An rl pool idle on verdicts for more than this share of the run gets the add-situations note |
+| `tier_mix_min_rows` | `20` | Rows before the drawn difficulty mix is compared with `hard_share` |
+| `tier_mix_tolerance` | `0.1` | How far below the asked hard share the drawn share may land before the run says so |
+| `progress_every_s` | `10.0` | Never more than this long between progress lines |
+| `progress_every_rows` | `10` | Never more than this many finished rollouts between progress lines |
+| `flush_report_rows` | `25` | The streamed-output log line is written every this many rows |
+| `flush_report_s` | `5.0` | Or every this many seconds |
+
 Aliases: `phrasings=` / `n=` → `requests_per_situation`; `repeats=` → `rollouts_per_request`; `unique=` → `unique_situations`; `policy=` → `system_prompt`; `risk=` → `fault_rate`.
 
 ## Output
@@ -1308,7 +1385,7 @@ Internals are grouped by stage and may move between releases.
 
 ```bash
 uv sync --extra dev
-uv run pytest           # about two minutes, no network
+uv run pytest           # under a minute on four cores, no network; -n0 runs it serially
 uv run ruff check .     # lint; `--fix` for the mechanical ones
 uv run mypy             # type check
 pre-commit install      # optional: ruff and whitespace hooks on commit
