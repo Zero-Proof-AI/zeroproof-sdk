@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.68 (2026-09-18)
 
 - README prose rewritten in plain voice: what each call does and why, in
   sentences a person would say. Downloads badge moved to pepy (pypistats
