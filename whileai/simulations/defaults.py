@@ -320,6 +320,14 @@ MAX_SAMPLES_PER_CALL = MAX_COMPLETIONS_PER_REQUEST
 # is a fragment the junk gate drops anyway. Both HTTP backends read it
 # (convention, untested).
 MIN_REPLY_TOKENS = 256
+# DECISION_TIMEOUT_S = 30: seconds one TypeSafe decision request may
+# take (``typesafe:`` judge, typesafe_backend.py). Jev's stated end-to-end
+# latency is 70 to 500 ms and its own SDK's default timeout is 10 s;
+# 30 s leaves room for a queue behind its 1,200-requests-a-minute limit
+# without a stuck request holding a judge worker for the chat judge's
+# 120 s (convention, untested; the vendor numbers are from
+# typesafe.ai/blog/introducing-system-one-models-and-jev).
+DECISION_TIMEOUT_S = 30.0
 
 # SAMPLING_TEMPERATURE_MAX = 2.0: the ceiling every temperature knob is
 # validated against (user_temperature, the hosted trainer's rollout
@@ -555,6 +563,15 @@ JUDGE_MAX_TOKENS = 120
 # to improve the robustness of LLM-as-a-judge workflows is to use a
 # sampling temperature of 0").
 JUDGE_TEMPERATURE = 0.0
+# DECISION_UNSURE_BAND = 0.1: a decision judge's (``typesafe:``) verdict
+# probability within this of PASS_THRESHOLD, so 0.4 to 0.6, marks the row
+# ``unsure`` in its judge_meta and the grade report counts them. Jev's
+# stated property is calibration, higher confidence means higher accuracy
+# (typesafe.ai/blog/introducing-system-one-models-and-jev), so a
+# near-even probability is a row for a person to read, not a label to
+# train on. The width is a convention, untested against gold;
+# ``judge_trust`` on labeled rows is how to check it.
+DECISION_UNSURE_BAND = 0.1
 
 # ---------------------------------------------------------------------
 # score: reply truncation
@@ -1450,6 +1467,8 @@ __all__ = [
     "CI_LEVEL",
     "DEAD_AGENT_BUDGET_MULTIPLE",
     "DEAD_AGENT_MIN_ERRORS",
+    "DECISION_TIMEOUT_S",
+    "DECISION_UNSURE_BAND",
     "DECONTAM_NGRAM",
     "DECONTAM_OVERLAP",
     "DEFAULT_AVG_TURNS",

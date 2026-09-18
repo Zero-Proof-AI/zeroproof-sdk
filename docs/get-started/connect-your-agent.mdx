@@ -75,6 +75,7 @@ data = wai.simulate("openai:gpt-4.1-mini", tools=TOOLS, system_prompt=POLICY)
 | `anthropic:<model>` | Anthropic, key from `ANTHROPIC_API_KEY` |
 | `vllm:<model>@<url>` | Any OpenAI-compatible server at `<url>` |
 | `ollama:<model>` | A local Ollama |
+| `typesafe:<model>` | TypeSafe's Jev, key from `TYPESAFE_API_KEY`. Judge only: `spec=` on `grade`, never `agent=` |
 
 ## The hosted model
 

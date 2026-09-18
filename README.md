@@ -103,7 +103,9 @@ returns `{"steps": [...], "final_text": "..."}`. To use a model, pass a
 spec string: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
 or `ollama:<model>`. With no `agent=` at all, the run uses the Qwen we
 host, on your key from `whileai login`, and Phi-4 grades. The judge is
-never the model it is judging.
+never the model it is judging. `data.grade(spec="typesafe:jev-latest")` grades
+with TypeSafe's Jev instead: typed questions, a probability on every verdict,
+no output tokens (judge only, on `TYPESAFE_API_KEY`).
 
 ## The loop
 

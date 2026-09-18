@@ -35,6 +35,11 @@ from .anthropic_backend import complete as anthropic_complete
 from .anthropic_backend import missing_key as missing_anthropic_key
 from .anthropic_backend import resolve_key as anthropic_key
 from .diversity import DEFAULT_AVG_TURNS, running_turn_mean, sample_turn_budget
+from .typesafe_backend import DEFAULT_MODEL as TYPESAFE_DEFAULT_MODEL
+from .typesafe_backend import base_url as typesafe_base_url
+from .typesafe_backend import is_typesafe_url, no_chat_error
+from .typesafe_backend import missing_key as missing_typesafe_key
+from .typesafe_backend import resolve_key as typesafe_key
 from .usage_meter import report_usage
 
 DEFAULT_AGENT = (
@@ -78,7 +83,9 @@ current_rollout = _CurrentRollout()
 
 
 def parse_backend_spec(spec: str) -> tuple[str, str]:
-    """Return (base_url, model) for ollama:/vllm:/openai:/anthropic: specs."""
+    """Return (base_url, model) for ollama:/vllm:/openai:/anthropic:/typesafe:
+    specs. ``typesafe:`` is judge-only: ``complete()`` refuses it and says
+    where it goes."""
     kind, _, rest = str(spec).partition(":")
     if kind == "ollama":
         return "http://localhost:11434/v1", rest or "llama3.1:8b"
@@ -97,9 +104,15 @@ def parse_backend_spec(spec: str) -> tuple[str, str]:
         # spec is just the model name and every caller (writer, user model,
         # agent, judge) records that name the way the other backends do.
         return ANTHROPIC_BASE_URL, rest or ANTHROPIC_DEFAULT_MODEL
+    if kind == "typesafe":
+        # TypeSafe's Jev, on TYPESAFE_API_KEY: typed decisions with
+        # probabilities, so a judge spec only. The URL is the API root
+        # (TYPESAFE_BASE_URL overrides it) and the spec is the model name.
+        return typesafe_base_url(), rest or TYPESAFE_DEFAULT_MODEL
     raise ValueError(
         f"unsupported backend spec {spec!r}; use ollama:<model>, "
-        "vllm:<model>@<url>, openai:<model>, or anthropic:<model>"
+        "vllm:<model>@<url>, openai:<model>, anthropic:<model>, or "
+        "typesafe:<model> (judge only)"
     )
 
 
@@ -276,6 +289,8 @@ def resolve_completion_key(base_url: str | None = None, api_key: str | None = No
         return str(api_key).strip()
     if is_anthropic_url(base_url):
         return anthropic_key()
+    if is_typesafe_url(base_url):
+        return typesafe_key()
     vllm = str(os.environ.get("VLLM_API_KEY") or "").strip()
     if not base_url:
         # no URL means the default agent, whichever route that resolves to
@@ -315,6 +330,8 @@ def missing_hosted_key(base_url: str | None = None, api_key: str | None = None) 
     """
     if is_anthropic_url(base_url):
         return missing_anthropic_key(api_key)
+    if is_typesafe_url(base_url):
+        return missing_typesafe_key(api_key)
     key = resolve_completion_key(base_url, api_key)
     if key:
         return None
@@ -640,6 +657,11 @@ def complete(
     and from this same shape by ``anthropic_backend``. That API returns no
     log-probabilities, so ``logprobs`` yields no ``_logprobs`` there.
     """
+    if is_typesafe_url(base_url):
+        # A decision model has no chat completion. The judges route to
+        # score.decision_judge before they get here; a writer, agent or
+        # simulated user on this spec is a configuration error, named.
+        raise ValueError(no_chat_error(f"typesafe:{model}"))
     if is_anthropic_url(base_url):
         # The Messages API, translated at the boundary. It runs before the
         # context squeeze below because that budget is sized to hosted Qwen's

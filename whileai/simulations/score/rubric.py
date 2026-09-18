@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from ..generate.agents import complete, parse_backend_spec
+from ..generate.typesafe_backend import is_typesafe_url
+from . import decision_judge
 from .grade_llm import (
     JUDGE_TEMPERATURE,
     _render_payload,
@@ -411,27 +413,34 @@ def rubric_judge(
         use = rubric or rubric_of(row)
         if use is None:
             return {"reward": None, "reason": "no rubric on the row", "rubric_version": None}
-        user = json.dumps(
-            {
-                "rubric": use.checklist(),
-                "reply": json.loads(_render_payload(row, policy=policy, tools=tools)),
-            },
-            default=str,
-        )
+        record = json.loads(_render_payload(row, policy=policy, tools=tools))
+        user = json.dumps({"rubric": use.checklist(), "reply": record}, default=str)
         ensure_warm()
         try:
-            reply = complete(
-                url,
-                model,
-                [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                api_key=api_key,
-                temperature=JUDGE_TEMPERATURE,
-                max_tokens=RUBRIC_JUDGE_MAX_TOKENS,
-                timeout=timeout,
-            )
+            if is_typesafe_url(url):
+                # one yes/no per rubric item, keyed by number
+                results, reason = decision_judge.rubric_decision(
+                    url,
+                    model,
+                    system=system,
+                    rubric=use,
+                    reply=record,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
+            else:
+                reply = complete(
+                    url,
+                    model,
+                    [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    api_key=api_key,
+                    temperature=JUDGE_TEMPERATURE,
+                    max_tokens=RUBRIC_JUDGE_MAX_TOKENS,
+                    timeout=timeout,
+                )
+                results, reason = parse_criteria_reply(str(reply.get("content") or ""))
         except Exception as exc:
             return {"reward": None, "reason": f"{type(exc).__name__}: {exc}"[:200]}
-        results, reason = parse_criteria_reply(str(reply.get("content") or ""))
         if results is None:
             return {"reward": None, "reason": "judge reply carried no criteria object"}
         return score_with_rubric(use, results, reason=reason)
