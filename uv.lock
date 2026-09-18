@@ -4019,7 +4019,7 @@ wheels = [
 
 [[package]]
 name = "whileai"
-version = "0.69"
+version = "0.70"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

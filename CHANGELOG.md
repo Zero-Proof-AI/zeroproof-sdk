@@ -3,6 +3,10 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.70 (2026-09-18)
+
+- README: the wordmark links to withwhile.com, matching the repo homepage.
+
 ## 0.69 (2026-09-18)
 
 - `uv run pytest` runs one worker per core (pytest-xdist in the dev extra,
