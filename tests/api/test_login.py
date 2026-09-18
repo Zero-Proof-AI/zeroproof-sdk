@@ -77,7 +77,7 @@ TRIAL = {
     "daily_output_tokens": 50000,
     "storage_bytes": 104857600,
     "datasets": 10,
-    "lift": "Sign in once at https://www.zeroproofai.com/sign-in with an email code to lift trial limits.",
+    "lift": f"Sign in once at {auth.SIGN_IN_URL} with an email code to lift trial limits.",
 }
 
 

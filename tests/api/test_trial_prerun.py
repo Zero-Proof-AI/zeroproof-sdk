@@ -14,7 +14,7 @@ from whileai import auth
 LINE = (
     "trial key: the hosted writer covers about 12 situations a day (25k input tokens); "
     "simulator=False writes them offline with no quota; sign in once at "
-    "https://www.zeroproofai.com/sign-in to lift it"
+    f"{auth.SIGN_IN_URL} to lift it"
 )
 
 
