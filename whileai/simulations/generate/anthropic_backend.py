@@ -36,6 +36,8 @@ import requests
 
 from whileai._env import getenv
 
+from ..defaults import TRANSIENT_BACKOFF_S, TRANSIENT_TRIES
+
 # The spec carries only the model name, so the base URL is fixed and doubles
 # as the marker that routes a call here.
 ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
@@ -50,9 +52,8 @@ MISSING_ANTHROPIC_KEY = (
     "to a key from console.anthropic.com."
 )
 
-# Same count and backoff as the OpenAI-compatible path's transient retry.
-_TRANSIENT_TRIES = 3
-_BACKOFF_S = 0.4
+# Transient retry count and backoff: TRANSIENT_TRIES / TRANSIENT_BACKOFF_S
+# in ``simulations.defaults``, shared with the OpenAI-compatible path.
 
 # Body fields the Messages API accepts. Anything else a caller put in
 # ``extra=`` is vLLM-only (chat_template_kwargs) and is dropped rather than
@@ -308,7 +309,7 @@ def _retry_after(headers: Any, attempt: int) -> float:
         value = float(str((headers or {}).get("retry-after") or "").strip())
     except (TypeError, ValueError):
         value = 0.0
-    return min(30.0, value) if value > 0 else _BACKOFF_S * (2**attempt)
+    return min(30.0, value) if value > 0 else TRANSIENT_BACKOFF_S * (2**attempt)
 
 
 def _one_call(
@@ -331,7 +332,7 @@ def _one_call(
         if status == 400 and "max_tokens" in body and int(payload.get("max_tokens") or 0) > 256:
             payload["max_tokens"] = max(256, int(payload["max_tokens"]) // 2)
             continue
-        if (status == 429 or status >= 500) and transient < _TRANSIENT_TRIES:
+        if (status == 429 or status >= 500) and transient < TRANSIENT_TRIES:
             time.sleep(_retry_after(response.headers, transient))
             transient += 1
             continue

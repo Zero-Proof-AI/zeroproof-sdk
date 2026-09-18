@@ -7,6 +7,7 @@ import json
 import pytest
 
 import whileai.simulations as wai
+from whileai.simulations.defaults import TRANSIENT_TRIES
 from whileai.simulations.generate import agents
 from whileai.simulations.generate import anthropic_backend as ab
 
@@ -293,7 +294,7 @@ def test_a_rate_limit_retries_then_raises(monkeypatch):
     monkeypatch.setattr(ab.requests, "post", fake_post)
     with pytest.raises(RuntimeError, match="rate-limited"):
         agents.complete(ab.ANTHROPIC_BASE_URL, "claude-fake", [{"role": "user", "content": "hi"}])
-    assert len(calls) == ab._TRANSIENT_TRIES + 1
+    assert len(calls) == TRANSIENT_TRIES + 1
 
 
 # --- the loops that consume it ----------------------------------------------

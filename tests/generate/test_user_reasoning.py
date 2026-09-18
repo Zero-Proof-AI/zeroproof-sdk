@@ -9,7 +9,7 @@ import threading
 import whileai.simulations as wai
 from tests.generate.test_logprobs import POLICY, TOOLS
 from whileai.simulations.generate.agents import (
-    _MIN_SPOKEN,
+    MIN_SPOKEN_CHARS,
     _user_followup,
     local_model,
     user_sim_system,
@@ -101,7 +101,7 @@ def test_reasoning_with_no_spoken_line_is_no_followup_not_a_fragment(monkeypatch
     )
     assert text == ""
     assert len(calls) == 2
-    assert len("ok") < _MIN_SPOKEN
+    assert len("ok") < MIN_SPOKEN_CHARS
     assert stats["user_think_stripped"] == 2 and stats["user_think_unclosed"] == 1
 
 

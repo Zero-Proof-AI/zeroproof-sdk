@@ -16,8 +16,9 @@ Two channels reach the code:
   ``ValueError`` that names the bound.
 
 Sections are per owner so parallel work reconciles by section, not by
-line: ``run/`` (engine, config, rows, simulation, data) is below. Other
-stages add their own section.
+line: ``run/`` (engine, config, rows, simulation, data) and ``generate/``
+(agents, generator, diversity, ...) are below. Other stages add their own
+section.
 """
 
 from __future__ import annotations
@@ -254,6 +255,33 @@ DEFAULT_SELECT_TARGET = 1000
 # task on the train or holdout side; 32 bits is fine resolution for a
 # fraction. (convention, untested)
 HOLDOUT_BUCKET_HEX_CHARS = 8
+
+# ---------------------------------------------------------------------
+# generate/: HTTP transport (agents.py, anthropic_backend.py)
+# ---------------------------------------------------------------------
+
+# TRANSIENT_TRIES = 3: a 5xx, a 429 (Anthropic) or a dropped Modal request
+# is retried this many times before the rollout is lost (convention,
+# untested; both backends read it so neither is silently flakier).
+TRANSIENT_TRIES = 3
+# TRANSIENT_BACKOFF_S = 0.4: the first sleep before a transient retry,
+# doubled each try (0.4, 0.8, 1.6 s) (convention, untested).
+TRANSIENT_BACKOFF_S = 0.4
+# MAX_SAMPLES_PER_CALL = 8: the most completions one request asks for
+# with ``n``; vLLM prefills once for all of them, and above eight a busy
+# endpoint dropped the request (convention from the hosted pool;
+# run/config.py caps completions_per_request at the same number inline).
+MAX_SAMPLES_PER_CALL = 8
+
+# ---------------------------------------------------------------------
+# generate/: context budgets (agents.py, generator.py)
+# ---------------------------------------------------------------------
+
+# CHARS_PER_TOKEN = 3: the token estimate every context budget is sized
+# with, for the agent's history and the writer's prompt alike. English
+# tokenizers sit at 3.5 to 4.5 chars per token, so this over-counts and
+# the budget errs on the safe side (convention, untested on this data).
+CHARS_PER_TOKEN = 3
 
 
 def knob(default: Any, *, lo: float | None = None, hi: float | None = None) -> Any:

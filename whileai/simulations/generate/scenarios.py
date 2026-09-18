@@ -161,16 +161,29 @@ WORLD_HINTS = {
     "unknown": "unknown",
     "unspecified": "unspecified",
 }
+# SUCCESS_SHARE = 0.90: the share of grid cells whose tool_condition is
+# flipped to success before a non-RL run, one row per fault kind kept.
+# Faults are a small slice of production traffic, and every fault row
+# also gets DEFAULT_FAULT_RATE applied, so row-level faults land under
+# 10% (convention, untested; ``advanced={"prefer_success": False}`` keeps
+# every fault cell, which is the rl default).
 SUCCESS_SHARE = 0.90
 
+# Region weight W = ALPHA * undercoverage + BETA * risk + GAMMA * novelty
+# + DELTA * behavior gap. Coverage and risk lead in explore runs; the
+# blend is a convention, untested, and rl runs use _MODE_WEIGHTS instead.
 ALPHA, BETA, GAMMA, DELTA = 0.35, 0.35, 0.2, 0.1
+# What a region scores on novelty and behavior gap before either is
+# measured: the middle of both scales (convention).
 _DEFAULT_NOVELTY = 0.5
 _DEFAULT_BEHAVIOR_VALUE = 0.5
-# Share of fault-tagged cells that keep a sandbox plan. Half of tagged cells
-# inject; tagged cells are a small slice of all rows, so row-level faults
-# stay modest (under 10% of rows from this dial alone). Independent of
-# failure_mutation: this is sandbox/tool faults, not a purposeful-fail arm.
-# Alias: simulate(risk=...). Set fault_rate=0 / risk=0 to disable injection.
+# DEFAULT_FAULT_RATE = 0.5: the share of fault-tagged cells that keep a
+# sandbox plan. Half of tagged cells inject; tagged cells are a small
+# slice of all rows, so row-level faults stay modest (under 10% of rows
+# from this dial alone). Independent of failure_mutation: this is
+# sandbox/tool faults, not a purposeful-fail arm. ``simulate(advanced=
+# {"fault_rate": r})`` or ``risk=`` moves it, 0 disables injection; the rl
+# mode raises it to 0.8 in run/config.py (convention, untested).
 DEFAULT_FAULT_RATE = 0.5
 
 
@@ -278,7 +291,11 @@ def _has_reference_keys(tools: list[dict]) -> bool:
 
 
 _ROLE_START = re.compile(r"^(?:you are|you're|your role(?: is)?|you act as|act as)\b", re.I)
+# _MAX_CLAUSE = 120: a policy clause longer than this is cut at a word
+# boundary to serve as a coverage label; RULE_CAP = 16 clauses per policy
+# (ZP_RULE_CAP overrides) bounds the grid (convention, untested).
 _MAX_CLAUSE = 120
+RULE_CAP = int(os.environ.get("ZP_RULE_CAP") or 16)
 
 
 def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
@@ -408,7 +425,7 @@ def check_dimensions(dimensions: Any) -> None:
 
 def build_dimensions(tools: list[dict], policy: str = "") -> dict[str, list[str]]:
     """Coverage axes from this agent. Length and vagueness are writer-only."""
-    rules = policy_sections(policy, cap=int(os.environ.get("ZP_RULE_CAP") or 16)) or ["unspecified"]
+    rules = policy_sections(policy, cap=RULE_CAP) or ["unspecified"]
     world = list(WORLD_STATES) if _has_reference_keys(tools) else ["unspecified"]
     return {
         "tool": _tool_dimension(tools),
@@ -418,6 +435,17 @@ def build_dimensions(tools: list[dict], policy: str = "") -> dict[str, list[str]
         "tool_condition": list(TOOL_CONDITIONS),
         "history": list(HISTORIES),
     }
+
+
+# Risk R of a region by the kind of tool it exercises: a destructive tool
+# under a boundary or adversarial stance, or under a fault, is the case a
+# policy exists for (1.0); a destructive tool in the ordinary case 0.3; a
+# read 0.1; anything else 0.2 (convention, untested).
+RISK_DESTRUCTIVE_HOT = 1.0
+RISK_DESTRUCTIVE = 0.3
+RISK_READ = 0.1
+RISK_OTHER = 0.2
+RISKY_STANCES = frozenset({"boundary", "adversarial", "forbidden", "conflicting"})
 
 
 def region_risk(assignment: dict, tools: list[dict]) -> float:
@@ -438,12 +466,12 @@ def region_risk(assignment: dict, tools: list[dict]) -> float:
         or ""
     )
     if kind == "destructive":
-        risky_policy = stance in {"boundary", "adversarial", "forbidden", "conflicting"}
+        risky_policy = stance in RISKY_STANCES
         risky_condition = assignment.get("tool_condition", "success") != "success"
-        return 1.0 if risky_policy or risky_condition else 0.3
+        return RISK_DESTRUCTIVE_HOT if risky_policy or risky_condition else RISK_DESTRUCTIVE
     if kind == "read":
-        return 0.1
-    return 0.2
+        return RISK_READ
+    return RISK_OTHER
 
 
 def region_weight(
@@ -471,6 +499,14 @@ def region_weight(
 
 
 _STARVED_AXES = ("tool_condition", "history", "world_state")
+# Starvation boost: an axis value never observed weighs UNSEEN_BOOST times
+# more, one seen at under STARVED_SHARE of its fair share STARVED_BOOST
+# times; nothing turns on before STARVATION_MIN_ROWS rows on the axis, so
+# the SUCCESS_SHARE flip is nudged, not overturned (convention, untested).
+STARVATION_MIN_ROWS = 12
+UNSEEN_BOOST = 2.5
+STARVED_BOOST = 1.5
+STARVED_SHARE = 0.5
 
 
 def axis_starvation_boost(
@@ -478,9 +514,10 @@ def axis_starvation_boost(
 ) -> float:
     """Multiplier that favors axis values the run has starved.
 
-    An axis value never observed gets 2.5x; one observed at under half its
-    fair share gets 1.5x. Needs a dozen rows on the axis before it turns on,
-    so the 90% success share is only nudged, not overturned.
+    An axis value never observed gets ``UNSEEN_BOOST``; one observed at
+    under ``STARVED_SHARE`` of its fair share gets ``STARVED_BOOST``. Needs
+    ``STARVATION_MIN_ROWS`` rows on the axis before it turns on, so the
+    success share is only nudged, not overturned.
     """
     if not axis_counts:
         return 1.0
@@ -488,24 +525,26 @@ def axis_starvation_boost(
     for axis in axes:
         counts = axis_counts.get(axis) or {}
         total = sum(counts.values())
-        if total < 12:
+        if total < STARVATION_MIN_ROWS:
             continue
         value = str(assignment.get(axis) or "")
         if not value or value == "unspecified":
             continue
         seen = counts.get(value, 0)
         if seen == 0:
-            boost *= 2.5
-        elif seen / total < 0.5 / max(1, len(counts)):
-            boost *= 1.5
+            boost *= UNSEEN_BOOST
+        elif seen / total < STARVED_SHARE / max(1, len(counts)):
+            boost *= STARVED_BOOST
     return boost
 
 
 # How the search is directed, by run kind. Cold-start RL hunts behavior
 # contrast: the behavior-gap term leads (0.35) instead of trailing (0.1),
-# because a grouped update needs the same ask to land different behaviors.
-# Trace-driven runs are already aimed by the trimmed grid; explore keeps
-# the coverage-first blend.
+# because a grouped update needs the same ask to land different behaviors
+# (DAPO 2503.14476 drops groups whose rollouts all agree; the weight aims
+# the writer at asks where they will not). Trace-driven runs are already
+# aimed by the trimmed grid; explore keeps the coverage-first blend. The
+# numbers are a convention, untested.
 _MODE_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
     "rl": (0.25, 0.25, 0.15, 0.35),
 }
@@ -606,6 +645,8 @@ RULE_FREE = "unspecified"
 
 _COVERING_CACHE: dict[str, list[dict]] = {}
 _COVERING_CACHE_LOCK = threading.Lock()
+# _COVERING_CACHE_MAX = 32: distinct grids memoized per process before the
+# cache is cleared; a process rarely sees more than a few (convention).
 _COVERING_CACHE_MAX = 32
 
 
@@ -1185,15 +1226,24 @@ _PROBE_FAMILIES: list[tuple[str, list[str]]] = [
     ),
 ]
 
+# The template (offline) writer's two arms and their starting split: nine
+# grid cards to one open-ended probe (convention). The same multiplicative
+# update as the search arms below, with a 15% floor per arm.
 _ARM_START = {"structured": 0.90, "open_ended": 0.10}
 _ARM_FLOOR = 0.15
 _ARM_LEARNING_RATE = 0.5
+# Open-ended probes (out-of-domain, injection, garbage) stay between 5%
+# and 10% of the pool whatever the learning says: they exist to catch a
+# reply the grid cannot, not to fill a dataset (convention, untested).
 _OPEN_ENDED_FLOOR = 0.05
 _OPEN_ENDED_CAP = 0.10
+# SEARCH_ARMS: the starting share of each situation-search arm.
 # Variety-first mix. Grid fill (structured + llm_guided) is the engine.
 # Open-ended stays small. Fail/behavior arms are occasional, not a strategy.
 # Risky and malicious situations live on the coverage grid (stance/tier)
 # and the fault_rate/risk dial, not on a 15% failure_mutation arm.
+# ``simulate(advanced={"arm_weights": {...}})`` pins the split and turns
+# the yield update off. The shares are a convention, untested.
 SEARCH_ARMS = {
     "structured": 0.42,
     "open_ended": 0.10,
@@ -1202,9 +1252,15 @@ SEARCH_ARMS = {
     "failure_mutation": 0.03,
 }
 _RARE_ARMS = ("behavior_targeted", "failure_mutation")
+# Rare arms never fall under 1% or rise over 8%; the grid arms keep 15%
+# each so the yield update cannot collapse the search onto one arm
+# (convention, untested).
 _RARE_FLOOR = 0.01
 _RARE_CAP = 0.08
 _VARIETY_FLOOR = 0.15
+# _SEARCH_ARM_LR = 0.5: the multiplicative step toward a higher-yield arm,
+# weight *= 1 + LR * yield, then floors and caps. The multiplicative-
+# weights form is standard (Hedge/EXP3); the step is a convention.
 _SEARCH_ARM_LR = 0.5
 
 

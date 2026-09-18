@@ -9,6 +9,8 @@ import re
 import threading
 from typing import Any
 
+from ..defaults import MAX_SAMPLES_PER_CALL
+
 _LENGTHS = ("short prompt", "medium prompt", "long prompt")
 _VAGUENESS = ("specific", "vague", "underspecified")
 _WEIRD = ("incomplete", "specific", "rambling")
@@ -32,12 +34,20 @@ _TIER_ALIASES = {
     "exploratory": "ordinary",
     "unsure": "ambiguous",
 }
-# Ordinary majority; other tiers stay in the bag so a short run still hits them.
-_TIER_BAG = ("ordinary",) * 6 + ("ambiguous",) + ("boundary",) + ("adversarial",) * 2
+# ORDINARY_SHARE = 0.60 / HARD_SHARE = 0.40: the share of situations drawn
+# from the ordinary tier and from the hard tiers (ambiguous, boundary,
+# adversarial, round-robin). ``simulate(hard_share=)`` moves it; the tiers
+# themselves are the four the grid's stance axis maps onto (``_TIER_ALIASES``),
+# and ``dimensions={"stance": [...]}`` picks which stances run, so the
+# tier set is fixed and the split is the knob. The literature filters on
+# solve rate, not on prompt kind: keep prompts the policy solves 20-80% of
+# the time (rlhf-book ch. 14, Reasoning; Tulu 3 2411.15124) and drop
+# groups that are all-pass or all-fail (DAPO 2503.14476, dynamic sampling).
+# That filter runs after the rollouts, in ``score.curriculum`` on
+# ``DEFAULT_BAND``; this share is the prior that feeds it and has no
+# measured optimum (convention, untested: 40% hard keeps every hard tier
+# present in a 20-row run without starving the ordinary majority).
 ORDINARY_SHARE = 0.60
-#: ``simulate(hard_share=)`` default: the fraction of situations drawn from
-#: the ambiguous, boundary and adversarial tiers (rlhf-book ch. 7: what a
-#: run can teach is set by where its prompts sit on the difficulty axis).
 HARD_SHARE = round(1.0 - ORDINARY_SHARE, 2)
 
 
@@ -55,10 +65,22 @@ _ASKS = ("question", "question", "ask")
 _COMPOUND = ("several asks", "do several things")
 _PRESSURES = ("rushed", "insistent", "repeat")
 _USER_TYPES = ("first time", "returning", "in a hurry", "careful", "brief")
+# DEFAULT_TEXTURE_RATE = 0.35: the share of cards that carry a typing
+# texture (lowercase, typos, no punctuation); ``simulate(advanced=
+# {"texture": ...})`` moves it. Simulated users are cleaner and more
+# polite than humans (2601.17087: politeness markers in 39.2% of simulated
+# user turns against 19.9% of human ones), so some texture is needed; the
+# share itself is a convention, untested against a measured rate.
 DEFAULT_TEXTURE_RATE = 0.35
 
+# NOVELTY_RESTART_FLOOR = 0.025: when a selected batch's mean novelty
+# (min cosine distance to everything already run) falls under this, the
+# writer is restarted with a fresh avoid list. In embedding space this is
+# a near-exact duplicate: SemDeDup's tight threshold eps=0.03 is where half
+# of LAION had a duplicate (2303.09540). Read by run/engine.py.
 NOVELTY_RESTART_FLOOR = 0.025
-# Writer restarts before a run concedes ask_exhausted. Five stalled a
+# MAX_NOVELTY_RESTARTS = 24: writer restarts before a run concedes
+# ask_exhausted (ZP_NOVELTY_RESTARTS overrides). Measured: five stalled a
 # 2,400-row budget at 298 rows while the behavior curve was still
 # climbing; the space was never the limit, the retry budget was.
 MAX_NOVELTY_RESTARTS = int(os.environ.get("ZP_NOVELTY_RESTARTS") or 24)
@@ -166,7 +188,12 @@ def scenario_family(text: str) -> tuple[str, frozenset[str]]:
 def cap_scenario_families(
     rows: list[dict], history: list[tuple[str, frozenset[str]]], *, cap: int = 2
 ) -> tuple[list[dict], list[dict]]:
-    """Keep at most ``cap`` messages sharing intent and a salient subject."""
+    """Keep at most ``cap`` messages sharing intent and a salient subject.
+
+    A lexical near-duplicate cap for the hash embedder (the semantic
+    embedders use novelty instead). The engine passes ``cap`` sized to the
+    run's phrasings per situation; 2 here is the bare default (convention).
+    """
     kept: list[dict] = []
     rejected: list[dict] = []
     for row in rows:
@@ -190,8 +217,20 @@ def _draw(seed: int, round_index: int, key: str, salt: str) -> int:
     return int(digest[:16], 16)
 
 
+# WRITER_TEMP_LO = 0.45 / WRITER_TEMP_HI = 1.05: the situation writer's
+# sampling temperature is drawn once per batch, uniformly in this band, so
+# a run covers the settings the instruction-synthesis literature uses
+# instead of picking one: Self-Instruct generates at 0.7 (top-p 0.5,
+# 2212.10560), Magpie at 1.0 (top-p 1.0, 2406.08464 repo default), and
+# concept-driven synthesis at 1.0 "to balance diversity and coherence"
+# (2603.18361). The edges are a convention: under 0.45 the hosted writer
+# repeats one opener, above 1.05 its JSON breaks. ``simulate(advanced=
+# {"writer_temperature": t})`` pins a value or ``(lo, hi)`` narrows the band.
 WRITER_TEMP_LO = 0.45
 WRITER_TEMP_HI = 1.05
+# WRITER_TEMP_MAX = 2.0: the most a caller may ask for (the OpenAI API's
+# own ceiling).
+WRITER_TEMP_MAX = 2.0
 
 _LENGTH_PROSE = {
     "short": ("You keep it brief.", "You write one short line.", "You use only a few words."),
@@ -206,6 +245,10 @@ _LENGTH_PROSE = {
         "You add a full paragraph of circumstances.",
     ),
 }
+# Mood of the person on an untagged card, as cumulative cuts on one
+# uniform draw: 14% mean, 14% frustrated, 12% confused, 12% curt, 14%
+# calm, 14% nice, 10% hurried, 10% chatty (convention, untested; a
+# tagged tone wins over the draw).
 _NICE_PROSE = (
     (0.14, "You are mean and impatient."),
     (0.28, "You are frustrated."),
@@ -230,13 +273,62 @@ def _unit(seed: int, round_index: int, key: str, salt: str) -> float:
     return (_draw(int(seed), int(round_index), str(key), salt) % 10007) / 10007.0
 
 
-def sample_writer_temperature(seed: int, round_index: int) -> float:
-    """Continuous writer temperature in a sane band. One draw per batch."""
+# LENGTH_SHORT_BELOW = 0.12 / LENGTH_LONG_FROM = 0.82: an untagged card
+# is a short ask when its uniform draw is under the first cut and a long
+# one from the second, so 12% short, 70% medium, 18% long. Right-skewed
+# on purpose: most real asks are a sentence or two (convention, untested).
+LENGTH_SHORT_BELOW = 0.12
+LENGTH_LONG_FROM = 0.82
+# How sure the person is of what they want, per ask family, as
+# (floor, width) of a uniform draw; the prose cuts at 0.40 and 0.70.
+# A vague ask never reaches "knows exactly", a tool ask never falls to
+# "has not settled" (convention, untested).
+CONFIDENCE_BANDS = {"vague": (0.12, 0.28), "general": (0.42, 0.28), "tool": (0.62, 0.38)}
+CONFIDENCE_SURE = 0.70
+CONFIDENCE_MOSTLY = 0.40
+
+
+def writer_temperature_band(value: Any) -> tuple[float, float]:
+    """``(lo, hi)`` from a ``writer_temperature`` knob: ``None`` is the
+    package band, a number pins the temperature, a pair narrows the band.
+    Refuses anything outside 0..WRITER_TEMP_MAX or a pair out of order."""
+    if value is None:
+        return WRITER_TEMP_LO, WRITER_TEMP_HI
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        lo = hi = float(value)
+    else:
+        try:
+            lo, hi = (float(x) for x in tuple(value))
+        except (TypeError, ValueError):
+            raise ValueError(
+                "writer_temperature= is a sampling temperature (a number) or a (lo, hi) band "
+                "the writer draws from once per batch"
+            ) from None
+    if not (0.0 <= lo <= hi <= WRITER_TEMP_MAX):
+        raise ValueError(
+            f"writer_temperature={value!r} must sit in 0..{WRITER_TEMP_MAX} with lo <= hi"
+        )
+    return lo, hi
+
+
+def sample_writer_temperature(
+    seed: int, round_index: int, *, band: tuple[float, float] | None = None
+) -> float:
+    """Continuous writer temperature in ``band`` (the package band by
+    default). One draw per batch, fixed by seed and round."""
+    lo, hi = (WRITER_TEMP_LO, WRITER_TEMP_HI) if band is None else band
     u = _unit(int(seed), int(round_index), "batch", "temp")
-    return round(WRITER_TEMP_LO + u * (WRITER_TEMP_HI - WRITER_TEMP_LO), 3)
+    return round(lo + u * (hi - lo), 3)
 
 
-_WRITER_N_CAP = 8
+# Writer completions per batch, by how much of the clock is left: early
+# batches fill the pool, late ones buy distinct cards with what is left.
+# (convention, untested; the cap is MAX_SAMPLES_PER_CALL)
+WRITER_N_EARLY = (3, 6)
+WRITER_N_MID = (1, 4)
+WRITER_N_LATE = (1, 2)
+WRITER_EARLY_FRACTION = 0.30
+WRITER_LATE_FRACTION = 0.80
 
 
 def sample_writer_n(
@@ -252,19 +344,20 @@ def sample_writer_n(
     Early (first ~30%): 3–6 to fill the pool. Mid: 1–4. Late (last ~20%):
     1–2 so leftover time buys distinct cards. Unknown budget: 1–4.
     A per-batch hash jitter means two writers at the same timestamp
-    need not share n. ``max_n`` is a ceiling (default 8).
+    need not share n. ``max_n`` is a ceiling (default MAX_SAMPLES_PER_CALL).
     """
-    ceiling = _WRITER_N_CAP if max_n is None else max(1, min(_WRITER_N_CAP, int(max_n)))
+    cap = MAX_SAMPLES_PER_CALL
+    ceiling = cap if max_n is None else max(1, min(cap, int(max_n)))
     if time_budget is None or float(time_budget) <= 0 or elapsed is None:
-        lo, hi = 1, 4
+        lo, hi = WRITER_N_MID
     else:
         frac = max(0.0, min(1.0, float(elapsed) / float(time_budget)))
-        if frac < 0.30:
-            lo, hi = 3, 6
-        elif frac >= 0.80:
-            lo, hi = 1, 2
+        if frac < WRITER_EARLY_FRACTION:
+            lo, hi = WRITER_N_EARLY
+        elif frac >= WRITER_LATE_FRACTION:
+            lo, hi = WRITER_N_LATE
         else:
-            lo, hi = 1, 4
+            lo, hi = WRITER_N_MID
     hi = min(hi, ceiling)
     lo = min(lo, hi)
     u = _unit(int(seed), int(round_index), "batch", "n")
@@ -290,7 +383,11 @@ def sample_writer_vars(
         bucket = "long"
     else:
         u_len = _unit(seed, round_index, key, "wlen")
-        bucket = "short" if u_len < 0.12 else ("long" if u_len >= 0.82 else "medium")
+        bucket = (
+            "short"
+            if u_len < LENGTH_SHORT_BELOW
+            else ("long" if u_len >= LENGTH_LONG_FROM else "medium")
+        )
     variants = _LENGTH_PROSE[bucket]
     u_lp = _unit(seed, round_index, key, "lprose")
     length_prose = variants[int(u_lp * len(variants)) % len(variants)]
@@ -301,15 +398,11 @@ def sample_writer_vars(
         u_n = _unit(seed, round_index, key, "nice")
         niceness_prose = next(prose for cut, prose in _NICE_PROSE if u_n < cut)
     u_c = _unit(seed, round_index, key, "conf")
-    if ask_family == "vague":
-        conf = 0.12 + 0.28 * u_c
-    elif ask_family == "general":
-        conf = 0.42 + 0.28 * u_c
-    else:
-        conf = 0.62 + 0.38 * u_c
-    if conf >= 0.70:
+    floor, width = CONFIDENCE_BANDS.get(ask_family, CONFIDENCE_BANDS["tool"])
+    conf = floor + width * u_c
+    if conf >= CONFIDENCE_SURE:
         confidence_prose = "You know exactly what you want done."
-    elif conf >= 0.40:
+    elif conf >= CONFIDENCE_MOSTLY:
         confidence_prose = "You know what you want but one detail is fuzzy."
     else:
         confidence_prose = "You haven't settled on a specific action yet."
@@ -496,13 +589,39 @@ def _length_hint(raw: Any, n_len: int) -> str:
         return "medium prompt"
     if text in _LENGTHS:
         return text
-    # Right-skew: most medium, some short, long tail.
+    # Right-skew: most medium, some short, long tail (LENGTH_SHORT_BELOW,
+    # LENGTH_LONG_FROM as percent points of a 0..99 draw).
     bucket = n_len % 100
-    if bucket < 12:
+    if bucket < round(LENGTH_SHORT_BELOW * 100):
         return "short prompt"
-    if bucket < 82:
+    if bucket < round(LENGTH_LONG_FROM * 100):
         return "medium prompt"
     return "long prompt"
+
+
+# How often an untagged card gets each optional tag, as "one card in N"
+# on an independent hash draw per tag. Conventions, untested: the tags
+# are hints the writer often ignores, and a tagged assignment always wins.
+LENGTH_HINT_SKIP_ONE_IN = 5  # four cards in five carry a length hint
+COMPOUND_ASK_ONE_IN = 23  # several asks in one message
+ASK_ONE_IN = 5  # a question or a plain ask, when not compound
+PRESSURE_ONE_IN = 19  # rushed, insistent, repeat
+USER_TYPE_ONE_IN = 17  # first time, returning, in a hurry, careful, brief
+TOOL_CONDITION_HINT_ONE_IN = 11  # tell the writer the tool will fault
+TONE_WITH_TEXTURE_ONE_IN = 3  # a textured card also gets a tone
+STANDARD_TEXTURE_SHARE = (3, 5)  # of untextured cards, 3 in 5 say "type normally"
+# One draw modulo MODE_SLOTS picks at most one of the rarer hints per card:
+# slot 14 vagueness, 16 odd phrasing, 11 history, 15 a stance the grid did
+# not map, every fifth slot (2, 7, 12, 17) a world-state hint, and a mapped
+# non-ordinary stance shows on the first ten slots (half the cards).
+MODE_SLOTS = 20
+MODE_VAGUENESS = 14
+MODE_PHRASING = 16
+MODE_HISTORY = 11
+MODE_UNMAPPED_STANCE = 15
+MODE_STANCE_BELOW = 10
+MODE_WORLD_EVERY = 5
+MODE_WORLD_SLOT = 2
 
 
 def sample_cell_tags(
@@ -540,54 +659,58 @@ def sample_cell_tags(
             return
         situation["stance"] = raw
 
-    if assignment.get("length") or (n % 5 != 0):
+    if assignment.get("length") or (n % LENGTH_HINT_SKIP_ONE_IN != 0):
         situation["length"] = _length_hint(assignment.get("length"), n_len)
 
     n_ask = _draw(seed, round_index, key, "ask")
     if assignment.get("ask"):
         situation["ask"] = assignment["ask"]
-    elif n_ask % 23 == 0:
-        situation["ask"] = _COMPOUND[(n_ask // 23) % len(_COMPOUND)]
-    elif n_ask % 5 == 0:
-        situation["ask"] = _ASKS[(n_ask // 5) % len(_ASKS)]
+    elif n_ask % COMPOUND_ASK_ONE_IN == 0:
+        situation["ask"] = _COMPOUND[(n_ask // COMPOUND_ASK_ONE_IN) % len(_COMPOUND)]
+    elif n_ask % ASK_ONE_IN == 0:
+        situation["ask"] = _ASKS[(n_ask // ASK_ONE_IN) % len(_ASKS)]
 
-    mode = n % 20
-    if mode == 14:
-        situation["vagueness"] = assignment.get("vagueness") or _VAGUENESS[(n // 20) % 3]
-    elif mode == 16:
-        situation["phrasing"] = _WEIRD[(n // 20) % len(_WEIRD)]
+    mode = n % MODE_SLOTS
+    if mode == MODE_VAGUENESS:
+        situation["vagueness"] = assignment.get("vagueness") or _VAGUENESS[(n // MODE_SLOTS) % 3]
+    elif mode == MODE_PHRASING:
+        situation["phrasing"] = _WEIRD[(n // MODE_SLOTS) % len(_WEIRD)]
     raw_stance = assignment.get("stance") or assignment.get("user_behavior")
     mapped_stance = _TIER_ALIASES.get(str(raw_stance)) if raw_stance else None
-    if (raw_stance and str(raw_stance) != "ordinary" and mode < 10) or (
-        mapped_stance is None and mode == 15
+    if (raw_stance and str(raw_stance) != "ordinary" and mode < MODE_STANCE_BELOW) or (
+        mapped_stance is None and mode == MODE_UNMAPPED_STANCE
     ):
         add_stance()
 
     n_extra = _draw(seed, round_index, key, "axis")
-    if assignment.get("pressure") or n_extra % 19 == 0:
+    if assignment.get("pressure") or n_extra % PRESSURE_ONE_IN == 0:
         situation["pressure"] = (
-            assignment.get("pressure") or _PRESSURES[(n_extra // 19) % len(_PRESSURES)]
+            assignment.get("pressure") or _PRESSURES[(n_extra // PRESSURE_ONE_IN) % len(_PRESSURES)]
         )
-    if assignment.get("user") or n_extra % 17 == 0:
+    if assignment.get("user") or n_extra % USER_TYPE_ONE_IN == 0:
         situation["user"] = (
-            assignment.get("user") or _USER_TYPES[(n_extra // 17) % len(_USER_TYPES)]
+            assignment.get("user") or _USER_TYPES[(n_extra // USER_TYPE_ONE_IN) % len(_USER_TYPES)]
         )
     hist = assignment.get("history")
-    if hist and hist != "fresh" and mode == 11:
+    if hist and hist != "fresh" and mode == MODE_HISTORY:
         situation["history"] = hist
     world = assignment.get("world_state")
-    if world and world not in {"unspecified", "unknown"} and mode % 5 == 2:
+    if (
+        world
+        and world not in {"unspecified", "unknown"}
+        and mode % MODE_WORLD_EVERY == MODE_WORLD_SLOT
+    ):
         situation["world_state"] = _world_hint(world)
     cond = assignment.get("tool_condition")
-    if cond and cond != "success" and n_extra % 11 == 0:
+    if cond and cond != "success" and n_extra % TOOL_CONDITION_HINT_ONE_IN == 0:
         situation["tool_condition"] = cond
 
     t = _draw(seed, round_index, key, "texture")
     if texture_rate > 0 and (t % 1000) < int(min(1.0, texture_rate) * 1000):
         situation["texture"] = _TEXTURES[(t // 1000) % len(_TEXTURES)]
-        if (t // 7919) % 3 == 0:
+        if (t // 7919) % TONE_WITH_TEXTURE_ONE_IN == 0:
             situation["tone"] = _TONES[(t // 104729) % len(_TONES)]
-    elif (t // 977) % 5 < 3:
+    elif (t // 977) % STANDARD_TEXTURE_SHARE[1] < STANDARD_TEXTURE_SHARE[0]:
         # The writer model collapses to lowercase texting on its own, so
         # ordinary prose (capitals, end marks) must be an explicit style too.
         situation["texture"] = "standard"
@@ -595,10 +718,22 @@ def sample_cell_tags(
     return situation
 
 
+# DEFAULT_CLOCK_S = 600: the wall-clock the planners assume when a run
+# names no time budget (ten minutes; convention). PLAN_UNIT_S = 60: the
+# clock at which the search plan is breadth-first only; every minute above
+# widens it up to PLAN_SCALE_MAX (convention, untested).
+DEFAULT_CLOCK_S = 600.0
+PLAN_UNIT_S = 60.0
+PLAN_SCALE_MIN = 0.5
+PLAN_SCALE_MAX = 3.0
+
+
 def sampling_plan(time_budget: float | None) -> dict[str, Any]:
     """Wider search when they give more wall-clock. Still BFS at 60s."""
-    seconds = 600.0 if time_budget is None or float(time_budget) <= 0 else float(time_budget)
-    scale = min(3.0, max(0.5, seconds / 60.0))
+    seconds = (
+        DEFAULT_CLOCK_S if time_budget is None or float(time_budget) <= 0 else float(time_budget)
+    )
+    scale = min(PLAN_SCALE_MAX, max(PLAN_SCALE_MIN, seconds / PLAN_UNIT_S))
     return {
         "seconds": seconds,
         "scale": scale,
@@ -607,6 +742,22 @@ def sampling_plan(time_budget: float | None) -> dict[str, Any]:
         "max_shape_len": 2 if seconds < 120 else 3,
         "ordinary_share": ORDINARY_SHARE,
     }
+
+
+# The adaptive mix: explore rises from 30% of the batch on a 15 s clock to
+# 80% at three minutes; what is left splits 55/45 between expand and
+# verify; up to 3 phrasings and 2 or 3 repeats per situation, 3 when the
+# clock is long enough (90 s) for verify to run. Conventions, untested.
+ADAPTIVE_EXPLORE_MIN = 0.30
+ADAPTIVE_EXPLORE_MAX = 0.80
+ADAPTIVE_CLOCK_LO_S = 15.0
+ADAPTIVE_CLOCK_SPAN_S = 165.0
+ADAPTIVE_SAT_MIN_CLOCK_S = 120.0
+ADAPTIVE_EXPAND_OF_REST = 0.55
+ADAPTIVE_N_REQ = 3
+ADAPTIVE_K_SHORT = 2
+ADAPTIVE_K_LONG = 3
+ADAPTIVE_K_LONG_FROM_S = 90.0
 
 
 def adaptive_allocator(
@@ -624,25 +775,25 @@ def adaptive_allocator(
         until_key = "compute"
     sat = until_key == "saturation"
     if time_budget is None or float(time_budget) <= 0:
-        total = 600.0
-        left = 600.0
+        total = DEFAULT_CLOCK_S
+        left = DEFAULT_CLOCK_S
     else:
         total = float(time_budget)
         spent = 0.0 if elapsed is None else max(0.0, float(elapsed))
         left = max(0.0, total - spent)
     # Saturation keeps covering the grid even on a short clock.
-    clock = max(left, 120.0) if sat else left
-    scale = min(1.0, max(0.0, (clock - 15.0) / 165.0))
-    explore = 0.30 + 0.50 * scale
+    clock = max(left, ADAPTIVE_SAT_MIN_CLOCK_S) if sat else left
+    scale = min(1.0, max(0.0, (clock - ADAPTIVE_CLOCK_LO_S) / ADAPTIVE_CLOCK_SPAN_S))
+    explore = ADAPTIVE_EXPLORE_MIN + (ADAPTIVE_EXPLORE_MAX - ADAPTIVE_EXPLORE_MIN) * scale
     rest = 1.0 - explore
-    expand = rest * 0.55
-    verify = rest * 0.45
+    expand = rest * ADAPTIVE_EXPAND_OF_REST
+    verify = rest * (1.0 - ADAPTIVE_EXPAND_OF_REST)
     return {
         "explore": explore,
         "expand": expand,
         "verify": verify,
-        "n_req": 3,
-        "k": 3 if sat or total >= 90.0 else 2,
+        "n_req": ADAPTIVE_N_REQ,
+        "k": ADAPTIVE_K_LONG if sat or total >= ADAPTIVE_K_LONG_FROM_S else ADAPTIVE_K_SHORT,
         "until": until_key,
         "seconds": total,
         "remaining": left,
@@ -721,6 +872,28 @@ def running_turn_mean(stats: dict | None) -> float | None:
             lock.release()
 
 
+# DEFAULT_AVG_TURNS = 6: the mean thread length (user and agent turns
+# together) ``local_model`` and this sampler aim for when a caller names
+# none. ``simulate()`` sets its own in run/config.py (12) and passes it
+# through. Human threads with an assistant averaged 7.8 and 6.9 turns on
+# SimulatorArena's two tasks (2510.05444); tau-bench sets no cap
+# (2406.12045). Six sits under the measured means (convention).
+DEFAULT_AVG_TURNS = 6.0
+# TURN_MIX_SHORT = 0.15 / TURN_MIX_TAIL = 0.10: of threads, 15% land under
+# the middle band, 75% in it (center +- TURN_BAND) and 10% in the long
+# tail; TURN_GAIN = 0.5 is the proportional correction toward avg_turns
+# from the live mean, a full mirror (gain 1) overshoots and oscillates.
+# The mix is a convention, untested; the gain was observed.
+TURN_MIX_SHORT = 0.15
+TURN_MIX_TAIL = 0.10
+TURN_BAND = 2
+TURN_GAIN = 0.5
+# Under a target of TURN_SHORT_TARGET the old short mix applies: 60% of
+# threads 2-4 turns, 30% 5-8, 10% longer (convention).
+TURN_SHORT_TARGET = 3.5
+TURN_SHORT_MIX = (0.60, 0.90)
+
+
 def sample_turn_budget(
     seed: int,
     key: str,
@@ -730,32 +903,32 @@ def sample_turn_budget(
 ) -> int:
     """15/75/10 around ``avg_turns``, shifted by the live mean, snapped even."""
     cap = max(2, int(max_turns))
-    target = 6.0 if avg_turns is None else float(avg_turns)
+    target = DEFAULT_AVG_TURNS if avg_turns is None else float(avg_turns)
     center = target
     if running_mean is not None:
-        # Proportional correction at half gain: a full mirror of the
-        # error (gain 1) overshoots and oscillates around the target.
-        center = target + 0.5 * (target - float(running_mean))
+        # Proportional correction at TURN_GAIN, see above.
+        center = target + TURN_GAIN * (target - float(running_mean))
     # The correction can push the center past the cap; clamped, so the
     # middle band never inverts (mid_hi < mid_lo divided by zero once
     # avg_turns reached the cap).
     center = max(2, min(cap, round(center)))
-    mid_lo = max(2, center - 2)
-    mid_hi = min(cap, max(mid_lo, center + 2))
+    mid_lo = max(2, center - TURN_BAND)
+    mid_hi = min(cap, max(mid_lo, center + TURN_BAND))
     short_hi = mid_lo - 1
     tail_lo = min(cap, mid_hi + 1)
     u = _draw(int(seed), 0, str(key), "turns") % 1000
-    if target <= 3.5:
-        # Old short mix: 60% 2–4, 30% 5–8, 10% long tail.
-        if u < 600:
+    short_cut = round(TURN_MIX_SHORT * 1000)
+    tail_cut = round((1.0 - TURN_MIX_TAIL) * 1000)
+    if target <= TURN_SHORT_TARGET:
+        if u < round(TURN_SHORT_MIX[0] * 1000):
             want = 2 + (u % 3)
-        elif u < 900:
+        elif u < round(TURN_SHORT_MIX[1] * 1000):
             want = 5 + (u % 4)
         else:
             want = 9 + (u % max(1, cap - 8))
-    elif u < 150 and short_hi >= 2:
+    elif u < short_cut and short_hi >= 2:
         want = 2 + (u % (short_hi - 1))
-    elif u < 900:
+    elif u < tail_cut:
         want = mid_lo + (u % (mid_hi - mid_lo + 1))
     else:
         want = tail_lo + (u % max(1, cap - tail_lo + 1))
@@ -776,8 +949,33 @@ def sample_request_axes(
     return {k: str(v) for k, v in tags.items() if k not in {"tool", "rule"}}
 
 
+# Annealed exploration of the candidate pool. ANNEAL_START = 1.0 decays by
+# ANNEAL_DECAY = 0.93 per round to ANNEAL_END = 0.12, so by round 30 the
+# batch is almost all exploitation (convention, untested). Explore slots
+# are EXPLORE_FRACTION_MIN..MAX of the batch, scaled by the temperature,
+# never more than half of it.
+ANNEAL_START = 1.0
+ANNEAL_END = 0.12
+ANNEAL_DECAY = 0.93
+EXPLORE_FRACTION_MIN = 0.04
+EXPLORE_FRACTION_MAX = 0.40
+# NOVELTY_PIVOT = 0.45: cosine distance above which an off-batch candidate
+# earns extra acceptance; ACCEPT_FLOOR = 0.15 is what a candidate at or
+# under the pivot gets at temperature 1, ACCEPT_SLOPE = 2.0 per unit of
+# distance above it. 0.45 is a coarse duplicate threshold: SemDeDup
+# removed 28% of LAION at eps 0.37 and 37% at 0.63 (2303.09540), so a
+# candidate under the pivot is likely a paraphrase of something run.
+NOVELTY_PIVOT = 0.45
+ACCEPT_FLOOR = 0.15
+ACCEPT_SLOPE = 2.0
+
+
 def anneal_temperature(
-    round_index: int, *, start: float = 1.0, end: float = 0.12, decay: float = 0.93
+    round_index: int,
+    *,
+    start: float = ANNEAL_START,
+    end: float = ANNEAL_END,
+    decay: float = ANNEAL_DECAY,
 ) -> float:
     return max(end, start * (decay ** max(0, int(round_index))))
 
@@ -785,7 +983,7 @@ def anneal_temperature(
 def explore_slot_count(batch_size: int, round_index: int) -> int:
     need = max(1, int(batch_size))
     temp = anneal_temperature(round_index)
-    frac = 0.04 + 0.36 * temp
+    frac = EXPLORE_FRACTION_MIN + (EXPLORE_FRACTION_MAX - EXPLORE_FRACTION_MIN) * temp
     return max(0, min(need // 2, round(need * frac)))
 
 
@@ -803,8 +1001,8 @@ def accept_anneal_candidate(
     if temperature <= 0.01:
         return False
     rng = rng or random.Random()
-    uplift = max(0.0, float(novelty) - 0.45)
-    prob = min(1.0, temperature * (0.15 + uplift * 2.0))
+    uplift = max(0.0, float(novelty) - NOVELTY_PIVOT)
+    prob = min(1.0, temperature * (ACCEPT_FLOOR + uplift * ACCEPT_SLOPE))
     return rng.random() < prob
 
 

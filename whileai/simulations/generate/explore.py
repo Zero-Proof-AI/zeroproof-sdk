@@ -119,7 +119,15 @@ MUTATORS = (
 )
 
 
-def mutate_pool(texts: list[str], rounds: int = 1, limit: int = 20_000) -> list[tuple[str, str]]:
+# MUTATION_POOL_LIMIT = 20,000 mutated texts per call and MUTATION_MIN_CHARS
+# = 12: a mutation shorter than this is a stub (convention).
+MUTATION_POOL_LIMIT = 20_000
+MUTATION_MIN_CHARS = 12
+
+
+def mutate_pool(
+    texts: list[str], rounds: int = 1, limit: int = MUTATION_POOL_LIMIT
+) -> list[tuple[str, str]]:
     """Apply every mutator across the pool. Returns (mutator_name, text)."""
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -136,7 +144,7 @@ def mutate_pool(texts: list[str], rounds: int = 1, limit: int = 20_000) -> list[
                     text = fn(a, b, i).strip()
                 except Exception:
                     continue
-                if len(text) < 12:
+                if len(text) < MUTATION_MIN_CHARS:
                     continue
                 key = hashlib.blake2b(text.lower().encode(), digest_size=8).hexdigest()
                 if key in seen:

@@ -38,6 +38,12 @@ from typing import Any
 from ..world.sandbox import MockEnvironment
 from .agents import current_rollout
 
+# SEEDED_RATE = 0.35: the share of rollouts on which ``seeded_agent`` does
+# one wrong thing on purpose; ``seeded_agent(rate=)`` moves it. High enough
+# that a 20-row demo run catches every behavior kind at least once
+# (convention; nothing here claims to be a real failure rate).
+SEEDED_RATE = 0.35
+
 #: the wrong things a seeded agent can do, in draw order
 SEEDED_BEHAVIORS: tuple[str, ...] = (
     "hedging",
@@ -182,7 +188,7 @@ def _honest(tool: str, ident: str, result: dict) -> str:
 def seeded_agent(
     tools: Sequence[dict],
     *,
-    rate: float = 0.35,
+    rate: float = SEEDED_RATE,
     seed: int = 0,
     behaviors: Sequence[str] | None = None,
 ) -> Callable[[str], dict]:
