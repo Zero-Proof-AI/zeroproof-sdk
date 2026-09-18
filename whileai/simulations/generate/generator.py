@@ -1979,6 +1979,7 @@ def make_default_generator(
     per_round: int = 40,
     seed: int = 0,
     dimensions: dict | None = None,
+    arm_weights: dict | None = None,
     simulator: Any = None,
     kind: str | None = None,
     **template_kwargs,
@@ -2154,9 +2155,18 @@ def make_default_generator(
         return _commit(texts, provenance)
 
     generate.regions = getattr(templates, "regions", [])
-    generate.arm_weights = dict(SEARCH_ARMS)
+    # A caller's arm_weights win and stay won. Without them the run starts at
+    # SEARCH_ARMS and the search reallocates toward whichever arm is yielding.
+    # With them, reallocation is off: a caller who asked for a harder eval set
+    # by raising the structured share should not have the search quietly learn
+    # its way back to the default mix mid-run. open_ended is still held to its
+    # 5-10% band by cap_open_ended_weight at the draw site, whatever is asked.
+    generate.arm_weights_pinned = bool(arm_weights)
+    generate.arm_weights = dict(arm_weights) if arm_weights else dict(SEARCH_ARMS)
 
     def reallocate_all(yields: dict[str, float]) -> dict[str, float]:
+        if getattr(generate, "arm_weights_pinned", False):
+            return dict(generate.arm_weights)
         tpl = {k: yields.get(k, 0.0) for k in ("structured", "open_ended")}
         if hasattr(templates, "reallocate"):
             templates.reallocate(tpl)

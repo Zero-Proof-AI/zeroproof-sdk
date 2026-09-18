@@ -405,6 +405,7 @@ class Run:
         self.optimizer_state: dict | None = None
         self.allocation_hits = {"n": 0}
         self.dimensions = c.dimensions
+        self.arm_weights = c.arm_weights
         if c.traces is not None:
             # same normalization as trace_report: a messages-only export
             # otherwise mines as zero tools and the grid is never aimed
@@ -703,6 +704,7 @@ class Run:
             per_round=c.pool_size,
             seed=c.seed,
             dimensions=self.dimensions,
+            arm_weights=self.arm_weights,
             simulator=self.simulator,
             kind=self.writer_kind,
             scenarios_per_request=c.scenarios_per_request,

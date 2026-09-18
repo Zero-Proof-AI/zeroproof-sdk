@@ -17,7 +17,7 @@ from whileai._env import getenv
 
 from ..generate.adapters import resolve_system_prompt
 from ..generate.diversity import adaptive_allocator
-from ..generate.scenarios import DEFAULT_FAULT_RATE
+from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS
 from .spec import spec_rubric
 
 # Rows a saturation-bounded run may produce before the loop gives up.
@@ -54,6 +54,7 @@ _ALIAS_NAMES = {
 _MOVED_NAMES = {
     "concurrency",
     "dimensions",
+    "arm_weights",
     "simulator",
     "user_model",
     "backend",
@@ -348,6 +349,11 @@ class RunConfig:
     # engine knobs
     concurrency: int
     dimensions: Any
+    # how the situation search splits across arms: structured, llm_guided,
+    # open_ended, behavior_targeted, failure_mutation. None uses SEARCH_ARMS.
+    # Raising the structured share makes a harder eval set; open_ended stays
+    # capped in the 5-10% band whatever is asked for.
+    arm_weights: Any
     simulator: Any
     # the simulated user's model: a backend spec, or None for the agent's own
     user_model: str | None
@@ -459,6 +465,21 @@ def resolve_run_config(
 
     concurrency = int(cfg.pop("concurrency", 32))
     dimensions = cfg.pop("dimensions", None)
+    arm_weights = cfg.pop("arm_weights", None)
+    if arm_weights is not None:
+        if not isinstance(arm_weights, dict) or not arm_weights:
+            raise ValueError("arm_weights= must be a non-empty dict of arm name -> weight")
+        bad = {k for k, v in arm_weights.items() if not isinstance(v, (int, float)) or v < 0}
+        if bad:
+            raise ValueError(f"arm_weights= values must be non-negative numbers; bad: {sorted(bad)}")
+        unknown = set(arm_weights) - set(SEARCH_ARMS)
+        if unknown:
+            raise ValueError(
+                f"arm_weights= has unknown arm(s) {sorted(unknown)}; "
+                f"known arms are {sorted(SEARCH_ARMS)}"
+            )
+        if sum(arm_weights.values()) <= 0:
+            raise ValueError("arm_weights= must have a positive total")
     simulator = writer_spec_for(agent, cfg.pop("simulator", None))
     user_model = cfg.pop("user_model", None)
     if user_model is not None:
@@ -655,6 +676,7 @@ def resolve_run_config(
         rubric=(str(rubric).strip() or None) if rubric else spec_rubric(spec),
         concurrency=concurrency,
         dimensions=dimensions,
+        arm_weights=arm_weights,
         simulator=simulator,
         user_model=user_model,
         backend=backend,
