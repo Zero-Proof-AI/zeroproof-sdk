@@ -33,6 +33,16 @@ import warnings
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from .defaults import (
+    PLATFORM_REWARD_MODEL_BATCH,
+    TRAINING_ERROR_CHARS,
+    TRAINING_FLUSH_EVERY,
+    TRAINING_FLUSH_SECONDS,
+    TRAINING_KNOBS,
+    TRAINING_MAX_BATCH,
+    TRAINING_POLL_MIN_S,
+    TRAINING_POLL_S,
+)
 from .ingest.platform import _call
 
 log = logging.getLogger("whileai.simulations")
@@ -51,9 +61,11 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-FLUSH_EVERY = 25
-FLUSH_SECONDS = 15.0
-MAX_BATCH = 500
+# The buffering numbers live in defaults.py (TRAINING_*) with their reasons;
+# ``training_run(flush_every=, flush_seconds=, max_batch=)`` sets them per run.
+FLUSH_EVERY = TRAINING_FLUSH_EVERY
+FLUSH_SECONDS = TRAINING_FLUSH_SECONDS
+MAX_BATCH = TRAINING_MAX_BATCH
 
 # The two numbers a finished run's page opens with, under one word: Better,
 # Worse or About the same. The platform's own trainer writes them; a run on
@@ -179,6 +191,7 @@ class TrainingRun:
         total_steps: int | None = None,
         flush_every: int = FLUSH_EVERY,
         flush_seconds: float = FLUSH_SECONDS,
+        max_batch: int = MAX_BATCH,
         transport: Callable[..., Any] | None = None,
     ):
         self.run_id = run_id
@@ -190,6 +203,7 @@ class TrainingRun:
         self._api_key = api_key
         self._flush_every = max(1, int(flush_every))
         self._flush_seconds = float(flush_seconds)
+        self._max_batch = max(1, int(max_batch))
         self._call = transport or _call
         self._buffer: list[dict[str, Any]] = []
         self._pending_total: int | None = None
@@ -258,7 +272,7 @@ class TrainingRun:
     def flush(self) -> bool:
         """Send buffered points. Returns True when nothing is left unsent."""
         with self._lock:
-            batch = self._buffer[:MAX_BATCH]
+            batch = self._buffer[: self._max_batch]
             total = self._pending_total
         if not batch and total is None:
             return True
@@ -313,7 +327,7 @@ class TrainingRun:
             body["adapter"] = str(adapter)
             self.adapter = str(adapter)
         if error:
-            body["error"] = str(error)[:2000]
+            body["error"] = str(error)[:TRAINING_ERROR_CHARS]
         try:
             out = self._call("POST", f"/runs/{self.run_id}/finish", self._api_key, body)
         except Exception as exc:
@@ -431,9 +445,10 @@ class TrainingRun:
         self._absorb(state)
         return self.status
 
-    def wait(self, *, timeout: float | None = None, poll: float = 15.0) -> str:
-        """Block until a hosted run ends. Returns the final status;
-        raises ``TimeoutError`` when ``timeout`` seconds pass first."""
+    def wait(self, *, timeout: float | None = None, poll: float = TRAINING_POLL_S) -> str:
+        """Block until a hosted run ends, reading its state every ``poll``
+        seconds (never under ``TRAINING_POLL_MIN_S``). Returns the final
+        status; raises ``TimeoutError`` when ``timeout`` seconds pass first."""
         started = time.monotonic()
         while self.refresh() == "running":
             if timeout is not None and time.monotonic() - started >= timeout:
@@ -441,7 +456,7 @@ class TrainingRun:
                     f"training run {self.run_id} still running after {timeout:.0f}s; "
                     f"watch it at {self.url}"
                 )
-            time.sleep(max(1.0, float(poll)))
+            time.sleep(max(TRAINING_POLL_MIN_S, float(poll)))
         return self.status
 
     def _absorb(self, state: Mapping[str, Any]) -> None:
@@ -497,6 +512,7 @@ def training_run(
     api_key: str | None = None,
     flush_every: int = FLUSH_EVERY,
     flush_seconds: float = FLUSH_SECONDS,
+    max_batch: int = MAX_BATCH,
     transport: Callable[..., Any] | None = None,
 ) -> TrainingRun:
     """Create a run on the platform and return the handle to log into.
@@ -529,6 +545,7 @@ def training_run(
         total_steps=int(total_steps) if total_steps else None,
         flush_every=flush_every,
         flush_seconds=flush_seconds,
+        max_batch=max_batch,
         transport=transport,
     )
     log.info("training run %s: %s", run.run_id, run.url)
@@ -565,6 +582,31 @@ def _measured_temperature(
 
 #: what GRPO does with a sampled reply the token cap cut
 TRUNCATED = ("mask", "zero")
+#: Rollout temperatures closer than this are the same temperature.
+_TEMPERATURE_TOLERANCE = 1e-9
+
+
+def _knob(name: str, value: Any, method: str) -> float:
+    """``value`` checked against ``TRAINING_KNOBS[name]``: the methods it
+    applies to and the accepted range. The message names the reference
+    value the literature reaches for, so a rejected value says what to try."""
+    spec = TRAINING_KNOBS[name]
+    methods: tuple[str, ...] = tuple(spec["methods"])
+    if method not in methods:
+        raise ValueError(
+            f"{name} is {spec['why']}; it applies to {', '.join(methods)} only"
+            + (" (other methods do not sample)" if name in ("generations", "temperature") else "")
+        )
+    number = float(value)
+    lo = float(spec["lo"])
+    hi = None if spec["hi"] is None else float(spec["hi"])
+    too_low = number <= lo if spec["open_lo"] else number < lo
+    too_high = hi is not None and (number >= hi if spec["open_hi"] else number > hi)
+    if too_low or too_high:
+        ref = spec["ref"]
+        ref_text = ref.get(method) if isinstance(ref, dict) else ref
+        raise ValueError(f"{name}: {spec['range']} (reference {ref_text!r}; {spec['why']})")
+    return number
 
 
 def train(
@@ -586,7 +628,7 @@ def train(
     config: Mapping[str, Any] | None = None,
     wait: bool = False,
     timeout: float | None = None,
-    poll: float = 15.0,
+    poll: float = TRAINING_POLL_S,
     api_key: str | None = None,
     transport: Callable[..., Any] | None = None,
 ) -> TrainingRun:
@@ -628,9 +670,11 @@ def train(
     the old way. A cut reply scored 0 teaches shorter thinking before it
     teaches the task, so ``"zero"`` is the knob to reach for only when the
     cap itself is the behavior under training (#253). Each has a
-    trainer default when left ``None``. ``config`` passes further host
-    keys as given
-    (``epsilonHigh``, ``scaleRewards``, ``balance``).
+    trainer default when left ``None``; the range each is accepted in and
+    the value the cited paper used are in ``TRAINING_KNOBS`` (defaults.py:
+    DAPO, Dr. GRPO, ProRL, DPO and the rlhf-book chapters), and a rejected
+    value is told the reference. ``config`` passes further host keys as
+    given (``epsilonHigh``, ``scaleRewards``, ``balance``).
     Every knob lands on the run's ``config`` so the run page shows it.
 
     A dataset already training answers with that run instead of a second.
@@ -658,45 +702,23 @@ def train(
     if base_model:
         body["base"] = str(base_model)
     if generations is not None:
-        if method != "grpo":
-            raise ValueError("generations is the GRPO group size; other methods do not sample")
-        if not 2 <= int(generations) <= 32:
-            raise ValueError("generations: 2 to 32 rollouts per prompt")
-        body["generations"] = int(generations)
+        body["generations"] = int(_knob("generations", int(generations), method))
     if learning_rate is not None:
-        if not 0 < float(learning_rate) < 1:
-            raise ValueError(
-                "learning_rate: a positive step below 1 (5e-6 for RL, 2e-4 for SFT LoRA)"
-            )
-        body["lr"] = float(learning_rate)
+        body["lr"] = _knob("learning_rate", learning_rate, method)
     if beta is not None:
-        if method not in ("grpo", "dpo"):
-            raise ValueError("beta is the KL coefficient; it applies to grpo and dpo only")
-        if float(beta) < 0:
-            raise ValueError("beta: 0 or more")
-        body["beta"] = float(beta)
+        body["beta"] = _knob("beta", beta, method)
     if seed is not None:
         body["seed"] = int(seed)
     if max_completion_length is not None:
-        if method not in ("grpo", "dpo"):
-            raise ValueError(
-                "max_completion_length caps a sampled reply; it applies to grpo and dpo only"
-            )
-        if not 16 <= int(max_completion_length) <= 4096:
-            raise ValueError("max_completion_length: 16 to 4096 tokens")
-        body["maxCompletionLength"] = int(max_completion_length)
+        body["maxCompletionLength"] = int(
+            _knob("max_completion_length", int(max_completion_length), method)
+        )
     if loss_type is not None:
         if method not in ("grpo", "dpo"):
             raise ValueError("loss_type picks the grpo or dpo objective variant")
         body["lossType"] = str(loss_type)
     if temperature is not None:
-        if method != "grpo":
-            raise ValueError(
-                "temperature is the GRPO rollout temperature; other methods do not sample"
-            )
-        if not 0 < float(temperature) <= 2:
-            raise ValueError("temperature: above 0 and at most 2")
-        body["temperature"] = float(temperature)
+        body["temperature"] = _knob("temperature", temperature, method)
     if truncated is not None:
         if method != "grpo":
             raise ValueError("truncated= says what GRPO does with a token-capped reply; grpo only")
@@ -711,7 +733,7 @@ def train(
     call = transport or _call
     if temperature is not None:
         measured = _measured_temperature(dataset, api_key, call)
-        if measured is not None and abs(measured - float(temperature)) > 1e-9:
+        if measured is not None and abs(measured - float(temperature)) > _TEMPERATURE_TOLERANCE:
             warnings.warn(
                 f"Training samples at {float(temperature):g} but the dataset was measured at "
                 f"{measured:g}; keep them the same or the before/after comparison is not "
@@ -760,11 +782,13 @@ class RewardModel:
         threshold: float | None = None,
         api_key: str | None = None,
         transport: Callable[..., Any] | None = None,
+        batch: int = PLATFORM_REWARD_MODEL_BATCH,
     ):
         self.run_id = run.run_id if isinstance(run, TrainingRun) else str(run or "").strip()
         if not self.run_id:
             raise ValueError("run: a finished reward-model run (wai.train(method='rm')) or its id")
         self.threshold = threshold
+        self.batch = max(1, int(batch))
         self.__name__ = f"reward_model:{self.run_id}"
         self._api_key = api_key
         self._call = transport or _call
@@ -772,11 +796,11 @@ class RewardModel:
 
     def score(self, rows: Sequence[dict]) -> list[dict[str, Any]]:
         """``[{"rm_score", "reward", "threshold"}]`` for each row, in order.
-        Up to 256 rows a call; more are sent in batches."""
+        Up to ``batch`` rows a call (256 by default); more are sent in batches."""
         src = [r for r in rows if isinstance(r, dict)]
         out: list[dict[str, Any]] = []
-        for i in range(0, len(src), 256):
-            chunk = src[i : i + 256]
+        for i in range(0, len(src), self.batch):
+            chunk = src[i : i + self.batch]
             res = self._call("POST", f"/runs/{self.run_id}/score", self._api_key, {"rows": chunk})
             res = res if isinstance(res, dict) else {}
             scores = list(res.get("scores") or [])
@@ -811,6 +835,7 @@ def reward_model(
     threshold: float | None = None,
     api_key: str | None = None,
     transport: Callable[..., Any] | None = None,
+    batch: int = PLATFORM_REWARD_MODEL_BATCH,
 ) -> RewardModel:
     """A judge backed by a finished reward-model run.
 
@@ -823,7 +848,7 @@ def reward_model(
     override the run's own cut. The scores are the model's; a reward
     model trained on one agent's pairs says nothing about another agent.
     """
-    return RewardModel(run, threshold=threshold, api_key=api_key, transport=transport)
+    return RewardModel(run, threshold=threshold, api_key=api_key, transport=transport, batch=batch)
 
 
 def models(*, api_key: str | None = None) -> list[dict[str, Any]]:

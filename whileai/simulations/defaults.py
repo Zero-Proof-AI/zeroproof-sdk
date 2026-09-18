@@ -507,6 +507,413 @@ TRUNCATED_REPLY_CHARS = 600
 # reward does not credit. Measured on our own lanes, not published.
 HACK_THRESHOLD = 0.3
 
+# ---------------------------------------------------------------------
+# world (sandbox)
+# ---------------------------------------------------------------------
+#
+# Reachable through ``MockEnvironment(options=WorldOptions(...))``,
+# ``export_environment(world=...)`` / ``load_environment(world=...)`` and
+# ``simulate(advanced={"world": {...}})``. The sandbox is seeded: changing a
+# value here changes the golden rows (scripts/golden.py), so a change is a
+# stated diff, never a drive-by.
+
+# WORLD_DEFAULT_FAULT_MODE = "timeout": the fault a plan gets when it names
+# none. Timeout is the most common runtime tool failure in the injection
+# benchmarks (first of six perturbation types in arXiv:2605.11928; first of
+# seven in arXiv:2606.01416); which mode a plan carries is decided upstream
+# by the tool_condition axis (generate/scenarios.py), not here.
+WORLD_DEFAULT_FAULT_MODE = "timeout"
+# WORLD_DEFAULT_FAULT_RATE = 1.0: a fault plan without a rate fires on every
+# call. The injection benchmarks fire at 100% per sample so every model is
+# tested at the same trajectory step (arXiv:2605.11928 §4); how often a
+# situation carries a plan at all is ``simulate(fault_rate=)`` (default in
+# generate/scenarios.py, DEFAULT_FAULT_RATE), a separate dial.
+WORLD_DEFAULT_FAULT_RATE = 1.0
+# WORLD_STALE_AS_OF = "3 days ago": the age stamped on a stale read. A
+# stale answer is a real record with an age, so the agent can notice it
+# is old (measured: a hash taught agents to invent a shipment around it and
+# a rubric judge passed them). The age itself is convention, untested.
+WORLD_STALE_AS_OF = "3 days ago"
+# WORLD_MALFORMED_PAYLOAD = "<<garbled resp0nse": what a malformed fault
+# returns. Unparseable text
+# is the "Malform" perturbation of arXiv:2605.11928 (malformed JSON);
+# convention for the exact bytes.
+WORLD_MALFORMED_PAYLOAD = "<<garbled resp0nse"
+# WORLD_EXISTS_SHARE = 0.7: share of user-named references that exist in the
+# world when no state says otherwise. Under 1.0 so "not found" is a path
+# the agent meets without a fault plan; the number is convention, untested.
+WORLD_EXISTS_SHARE = 0.7
+# WORLD_SEARCH_HITS = (1, 6): a search or listing returns this many records,
+# inclusive. Measured: a fixed 2 to 3 taught models that searches always
+# return two or three results.
+WORLD_SEARCH_HITS = (1, 6)
+# WORLD_TEMPLATE_HITS = (1, 5): records a model-written list template
+# expands to, inclusive. Convention, untested; same reasoning as search hits.
+WORLD_TEMPLATE_HITS = (1, 5)
+# WORLD_ID_RANGE = (1000, 90000): generated record ids, lower inclusive,
+# upper exclusive. Four to five digits reads as an id and never collides
+# with the ``<stem>_<hex>`` ids the world issues on create. Convention.
+WORLD_ID_RANGE = (1000, 90000)
+# WORLD_DATE_YEARS = (2022, 5): generated dates fall in these calendar
+# years (first year, span). Convention: recent enough to read as live data,
+# fixed so seeded rows do not drift with the clock.
+WORLD_DATE_YEARS = (2022, 5)
+# WORLD_JITTER_DIVISOR = 3: a number in a model-written result template
+# moves by up to one part in this many of itself (900 lands in 600 to
+# 1200). Wide enough that a policy threshold near the template value is
+# crossed both ways; convention, untested. Documented on local_model().
+WORLD_JITTER_DIVISOR = 3
+# WORLD_CREATED_ID_MODULUS = 100000: issued ids on create are
+# ``<stem>_<n mod this>``. Five digits; convention.
+WORLD_CREATED_ID_MODULUS = 100_000
+# WORLD_ISSUED_ID_HEX = 12: hex characters in a world-issued id and in the
+# per-call digest. 48 bits: no collision in any run this package makes.
+WORLD_ISSUED_ID_HEX = 12
+# WORLD_REF_CHARS = 8: characters of the call digest echoed as ``ref``.
+WORLD_REF_CHARS = 8
+# WORLD_EXPRESSION_CHARS = 200: a calculator expression is echoed back cut
+# to this many characters, so a runaway argument cannot bloat a row.
+WORLD_EXPRESSION_CHARS = 200
+# WORLD_HINT_CHARS = 40: characters of a caller's query kept as the name
+# stem of generated records. Long enough for a product name; convention.
+WORLD_HINT_CHARS = 40
+# WORLD_SHELL_FLAVORS = 11: one shell call in this many is a permission
+# error, one a failing test run, one a merge conflict, one an ``ls``; the
+# rest pass. About a third of shell calls therefore fail, near the
+# per-call tool error rates the tau-bench family reports for weaker agents
+# (arXiv:2406.12045 reports pass^1 under 50% on retail). Convention.
+WORLD_SHELL_FLAVORS = 11
+# WORLD_CI_FAIL_ONE_IN = 7: one CI listing in this many carries a failed
+# check. Convention, untested.
+WORLD_CI_FAIL_ONE_IN = 7
+
+# ---------------------------------------------------------------------
+# ingest (traces)
+# ---------------------------------------------------------------------
+#
+# Reachable through keywords on the ingest helpers (``mine_result_exemplars``,
+# ``leakage_report``, ``split_pseudo_production``, ``behavior_state``,
+# ``dimensions_from_traces``).
+
+# TRACE_EXEMPLARS_PER_TOOL = 3: real result payloads kept per tool as shape
+# templates. Three shows the shape family (record, list, text) without
+# repeating it; convention, untested.
+TRACE_EXEMPLARS_PER_TOOL = 3
+# TRACE_EXEMPLAR_MAX_CHARS = 500: serialized size cap on one exemplar, about
+# 125 tokens at 4 characters a token, so three per tool stay under a few
+# hundred tokens of the writer prompt. Token-budget reasoning; the exact
+# number is convention.
+TRACE_EXEMPLAR_MAX_CHARS = 500
+# TRACE_EXEMPLAR_STRING_CHARS = 160: a string inside an exemplar is cut here
+# with an ellipsis; TRACE_EXEMPLAR_LIST_ITEMS = 2 and
+# TRACE_EXEMPLAR_DICT_KEYS = 12 bound the nesting so the 500-char cap is
+# reachable by trimming, not by dropping the whole payload. Convention.
+TRACE_EXEMPLAR_STRING_CHARS = 160
+TRACE_EXEMPLAR_LIST_ITEMS = 2
+TRACE_EXEMPLAR_DICT_KEYS = 12
+# TRACE_LEAK_THRESHOLD = 0.9: cosine similarity at or above which a
+# generated prompt is a near copy of a source trace. Exact matches always
+# flag. rlhfbook.com/c/16-evaluation.html ("Contamination") uses 8-gram
+# overlap for exact leakage; 0.9 on hashed n-gram vectors is the same test
+# with a small paraphrase allowance. Convention for the exact number.
+TRACE_LEAK_THRESHOLD = 0.9
+# TRACE_LEAK_EXAMPLES = 20: offenders listed in a leakage report; the count
+# is always complete. Report size, convention.
+TRACE_LEAK_EXAMPLES = 20
+# TRACE_PSEUDO_PRODUCTION_FRACTION = 0.2: rows set aside as pseudo
+# production. The usual 80/20 train/holdout split; convention.
+TRACE_PSEUDO_PRODUCTION_FRACTION = 0.2
+# TRACE_MIN_SUPPORT = 3: graded rows a behavior region needs before its
+# allocation is more than a hint. Statistical reason: the Clopper-Pearson
+# 95% upper bound on a 0-of-n fail rate is 0.95 at n=1, 0.78 at n=2 and
+# 0.63 at n=3, so three is the smallest count at which "never failed" rules
+# out a majority fail rate.
+TRACE_MIN_SUPPORT = 3
+# TRACE_EXPLORATION_FLOOR = 0.2 and TRACE_EXPLORATION_MAX = 0.6: share of
+# the budget always kept for broad coverage (floor) and the most a caller
+# can reserve (max). An allocation that follows observed failures alone
+# never finds a new one; 20% is an epsilon-greedy convention, untested.
+TRACE_EXPLORATION_FLOOR = 0.2
+TRACE_EXPLORATION_MAX = 0.6
+# TRACE_STATE_PRIORITY = {new: 1.0, ...}: status weight in the region
+# priority. New and persistent failures draw first; a solved region keeps a small weight so
+# it is re-checked. Convention, untested.
+TRACE_STATE_PRIORITY = {
+    "new": 1.0,
+    "persistent": 0.9,
+    "uncertain": 0.35,
+    "improving": 0.2,
+    "solved": 0.05,
+    "passing": 0.05,
+}
+# TRACE_SUPPORT_SATURATION = 6: failures at which the support factor
+# reaches 1.0 (it starts at 0.5 with none). Convention, untested.
+TRACE_SUPPORT_SATURATION = 6
+# TRACE_RATE_FLOOR = 0.25: the rate factor is floor + (1 - floor) * fail
+# rate, so a region that never fails still draws a quarter of the weight a
+# region that always fails does. Convention, untested.
+TRACE_RATE_FLOOR = 0.25
+# TRACE_REPORT_LIST_CAP = 5: names shown per axis in the text report.
+TRACE_REPORT_LIST_CAP = 5
+# TRACE_TASK_HASH_CHARS = 200: prompt characters in the split hash.
+TRACE_TASK_HASH_CHARS = 200
+
+# ---------------------------------------------------------------------
+# connect (platform)
+# ---------------------------------------------------------------------
+#
+# Reachable through ``timeout=`` / ``poll=`` keywords on the platform calls.
+
+# PLATFORM_REQUEST_TIMEOUT_S = 120: one gate request. A finalize on a large
+# set takes tens of seconds; two minutes is convention, untested.
+PLATFORM_REQUEST_TIMEOUT_S = 120
+# PLATFORM_UPLOAD_TIMEOUT_S = 300: the studio import, which grades every row
+# server side before answering. Convention, sized to a 20k-row push.
+PLATFORM_UPLOAD_TIMEOUT_S = 300
+# PLATFORM_CREDENTIAL_TTL_S = 3600: default life of a delegated credential.
+# One hour matches the Clerk session token that mints it.
+PLATFORM_CREDENTIAL_TTL_S = 3600
+# PLATFORM_ERROR_DETAIL_CHARS = 400: gate error body echoed in the
+# exception. Enough for the gate's one-line reason; convention.
+PLATFORM_ERROR_DETAIL_CHARS = 400
+# PLATFORM_STUDIO_MAX_ROWS = 20000: the studio import endpoint's cap.
+PLATFORM_STUDIO_MAX_ROWS = 20_000
+# PLATFORM_HF_DATASET_TIMEOUT_S = 600 / PLATFORM_HF_MODEL_TIMEOUT_S = 900:
+# how long ``hf_publish`` / ``hf_publish_run`` wait for the Hugging Face
+# push; an adapter upload is bigger than a JSONL set. Convention.
+PLATFORM_HF_DATASET_TIMEOUT_S = 600.0
+PLATFORM_HF_MODEL_TIMEOUT_S = 900.0
+# PLATFORM_HF_POLL_S = 2.5 / PLATFORM_HF_MODEL_POLL_S = 3.0 /
+# PLATFORM_IMPORT_POLL_S = 3.0: seconds between status reads while waiting.
+PLATFORM_HF_POLL_S = 2.5
+PLATFORM_HF_MODEL_POLL_S = 3.0
+PLATFORM_IMPORT_POLL_S = 3.0
+# PLATFORM_IMPORT_TIMEOUT_S = 900 / PLATFORM_IMPORT_MAX_ROWS = 100000: an
+# import of a Hugging Face split. The row cap is the gate's.
+PLATFORM_IMPORT_TIMEOUT_S = 900.0
+PLATFORM_IMPORT_MAX_ROWS = 100_000
+# PLATFORM_TRACE_PAGE_SIZE = 200: traces read per page when listing an
+# agent's traces (the ``limit=`` the traces route takes). Convention.
+PLATFORM_TRACE_PAGE_SIZE = 200
+# PLATFORM_HOLDOUT_PROVE_EFFECT = 0.05: the gain a pushed holdout is sized
+# to prove at 80% power (holdout_size). Five points is the package's proof
+# bar (a 5-point move on 50+ judged tasks); rlhfbook.com/c/16-evaluation.html
+# puts held-constant eval noise at 0.25 to 1.5 points, so five is several
+# noise floors.
+PLATFORM_HOLDOUT_PROVE_EFFECT = 0.05
+# PLATFORM_REWARD_MODEL_BATCH = 256: rows per scoring request to a hosted
+# reward model; the gate's request cap.
+PLATFORM_REWARD_MODEL_BATCH = 256
+# PLATFORM_UNKNOWN_IDS_SHOWN = 3: unknown trace ids named in an error.
+PLATFORM_UNKNOWN_IDS_SHOWN = 3
+
+# ---------------------------------------------------------------------
+# training
+# ---------------------------------------------------------------------
+#
+# Reachable through ``training_run(flush_every=, flush_seconds=)``,
+# ``TrainingRun(max_batch=)``, ``train(...)`` keywords and ``run.wait(poll=)``.
+# The trainer's own defaults live on the platform; what the SDK holds is
+# the range each knob is accepted in and the value the literature reaches
+# for, so the error message can name a fix.
+
+# TRAINING_FLUSH_EVERY = 25 points / TRAINING_FLUSH_SECONDS = 15: when the
+# log buffer is sent. One request per 25 steps keeps a 1k-step run under
+# 50 calls; 15 s keeps a slow run's curve live. Convention.
+TRAINING_FLUSH_EVERY = 25
+TRAINING_FLUSH_SECONDS = 15.0
+# TRAINING_MAX_BATCH = 500: points per log request. Keeps one request
+# well under the gate's body limit; convention.
+TRAINING_MAX_BATCH = 500
+# TRAINING_POLL_S = 15 / TRAINING_POLL_MIN_S = 1: seconds between reads of
+# a hosted run's state, and the floor so a caller cannot hammer the gate.
+TRAINING_POLL_S = 15.0
+TRAINING_POLL_MIN_S = 1.0
+# TRAINING_ERROR_CHARS = 2000: a finish error is cut here; the run page
+# shows one screen of it.
+TRAINING_ERROR_CHARS = 2000
+
+# TRAINING_KNOBS = {knob: {lo, hi, ref, why}}: accepted range and reference
+# value per knob, by method. ``lo``/``hi`` are what ``train`` accepts; ``ref``
+# is what the cited source used, so the message that rejects a value can
+# say what to reach for.
+#
+# generations: GRPO group size G. DAPO trains at G=16 (arXiv:2503.14476,
+#   Table of hyperparameters), Dr. GRPO at 8 (arXiv:2503.20783, Table 6),
+#   ProRL at 16 (arXiv:2505.24864). 2 is the structural minimum (one
+#   advantage needs a pair); 32 is the hosted trainer's memory cap.
+# learning_rate: RL runs at 1e-6 (DAPO, Dr. GRPO) to 2e-6 (ProRL); SFT one
+#   to two orders below pretraining, 1e-5 to 8e-5 full fine-tune
+#   (rlhfbook.com/c/09-instruction-tuning.html, "Implementation Details"),
+#   2e-4 for a LoRA adapter (LoRA arXiv:2106.09685 tunes at a higher rate
+#   than full fine-tuning). DPO wants "surprisingly low learning rates"
+#   (rlhfbook.com/c/12-direct-alignment.html); the DPO paper used 1e-6
+#   (arXiv:2305.18290, App. B).
+# beta: the KL coefficient. DAPO, Dr. GRPO and CISPO drop it (0.0;
+#   arXiv:2503.14476, 2503.20783, 2506.13585); ProRL keeps it with
+#   reference resets (arXiv:2505.24864). DPO's beta is the preference
+#   temperature, 0.1 in the paper (arXiv:2305.18290).
+# max_completion_length: DAPO's soft overlong window is 4096 tokens under a
+#   16384 cap (arXiv:2503.14476); the hosted trainer serves up to 4096.
+# temperature: ProRL samples at 1.2 (arXiv:2505.24864); rejection sampling
+#   runs 0.7 to 1.0 (rlhfbook.com/c/10-rejection-sampling.html).
+# clip (host key epsilonHigh): PPO/GRPO clip 0.2 (rlhfbook.com/c/11-
+#   policy-gradients.html); DAPO clip-higher 0.28, ProRL 0.4.
+TRAINING_KNOBS: dict[str, dict[str, Any]] = {
+    # lo/hi: accepted range; open_lo/open_hi: the endpoint itself is
+    # rejected; range: the words the error uses; ref: the cited value.
+    "generations": {
+        "lo": 2,
+        "hi": 32,
+        "open_lo": False,
+        "open_hi": False,
+        "range": "2 to 32 rollouts per prompt",
+        "ref": 8,
+        "methods": ("grpo",),
+        "why": "the GRPO group size; Dr. GRPO 8, DAPO and ProRL 16 "
+        "(arXiv:2503.20783, 2503.14476, 2505.24864)",
+    },
+    "learning_rate": {
+        "lo": 0.0,
+        "hi": 1.0,
+        "open_lo": True,
+        "open_hi": True,
+        "range": "a positive step below 1",
+        "ref": {"sft": 2e-4, "grpo": 1e-6, "dpo": 1e-6, "rm": 1e-5},
+        "methods": ("sft", "grpo", "dpo", "rm"),
+        "why": "the optimizer step; 1e-6 for RL (DAPO, Dr. GRPO), 1e-6 for DPO "
+        "(arXiv:2305.18290), 2e-4 for a LoRA SFT adapter",
+    },
+    "beta": {
+        "lo": 0.0,
+        "hi": None,
+        "open_lo": False,
+        "open_hi": False,
+        "range": "0 or more",
+        "ref": {"grpo": 0.0, "dpo": 0.1},
+        "methods": ("grpo", "dpo"),
+        "why": "the KL coefficient; 0 in DAPO, Dr. GRPO and CISPO, 0.1 as the DPO "
+        "preference temperature (arXiv:2305.18290)",
+    },
+    "max_completion_length": {
+        "lo": 16,
+        "hi": 4096,
+        "open_lo": False,
+        "open_hi": False,
+        "range": "16 to 4096 tokens",
+        "ref": 4096,
+        "methods": ("grpo", "dpo"),
+        "why": "the token cap on a sampled reply; DAPO's soft overlong window is 4096 "
+        "(arXiv:2503.14476)",
+    },
+    "temperature": {
+        "lo": 0.0,
+        "hi": 2.0,
+        "open_lo": True,
+        "open_hi": False,
+        "range": "above 0 and at most 2",
+        "ref": 1.0,
+        "methods": ("grpo",),
+        "why": "the GRPO rollout temperature; ProRL 1.2, rejection sampling 0.7 to 1.0",
+    },
+    "clip": {
+        "lo": 0.0,
+        "hi": 1.0,
+        "open_lo": False,
+        "open_hi": False,
+        "range": "0 to 1",
+        "ref": 0.28,
+        "methods": ("grpo",),
+        "why": "the upper clip (host key epsilonHigh); 0.2 PPO, 0.28 DAPO clip-higher, 0.4 ProRL",
+    },
+}
+# TRAINING_LORA_RANK = 16 / TRAINING_LORA_ALPHA = 32: reference adapter
+# shape. LoRA tunes r=4 to 8 on the attention projections and sets alpha
+# to the first r tried (arXiv:2106.09685 §7.1); alpha=2r is the PEFT
+# convention. Advisory: the hosted trainer owns its own values.
+TRAINING_LORA_RANK = 16
+TRAINING_LORA_ALPHA = 32
+# TRAINING_BATCH_PROMPTS = 256: reference prompt batch. OLMo 2 post-trains
+# at 256 prompts (rlhfbook.com/c/09-instruction-tuning.html); ProRL at 256
+# (arXiv:2505.24864); DAPO at 512. Advisory.
+TRAINING_BATCH_PROMPTS = 256
+# TRAINING_SFT_EPOCHS = 2: reference SFT epochs; rlhfbook gives no number
+# and the hosted trainer owns its own. Convention, untested.
+TRAINING_SFT_EPOCHS = 2
+
+# ---------------------------------------------------------------------
+# monitor
+# ---------------------------------------------------------------------
+#
+# Reachable through ``HackMonitor(...)`` keywords.
+
+# MONITOR_N_PROMPTS = 32 / MONITOR_K = 4: holdout asks sampled per eval and
+# completions per ask (128 rollouts). At p=0.5 a 32-task bootstrap band is
+# about +-0.17, wide enough that only large proxy/gold divergence reads;
+# the size is a cost choice, and ``n_prompts=`` raises it. Convention.
+MONITOR_N_PROMPTS = 32
+MONITOR_K = 4
+# MONITOR_EVERY = 10: trainer steps between evals. Convention.
+MONITOR_EVERY = 10
+# MONITOR_WINDOW = 3: evals the alarms look back over.
+MONITOR_WINDOW = 3
+# MONITOR_DELTA = 0.1: proxy gain over the window that counts as climbing.
+# Ten points is well outside the 0.25 to 1.5 point eval noise
+# rlhfbook.com/c/16-evaluation.html reports; convention for the number.
+MONITOR_DELTA = 0.1
+# MONITOR_LENGTH_PCT = 0.25: completion-length growth that counts. Length
+# growth is the first symptom of over-optimization in
+# rlhfbook.com/c/17-over-optimization.html and the bias Dr. GRPO removes
+# (arXiv:2503.20783); a quarter is convention.
+MONITOR_LENGTH_PCT = 0.25
+# MONITOR_BUFFER = 512: completions the reward wrapper keeps for the
+# feature scan; MONITOR_SCAN_MIN = 8 is the fewest it scans (two groups).
+MONITOR_BUFFER = 512
+MONITOR_SCAN_MIN = 8
+# MONITOR_SCAN_PERMUTATIONS = 50 / MONITOR_WINDOW_BOOTSTRAPS = 500: the
+# permutation count for hack_scan's feature test and the bootstrap count
+# for the gold-vs-window interval. 500 resamples give a 95% band to about
+# two decimals; 50 permutations a p-value to 0.02. Convention.
+MONITOR_SCAN_PERMUTATIONS = 50
+MONITOR_WINDOW_BOOTSTRAPS = 500
+# MONITOR_MAX_NEW_TOKENS = 256: completion length sampled on the holdout.
+MONITOR_MAX_NEW_TOKENS = 256
+# MONITOR_CONCURRENCY = 8: gold judge calls in flight.
+MONITOR_CONCURRENCY = 8
+# MONITOR_SAMPLE_TEMPERATURE = 0.8 / MONITOR_SAMPLE_TOP_P = 0.95 /
+# MONITOR_SAMPLE_BATCH = 16: how the default sampler draws. The same
+# temperature the rollout engine uses (LOCAL_MODEL_TEMPERATURE) so the
+# holdout is sampled the way the data was.
+MONITOR_SAMPLE_TEMPERATURE = 0.8
+MONITOR_SAMPLE_TOP_P = 0.95
+MONITOR_SAMPLE_BATCH = 16
+
+# ---------------------------------------------------------------------
+# environment
+# ---------------------------------------------------------------------
+#
+# Reachable through ``build_tasks`` / ``export_environment`` keywords.
+
+# The solve-rate band (0.2, 0.8) an environment keeps prompts in lives in
+# score/optimize.py as DEFAULT_BAND (one home); environment.py imports it.
+# DAPO's dynamic sampling drops prompts at accuracy 0 and 1
+# (arXiv:2503.14476); the 20 to 80 band is the same rule with a margin for
+# k=8 noise.
+# ENV_HOLDOUT_FRACTION = 0.2: tasks held out. 80/20 convention.
+ENV_HOLDOUT_FRACTION = 0.2
+# ENV_DECONTAMINATION_NGRAM = 8: n-gram size for train-vs-holdout overlap;
+# rlhfbook.com/c/16-evaluation.html ("Contamination") found its overlaps
+# with 8-gram matching.
+ENV_DECONTAMINATION_NGRAM = 8
+# ENV_DECONTAMINATION_EXAMPLES = 3: overlaps shown in the report.
+ENV_DECONTAMINATION_EXAMPLES = 3
+# ENV_MAX_TURNS_FALLBACK = 10: turn cap when a spec carries none.
+ENV_MAX_TURNS_FALLBACK = 10
+# ENV_EVAL_EXAMPLES = 5 / ENV_EVAL_ROLLOUTS = 3: the verifiers smoke eval
+# written into the exported pyproject.
+ENV_EVAL_EXAMPLES = 5
+ENV_EVAL_ROLLOUTS = 3
+
 
 def knob(default: Any, *, lo: float | None = None, hi: float | None = None) -> Any:
     """A :class:`RunKnobs` field with its bounds. ``lo`` and ``hi`` are
@@ -827,6 +1234,12 @@ __all__ = [
     "DEFAULT_WRITER_FLIGHT",
     "DIFFICULTY_BAND",
     "DIFFICULTY_BAND_ROLLOUTS",
+    "ENV_DECONTAMINATION_EXAMPLES",
+    "ENV_DECONTAMINATION_NGRAM",
+    "ENV_EVAL_EXAMPLES",
+    "ENV_EVAL_ROLLOUTS",
+    "ENV_HOLDOUT_FRACTION",
+    "ENV_MAX_TURNS_FALLBACK",
     "FAULT_STATUSES",
     "FINGERPRINT_STEM_MIN_LEN",
     "FLIP_FLAG",
@@ -851,10 +1264,41 @@ __all__ = [
     "MIN_GOLD",
     "MIN_KAPPA",
     "MIN_RERUNS",
+    "MONITOR_BUFFER",
+    "MONITOR_CONCURRENCY",
+    "MONITOR_DELTA",
+    "MONITOR_EVERY",
+    "MONITOR_K",
+    "MONITOR_LENGTH_PCT",
+    "MONITOR_MAX_NEW_TOKENS",
+    "MONITOR_N_PROMPTS",
+    "MONITOR_SAMPLE_BATCH",
+    "MONITOR_SAMPLE_TEMPERATURE",
+    "MONITOR_SAMPLE_TOP_P",
+    "MONITOR_SCAN_MIN",
+    "MONITOR_SCAN_PERMUTATIONS",
+    "MONITOR_WINDOW",
+    "MONITOR_WINDOW_BOOTSTRAPS",
     "OK_STATUSES",
     "PARENT_HEAD_CHARS",
     "PASS_REWARD",
     "PASS_THRESHOLD",
+    "PLATFORM_CREDENTIAL_TTL_S",
+    "PLATFORM_ERROR_DETAIL_CHARS",
+    "PLATFORM_HF_DATASET_TIMEOUT_S",
+    "PLATFORM_HF_MODEL_POLL_S",
+    "PLATFORM_HF_MODEL_TIMEOUT_S",
+    "PLATFORM_HF_POLL_S",
+    "PLATFORM_HOLDOUT_PROVE_EFFECT",
+    "PLATFORM_IMPORT_MAX_ROWS",
+    "PLATFORM_IMPORT_POLL_S",
+    "PLATFORM_IMPORT_TIMEOUT_S",
+    "PLATFORM_REQUEST_TIMEOUT_S",
+    "PLATFORM_REWARD_MODEL_BATCH",
+    "PLATFORM_STUDIO_MAX_ROWS",
+    "PLATFORM_TRACE_PAGE_SIZE",
+    "PLATFORM_UNKNOWN_IDS_SHOWN",
+    "PLATFORM_UPLOAD_TIMEOUT_S",
     "POSITION_FLIP_FLAG",
     "POWER",
     "PROGRESS_MIN_BUDGET",
@@ -875,9 +1319,53 @@ __all__ = [
     "TIER_MIX_MIN_ROWS",
     "TIER_MIX_TOLERANCE",
     "TOOL_SCHEMA_SPAN_CHARS",
+    "TRACE_EXEMPLARS_PER_TOOL",
+    "TRACE_EXEMPLAR_DICT_KEYS",
+    "TRACE_EXEMPLAR_LIST_ITEMS",
+    "TRACE_EXEMPLAR_MAX_CHARS",
+    "TRACE_EXEMPLAR_STRING_CHARS",
+    "TRACE_EXPLORATION_FLOOR",
+    "TRACE_EXPLORATION_MAX",
+    "TRACE_LEAK_EXAMPLES",
+    "TRACE_LEAK_THRESHOLD",
+    "TRACE_MIN_SUPPORT",
+    "TRACE_PSEUDO_PRODUCTION_FRACTION",
+    "TRACE_RATE_FLOOR",
+    "TRACE_REPORT_LIST_CAP",
+    "TRACE_STATE_PRIORITY",
+    "TRACE_SUPPORT_SATURATION",
+    "TRACE_TASK_HASH_CHARS",
+    "TRAINING_BATCH_PROMPTS",
+    "TRAINING_ERROR_CHARS",
+    "TRAINING_FLUSH_EVERY",
+    "TRAINING_FLUSH_SECONDS",
+    "TRAINING_KNOBS",
+    "TRAINING_LORA_ALPHA",
+    "TRAINING_LORA_RANK",
+    "TRAINING_MAX_BATCH",
+    "TRAINING_POLL_MIN_S",
+    "TRAINING_POLL_S",
+    "TRAINING_SFT_EPOCHS",
     "TRANSIENT_BACKOFF_S",
     "TRANSIENT_TRIES",
     "TRUNCATED_REPLY_CHARS",
+    "WORLD_CI_FAIL_ONE_IN",
+    "WORLD_CREATED_ID_MODULUS",
+    "WORLD_DATE_YEARS",
+    "WORLD_DEFAULT_FAULT_MODE",
+    "WORLD_DEFAULT_FAULT_RATE",
+    "WORLD_EXISTS_SHARE",
+    "WORLD_EXPRESSION_CHARS",
+    "WORLD_HINT_CHARS",
+    "WORLD_ID_RANGE",
+    "WORLD_ISSUED_ID_HEX",
+    "WORLD_JITTER_DIVISOR",
+    "WORLD_MALFORMED_PAYLOAD",
+    "WORLD_REF_CHARS",
+    "WORLD_SEARCH_HITS",
+    "WORLD_SHELL_FLAVORS",
+    "WORLD_STALE_AS_OF",
+    "WORLD_TEMPLATE_HITS",
     "Z_95",
     "RunKnobs",
     "knob",

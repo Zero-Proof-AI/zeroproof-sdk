@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whileai._env import getenv
 
@@ -44,6 +44,9 @@ from ..generate.agents import LOCAL_MODEL_TIMEOUT, PATIENCE_LEVELS
 from ..generate.diversity import adaptive_allocator
 from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS, check_dimensions
 from .spec import spec_rubric
+
+if TYPE_CHECKING:
+    from ..world.sandbox import WorldOptions
 
 # The values themselves, with the reason for each, live in
 # ``whileai.simulations.defaults``; these names stay importable from here.
@@ -413,6 +416,8 @@ class RunConfig:
     model_version_tag: str
     # every other engine number, each an ``advanced`` key of the same name
     knobs: RunKnobs = field(default_factory=RunKnobs)
+    # the mock world's dials (sandbox WorldOptions), or None for the defaults
+    world_options: WorldOptions | None = None
     # what is left goes to the situation writer as keyword arguments
     advanced: dict = field(default_factory=dict)
 
@@ -711,6 +716,15 @@ def resolve_run_config(
     # start (two to three minutes); slow customer backends raise it.
     rollout_timeout = float(cfg.pop("timeout", LOCAL_MODEL_TIMEOUT) or LOCAL_MODEL_TIMEOUT)
 
+    # advanced={"world": {...}}: the mock world's dials (search_hits,
+    # exists_share, default_fault_mode, name pools, ...). Validated here so a
+    # typo fails before any model is touched; reaches MockEnvironment(options=).
+    world_options = cfg.pop("world", None)
+    if world_options is not None:
+        from ..world.sandbox import WorldOptions
+
+        world_options = WorldOptions.coerce(world_options)
+
     cap = budget if budget is not None else SATURATION_CAP
     return RunConfig(
         agent=agent,
@@ -780,5 +794,6 @@ def resolve_run_config(
         rollout_timeout=rollout_timeout,
         model_version_tag=model_version_tag,
         knobs=knobs,
+        world_options=world_options,
         advanced=cfg,
     )
