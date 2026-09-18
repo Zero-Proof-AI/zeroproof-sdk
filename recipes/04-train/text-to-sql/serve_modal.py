@@ -48,16 +48,19 @@ VLLM_VERSION = _cfg.get("vllm") or "0.10.0"
 SLUG = re.sub(r"[^a-z0-9]+", "-", MODEL.lower()).strip("-")[-40:]
 
 app = modal.App(f"t2s-serve-{SLUG}")
-image = (
+# Newer vLLM builds kernels at start (Qwen3.5's linear attention among them) and
+# needs nvcc: a CUDA devel base, not debian_slim.
+_img = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install(f"vllm=={VLLM_VERSION}", "huggingface_hub[hf_transfer]>=0.34.4")
-    .env(
-        {
-            "HF_HOME": "/root/.cache/huggingface",
-            "HF_HUB_ENABLE_HF_TRANSFER": "1",
-            **({"VLLM_USE_V1": "0"} if VLLM_VERSION.startswith("0.10") else {}),
-        }
-    )
+    if VLLM_VERSION.startswith("0.10")
+    else modal.Image.from_registry("nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.12")
+)
+image = _img.pip_install(f"vllm=={VLLM_VERSION}", "huggingface_hub[hf_transfer]>=0.34.4").env(
+    {
+        "HF_HOME": "/root/.cache/huggingface",
+        "HF_HUB_ENABLE_HF_TRANSFER": "1",
+        **({"VLLM_USE_V1": "0"} if VLLM_VERSION.startswith("0.10") else {}),
+    }
 )
 # Runs trained before the whileai rename live on the zeroproof-* volumes;
 # `--runs-volume` / `--hf-cache` point a deploy at them.
