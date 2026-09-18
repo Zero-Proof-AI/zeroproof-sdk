@@ -3,6 +3,24 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Follow-up depth tracks `avg_turns`. A reply that was not a question, a
+  refusal or a recognised success used to end the thread, so the mean
+  number of simulated user turns sat near 1.5 whatever `avg_turns` said,
+  and a behaviour that needs three turns (confirm before acting) was never
+  generated. Threads now continue with probability `1 - 1/cap`, where the
+  cap is `avg_turns // 2` user turns, and a success phrasing no longer
+  decides depth. (#299) What that costs: with the default `avg_turns=12`,
+  the mean number of simulated user turns per row goes from about 1.3 to
+  about 3.9 on plain agent replies (measured on the default budget draw
+  over 4000 rows; 3.1 to 4.6 when replies mix in questions and refusals,
+  which already earned an answer). A default run therefore makes about
+  three times the agent calls per row, a user-model call for each
+  follow-up (under one per row before, about three now), and fewer rows
+  per minute. To keep the old depth, lower `avg_turns`: 4 gives a mean of
+  about 1.9, the shallowest the new draw goes; 6 gives about 2.3.
+
 ## 0.62 (2026-09-17)
 
 - `init-evals` finds an agent whose extra parameters have defaults
