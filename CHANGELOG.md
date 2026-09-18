@@ -3,6 +3,14 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.80 (2026-09-18)
+
+- The reasoning cites in `whileai/simulations/` (`defaults.py`,
+  `environment.py`, `generate/diversity.py`, `score/optimize.py`) and the
+  `environment` and `what-to-run` docs pages point at
+  `rlhfbook.com/c/07-reasoning`; the old link named chapter 14
+  (over-optimization) and the `.html` form the site now redirects.
+
 ## 0.79 (2026-09-18)
 
 - `typesafe:<model>` is a judge backend spec: TypeSafe's Jev, a decision
