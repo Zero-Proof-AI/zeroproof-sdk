@@ -116,7 +116,7 @@ def test_login_prints_link_and_saves_key_after_approval(gate, tmp_path):
     assert saved["name"] == "cli box"
     assert saved["tier"] == "full", "login records the tier it learned from /me"
     assert auth.trial_prerun_note() is None
-    assert saved["api_url"] == "https://api.zeroproofai.com"
+    assert saved["api_url"] == "https://mbxp83jd48.execute-api.us-east-1.amazonaws.com"
     assert not (tmp_path / "pending-login.json").exists()
     assert auth.stored_api_key() == key
     assert auth.resolve_api_key() == key
