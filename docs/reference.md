@@ -932,6 +932,7 @@ wai.run_judge(rows, likert_judge, scale=(1, 5))  # rating kept, reward = (r - 1)
 pairs, report = wai.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 rows, report = wai.write_rubrics(rows, domain="refunds")  # per-prompt criteria on privileged.rubric
 scored = wai.run_judge(rows, wai.rubric_judge())  # a verdict per criterion; markers rubric:<item>
+# the judge payload carries tool_calls: performed calls per declared tool, 0 when it never ran; a claim in text is not a call (#346)
 clean, report = wai.decontaminate(
     train_rows, against=[eval_rows]
 )  # same task id, verbatim, or 8-gram overlap with the eval set
