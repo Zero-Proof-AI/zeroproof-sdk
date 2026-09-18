@@ -71,15 +71,28 @@ def printing_transport(method: str, path: str, body=None):
     if path.endswith("/evals"):
         return {"evals": body}
     if "/dashboard" in path:
+        # The same rule the platform applies: the difference interval is
+        # delta +- sqrt(ci_a^2 + ci_b^2), and the served version is v3.
+        cand, serv = "v4", "v3"
+        (c_score, c_ci), (s_score, s_ci) = SCORES[cand]["refunds"], SCORES[serv]["refunds"]
+        delta = round(c_score - s_score, 1)
+        lower = sum(1 for name in SCORES[cand] if SCORES[cand][name][0] < SCORES[serv][name][0])
         return {
             "agent": {"id": body_id, "name": body_id},
-            "behavior": {"name": "refunds"},
+            "behavior": {
+                "name": "refunds",
+                "n": 240,
+                "judge": {"agreement": 0.86, "humanN": 60},
+                "noiseFloor": 2.4,
+                "rewardIsJudge": False,
+                "contamination": 0,
+            },
             "verdict": {
-                "candidate": "v4",
-                "serving": "v3",
-                "delta": 5,
-                "excludesZero": True,
-                "regressions": 1,
+                "candidate": cand,
+                "serving": serv,
+                "delta": delta,
+                "excludesZero": abs(delta) > math.sqrt(c_ci**2 + s_ci**2),
+                "regressions": lower,
             },
         }
     if not isinstance(body, dict):

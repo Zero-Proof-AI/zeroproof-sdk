@@ -319,7 +319,11 @@ def test_dashboard_and_verdict_are_typed():
     d = t.dashboard()
     assert isinstance(d, Dashboard) and d.versions[1].score == 83 and d.live.replies_7d == 18400
     assert d.deltas[0].target and d.deltas[1].delta == -4
-    assert str(t.verdict()) == "refunds: v4 beats v3 by 5 (interval excludes zero); 1 regression"
+    assert str(t.verdict()) == (
+        "unproven: refunds: v4 beats v3 by 5 (interval excludes zero, no noise floor declared); "
+        "1 behavior lower (point estimates, no interval on that check); n=240 "
+        "(judge agreement unmeasured)"
+    )
 
     empty = track(
         "a",
@@ -336,6 +340,91 @@ def test_dashboard_and_verdict_are_typed():
         ),
     )
     assert str(unscored.verdict()) == "?: no candidate scored against v3 yet"
+
+
+def _dash(**verdict):
+    beh = {
+        "name": "refunds",
+        "n": 240,
+        "judge": {"agreement": 0.86, "humanN": 60},
+        "noiseFloor": 2.4,
+        "rewardIsJudge": False,
+        "contamination": 0,
+    }
+    beh.update(verdict.pop("behavior", {}))
+    base = {"candidate": "v4", "serving": "v3", "delta": 5, "excludesZero": True, "regressions": 1}
+    base.update(verdict)
+    return {"agent": {"id": "a", "name": "a"}, "behavior": beh, "verdict": base}
+
+
+def _verdict(dash):
+    return str(track("a", transport=Fake(dashboard=dash)).verdict())
+
+
+def test_verdict_claims_a_win_only_with_an_interval_that_clears_the_floor():
+    assert _verdict(_dash()) == (
+        "refunds: v4 beats v3 by 5 (interval excludes zero, clears the noise floor of 2.4); "
+        "1 behavior lower (point estimates, no interval on that check); "
+        "judge agreement 0.86 on 60, n=240"
+    )
+    assert _verdict(_dash(delta=-5, regressions=0)).startswith(
+        "refunds: v4 trails v3 by 5 (interval excludes zero, clears the noise floor of 2.4)"
+    )
+
+
+def test_verdict_never_says_beats_without_an_interval():
+    out = _verdict(_dash(excludesZero=None))
+    assert "beats" not in out
+    assert out.startswith("refunds: v4 scored +5 vs v3, no interval on one side, not a result")
+
+
+def test_verdict_never_says_beats_inside_the_noise():
+    out = _verdict(_dash(delta=2, excludesZero=False, regressions=0))
+    assert "beats" not in out
+    assert out.startswith("refunds: v4 about the same as v3 (+2, interval includes zero)")
+
+
+def test_verdict_reads_the_noise_floor():
+    # Excludes zero on the interval, but the eval moves that much on its own.
+    out = _verdict(_dash(delta=2, regressions=0))
+    assert "beats" not in out
+    assert "inside the eval's re-run band (2.4), not a result" in out
+    # No floor declared: the claim stands and says the floor is missing.
+    out = _verdict(_dash(regressions=0, behavior={"noiseFloor": None}))
+    assert "beats v3 by 5 (interval excludes zero, no noise floor declared)" in out
+
+
+def test_verdict_is_unproven_on_a_short_or_unmeasured_judge():
+    out = _verdict(_dash(regressions=0, behavior={"n": 12, "judge": {"agreement": 0.55}}))
+    assert out.startswith("unproven: refunds: v4 beats v3 by 5")
+    assert "n=12 under 50" in out and "judge agreement 0.55 under 0.8" in out
+    out = _verdict(_dash(regressions=0, behavior={"judge": None, "rewardIsJudge": True}))
+    assert out.startswith("unproven:")
+    assert "judge agreement unmeasured" in out and "the training reward is the judge" in out
+    # A non-claim is not prefixed: there is nothing to prove.
+    out = _verdict(_dash(excludesZero=False, behavior={"n": 12}))
+    assert not out.startswith("unproven:")
+
+
+def test_verdict_names_the_served_version_as_no_candidate():
+    assert _verdict(_dash(candidate="v3", delta=0)) == (
+        "refunds: v3 is the served version; no candidate to compare"
+    )
+
+
+def test_score_refuses_nan_and_warns_on_a_short_n(caplog):
+    run = track("a", transport=Fake()).run("v1")
+    with pytest.raises(ValidationError):
+        run.score("refunds", float("nan"), ci=2.0, n=100)
+    with pytest.raises(ValidationError):
+        run.score("refunds", 80, ci=-1.0, n=100)
+    with pytest.raises(ValidationError):
+        run.score("refunds", 80, ci=1.0, n=0)
+    with caplog.at_level("WARNING", logger="whileai.platform"):
+        run.score("refunds", 80, ci=1.0, n=12)
+        run.score("tone", 80, ci=1.0)
+    assert "n=12" in caplog.text and "under 50" in caplog.text
+    assert "has no n" in caplog.text
 
 
 def test_missing_key_names_the_fix(monkeypatch, tmp_path):
