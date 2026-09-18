@@ -323,7 +323,10 @@ RUBRIC_JUDGE_SYSTEM = (
     "For every rubric item decide true or false: a hard rule or principle is "
     "true when the reply meets it; a pitfall is true when the reply exhibits "
     "the mistake. Judge only what the record shows; a claim the tools did not "
-    "return does not meet anything. The length of the reply must not influence "
+    "return does not meet anything. `tool_calls` counts, from the record, how "
+    "many times each tool actually ran: a tool whose count is 0 was NOT called, "
+    "however plainly the agent said it would, and no item requiring that action "
+    "is met. The length of the reply must not influence "
     "any item. Answer every item, keyed by its number. Reply with one JSON "
     'object and nothing else: {"criteria": {"1": true | false, "2": ..., ...}, '
     '"reason": "<one sentence>"}.'
