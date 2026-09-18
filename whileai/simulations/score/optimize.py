@@ -722,11 +722,11 @@ def next_round(
         if rate < lo:
             unsolved += 1
             continue
-        rep = dict(first.get(key) or given.get(key) or {"prompt": key})
-        cal = dict(rep.get("calibration") or {})
+        report: dict[str, Any] = dict(first.get(key) or given.get(key) or {"prompt": key})
+        cal = dict(report.get("calibration") or {})
         cal.update({"pass_rate": round(rate, 4), "n": len(labels[key]), "band": [lo, hi]})
-        rep["calibration"] = cal
-        kept.append(rep)
+        report["calibration"] = cal
+        kept.append(report)
     sha = hashlib.sha256("\n".join(sorted(task_key(r) for r in kept)).encode()).hexdigest()[:16]
     return {
         "tasks": kept,

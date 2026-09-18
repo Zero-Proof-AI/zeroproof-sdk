@@ -5,6 +5,15 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `ty` type-checks the package in CI beside mypy (`uv run ty check`,
+  under a second cold, where mypy takes about six). mypy stays the gate
+  until ty reaches 1.0; the ty config mirrors the mypy block. Its first
+  pass tightened six `None` paths that mypy had missed or that carried a
+  `type: ignore`: the patience table in `agents.py`, the reward list and
+  integrity floor in `hack_scan.py`, the audit-reason join in
+  `grade_llm.py`, the calibration report in `optimize.py`, and the
+  packaged schema path in `schema.py`.
+
 - A `run_std` handed to `delta_report` carries where it came from.
   `delta_report(run_std=x)` read `x` as the eval's exact spread and used
   1.96, but every paper recipe hands in a `run_std` estimated from three

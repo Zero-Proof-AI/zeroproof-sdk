@@ -455,8 +455,9 @@ def run_judge(
         declared = getattr(rows, "declared_tools", None)
         if declared:
             tools = sorted(str(t) for t in declared)
-    if not isinstance(rows, (list, tuple)) and hasattr(rows, "trajectories"):
-        rows = rows.trajectories
+    trajectories = getattr(rows, "trajectories", None)
+    if trajectories is not None and not isinstance(rows, (list, tuple)):
+        rows = trajectories
     src_rows = [r for r in rows if isinstance(r, dict)]
     rid = run_id or f"score_{uuid.uuid4().hex[:12]}"
     # A function judge is named by __name__; a Verifier is an instance and

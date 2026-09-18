@@ -407,7 +407,7 @@ def hack_scan(
         return base
 
     # groups
-    rewards = [float(_reward(r, reward)) for r in graded]  # type: ignore[arg-type]
+    rewards = [v for r in graded if (v := _reward(r, reward)) is not None]
     group_index: dict[str, int] = {}
     group_of_row: list[int] = []
     for r in graded:
@@ -638,9 +638,11 @@ def hack_scan(
     a = max((abs(x["rho"]) for x in above if not x["endorsed"]), default=0.0)
     inverted = [] if degenerate else [x for x in above if x["endorsed"] and x["rho"] < 0]
     base["inverted"] = [x["name"] for x in inverted]
+    integrity: float | None = None
     if endorsed and not degenerate:
         base["endorsed_on_top"] = bool(top and top["endorsed"] and top["rho"] > 0)
-        base["integrity"] = round(e / (e + a), 4) if (e + a) > 0 else 0.0
+        integrity = round(e / (e + a), 4) if (e + a) > 0 else 0.0
+        base["integrity"] = integrity
     if degenerate:
         base["regime"] = "degenerate"
         base["top_feature"] = None
@@ -705,7 +707,8 @@ def hack_scan(
         endorsed
         and base["regime"] in ("train", "pool_exhausted")
         and a > 0
-        and base["integrity"] < 1.0 - RIVAL_SHARE
+        and integrity is not None
+        and integrity < 1.0 - RIVAL_SHARE
     ):
         rivals = [x["name"] for x in above if not x["endorsed"]][:3]
         warnings.append(

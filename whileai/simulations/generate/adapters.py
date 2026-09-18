@@ -131,13 +131,13 @@ def openai_http(
 
     agent.__name__ = f"openai_http[{model}]"
     # How every reply was sampled, as the engine stamps it on the row.
-    agent.sampling = {  # type: ignore[attr-defined]
+    agent.sampling = {  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         "temperature": float(temperature),
         "max_tokens": reply_tokens,
         "model": model,
     }
-    agent.system = policy_text  # type: ignore[attr-defined]
-    agent.policy = policy_text  # type: ignore[attr-defined]
+    agent.system = policy_text  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+    agent.policy = policy_text  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return agent
 
 
@@ -598,8 +598,9 @@ def _schema_from_object(tool: Any) -> dict | None:
         or getattr(tool, "args", None)
         or {}
     )
-    if hasattr(params, "model_json_schema"):
-        params = params.model_json_schema()
+    schema_fn = getattr(params, "model_json_schema", None)
+    if callable(schema_fn):
+        params = schema_fn()
     elif hasattr(params, "schema") and not isinstance(params, dict):
         try:
             params = params.schema()

@@ -824,7 +824,9 @@ class SimulationData:
         if publish:
             entry = {
                 **entry,
-                "card": _publish(entry["datasetId"], agent or "", description, api_key=api_key),
+                "card": _publish(
+                    str(entry["datasetId"]), agent or "", description, api_key=api_key
+                ),
             }
         return entry
 

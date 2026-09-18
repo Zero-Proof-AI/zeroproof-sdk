@@ -1125,7 +1125,7 @@ _LOG_KEYS = {
 }
 
 
-class TrainerCallback(_callback_base()):  # type: ignore[misc]
+class TrainerCallback(_callback_base()):  # type: ignore[misc]  # ty: ignore[unsupported-base]
     """One line on a Transformers or TRL trainer:
     ``trainer.add_callback(wai.TrainerCallback(run))``.
 

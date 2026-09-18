@@ -299,7 +299,7 @@ def attach_rubric(
         if not isinstance(row, dict):
             continue
         out.append(row)
-        chosen = rubric(row) if callable(rubric) else rubric
+        chosen: Any = rubric(row) if callable(rubric) else rubric
         if chosen is None:
             continue
         if not isinstance(chosen, Rubric):

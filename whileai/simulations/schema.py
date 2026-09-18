@@ -890,7 +890,9 @@ def load_json_schema() -> dict:
     """The packaged ``schemas/row-v1.json``."""
     from importlib import resources
 
-    text = (resources.files(__package__) / "schemas" / "row-v1.json").read_text()
+    text = (
+        resources.files(__package__ or "whileai.simulations") / "schemas" / "row-v1.json"
+    ).read_text()
     return json.loads(text)
 
 

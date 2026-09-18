@@ -272,7 +272,7 @@ def seeded_agent(
         return {"steps": steps, "final_text": reply, "seeded": seeded}
 
     agent.__name__ = "seeded_agent"
-    agent.world = w  # type: ignore[attr-defined]
+    agent.world = w  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return agent
 
 
