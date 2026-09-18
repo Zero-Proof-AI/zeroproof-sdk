@@ -9,12 +9,12 @@
   "k": 4,
   "arms": {
     "base": {
-      "score": 0.36875,
+      "score": 0.35833333333333334,
       "ci": [
-        0.30833333333333335,
-        0.4375
+        0.2916666666666667,
+        0.42916666666666664
       ],
-      "pass_at_k": 0.5833333333333334,
+      "pass_at_k": 0.5666666666666667,
       "steps": 0,
       "gpu_minutes": 0
     },
@@ -45,24 +45,27 @@
       0.020833333333333332,
       0.1125
     ],
-    "verdict": "moved"
+    "verdict": "moved",
+    "noise_band": 0.02495181840908594
   },
   "checks": {
-    "run_std": 0.0169,
+    "run_std": 0.0078,
     "decontaminated_dropped": 0,
     "over_optimized": false,
-    "length_before": 727.88125,
+    "length_before": 722.3541666666666,
     "length_after": {
       "baseline": 234.15416666666667,
       "recipe": 496.26875
     },
     "hack_scan_top": "marker:shaped_reward",
     "seed": 0,
-    "pins": "torch 2.7.1, transformers 4.54.0, trl 0.19.1, peft 0.16.0"
+    "pins": "torch 2.7.1, transformers 4.54.0, trl 0.19.1, peft 0.16.0",
+    "run_std_runs": 10,
+    "run_std_verified": "2026-09-18"
   },
   "gpu": "L40S",
-  "usd": 1.73,
+  "usd": 2.62,
   "verified": "2026-09-17",
-  "whileai": "0.53",
+  "whileai": "0.75",
   "run_url": "https://www.zeroproofai.com/platform/training/run_396d8b162199da3d"
 }

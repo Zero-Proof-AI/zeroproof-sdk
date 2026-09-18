@@ -49,6 +49,7 @@
   },
   "checks": {
     "run_std": 0.0135,
+    "run_std_runs": 3,
     "decontaminated_dropped": 0,
     "over_optimized": true,
     "length_before": 1618.625,

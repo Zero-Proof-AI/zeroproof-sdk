@@ -3,6 +3,23 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- A `run_std` handed to `delta_report` carries where it came from.
+  `delta_report(run_std=x)` read `x` as the eval's exact spread and used
+  1.96, but every paper recipe hands in a `run_std` estimated from three
+  base re-runs, and at two degrees of freedom the 1.96 band passes about
+  19% of pure-noise deltas, not 5%. `run_std_runs=` (the `n_runs` the
+  floor came from) makes `noise_band` use the two-sided t quantile at
+  `runs - 1` (4.30 from three re-runs, 2.26 from ten); the report carries
+  `run_std_runs` and `run_std_df`, and `noise_rule` and
+  `format_delta_report` say which quantile applied. A bare `run_std=`
+  keeps 1.96 and warns with the fix. `recipes/papers/check.py` mirrors it:
+  `checks.run_std_runs` is required in every `results.json`, and "moved"
+  is held to the t band. filter-metric's base was re-evaluated ten times
+  (run_std 0.0169 from 3 runs -> see its README); the verdict is re-read
+  against the honest band there (rlhf-book ch. 16, appendix C).
+
 ## 0.75 (2026-09-18)
 
 - `data.report()` is the whole experiment record. `hard_share` and
