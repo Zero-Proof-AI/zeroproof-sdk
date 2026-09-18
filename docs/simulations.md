@@ -1,5 +1,6 @@
 ---
 title: "While Simulations"
+sidebarTitle: "Simulations"
 description: "How the simulation engine thinks and why: the problem it solves, the situations it covers, and the rows it returns."
 ---
 
@@ -8,7 +9,7 @@ can describe. You give it the agent's definition; it gives you graded
 conversations you can train on. This document is about how it thinks and
 why, not a tour of every option.
 The same engine on one page, with the estimators and the references, is
-[engine.md](/engine).
+[The engine](/engine).
 
 ## The problem it solves
 
@@ -50,21 +51,21 @@ tool list and policy.
 
 **Situations are coordinates, not prompts.** Asking a model for a thousand
 user requests gives you a thousand variations of the same polite,
-well-specified ask. The SDK instead declares axes (which tool, which
-policy clause, what the world looks like, what condition the tool is in,
-what stance the person takes, what has already happened) and renders
+well-specified ask. The SDK instead declares six axes (which tool, which
+policy rule, what stance the person takes, what the world looks like,
+what condition the tool is in, what has already happened) and renders
 points in that space. The planned grid is a pairwise covering array:
 every pair of axis values appears together in at least one planned
 cell, which is the coverage strength the testing literature settled on
 because most real failures come from two things interacting. On a cold
-start the engine then flips most fault cells to success (one cell per
-fault type stays), so the tool-condition axis is sampled, not covered,
-unless you raise `fault_rate` or pass `prefer_success=False`. What the
-run actually touched is a number: `data.coverage["pairwise"]` is
-planned pairs, covered pairs, and the fraction. Read it as what it
-counts: pairwise cells of the 6-axis grid, which is training-data
-coverage, not policy coverage. A 200-row run over a grid with thousands
-of pairs reports a small fraction and that is arithmetic, not a failed
+start the engine then flips nine in ten fault cells to success (one cell
+per fault kind stays), so the tool-condition axis is sampled, not
+covered, unless you raise `fault_rate` or pass `prefer_success=False`.
+What the run actually touched is a number: `data.coverage["pairwise"]`
+holds `pairs_planned`, `pairs_covered` and `fraction`. Read it as what
+it counts: pairwise cells of the six-axis grid, which is training-data
+coverage, not policy coverage. A 64-row offline run plans 381 pairs and
+covers 139, a fraction of 0.36, and that is arithmetic, not a failed
 eval. Whether your policy is covered is a different question, and
 `coverage_gap(asks, tools=..., system_prompt=...)` answers it.
 
@@ -90,27 +91,33 @@ success declared after a failed call), and then your grader, a function
 you write, decides what good means for your agent. The SDK's job is to
 make every row worth grading; it does not get a vote on what passes.
 It does insist on two things about whichever judge you use, because a
-judge is a reward model. The hosted grader is a different model family
-from the hosted policy, because a judge grading its own writing prefers
-it. Every label says who made it: the hosted grader
+judge is a reward model. The hosted grader (Phi-4) is a different model
+family from the hosted policy (Qwen), because a judge grading its own
+writing prefers it. Every label says who made it: the hosted grader
 stamps its model, rubric hash, and settings on the row, and a custom
-judge can pass `version=` to do the same, so a rubric edit is visible as
-a new judge rather than a silent drift. And the judge is measured, not
-trusted: hand-label a sample into `gold_reward` and `judge_agreement`
-reports agreement, kappa, and the rate at which the judge passed a row
-you failed, which is the number that decides whether training on its
-labels teaches the behavior or the judge's blind spot.
+judge can pass `data.grade(judge=..., version=...)` to do the same, so a
+rubric edit is visible as a new judge rather than a silent drift. And the
+judge is measured, not trusted: hand-label a sample, attach the labels
+with `attach_labels(rows, labels, kind="human")`, and `judge_agreement`
+reports agreement, kappa, and `pass_when_gold_fail`, the rate at which
+the judge passed a row you failed. That is the number that decides
+whether training on its labels teaches the behavior or the judge's
+blind spot. A bare `gold_reward` column with no record of who wrote it
+is reported as unmeasured, not as a pass.
 
 **Failure is loud.** If the writer, the world, or a judge cannot do its
-job, the run says so. Template fallbacks are never quietly substituted for
-model-written situations, because a dataset that looks real and is not is
-worse than no dataset.
+job, the run says so. When the hosted situation writer fails, the
+offline template writer takes over and `data.degraded` carries
+`generator_fallback`; a run that ends with no rows keeps the writer's
+last error in `data.search["writer_errors"]`. A dataset that looks real
+and is not is worse than no dataset, so the substitution is never
+silent.
 
 ## Which model runs it
 
 Four roles can each take their own model: the agent (`agent=`), the
 situation writer (`simulator=`), the simulated person (`user_model=`) and
-the judge (`spec=`). Each one takes the same backend spec.
+the judge (`spec=` on `grade()`). Each one takes the same backend spec.
 
 | Spec | Backend | Key |
 | --- | --- | --- |
@@ -130,34 +137,43 @@ data = wai.simulate(
 ```
 
 Omitting `agent=` runs the While-hosted model on your account key instead.
-One model in more than one role is the regime to avoid, and the run says so
-on `data.degraded`: a judge grading its own writing prefers it.
+One model in more than one role is the regime to avoid. When the agent
+model also wrote the situations or played the user, `data.degraded`
+carries `same_model` and `warnings` says which call separates them.
 
 ## What you get
 
 A JSONL file of conversations in chat format, with tool schemas, each
 row carrying its situation (which axes, which world state, which faults
 were scheduled), its persona tags, and, once graded, its reward and the
-reason. From there: `training_set()` for supervised fine-tuning,
-preference pairs and repeated groups for reinforcement learning, and a
-leakage check against any evaluation you care about. Each export carries
-what the training recipe needs and a reviewer would ask for. Supervised
-rows carry a `loss_mask`, one flag per message, so the trainer learns the
-agent's turns and never the tool output or the user (`mask_mode="final"`
-keeps only the last agent turn). Preference pairs carry the raw scores
-and their margin, which model produced each side and whether the two
-match, and the length gap between chosen and rejected, with a warning
-when the chosen side is usually the longer one, because a preference
-trainer learns length before it learns behavior. RL groups carry
-`group_id`, the group size, and the 0/1 counts, plus the calibration
-stamp the publish gate writes. With `logprobs=True` every agent turn also
-carries the summed log-probability of the tokens the policy generated and
-their count, which is what a later update needs to correct for being
-off-policy and what a KL to a reference model is computed from. The default check
-is lexical: word and bigram overlap with numbers collapsed, so it drops
-near-copies and copies that differ only in an id, and it does not catch
-a paraphrase. Pass a semantic `embedder=` to the leakage functions when
-that matters.
+reason. From there: `data.training_set()` for supervised fine-tuning,
+`build_preference_pairs` and `export_preference` for preference pairs,
+`select_for_rl` and `export_dataset` for repeated groups, and
+`decontaminate` as a leakage check against any evaluation you care
+about. Each export carries what the training recipe needs and a reviewer
+would ask for. Supervised rows carry a `loss_mask`, one flag per message,
+so the trainer learns the agent's turns and never the tool output or the
+user (`mask_mode="final"` keeps only the last agent turn). Preference
+pairs carry the raw scores and their `margin`, which model produced each
+side and whether the two match (`same_policy`), and the length gap
+between chosen and rejected (`length_delta`), with a warning when the
+chosen side is usually the longer one, because a preference trainer
+learns length before it learns behavior. RL groups carry `group_id`, the
+group size `k`, the fail and pass counts `n0` and `n1`, the group's
+reward mean and standard deviation, plus the `calibration` stamp the
+publish gate writes. With `logprobs=True` every agent turn also carries
+the summed log-probability of the tokens the policy generated
+(`logprob`) and their count (`n_tokens`), the per-token list when the
+backend returns one, and the `policy_version` and sampling settings.
+That is what a later update needs to correct for being off-policy and
+what a KL to a reference model is computed from.
+
+The leakage check applies four rules in order: the same task id as an
+eval row, the same text after normalising case and whitespace, a near
+copy (one eval text covers 80 percent of the row's words with shared
+8-word n-grams, the Llama 2 rule), and, only when you pass a semantic
+`embedder=`, cosine similarity at or above 0.85. Word overlap does not
+see a paraphrase; the embedder does.
 
 ## Hugging Face, both directions
 
@@ -190,14 +206,13 @@ One table, because these cost testers a round trip each:
 | call | you get | read it as |
 | --- | --- | --- |
 | `simulate(...)` | `SimulationData` | `data.rows` and `data.rows()` both work |
-| `evaluate(...)`, `grade(...)` | `ScoredData` | `scored.rows` is a **list**; `scored.rows()` is a `TypeError` |
-| | | `scored.warnings`: hollow-run notes, print them before any number |
+| `evaluate(...)`, `data.grade(judge=...)` | `ScoredData` | `scored.rows` and `scored.rows()` both work; `scored.warnings` holds hollow-run notes, print them before any number |
 | `pass_at(rows)` | `PassAt` | `pass_at_1`, `pass_pow_k` (printed `pass^k`, not `pass_hat_k`), `pass_at_k`, `headroom`, `ci95` |
-| `marker_summary(rows)` | `{marker: stats}` | `mean`, `ci95` (not `ci`), `n_tasks`, `n_rows` (not `n`), `note` or `warning` |
+| `marker_summary(rows)` | `{marker: stats}` | `mean`, `ci95` (not `ci`), `n_tasks`, `n_rows` (not `n`), `note` or `warning`; rows need markers first, from the judge or `mark_rows` |
 | `judge_trust(rows)` | `dict` | `ok`, `agreement.agreement`, `agreement.ci95`, `gold_kind`, `warnings` |
 
 The full field-by-field version, including which fields print and which
-do not, is in [evals.md](/evals#7-return-shapes).
+do not, is in [Evals](/evals#7-return-shapes).
 
 ## What it is not
 
@@ -212,5 +227,7 @@ about all three.
 The same simulator that produces a frozen dataset can serve as a live
 environment for on-policy reinforcement learning: the trainer drives the
 policy, and the SDK supplies the situations, the world, the person, and
-the reward. That export is designed and follows once the supervised loop
-is closed end to end.
+the reward. `export_environment(data, out, reward=...)` writes that as an
+installable `verifiers` environment: the tasks with a train and holdout
+split, the world dials in `spec.json`, and the 20 to 80 percent
+difficulty band applied to graded rows.

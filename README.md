@@ -219,7 +219,7 @@ points the next simulation at the situations that failed.
 ## Documentation
 
 [docs.withwhile.com](https://docs.withwhile.com): the guides and the generated API reference, rebuilt on every merge.
-[docs/reference.md](docs/reference.md): every call, knob, report and gate.
+[docs.withwhile.com/reference/overview](https://docs.withwhile.com/reference/overview): every call, knob, report and gate.
 [docs/engine.md](docs/engine.md): how a row is made.
 [CHANGELOG.md](CHANGELOG.md): one entry per release.
 
