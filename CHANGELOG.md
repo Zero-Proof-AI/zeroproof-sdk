@@ -3,6 +3,21 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.74 (2026-09-18)
+
+- The search aims at the criterion that failed, not at a low mean. A
+  rubric row that breaks one rule of three scores 0.667 and used to pass
+  `_graded_failure`, so the rule was never re-rolled. `failed_criteria(row)`
+  reads the per-criterion markers, a failure is any failed criterion or a
+  low mean, and `search["failure_criteria"]` says which rule drove each
+  mutation (#373, the mechanism behind #285).
+- Docs live in the package. `docs/` is a Mintlify project (`docs.json`,
+  frontmatter on every guide, an index page with the README quickstart).
+  `scripts/gen_api_docs.py` renders `docs/api/*.mdx` from `__all__`,
+  signatures and docstrings; CI fails with a diff when they are stale, a PR
+  that touches `whileai/` must touch `docs/` (label `no-docs` to opt out),
+  and `mint validate` runs on every PR (#385).
+
 ## 0.73 (2026-09-18)
 
 - A run records what it ran under. `data.report()` (and `data.coverage`)
