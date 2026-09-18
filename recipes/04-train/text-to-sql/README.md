@@ -273,6 +273,27 @@ to it, more of the same reward cannot move this base much further. New
 capability needs a bigger base or harder training prompts it can solve
 sometimes.
 
+## Qwen3.5 on the 459-task holdout (2026-09-18)
+
+Qwen3.5-4B and 9B are `model_type qwen3_5` (`Qwen3_5ForConditionalGeneration`),
+which the 2025 pins cannot load: `serve_modal.py --vllm 0.29.0` serves them
+and `train_grpo_modal.py --stack new` (transformers 5, TRL 1.13, vLLM 0.29)
+trains them; the lessons list says what that took. Same prompt, same 4,096
+reply budget, same verifier, k=4.
+
+| Model | pass@1 (95% CI) | pass^4 | pass@4 | no SQL | SQL error | cut by the reply budget |
+|---|---|---|---|---|---|---|
+| Qwen3-4B, thinking on (reference) | 0.53 (0.49..0.56) | 0.25 | 0.76 | 0.13 | 0.12 | 8% |
+| Qwen3.5-9B, default template | 0.53 (0.50..0.57) | 0.25 | 0.76 | 0.10 | 0.20 | 21% |
+| Qwen3.5-4B, default template | 0.14 (0.13..0.16) | 0.00 | 0.43 | 0.46 | 0.36 | 79% |
+
+Neither Qwen3.5 checkpoint emits `<think>` tags here; both reason in plain
+text before the query. The 4B does it at such length that 79% of replies
+hit the 4,096-token cap with no query yet, so at this budget it is not a
+usable base; the 9B lands where Qwen3-4B started, with more of its misses
+being SQL that does not run (0.20 vs 0.12), which is the kind of miss a
+verifier reward fixes fastest. The 9B is the one being trained.
+
 ## Other bases on the same holdout (140 tasks, k=4)
 
 Served with `serve_modal.py` (vLLM on one L40S; `--adapter volume:<run_id>`
