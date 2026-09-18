@@ -496,28 +496,55 @@ def export_environment(
     ngram: int = ENV_DECONTAMINATION_NGRAM,
     world: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write ``source`` as an installable verifiers environment under ``out``.
+    """Write graded rows as an installable verifiers environment for an on-policy trainer.
 
-    ``source`` is a ``SimulationData`` (system prompt and tools come from
-    its profile), a row list, or a JSONL path; graded rows get the
-    difficulty band, ungraded rows are exported as they are. ``reward``
-    is a ``Verifier``, a judge callable honoring the SDK judge contract,
-    or ``'module:attr'``; it must be importable in the trainer process. A
-    ``@verifier`` or ``All([...])`` bound to a name in your own module is
-    referenced by that name (a script run as ``__main__`` by its file
-    stem, so keep that directory on the trainer's path).
-    With no reward the conduct grade is used and the report warns: it is
-    a process reward, and a policy trained on it alone learns to call
-    nothing (see recipes/03-select/prime-intellect-rl). ``execute`` names a live
-    world ``(tool, arguments) -> result``; without it the SDK's mock
-    world answers, seeded per task so every rollout of a task sees the
-    same world. ``world`` is a dict of the mock world's dials
-    (``WorldOptions`` fields: ``search_hits``, ``exists_share``,
-    ``default_fault_mode``, name pools, ...); it is written into
-    ``spec.json`` and the trainer's world is built from it, so the world a
-    policy trains against is the one the export says. ``ngram`` is the
-    train-vs-holdout decontamination size. Returns the report; the same
-    text is the package README.
+    Reach for it when the next step is RL in a trainer that speaks
+    verifiers (prime-rl and the like) and needs the tasks, the world and
+    the reward as one package. It writes the package under ``out`` and
+    returns the report, which is also the package README: ``path``,
+    ``prompts``, ``tasks``, ``train`` and ``holdout`` counts,
+    ``graded_prompts``, ``band``, ``band_dropped``, ``graded_mixed``
+    (prompts the policy both solved and failed, the ones with an
+    advantage) and ``decontamination``.
+
+    * ``source``: a ``SimulationData`` (system prompt and tools come from
+      its profile), a row list, or a JSONL path; graded rows get the
+      difficulty band, ungraded rows are exported as they are. For a list
+      or path pass ``system_prompt`` and ``tools``.
+    * ``reward``: a ``Verifier``, a judge callable honoring the SDK judge
+      contract, or ``'module:attr'``; it must be importable in the trainer
+      process. A ``@verifier`` or ``All([...])`` bound to a name in your
+      own module is referenced by that name (a script run as ``__main__``
+      by its file stem, so keep that directory on the trainer's path).
+      With no reward the conduct grade is used and the report warns: it
+      is a process reward, and a policy trained on it alone learns to
+      call nothing (see recipes/03-select/prime-intellect-rl).
+    * ``execute``: a live world ``(tool, arguments) -> result``; without
+      it the SDK's mock world answers, seeded per task so every rollout
+      of a task sees the same world.
+    * ``world``: the mock world's dials as a dict (``WorldOptions``
+      fields: ``search_hits``, ``exists_share``, ``default_fault_mode``,
+      name pools, ...). It is written into ``spec.json`` and the trainer's
+      world is built from it, so the world a policy trains against is the
+      one the export says.
+    * ``holdout`` (0.2): the share of tasks held out, split by scenario id
+      (or the prompt) so a task is wholly on one side, or an explicit
+      list of holdout prompts.
+    * ``band`` (``(0.2, 0.8)``): the pass-rate band a graded prompt must
+      sit in; prompts the policy always or never solved carry no
+      advantage and are dropped (rlhf-book ch. 7, difficulty filtering at
+      20 to 80 percent; DAPO's dynamic sampling, arXiv:2503.14476).
+      ``None`` keeps them all.
+    * ``ngram`` (8): the train-versus-holdout decontamination size, the
+      overlap rlhf-book ch. 16 found its contaminations with.
+    * ``name``, ``description``, ``max_turns``: the package name, its
+      README line, and the rollout turn cap (the SDK default when
+      ``None``).
+
+    ```python
+    report = wai.export_environment(data, "envs/refunds", reward=my_verifier)
+    print(report["train"], report["holdout"], report["path"])
+    ```
     """
     from .world.sandbox import WorldOptions
 

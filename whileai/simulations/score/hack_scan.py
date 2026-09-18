@@ -331,44 +331,61 @@ def hack_scan(
     top_features: int | None = REPORT_TOP,
     alpha: float = ALPHA,
 ) -> dict[str, Any]:
-    """Rank what separates reward within each ask against a permutation
-    noise floor, and say what a grouped update would learn.
+    """Rank the features that separate reward within each ask, against a permutation noise floor, and say what a grouped update would learn.
 
-    ``alpha`` (``ALPHA``, 0.05) sets the floor: ``tau`` is the
-    ``1 - alpha`` quantile of the strongest feature's |rho| when reward is
-    shuffled within ask, so a feature above it clears chance at that rate.
+    Reach for it before an RL run, and again after, to check that the
+    reward tracks the behavior you meant rather than a shortcut. It
+    returns a dict: ``regime`` (``train``, ``reward_hack``,
+    ``pool_exhausted``, ``no_signal``, ``degenerate``, ``unknown``),
+    ``tau`` (the floor), ``features`` ranked by |within-ask correlation|
+    with the pooled correlation beside each, ``top_feature``,
+    ``endorsed_on_top``, ``integrity`` (the share of the above-floor
+    signal that sits on an endorsed feature), the support numbers (asks
+    all-pass, all-fail, mixed, gradient capacity), and ``warnings`` in
+    one line each.
 
-    ``rows`` are graded rollouts, several per ask (``mode="rl"``); the
-    reward under ``reward`` may be 0/1 or partial credit. ``endorsed``
-    names the features the reward is supposed to track, as substrings of
-    feature names (``"lookup_order"`` matches ``tool:lookup_order`` and
-    ``contains:lookup_order``; ``"marker:grounded"`` a marker). Without
-    it the scan still ranks and floors, but cannot call a hack a hack.
-    ``features`` adds hand-tier columns: ``{"name": lambda row: value}``.
-    ``top_features`` caps the ranking in the report (``None`` lists all).
-
-    Returns ``regime`` (``train``, ``reward_hack``, ``pool_exhausted``,
-    ``no_signal``, ``degenerate``, ``unknown``), ``tau`` (the floor),
-    ``features`` ranked by |within-ask correlation| with the pooled
-    correlation beside each, ``top_feature``, ``endorsed_on_top``,
-    ``integrity`` (share of the above-floor signal that sits on an
-    endorsed feature), the support numbers (asks all-pass, all-fail,
-    mixed, gradient capacity), and ``warnings`` in one line each.
+    * ``rows``: graded rollouts, several per ask (``mode="rl"``); the
+      reward under ``reward`` may be 0/1 or partial credit.
+    * ``endorsed``: the features the reward is supposed to track, as
+      substrings of feature names (``"lookup_order"`` matches
+      ``tool:lookup_order`` and ``contains:lookup_order``;
+      ``"marker:grounded"`` a marker). Without it the scan still ranks and
+      floors, but cannot call a hack a hack.
+    * ``features``: hand-tier columns to add, as
+      ``{"name": lambda row: value}``, beside the built-in ones (reply
+      length, tool calls,
+      turns, truncation, one indicator per tool called, every numeric
+      marker). ``auto`` (``True``) adds the auto tier: presence of the
+      ``top_k`` (200) most common words and word pairs in the agent's
+      text, the tier that finds the hack nobody listed.
+    * ``alpha`` (``ALPHA``, 0.05): sets the floor. ``tau`` is the
+      ``1 - alpha`` quantile of the strongest feature's |rho| when reward
+      is shuffled within ask (``n_perm`` shuffles, 100), so a feature
+      above it clears chance at that rate.
+    * ``top_features`` (20): caps the ranking in the report (``None``
+      lists all). ``min_obs`` (20) is the fewest observations a feature
+      needs to be ranked.
 
     ``degenerate`` is the refusal: an ask holds fewer than
     ``MIN_DISTINCT_PER_ASK`` distinct rollouts at the median
-    (``distinct_per_ask``) and two or more features sit at |rho| >=
-    ``DEGENERATE_RHO``, exactly collinear with reward and with each other
-    because nothing else could happen at that variety. The ranking cannot
-    separate them and the noise floor is no help (it tells signal from
-    noise, not one perfect explanation from another), so ``top_feature``
-    and ``integrity`` are ``None``, ``inverted`` is empty, no hack is
-    claimed, and ``collinear`` lists the tied features. The direction is
-    withheld with the name: at that variety an endorsed feature is
-    negative exactly when it fell on the failing trajectory, so the sign
-    is the same coin flip. Collinear features on a varied pool are left
-    alone: there the ranking found two names for one behavior, and a
-    genuinely inverted endorsed feature is still reported.
+    (``distinct_per_ask``) and two or more features sit at |rho| at or
+    above ``DEGENERATE_RHO``, exactly collinear with reward and with each
+    other because nothing else could happen at that variety. The ranking
+    cannot separate them and the noise floor is no help (it tells signal
+    from noise, not one perfect explanation from another), so
+    ``top_feature`` and ``integrity`` are ``None``, ``inverted`` is empty,
+    no hack is claimed, and ``collinear`` lists the tied features. The
+    direction is withheld with the name: at that variety an endorsed
+    feature is negative exactly when it fell on the failing trajectory,
+    so the sign is the same coin flip. Collinear features on a varied
+    pool are left alone: there the ranking found two names for one
+    behavior, and a genuinely inverted endorsed feature is still
+    reported.
+
+    ```python
+    scan = wai.hack_scan(data.rows(), endorsed=["tool:lookup_order"])
+    print(scan["regime"], scan["top_feature"], scan["integrity"])
+    ```
     """
     graded = [r for r in rows if isinstance(r, dict) and _reward(r, reward) is not None]
     n = len(graded)

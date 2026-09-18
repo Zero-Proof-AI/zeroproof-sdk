@@ -333,139 +333,151 @@ def delta_report(
     answered_gap_points: float = ANSWERED_GAP_POINTS,
     answered_alpha: float = ANSWERED_P_MAX,
 ) -> dict[str, Any]:
-    """Compare ``after`` to ``before`` on pass@1 and every shared marker.
+    """Compare an ``after`` run to a ``before`` run on pass@1 and every shared marker, and say whether the change is real.
 
-    ``alpha`` is the false-positive rate every verdict runs at: each
-    interval is at ``1 - alpha`` (``ci95`` at the default), the re-run
-    band uses the same quantile, and ``family_error`` is ``1 - (1 -
-    alpha) ** n_metrics``. ``power`` feeds the sizing line
-    (``detectable_effect``, ``holdout_size``). ``ceiling_pass_rate``,
-    ``answered_gap_points`` and ``answered_alpha`` are the flags' thresholds
-    (``CEILING_PASS_RATE``, ``ANSWERED_GAP_POINTS``, ``ANSWERED_P_MAX``).
+    Reach for it after a change (a prompt edit, a trained adapter, a model
+    swap): both sides are graded rows, ideally on the same pinned tasks
+    (``simulate(tasks=before)``) with the same rollouts per task. It
+    returns a dict. The keys a caller reads first: ``headline_verdict``
+    (``PASS`` only for a gain the report supports, ``NO DIFFERENCE`` for
+    an interval over zero, ``NOT COMPARABLE (causes)`` when the arms
+    cannot be compared, ``FAIL`` for a regression, a failed guard, or
+    over-optimization), ``ok`` (the gate: no regression, no failed guard,
+    comparable arms; it does not say the change helped), ``metrics`` (one
+    entry per metric with its delta, interval and verdict), ``warnings``
+    (each naming its fix), ``not_comparable``, ``n_paired_tasks`` and
+    ``n_unpaired_tasks``. ``format_delta_report(report)`` prints it with
+    ``headline_verdict`` on the first line.
 
-    The two sides should have the same number of rollouts per task. When
-    a run lost rollouts (``data.report()["rollouts_lost"]``), one arm can
-    sit at k=4 and the other at k=2; the report warns, next to the sizing
-    line, naming both. Unequal k is a precision issue, not a bias: a
-    task's pass rate is its mean over however many rows it has, so rows
-    lost at random leave the paired delta unbiased and only widen its
-    interval (simulated, k=4 against k=2 on half the tasks: mean delta on
-    the true value, interval about 10% wider). Rows lost for a reason are
-    the problem: a timeout that takes the hard runs, an empty reply on
-    the long ones, and the surviving rows on that arm score higher than
-    the arm does. No trimming fixes that; only re-running the short arm
-    on its short tasks does, and ``data.report()["rollouts_lost_by"]``
-    says why the rows went missing. ``balance_rollouts=True`` (off by
-    default) trims every paired task to the rows both sides have, chosen
-    by ``seed``, so pass^k and pass@k share one k; it costs precision
-    (another 10% on the interval in the same simulation) and removes no
-    bias (failures dropped on one arm: delta 0.32 untrimmed, 0.32 trimmed,
-    true 0.05), and ``balanced`` says how many rows each side gave up.
+    Arguments that matter:
 
-    ``target`` names the metric the run was meant to move (``"pass_at_1"``
-    or ``"marker:<name>"``); the verdict on it is the headline.
-    ``proxy`` names the metric the run was actually trained on (the
-    training reward as a marker, e.g. ``"marker:first_action"``). When
-    the proxy moved up and the target did not, or the proxy's interval
-    sits entirely above the target's, the report is ``over_optimized``
-    and fails: the policy learned something the target does not credit
-    (rlhf-book ch. 14).
-    ``must_not_regress`` lists metrics whose significant drop fails the
-    report. Metric names for markers are the marker names; pass@1 is
-    ``"pass_at_1"``. Tasks on one side only do not pair; their count is
-    ``n_unpaired_tasks`` and, when any were dropped, a warning says so.
+    * ``target``: the metric the run was meant to move (``"pass_at_1"`` or
+      ``"marker:name"``); its verdict is the headline.
+    * ``proxy``: the metric the run was actually trained on (the training
+      reward as a marker, such as ``"marker:first_action"``). When the
+      proxy moved up and the target did not, or the proxy's interval sits
+      entirely above the target's, the report is ``over_optimized`` and
+      fails: the policy learned something the target does not credit
+      (rlhf-book ch. 14).
+    * ``must_not_regress``: metrics whose significant drop fails the
+      report. Marker metrics go by marker name; pass@1 is ``"pass_at_1"``.
+    * ``by``: split the target by a group on each row (a top-level row
+      key, a marker name, or a callable ``row -> group``). The report
+      gains ``groups``, the target compared within each, so a headline
+      that moved cannot hide a kind of prompt that moved the other way. A
+      group whose target dropped significantly is listed in
+      ``groups_down`` and warned about; it does not flip ``ok``, which
+      stays the ``must_not_regress`` contract (name the group's metric
+      there if it should).
+    * ``run_std`` and ``run_std_runs``: the evaluation's own re-run
+      standard deviation, per metric or as one number, and how many
+      re-runs it was computed from. See the noise floor below.
+    * ``alpha`` (0.05): the false-positive rate every verdict runs at.
+      Each interval is at ``1 - alpha`` (``ci95`` at the default), the
+      re-run band uses the same quantile, and ``family_error`` is
+      ``1 - (1 - alpha) ** n_metrics``. ``power`` (0.8) feeds the sizing
+      line (``detectable_effect``, ``holdout_size``).
+    * ``balance_rollouts`` (off): trim every paired task to the rows both
+      sides have, chosen by ``seed``, so pass^k and pass@k share one k;
+      ``balanced`` says how many rows each side gave up.
+    * ``ceiling_pass_rate`` (``CEILING_PASS_RATE``, 0.9),
+      ``answered_gap_points`` (``ANSWERED_GAP_POINTS``, 0.1) and
+      ``answered_alpha`` (``ANSWERED_P_MAX``, 0.01): the thresholds of the
+      ``ceiling`` and ``answered`` flags below.
 
-    ``by`` splits the target by a group on each row: a row key (top level,
-    or a marker name) or a callable ``row -> group``. The report gains
-    ``groups``: the target compared within each group, so a headline that
-    moved cannot hide a kind of prompt that moved the other way. A group
-    whose target dropped significantly is listed in ``groups_down`` and
-    warned about; it does not flip ``ok``, which stays the
-    ``must_not_regress`` contract (name the group's metric there if it
-    should).
+    Pairing. Tasks pair by the key ``pass_at`` groups on; tasks on one
+    side only do not pair, their count is ``n_unpaired_tasks``, and when
+    any were dropped a warning says so. ``situations`` is the cause in
+    ``not_comparable`` when fewer than half the tasks are on both sides
+    (``paired_share`` under 0.5 with tasks on one side only): the arms
+    drew different situation sets, so the delta over the few that pair is
+    between two evals, and the fix is to pin the after side to the before
+    run's tasks (``tasks=``) or compare per tier with ``dataset_report``.
 
-    ``run_std`` is the evaluation's own re-run standard deviation
-    (rlhf-book ch. 16, appendix C). Pass
-    ``eval_variance(...)["run_std_by_metric"]`` so pass@1 and each marker
-    are judged against their own floor: a marker on a subset of tasks is
-    several times noisier than pass@1, and pass@1's floor reads a re-run
-    draw of it as a regression (#300). A scalar applies one floor to
-    every metric, as before. A metric the mapping lacks, or carries as
+    Unequal rollouts. When a run lost rollouts
+    (``data.report()["rollouts_lost"]``), one arm can sit at k=4 and the
+    other at k=2; the report warns, next to the sizing line, naming both.
+    Unequal k is a precision issue, not a bias: a task's pass rate is its
+    mean over however many rows it has, so rows lost at random leave the
+    paired delta unbiased and only widen its interval (simulated, k=4
+    against k=2 on half the tasks: mean delta on the true value, interval
+    about 10% wider). Rows lost for a reason are the problem: a timeout
+    that takes the hard runs, an empty reply on the long ones, and the
+    surviving rows on that arm score higher than the arm does. No
+    trimming fixes that; ``balance_rollouts`` costs precision (another
+    10% on the interval in the same simulation) and removes no bias
+    (failures dropped on one arm: delta 0.32 untrimmed, 0.32 trimmed,
+    true 0.05). Only re-running the short arm on its short tasks does,
+    and ``data.report()["rollouts_lost_by"]`` says why the rows went
+    missing.
+
+    Noise floor. One evaluation is a draw, not a distribution (rlhf-book
+    ch. 16, "why many comparisons are unreliable", and appendix C). With
+    one run on either side and no ``run_std``, a target that moved reads
+    ``moved_unreplicated`` and a warning says how to fix it. Pass
+    ``eval_variance(...)["run_std_by_metric"]`` as ``run_std`` so pass@1
+    and each marker are judged against their own floor: a marker on a
+    subset of tasks is several times noisier than pass@1, and pass@1's
+    floor reads a re-run draw of it as a regression. A scalar applies one
+    floor to every metric. A metric the mapping lacks, or carries as
     ``None``, is never given another metric's floor: it gets
-    ``noise_note: "no_replicate_floor"``, a warning, and its verdict rests
-    on the task interval alone. A metric whose delta is inside
+    ``noise_note: "no_replicate_floor"``, a warning, and its verdict
+    rests on the task interval alone. A metric whose delta is inside
     ``noise_band(floor, n_a, n_b, df)`` is ``within_noise``: not improved,
     not slipped, not a regression, and a target there reads
     ``within_eval_noise`` rather than moved, because re-running the eval
     moves it that much on its own. The band is ``floor * sqrt(1/n_a +
     1/n_b)`` (the delta is a mean of ``n_a`` runs against a mean of
     ``n_b``) times 1.96 for a given floor, which is taken as the eval's
-    spread. A floor that came from re-runs is an estimate, not the spread:
-    pass ``run_std_runs=`` (how many re-runs it was computed from,
-    ``eval_variance(...)["n_runs"]``) and the band uses the two-sided t
-    quantile at ``df = run_std_runs - 1`` instead (three re-runs: 4.30 x
-    floor x sqrt(2) with one run per side, not 1.96; under pure noise the
-    1.96 band lets about one delta in five through at df=2). A given
-    ``run_std`` without ``run_std_runs`` keeps 1.96 and a warning names
-    the fix. When both row sets carry two or more ``lineage.eval_run``
-    values (``simulate(tasks=..., runs=3)``) the report computes each
-    metric's floor itself, pooled over the two sides, and uses the t
-    quantile at ``df = sum(runs - 1)`` instead (three runs per side: 2.78 x
-    floor x sqrt(2/3)); ``run_std`` is the headline metric's floor,
-    ``run_std_by_metric`` has them all, ``noise_band`` is the headline
-    band, ``noise_rule`` spells it out, and ``eval_runs`` says how many
-    runs each side had. With one run on either side and no ``run_std`` a
-    target that moved reads ``moved_unreplicated`` and a warning says how
-    to fix it:
-    one evaluation is a draw, not a distribution (rlhf-book ch. 16,
-    "why many comparisons are unreliable", and appendix C).
-    ``not_comparable`` lists every reason the two arms cannot be compared
-    at all (none are raised here; the comparability checks add theirs).
+    spread. A floor that came from re-runs is an estimate, not the
+    spread: pass ``run_std_runs`` (``eval_variance(...)["n_runs"]``) and
+    the band uses the two-sided t quantile at ``df = run_std_runs - 1``
+    instead (three re-runs: 4.30 x floor x sqrt(2) with one run per side,
+    not 1.96; under pure noise the 1.96 band lets about one delta in five
+    through at df=2). A given ``run_std`` without ``run_std_runs`` keeps
+    1.96 and a warning names the fix. When both row sets carry two or
+    more ``lineage.eval_run`` values (``simulate(tasks=..., runs=3)``) the
+    report computes each metric's floor itself, pooled over the two
+    sides, and uses the t quantile at ``df = sum(runs - 1)`` (three runs
+    per side: 2.78 x floor x sqrt(2/3)); ``run_std`` is then the headline
+    metric's floor, ``run_std_by_metric`` has them all, ``noise_band`` is
+    the headline band, ``noise_rule`` spells it out, and ``eval_runs``
+    says how many runs each side had.
+
+    Comparability. ``config`` says what each side was produced with
+    (``pass_at(...).config`` per side: task count, k, temperature,
+    max_tokens, policy and judge versions, prompt hash). A warning names
+    each setting the two sides disagree on, and says so when both sides
+    are the same policy version (rlhf-book ch. 16: a comparison is only
+    as good as the settings it was run under).
+    ``config[side]["answered_share"]`` is the share of rows per side with
+    a spoken reply once ``<think>`` markup is gone, and every rate is
+    conditional on it. The two shares are compared with a pooled
+    two-proportion z test; when it clears ``answered_alpha`` the warning
+    states p and the gap, and when the gap also exceeds the re-run band
+    (or ``answered_gap_points`` with no band) the report fails with
+    ``answered`` in ``not_comparable`` and names the mechanism: a
+    reasoning base against a reasoning-suppressed adapter under one
+    shared ``max_tokens`` runs out of budget inside ``<think>`` and never
+    answers, so the adapter wins every row the base did not reply to.
+    ``not_comparable`` lists every such cause under one prefix, ``NOT
+    COMPARABLE:``; none are raised here. A replay (``simulate(tasks=...)``
+    or ``runs=N``) keeps the writer of the run it replays on
+    ``writer_model``, so two runs of one call compare as one writer.
+    Situations nobody's model wrote (a ``seeds=`` ask, the offline
+    template writer, or a replay of either) count as one writer for this
+    check: nothing there could have moved with the weights.
 
     ``ceiling`` is set when the before side already passes
-    ``CEILING_PASS_RATE`` of its tasks, or when fewer than
+    ``ceiling_pass_rate`` of its tasks, or when fewer than
     ``CEILING_MIN_TASKS_WITH_ROOM`` paired tasks (and under half) are not
     already passed every time: there is little room left for an
     improvement to show, whatever the training did.
 
-
-    ``config`` says what each side was produced with (``pass_at(...).config``
-    per side: task count, k, temperature, max_tokens, policy and judge
-    versions, prompt hash). A warning names each setting the two sides
-    disagree on, and says so when both sides are the same policy version
-    (rlhf-book ch. 16: a comparison is only as good as the settings it
-    was run under).
-
-    ``config[side]["answered_share"]`` is the share of rows per side with
-    a spoken reply once ``<think>`` markup is gone. Every rate is
-    conditional on it. The two shares are compared with a pooled
-    two-proportion z test; when it clears ``ANSWERED_P_MAX`` (p < 0.01)
-    the warning states p and the gap, and when the gap also exceeds the
-    re-run band (or ``ANSWERED_GAP_POINTS`` with no band) the report
-    fails with ``answered`` in ``not_comparable`` and names the mechanism:
-    a reasoning base against a reasoning-suppressed adapter under one
-    shared ``max_tokens`` runs out of budget inside ``<think>`` and never
-    answers, so the adapter wins every row the base did not reply to
-    (#297). ``not_comparable`` lists every such cause under one prefix,
-    ``NOT COMPARABLE:``. ``situations`` is the cause when fewer than half
-    the tasks are on both sides (``paired_share`` under 0.5 with tasks on
-    one side only): the arms drew different situation sets, so the delta
-    over the few that pair is between two evals, and the fix is to pin
-    the after side to the before run's tasks (``tasks=``) or compare per
-    tier with ``dataset_report``. A replay (``simulate(tasks=...)`` or
-    ``runs=N``) keeps the writer of the run it replays on ``writer_model``,
-    so two runs of one call compare as one writer. Situations nobody's
-    model wrote (a ``seeds=`` ask, the offline template writer, or a
-    replay of either) count as one writer for this check: nothing there
-    could have moved with the weights.
-
-    ``headline_verdict`` is the verdict ``format_delta_report`` prints on
-    its first line, in words: ``PASS`` only for a gain the report
-    supports, ``NO DIFFERENCE`` for an interval over zero, ``NOT
-    COMPARABLE (causes)`` when the arms cannot be compared, ``FAIL`` for a
-    regression, a guard, or over-optimization. ``ok`` is the gate (no
-    regression, no failed guard, comparable arms); it does not say the
-    change helped.
+    ```python
+    report = wai.delta_report(base.rows(), tuned.rows(), target="pass_at_1")
+    print(wai.format_delta_report(report))
+    ```
     """
     if not 0 < alpha < 1 or not 0 < power < 1:
         raise ValueError("alpha and power are probabilities strictly between 0 and 1")

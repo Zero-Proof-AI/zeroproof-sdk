@@ -444,33 +444,54 @@ class SimulationData:
         payload_chars: int = JUDGE_PAYLOAD_CHARS,
         max_tokens: int = JUDGE_MAX_TOKENS,
     ):
-        """Grade after simulation with the hosted judge or a custom callable.
+        """Grade this run's rows in place with the hosted judge or your own callable.
 
-        With no callable this is ``grade_llm``: the hosted LLM judge (Phi-4,
-        a different family from the hosted Qwen policy), read from
-        ``VLLM_API_KEY``. It writes ``reward`` and ``reason`` onto the rows
-        in place and returns the judge report (a dict: graded, n0, n1,
-        backend, judge_version, warnings). ``llm=True`` is the same path.
-        A plain ``grader=`` callable scores in place too and returns
-        nothing. Simulation itself never invokes this method by default.
+        Reach for it right after ``simulate`` to score the rows without
+        leaving the object. Simulation never calls it on its own. Three paths,
+        chosen by what you pass:
 
-        ``judge=`` is the contract path: any callable honoring the judge
-        contract (``judge(row) -> {"reward": 0 or 1, "reason": str,
-        "markers": {name: value}}``; a bare number works too). The
-        contract and its failure modes are written out in full in
-        ``whileai.simulations.score.judging`` — note the ``score.``,
-        there is no ``whileai.simulations.judging``. It returns a
-        ``ScoredData`` of copies — trajectories here stay unmodified, judge
-        errors are marked per-row instead of coerced to 0 — and its output
-        feeds ``export_training`` and ``simulate(traces=...)`` directly.
-        ``version=`` names the judge's version (model, rubric hash) and is
-        recorded on every scored row; the hosted grader stamps its own.
+        * No callable (or ``llm=True``): ``grade_llm``, the hosted LLM judge
+          (Phi-4 unless ``WHILEAI_JUDGE`` is set, a different family from the
+          hosted Qwen policy), read from ``VLLM_API_KEY``. It writes
+          ``reward`` (0 or 1) and ``reason`` onto the rows in place and
+          returns the judge report, a dict with ``graded``, ``n0``, ``n1``,
+          ``backend``, ``judge_version`` and ``warnings``.
+        * ``grader=``, a plain callable returning a number or
+          ``{"reward": ..., "reason": ...}`` per row: scores every row in
+          place over ``concurrency`` threads and returns the run itself, so
+          ``data.grade(my_grader).pass_at`` reads through.
+        * ``judge=``, the contract path: any callable honoring the judge
+          contract, which returns
+          ``{"reward": 0 or 1, "reason": str, "markers": {name: value}}``
+          per row (a bare number works too). The contract
+          and its failure modes are written out in full in
+          ``whileai.simulations.score.judging`` (note the ``score.``; there is
+          no ``whileai.simulations.judging``). It returns a ``ScoredData`` of
+          copies: the trajectories here stay unmodified, judge errors are
+          marked per row instead of coerced to 0, and its output feeds
+          ``export_dataset`` and ``simulate(traces=...)`` directly.
 
-        Every path then checks the judge against the rows' human labels
-        (``attach_labels(kind="human")``) and stamps the summary on each
-        graded row's ``judge_meta["trust"]``. ``trust="warn"`` (default)
-        logs one line when the check failed or no labels exist,
-        ``"require"`` raises instead, ``"off"`` skips it.
+        Arguments that matter:
+
+        * ``version``: names the judge's version (model, rubric hash) and is
+          recorded on every scored row; the hosted grader stamps its own.
+        * ``rubric``: what doing the job means, as text, for the hosted judge;
+          without it the judge grades the conduct floor only, and says so.
+        * ``use_privileged``: ``True`` shows the hosted judge each row's
+          ``privileged`` block (principle, reference, hidden state) the agent
+          never saw.
+        * ``trust``: the judge check against the rows' human labels
+          (``attach_labels(kind="human")``), run on every path, with the
+          summary stamped on each graded row's ``judge_meta["trust"]``.
+          ``"warn"`` (the default) logs one line when the check failed or no
+          labels exist, ``"require"`` raises instead, ``"off"`` skips it.
+        * ``path``: write the graded run's JSONL there afterwards.
+
+        ```python
+        data = wai.simulate(agent, tools=TOOLS, simulator=False, budget=16)
+        data.grade(lambda row: 1.0 if row.get("final_text") else 0.0)
+        print(data.pass_at)
+        ```
         """
         if judge is not None:
             from .score.judging import run_judge
@@ -961,17 +982,33 @@ def grade_llm(
     payload_chars: int = JUDGE_PAYLOAD_CHARS,
     max_tokens: int = JUDGE_MAX_TOKENS,
 ):
-    """Binary 0/1 situation grade. Default brain is hosted Qwen.
+    """Grade rows 0 or 1 with the hosted LLM judge and write a reason beside each.
 
-    ``source`` is a ``SimulationData``, a JSONL path, or a row list.
-    Writes ``reward`` 0 or 1 and a one-sentence ``reason``. Keeps the
-    previous score as ``qwen_reward`` when present. Does not run during
-    ``simulate()``. Search does not read ``reward``. ``limit`` grades
-    that many rows then stops. Hosted Qwen reads ``VLLM_API_KEY``.
-    For a path or row list, pass ``policy=`` and ``tools=`` so the judge
-    sees the agent's rules; a ``SimulationData`` supplies its own.
-    ``trust`` is the judge check against human labels: see
-    ``SimulationData.grade``.
+    Reach for it when the rows are a JSONL path or a row list rather than
+    a ``SimulationData`` you hold (that object has the same call as
+    ``data.grade()``). It writes ``reward`` (0 or 1) and a one-sentence
+    ``reason`` on each row, keeps a previous score as ``qwen_reward``
+    when present, and returns the judge report, a dict with ``graded``,
+    ``n0``, ``n1``, ``backend``, ``judge_version``, ``warnings`` and
+    ``path``. It does not run during ``simulate()``, and search never
+    reads ``reward``. The default judge is the hosted Phi-4 unless
+    ``WHILEAI_JUDGE`` is set; it reads ``VLLM_API_KEY``.
+
+    * ``source``: a ``SimulationData``, a JSONL path, or a row list. A path
+      source is rewritten graded, unless ``output`` names another file;
+      a row list is updated in place.
+    * ``policy`` and ``tools``: for a path or row list, pass the agent's
+      system prompt and tool schemas so the judge sees the rules the agent
+      was under; a ``SimulationData`` supplies its own.
+    * ``limit``: grade that many rows, then stop.
+    * ``spec``, ``base_url``, ``model``, ``api_key``: point the judge at
+      another OpenAI-compatible server instead of the hosted one.
+    * ``use_privileged``: ``True`` shows the judge each row's ``privileged``
+      block (principle, reference, hidden state) the agent never saw.
+    * ``trust``: the judge check against human labels (``"warn"``,
+      ``"require"``, ``"off"``), the same as ``SimulationData.grade``.
+    * ``payload_chars`` (8000) caps the evidence the judge reads per row
+      and ``max_tokens`` (120) its reply; both land in ``judge_meta``.
     """
     if isinstance(source, SimulationData):
         return source.grade_llm(
