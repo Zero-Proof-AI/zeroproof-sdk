@@ -10,6 +10,8 @@ from typing import Any
 
 from .scenarios import intent_for_tool
 
+# ENUM_CAP = 400: the most tool-sequence shapes enumerated for one agent;
+# ``sampling_plan`` raises its own cap with the clock (convention).
 ENUM_CAP = 400
 
 

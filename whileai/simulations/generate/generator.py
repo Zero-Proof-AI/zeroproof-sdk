@@ -10,6 +10,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import CHARS_PER_TOKEN, MAX_SAMPLES_PER_CALL
 from .agents import CONTEXT_TOKENS, complete, default_simulator_spec, parse_backend_spec
 from .diversity import (
     DEFAULT_TEXTURE_RATE,
@@ -21,6 +22,7 @@ from .diversity import (
     sample_writer_n,
     sample_writer_temperature,
     sample_writer_vars,
+    writer_temperature_band,
 )
 from .scenarios import (
     SEARCH_ARMS,
@@ -34,19 +36,38 @@ from .scenarios import (
     steering_front_values,
 )
 
-# Ceiling only. The model stops at EOS. Sized to a card batch, not 1024.
-_OUT_TOKENS = 768
-_OUT_TOKENS_SMALL = 320
+# WRITER_OUT_TOKENS = 768: the writer's reply ceiling for one card batch
+# (twelve cards at about 50 tokens each plus JSON); the model stops at
+# EOS, so this only bounds a runaway. ``advanced={"out_tokens": n}``
+# moves it within WRITER_OUT_TOKENS_MIN..MAX. _OUT_MARGIN = 64 is slack
+# for the chat template (convention, sized to hosted Qwen).
+WRITER_OUT_TOKENS = 768
+WRITER_OUT_TOKENS_MIN = 256
+WRITER_OUT_TOKENS_MAX = 2048
 _OUT_MARGIN = 64
+# Cards per writer request: 12 by default (``advanced={"scenarios_per_
+# request": n}``), never under 2 or over 28, which is what fits a 4k
+# window beside the system prompt (convention, sized to hosted Qwen).
 _MAX_CELLS_PER_CALL = 28
 _DEFAULT_CELLS_PER_CALL = 12
 _MIN_CELLS_PER_CALL = 2
+# _EXTRAS_PER_CALL = 1: off-grid cards added to each request by default
+# (``advanced={"extra_cards": n}``, at most _MAX_EXTRA_CARDS).
 _EXTRAS_PER_CALL = 1
-_MAX_COMPLETIONS = 8
+_MAX_EXTRA_CARDS = 4
+# _WRITER_TIMEOUT = 30 s per writer call: a card batch on a warm endpoint
+# takes a few seconds; a cold start is the scene thread's problem, not
+# the writer's (convention).
 _WRITER_TIMEOUT = 30.0
 # Writer-side policy visibility. Policy-heavy agents raise it with
 # ZP_WRITER_POLICY_CHARS; the agent itself always gets the full policy.
+# 1200 chars is about 400 tokens of a 4k window (convention).
 _WRITER_POLICY_MAX_CHARS = int(os.environ.get("ZP_WRITER_POLICY_CHARS") or 1200)
+# MIN_MESSAGE_CHARS = 8 / MAX_MESSAGE_CHARS = 4000: a written situation
+# shorter than this is a stub and longer is a pasted document; both are
+# dropped at parse time (convention, untested).
+MIN_MESSAGE_CHARS = 8
+MAX_MESSAGE_CHARS = 4000
 
 
 def _dumps(obj: Any) -> str:
@@ -54,7 +75,7 @@ def _dumps(obj: Any) -> str:
 
 
 def _token_estimate(text: str) -> int:
-    return max(1, (len(text) + 2) // 3)
+    return max(1, (len(text) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN)
 
 
 def writer_policy_digest(policy: str, *, max_chars: int = _WRITER_POLICY_MAX_CHARS) -> str:
@@ -505,7 +526,7 @@ def _parse_messages(text: str) -> list[dict[str, Any]]:
         else:
             message = clean_user_message(str(item) if isinstance(item, str) else "")
             target_key = None
-        if 8 <= len(message) <= 4000:
+        if MIN_MESSAGE_CHARS <= len(message) <= MAX_MESSAGE_CHARS:
             output.append(
                 {
                     "message": message,
@@ -613,19 +634,37 @@ def assistant_kind(policy: str = "", name: str = "") -> str:
     return words[0] if words else ""
 
 
+# OMIT_KIND_ONE_IN = 50: one writer call in fifty drops the "a <kind>
+# assistant" label so not every ask presumes the assistant's job
+# (convention, untested).
+OMIT_KIND_ONE_IN = 50
+# Ask families per card, as slots of ten: ASK_FAMILY_VAGUE_FROM = 9 makes
+# 10% vague (no action named), ASK_FAMILY_GENERAL_FROM = 8 another 10%
+# general (a real request, no tool named), the rest tool asks. Most real
+# asks name what they want; the split is a convention, untested.
+ASK_FAMILY_SLOTS = 10
+ASK_FAMILY_VAGUE_FROM = 9
+ASK_FAMILY_GENERAL_FROM = 8
+# KNOWS_REF_ONE_IN = 5 / KNOWS_REF_SLOTS = 2: of tool asks, two cards in
+# five have the person lacking the identifier (a name, a number or both),
+# so the agent must ask for it (convention, untested).
+KNOWS_REF_ONE_IN = 5
+KNOWS_REF_SLOTS = 2
+
+
 def _omit_assistant_kind(seed: int, round_index: int) -> bool:
-    """About 2% of writer calls drop the kind label."""
+    """One writer call in ``OMIT_KIND_ONE_IN`` drops the kind label."""
     digest = hashlib.sha256(f"{int(seed)}:{int(round_index)}:omit-kind".encode()).hexdigest()
-    return int(digest[:8], 16) % 50 == 0
+    return int(digest[:8], 16) % OMIT_KIND_ONE_IN == 0
 
 
 def _ask_family(seed: int, round_index: int, key: str) -> str:
-    """80% a tool ask, 10% a general request, 10% vague."""
+    """A tool ask, a general request, or vague; see ASK_FAMILY_*."""
     digest = hashlib.sha256(f"{int(seed)}:{int(round_index)}:{key}:ask-family".encode()).hexdigest()
-    slot = int(digest[:8], 16) % 10
-    if slot >= 9:
+    slot = int(digest[:8], 16) % ASK_FAMILY_SLOTS
+    if slot >= ASK_FAMILY_VAGUE_FROM:
         return "vague"
-    if slot >= 8:
+    if slot >= ASK_FAMILY_GENERAL_FROM:
         return "general"
     return "tool"
 
@@ -678,12 +717,26 @@ def _tool_briefs(tools: Sequence[dict]) -> dict[str, dict[str, Any]]:
 
 
 _SCENE_KEYS = ("who", "usually_want", "tools")
+# The one-time scene pass: 400 chars of private writer context, 160 reply
+# tokens, 8 s (it runs in a background thread; a slow answer is dropped,
+# not waited for). SCENE_TEMPERATURE = 0.3: a structured-JSON pass, sampled
+# low so the fields parse; Magpie generates its structured responses at 0
+# (2406.08464 repo default). Conventions, untested.
 _SCENE_MAX_CHARS = 400
 _SCENE_TIMEOUT = 8.0
 _SCENE_OUT_TOKENS = 160
+SCENE_TEMPERATURE = 0.3
+# Tool digests handed to the auxiliary passes: at most 16 tools, 160 chars
+# of description and 8 field names each, so a 40-tool agent fits in the
+# window (convention).
+_DIGEST_TOOLS = 16
+_DIGEST_DESCRIPTION_CHARS = 160
+_DIGEST_FIELDS = 8
 
 
-def _tool_digest(tools: Sequence[dict], *, limit: int | None = 16) -> list[dict[str, Any]]:
+def _tool_digest(
+    tools: Sequence[dict], *, limit: int | None = _DIGEST_TOOLS
+) -> list[dict[str, Any]]:
     """Compact tool cards for the one-time scene pass. No full schemas."""
     out: list[dict[str, Any]] = []
     for schema in tools:
@@ -695,8 +748,10 @@ def _tool_digest(tools: Sequence[dict], *, limit: int | None = 16) -> list[dict[
         out.append(
             {
                 "name": name,
-                "does": str(fn.get("description") or intent_for_tool(name))[:160],
-                "fields": list(params.get("properties") or {})[:8],
+                "does": str(fn.get("description") or intent_for_tool(name))[
+                    :_DIGEST_DESCRIPTION_CHARS
+                ],
+                "fields": list(params.get("properties") or {})[:_DIGEST_FIELDS],
             }
         )
     if limit is None:
@@ -748,8 +803,17 @@ _AMPLIFY_AXES = (
     "playful or joking",
     "multi-part or contextual",
 )
+# Seed amplification: 25 new asks per round, up to 40 rounds, at
+# AMPLIFY_TEMPERATURE = 1.0 with AMPLIFY_OUT_TOKENS = 900. The temperature
+# is Magpie's instruction-generation setting (1.0, top-p 1.0, 2406.08464
+# repo default); Self-Instruct used 0.7 (2212.10560) and sampled 8
+# in-context examples per step, this pass shows up to 12. The batch and
+# round caps are conventions.
 _AMPLIFY_BATCH = 25
 _AMPLIFY_MAX_ROUNDS = 40
+_AMPLIFY_EXAMPLES = 12
+AMPLIFY_TEMPERATURE = 1.0
+AMPLIFY_OUT_TOKENS = 900
 
 
 def amplify_seeds(
@@ -795,7 +859,7 @@ def amplify_seeds(
         url, model = parse_backend_spec(spec)
     except ValueError:
         return kept
-    examples = "\n".join(f"- {s}" for s in kept[:12])
+    examples = "\n".join(f"- {s}" for s in kept[:_AMPLIFY_EXAMPLES])
     hint = writer_policy_digest(policy)[:400]
     for round_index in range(_AMPLIFY_MAX_ROUNDS):
         if len(kept) >= target:
@@ -814,8 +878,8 @@ def amplify_seeds(
                 url,
                 model,
                 [{"role": "user", "content": prompt}],
-                temperature=1.0,
-                max_tokens=900,
+                temperature=AMPLIFY_TEMPERATURE,
+                max_tokens=AMPLIFY_OUT_TOKENS,
                 timeout=timeout,
                 n=1,
             )
@@ -875,7 +939,7 @@ def write_scene_brief(
                     f"{_dumps(payload)}",
                 },
             ],
-            temperature=0.3,
+            temperature=SCENE_TEMPERATURE,
             max_tokens=_SCENE_OUT_TOKENS,
             timeout=timeout,
             n=1,
@@ -886,8 +950,14 @@ def write_scene_brief(
     return _format_scene_brief(text, policy=writer_policy)
 
 
+# Drafting tools for a prose-only agent: 40 s, 1200 reply tokens (4 to 8
+# schemas), DRAFT_TEMPERATURE = 0.2 for parseable JSON; between 2 and 8
+# tools are kept (convention, untested).
 _DRAFT_TIMEOUT = 40.0
 _DRAFT_OUT_TOKENS = 1200
+DRAFT_TEMPERATURE = 0.2
+_DRAFT_MIN_TOOLS = 2
+_DRAFT_MAX_TOOLS = 8
 _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{2,40}$")
 
 
@@ -933,7 +1003,7 @@ def draft_tools(
                     f"{'Domain hint: ' + kind if kind else ''}",
                 },
             ],
-            temperature=0.2,
+            temperature=DRAFT_TEMPERATURE,
             max_tokens=_DRAFT_OUT_TOKENS,
             timeout=timeout,
             n=1,
@@ -987,17 +1057,19 @@ def draft_tools(
                 },
             }
         )
-        if len(out) >= 8:
+        if len(out) >= _DRAFT_MAX_TOOLS:
             break
-    return out if len(out) >= 2 else []
+    return out if len(out) >= _DRAFT_MIN_TOOLS else []
 
 
 # Generous: the pass runs in a background thread while writers flood the
 # same GPU, and a late fill is still useful for every later rollout.
 _SHAPES_TIMEOUT = 45.0
 _SHAPES_OUT_TOKENS = 1500  # 11 record tools measured at 852 tokens
-_SHAPES_MAX_CALLS = 3
 _SHAPES_TOOLS_PER_CALL = 12
+# SHAPES_TEMPERATURE = 0.3: example results are JSON the sandbox fills;
+# sampled low so they parse (convention, untested).
+SHAPES_TEMPERATURE = 0.3
 
 
 def _shape_batches(digest: Sequence[dict]) -> list[list[dict]]:
@@ -1095,7 +1167,7 @@ def write_result_shapes(
                 url,
                 model,
                 [{"role": "system", "content": system}, {"role": "user", "content": _dumps(batch)}],
-                temperature=0.3,
+                temperature=SHAPES_TEMPERATURE,
                 max_tokens=_SHAPES_OUT_TOKENS,
                 timeout=timeout,
                 n=1,
@@ -1179,7 +1251,7 @@ def _ref_knowledge(
         return False, "both"
     digest = hashlib.sha256(f"{int(seed)}:{int(round_index)}:{key}:ref".encode()).hexdigest()
     n = int(digest[:8], 16)
-    if n % 5 >= 2:
+    if n % KNOWS_REF_ONE_IN >= KNOWS_REF_SLOTS:
         return False, "both"
     return True, ("both", "name", "number")[n % 3]
 
@@ -1377,10 +1449,14 @@ class ModelSimulator:
         prefer_success: bool | None = None,
         steering_weight: float | None = None,
         hard_share: float | None = None,
+        writer_temperature: float | tuple[float, float] | None = None,
     ):
         self.texture_rate = (
             DEFAULT_TEXTURE_RATE if texture_rate is None else max(0.0, float(texture_rate))
         )
+        # The band the per-batch temperature is drawn from; None is the
+        # package band (WRITER_TEMP_LO..HI), a number pins it.
+        self.writer_temperature = writer_temperature_band(writer_temperature)
         # The run's difficulty dial, from RunConfig; every mixer call here uses it.
         self.hard_share = clamp_share(hard_share)
         self.backend_spec = backend_spec or default_simulator_spec()
@@ -1398,11 +1474,12 @@ class ModelSimulator:
                 ),
             ),
         )
-        # Ceiling for the live n draw. None means the adaptive cap (8).
+        # Ceiling for the live n draw. None means the adaptive cap.
         self.completions = max(
             1,
             min(
-                _MAX_COMPLETIONS, int(completions if completions is not None else _MAX_COMPLETIONS)
+                MAX_SAMPLES_PER_CALL,
+                int(completions if completions is not None else MAX_SAMPLES_PER_CALL),
             ),
         )
         self.time_budget = (
@@ -1412,10 +1489,14 @@ class ModelSimulator:
         # Ceiling scales with what the caller sized for its card count; a
         # fixed 768 silently starved long-prompt cards in big batches.
         self.out_tokens = max(
-            256, min(2048, int(out_tokens if out_tokens is not None else _OUT_TOKENS))
+            WRITER_OUT_TOKENS_MIN,
+            min(
+                WRITER_OUT_TOKENS_MAX,
+                int(out_tokens if out_tokens is not None else WRITER_OUT_TOKENS),
+            ),
         )
         self.distinct_cards = bool(distinct_cards)
-        self.extra_cards = max(0, min(4, int(extra_cards)))
+        self.extra_cards = max(0, min(_MAX_EXTRA_CARDS, int(extra_cards)))
         self.seed = int(seed)
         self.timeout = timeout
         self.regions = scenario_regions(
@@ -1865,7 +1946,7 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
         sampled, prompt = self._fit_prompt(round_index, sampled)
         try:
             url, model = parse_backend_spec(self.backend_spec)
-            temp = sample_writer_temperature(self.seed, round_index)
+            temp = sample_writer_temperature(self.seed, round_index, band=self.writer_temperature)
             self.last_temperature = temp
             elapsed = None
             if self.run_started is not None:
@@ -2010,7 +2091,10 @@ def make_default_generator(
     Pass ``simulator=False`` to skip the model arm (templates and probes).
     When the model is on and a round fails, that arm is skipped. Templates
     are not used as a fallback. ``hard_share`` is the run's difficulty dial
-    and reaches both arms.
+    and reaches both arms. ``writer_temperature`` (an ``advanced=`` key) is
+    a number that pins the writer's sampling temperature or a ``(lo, hi)``
+    band it draws from per batch; the default band is ``WRITER_TEMP_LO``
+    to ``WRITER_TEMP_HI``.
     """
     cells = max(
         _MIN_CELLS_PER_CALL,
@@ -2022,9 +2106,13 @@ def make_default_generator(
     completions = max(
         1,
         min(
-            _MAX_COMPLETIONS, int(template_kwargs.pop("completions_per_request", _MAX_COMPLETIONS))
+            MAX_SAMPLES_PER_CALL,
+            int(template_kwargs.pop("completions_per_request", MAX_SAMPLES_PER_CALL)),
         ),
     )
+    # Validated here, model or not, so a bad value fails the run before
+    # any card is written and an offline run still refuses a typo.
+    writer_temperature = writer_temperature_band(template_kwargs.pop("writer_temperature", None))
     texture_rate = template_kwargs.pop("texture_rate", None)
     distinct_cards = bool(template_kwargs.pop("distinct_cards", False))
     extra_cards = int(template_kwargs.pop("extra_cards", _EXTRAS_PER_CALL))
@@ -2080,6 +2168,7 @@ def make_default_generator(
             prefer_success=prefer_success,
             steering_weight=steering_weight,
             hard_share=hard_share,
+            writer_temperature=writer_temperature,
         )
 
     def _ingest_templates(

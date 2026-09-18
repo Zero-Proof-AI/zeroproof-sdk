@@ -25,6 +25,10 @@ from typing import Any
 
 from whileai._env import getenv
 
+# FLUSH_EVERY_S = 15 / FLUSH_EVERY_CALLS = 50: the meter posts what it
+# owes every fifteen seconds or fifty hosted calls, whichever comes first,
+# and once more at exit (convention; the platform Usage page is minute-
+# resolution).
 FLUSH_EVERY_S = 15.0
 FLUSH_EVERY_CALLS = 50
 

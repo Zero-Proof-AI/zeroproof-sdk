@@ -17,6 +17,12 @@ from urllib.parse import urlparse
 from whileai._env import getenv
 from whileai.auth import SIGN_IN_URL
 
+from ..defaults import (
+    CHARS_PER_TOKEN,
+    MAX_SAMPLES_PER_CALL,
+    TRANSIENT_BACKOFF_S,
+    TRANSIENT_TRIES,
+)
 from ..text import split_reasoning
 from ..world.sandbox import MockEnvironment
 from .anthropic_backend import ANTHROPIC_BASE_URL, is_anthropic_url
@@ -24,7 +30,7 @@ from .anthropic_backend import DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL
 from .anthropic_backend import complete as anthropic_complete
 from .anthropic_backend import missing_key as missing_anthropic_key
 from .anthropic_backend import resolve_key as anthropic_key
-from .diversity import running_turn_mean, sample_turn_budget
+from .diversity import DEFAULT_AVG_TURNS, running_turn_mean, sample_turn_budget
 from .usage_meter import report_usage
 
 DEFAULT_AGENT = (
@@ -133,18 +139,42 @@ def default_simulator_spec() -> str:
 # Working context estimate for the rollout backend. Sized to hosted Qwen
 # by default; a bigger-window backend sets ZP_CONTEXT_TOKENS and every
 # derived budget (turn caps, shrink threshold) scales with it.
-CONTEXT_TOKENS = max(2048, int(os.environ.get("ZP_CONTEXT_TOKENS") or 4096))
+# CONTEXT_FLOOR_TOKENS = 2048: the smallest window the loop is sized for;
+# below it one system prompt plus one tool schema leaves no room for a
+# reply (convention, untested).
+CONTEXT_FLOOR_TOKENS = 2048
+CONTEXT_TOKENS = max(CONTEXT_FLOOR_TOKENS, int(os.environ.get("ZP_CONTEXT_TOKENS") or 4096))
 _CONTEXT_TOKENS = CONTEXT_TOKENS
+# LARGE_CONTEXT_TOKENS = 8192: above this window the loop assumes a
+# long-horizon backend and raises the turn cap and the reply budget
+# (convention: the hosted 4k Qwen is below it, every 16k+ server above).
+LARGE_CONTEXT_TOKENS = 8192
+# The turn cap is what the window can hold: the reserved head (system
+# prompt, 64 tokens per tool schema up to 1536) comes off, and each
+# user+agent exchange is budgeted at 128 tokens (convention, untested;
+# a measured per-turn mean would replace it).
+TURN_CAP_RESERVED_TOKENS = 2048
+TURN_CAP_TOOL_TOKENS = 64
+TURN_CAP_TOOLS_MAX_TOKENS = 1536
+TURN_CAP_TOKENS_PER_TURN = 128
+# TURN_CAP_SMALL = 40 / TURN_CAP_LARGE = 120: ceilings on the derived cap
+# for a small and a large window; TURN_CAP_MIN = 8 is the floor
+# (convention, untested).
+TURN_CAP_SMALL = 40
+TURN_CAP_LARGE = 120
+TURN_CAP_MIN = 8
 
 
 def default_max_turns(context_tokens: int | None = None, *, n_tools: int = 0) -> int:
     """Conversation cap. Scales with the context window; small windows
-    reach 40 turns, large ones (ZP_CONTEXT_TOKENS) go long-horizon."""
+    reach ``TURN_CAP_SMALL`` turns, large ones (ZP_CONTEXT_TOKENS) go
+    long-horizon."""
     ctx = int(context_tokens if context_tokens is not None else CONTEXT_TOKENS)
-    reserved = 2048 + min(1536, max(0, int(n_tools)) * 64)
-    per_turn = 128
-    ceiling = 40 if ctx <= 8192 else 120
-    return max(8, min(ceiling, max(1, ctx - reserved) // per_turn))
+    reserved = TURN_CAP_RESERVED_TOKENS + min(
+        TURN_CAP_TOOLS_MAX_TOKENS, max(0, int(n_tools)) * TURN_CAP_TOOL_TOKENS
+    )
+    ceiling = TURN_CAP_SMALL if ctx <= LARGE_CONTEXT_TOKENS else TURN_CAP_LARGE
+    return max(TURN_CAP_MIN, min(ceiling, max(1, ctx - reserved) // TURN_CAP_TOKENS_PER_TURN))
 
 
 def _models_url(base_url: str | None = None) -> tuple[str, Any] | None:
@@ -335,6 +365,9 @@ def _client_metered(base_url: str | None) -> bool:
 
 
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+# _REDIRECT_HOPS = 8: Modal 303s again every 150 s of a long call, so eight
+# hops is twenty minutes of cold start before the call is given up
+# (convention, untested).
 _REDIRECT_HOPS = 8
 
 
@@ -391,8 +424,11 @@ HOSTED_DROPPED = (
     "Lower concurrency or wait for the other simulate to finish."
 )
 _TRANSIENT_RETRY = "retry_transient"
-_TRANSIENT_TRIES = 3
 _TRANSIENT_STATUSES = {500, 502, 503, 504}
+# _REQUEST_ATTEMPTS = 8: one first try, up to four shape retries (halve
+# max_tokens, shrink the input, drop n, drop logprobs) and TRANSIENT_TRIES
+# transient retries; the loop bound is their sum (structural, not a knob).
+_REQUEST_ATTEMPTS = 1 + 4 + TRANSIENT_TRIES
 
 
 def _is_lost_track(text: str) -> bool:
@@ -439,7 +475,7 @@ def _estimate_tokens(messages: list[dict], tools: list[dict] | None) -> int:
     blob = json.dumps(messages, default=str, separators=(",", ":"))
     if tools:
         blob += json.dumps(tools, default=str, separators=(",", ":"))
-    return max(1, (len(blob) + 2) // 3)
+    return max(1, (len(blob) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN)
 
 
 def _last_user_index(messages: list[dict]) -> int:
@@ -449,16 +485,30 @@ def _last_user_index(messages: list[dict]) -> int:
     return -1
 
 
+# SHRINK_USER_MIN_CHARS = 800: a last user message shorter than this is
+# never cut to make room; longer ones are halved, never below half of
+# this (convention, untested: a user line under 800 chars is speech, one
+# over it is usually a pasted document).
+SHRINK_USER_MIN_CHARS = 800
+
+
 def _shrink_last_user(messages: list[dict], *, frac: float = 0.5) -> bool:
     """Halve a long last user message. Short agent turns stay intact."""
     i = _last_user_index(messages)
     if i < 0:
         return False
     content = str(messages[i].get("content") or "")
-    if len(content) < 800:
+    if len(content) < SHRINK_USER_MIN_CHARS:
         return False
-    messages[i] = {**messages[i], "content": content[: max(400, int(len(content) * frac))]}
+    floor = SHRINK_USER_MIN_CHARS // 2
+    messages[i] = {**messages[i], "content": content[: max(floor, int(len(content) * frac))]}
     return True
+
+
+# LENGTH_CUT_MIN_CHARS = 40: a token-capped reply is cut back to its last
+# sentence only when that leaves more than this; a shorter stub is left
+# for the junk gate (convention, untested).
+LENGTH_CUT_MIN_CHARS = 40
 
 
 def _trim_length_cut(choice: dict) -> None:
@@ -480,7 +530,7 @@ def _trim_length_cut(choice: dict) -> None:
         # left the shape writer 147 chars of an 11-tool answer
         return
     cut = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
-    if cut > 40:
+    if cut > LENGTH_CUT_MIN_CHARS:
         message["content"] = text[: cut + 1]
 
 
@@ -544,6 +594,23 @@ def _thread_connection(parsed: Any, conn_key: tuple, timeout: float) -> http.cli
     return conn
 
 
+# MIN_REPLY_TOKENS = 256: no request asks for fewer reply tokens than
+# this; the input is shrunk instead, because a reply cut under 256 tokens
+# is a fragment the junk gate drops anyway (convention, untested).
+MIN_REPLY_TOKENS = 256
+# CONTEXT_MARGIN_TOKENS = 64: slack between the estimated input and the
+# window, for chat-template tokens the estimate does not see
+# (convention, untested).
+CONTEXT_MARGIN_TOKENS = 64
+# COMPLETE_TEMPERATURE = 0.7 / COMPLETE_MAX_TOKENS = 1024 / COMPLETE_TIMEOUT_S
+# = 60: what a bare ``complete()`` call uses when the caller names
+# nothing; every caller in this package names its own (convention, the
+# OpenAI client defaults).
+COMPLETE_TEMPERATURE = 0.7
+COMPLETE_MAX_TOKENS = 1024
+COMPLETE_TIMEOUT_S = 60.0
+
+
 def complete(
     base_url: str,
     model: str,
@@ -551,9 +618,9 @@ def complete(
     *,
     tools: list[dict] | None = None,
     api_key: str | None = None,
-    temperature: float = 0.7,
-    max_tokens: int = 1024,
-    timeout: float = 60,
+    temperature: float = COMPLETE_TEMPERATURE,
+    max_tokens: int = COMPLETE_MAX_TOKENS,
+    timeout: float = COMPLETE_TIMEOUT_S,
     n: int = 1,
     logprobs: bool | str = False,
     extra: Mapping[str, Any] | None = None,
@@ -608,11 +675,11 @@ def complete(
     if not post_path.startswith("/"):
         post_path = "/" + post_path
     messages = [dict(m) for m in messages]
-    room = _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - 64
-    while room < 256 and _shrink_last_user(messages):
-        room = _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - 64
-    want = max(256, min(int(max_tokens), max(256, room)))
-    samples = max(1, min(8, int(n)))
+    room = _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - CONTEXT_MARGIN_TOKENS
+    while room < MIN_REPLY_TOKENS and _shrink_last_user(messages):
+        room = _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - CONTEXT_MARGIN_TOKENS
+    want = max(MIN_REPLY_TOKENS, min(int(max_tokens), max(MIN_REPLY_TOKENS, room)))
+    samples = max(1, min(MAX_SAMPLES_PER_CALL, int(n)))
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
@@ -634,7 +701,7 @@ def complete(
     conn_key = (parsed.scheme or "https", parsed.hostname, parsed.port, timeout)
     last_err: Exception | None = None
     transient = 0
-    for _ in range(8):
+    for _ in range(_REQUEST_ATTEMPTS):
         payload["messages"] = messages
         body = json.dumps(payload, separators=(",", ":")).encode()
         conn = _thread_connection(parsed, conn_key, timeout)
@@ -645,13 +712,20 @@ def complete(
             status, raw = _follow_redirects(resp, raw, headers, timeout)
             if status >= 400:
                 err = raw[:400].decode("utf-8", "replace")
-                if status == 400 and "max_tokens" in err and int(payload["max_tokens"]) > 256:
-                    payload["max_tokens"] = max(256, int(payload["max_tokens"]) // 2)
+                if (
+                    status == 400
+                    and "max_tokens" in err
+                    and int(payload["max_tokens"]) > MIN_REPLY_TOKENS
+                ):
+                    payload["max_tokens"] = max(MIN_REPLY_TOKENS, int(payload["max_tokens"]) // 2)
                     raise RuntimeError("retry_max_tokens")
                 if status == 400 and _shrink_last_user(messages):
-                    room = _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - 64
+                    room = (
+                        _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - CONTEXT_MARGIN_TOKENS
+                    )
                     payload["max_tokens"] = max(
-                        256, min(int(payload["max_tokens"]), max(256, room))
+                        MIN_REPLY_TOKENS,
+                        min(int(payload["max_tokens"]), max(MIN_REPLY_TOKENS, room)),
                     )
                     raise RuntimeError("retry_shrink_input")
                 if status == 400 and payload.get("n"):
@@ -721,9 +795,9 @@ def complete(
                 "retry_drop_logprobs",
             }:
                 continue
-            if kind == _TRANSIENT_RETRY and transient < _TRANSIENT_TRIES:
+            if kind == _TRANSIENT_RETRY and transient < TRANSIENT_TRIES:
                 transient += 1
-                time.sleep(0.4 * (2 ** (transient - 1)))
+                time.sleep(TRANSIENT_BACKOFF_S * (2 ** (transient - 1)))
                 continue
             break
     if last_err is not None and str(last_err) == _TRANSIENT_RETRY:
@@ -781,13 +855,14 @@ def _strip_tool_markup(text: str) -> str:
     return cleaned.strip()
 
 
-#: A simulated-user turn that carried reasoning and left fewer spoken
-#: characters than this was reasoning with no spoken line: the writer
-#: thought and never typed, so the turn is retried, never emitted as a
-#: fragment. The floor applies only to turns that carried reasoning; a
-#: bare ``yes`` or ``order 4821`` with no ``<think>`` is a real user turn
-#: and passes untouched (#284).
-_MIN_SPOKEN = 25
+# MIN_SPOKEN_CHARS = 25: a simulated-user turn that carried reasoning and
+# left fewer spoken characters than this was reasoning with no spoken
+# line: the writer thought and never typed, so the turn is retried, never
+# emitted as a fragment. The floor applies only to turns that carried
+# reasoning; a bare ``yes`` or ``order 4821`` with no ``<think>`` is a
+# real user turn and passes untouched (#284) (convention, untested: 25
+# chars is about the shortest full user sentence seen in source traces).
+MIN_SPOKEN_CHARS = 25
 
 
 def _strip_think(text: str) -> str:
@@ -845,12 +920,19 @@ _STOCK_CLOSE = re.compile(
 )
 
 
+# PREAMBLE_MAX_WORDS = 24: an agent line that opens like "let me" and is
+# no longer than this is a preamble before a tool call, so the loop lets
+# the agent speak once more instead of handing the turn to the user
+# (convention, untested).
+PREAMBLE_MAX_WORDS = 24
+
+
 def _looks_unfinished(text: str, steps: list) -> bool:
     words = (text or "").strip().split()
     if not words:
         return True
     head = " ".join(words[:8])
-    return bool(_PREAMBLE.match(head) and len(words) <= 24)
+    return bool(_PREAMBLE.match(head) and len(words) <= PREAMBLE_MAX_WORDS)
 
 
 def _last_agent_utterance(steps: list) -> tuple[str, int]:
@@ -917,18 +999,74 @@ def _agent_asked(text: str) -> bool:
 #: is what every run did before the knob existed: every question answered
 #: until the depth cap, so whether a thread ended was decided by the turn
 #: budget and never by what the agent said, and no rubric criterion about
-#: asking could fail (#289). The odds are a default, not a measurement: to
-#: ground them, fit a Kaplan-Meier hazard per question index on source
-#: traces (of the threads still answering at question k, the share that
-#: leave at k) and set the levels from it. The 63% of asked source threads
-#: that ended with the person walking away says the shape is common, not
-#: what the per-question hazard is.
+#: asking could fail (#289).
 PATIENCE_LEVELS = ("short", "normal", "endless")
-_WALK_AWAY_ODDS = {
+# PATIENCE_HAZARDS: per level, (second, later) = the chance the person
+# leaves at the agent's second question and at every question after it.
+# normal = (0.35, 0.60) and short = (0.60, 0.90) are a convention, not a
+# measurement: the 63% of asked source threads that ended with the person
+# walking away (#289) says the shape is common, not what the per-question
+# hazard is. The literature gives a direction, not a number: benchmark
+# users never leave (tau-bench 2406.12045 and tau2-bench 2506.07982 stop
+# only on goal or out-of-scope), simulated users are more cooperative than
+# humans (2601.17087: questions in 18.8% of simulated user turns against
+# 9.8% for humans, politeness markers in 39.2% against 19.9%), and an
+# impatient persona drops task success from 0.675 to 0.15-0.20
+# (2605.12894, tau-trait). To ground a level, fit a Kaplan-Meier hazard
+# per question index on production traces (of the threads still answering
+# at question k, the share that leave at k) and pass it as
+# ``patience={"second": p, "later": q}``.
+PATIENCE_HAZARDS: dict[str, tuple[float, float]] = {
     "short": (0.6, 0.9),
     "normal": (0.35, 0.6),
     "endless": (0.0, 0.0),
 }
+Patience = str | Mapping[str, float] | tuple[float, float] | list[float]
+
+
+def patience_hazards(patience: Patience | None) -> tuple[float, float]:
+    """``(second, later)`` for a patience level name, or for a custom table
+    given as ``{"second": p, "later": q}`` or ``(p, q)``, each in 0..1.
+    ``None`` is ``normal``. A name outside ``PATIENCE_LEVELS`` or a chance
+    outside 0..1 is refused with the fix."""
+    if patience is None:
+        return PATIENCE_HAZARDS["normal"]
+    if isinstance(patience, str):
+        level = patience.strip().lower() or "normal"
+        if level not in PATIENCE_HAZARDS:
+            raise ValueError(
+                f"patience={patience!r} is not a level; use one of "
+                + ", ".join(repr(p) for p in PATIENCE_LEVELS)
+                + ', or a table {"second": p, "later": q} of walk-away chances'
+            )
+        return PATIENCE_HAZARDS[level]
+    raw_second: Any
+    raw_later: Any
+    if isinstance(patience, Mapping):
+        raw_second, raw_later = patience.get("second"), patience.get("later")
+    else:
+        items = tuple(patience)
+        raw_second, raw_later = (items[0], items[1]) if len(items) == 2 else (None, None)
+    try:
+        second, later = float(raw_second), float(raw_later)
+    except (TypeError, ValueError):
+        raise ValueError(
+            'patience= takes a level name or a table {"second": p, "later": q}: the chance '
+            "the person leaves at the agent's second question and at every later one"
+        ) from None
+    if not (0.0 <= second <= 1.0 and 0.0 <= later <= 1.0):
+        raise ValueError(
+            f"patience table {patience!r} has a chance outside 0..1; "
+            "second and later are probabilities of leaving"
+        )
+    return second, later
+
+
+def patience_may_leave(patience: Patience | None) -> bool:
+    """True when this patience can end a thread: any non-zero hazard."""
+    return any(h > 0 for h in patience_hazards(patience))
+
+
 #: What ``_user_followup`` returns when the person gives up on the question.
 USER_LEFT = "[leaves]"
 _LEAVES = re.compile(r"\W*leaves\W*", re.I)
@@ -941,13 +1079,11 @@ def _draw(message: str, turn_i: int, salt: str) -> float:
     return int(digest[:8], 16) / float(1 << 32)
 
 
-def _walk_away_hazard(patience: str, questions: int) -> float:
+def _walk_away_hazard(patience: Patience | None, questions: int) -> float:
     """Chance the person leaves instead of answering, given how many
     questions the agent already asked on this thread (not counting this
     one). Zero on the first question: the person always tries once."""
-    second, later = _WALK_AWAY_ODDS.get(
-        str(patience or "normal").lower(), _WALK_AWAY_ODDS["normal"]
-    )
+    second, later = patience_hazards(patience)
     if questions <= 0:
         return 0.0
     return second if questions == 1 else later
@@ -955,8 +1091,10 @@ def _walk_away_hazard(patience: str, questions: int) -> float:
 
 def _user_turn_cap(budget: int) -> int:
     """How many times the person speaks at most on a thread of ``budget``
-    turns. The budget's rule, kept apart from the person's patience: a
-    thread the cap ends is not one the person left."""
+    turns: half of it, because turns alternate user, agent, user, agent
+    (structural, not a knob; ``avg_turns`` sets the budget). The budget's
+    rule, kept apart from the person's patience: a thread the cap ends is
+    not one the person left."""
     return max(2, int(budget) // 2)
 
 
@@ -965,7 +1103,7 @@ def _user_walks_away(
     turn_i: int,
     *,
     questions: int = 0,
-    patience: str = "normal",
+    patience: Patience | None = "normal",
 ) -> bool:
     """True when the person gives up on the agent's question rather than
     answer it (#289): the patience hazard at this question index, and
@@ -1026,7 +1164,7 @@ def _want_followup(
     budget: int = 6,
     agent_text: str = "",
     questions: int = 0,
-    patience: str = "normal",
+    patience: Patience | None = "normal",
 ) -> bool:
     """True when the human would naturally speak again.
 
@@ -1076,13 +1214,59 @@ def _want_followup(
         # there is nothing a second one could be for.
         return False
     # Geometric with p = 1 - 1/cap: a thread of cap turns in expectation,
-    # deterministic in the message and turn so a seeded run reproduces.
+    # deterministic in the message and turn so a seeded run reproduces
+    # (structural: the mean follows avg_turns, which is the knob; human
+    # threads with an assistant average 7 to 8 turns on SimulatorArena,
+    # 2510.05444, the default avg_turns sits near that).
     return _draw(message, turn_i, "react") < (1.0 - 1.0 / float(cap))
 
 
-# Follow-up user turns only. Opener temperature lives on the writer (0.45–1.05).
-_RESPONSE_TEMP_LO = 0.40
-_RESPONSE_TEMP_HI = 0.55
+# USER_TURN_TEMPERATURE = 0.475: sampling temperature of a simulated
+# user's follow-up line (the opener's diversity comes from the writer's
+# band, WRITER_TEMP_LO..HI). The midpoint of the 0.40-0.55 band the code
+# used to name and never sample. Low on purpose: a follow-up must stay
+# consistent with the thread and passes an accept gate with at most three
+# tries, so a hotter draw costs retries. Benchmarks disagree with each
+# other: tau-bench runs its user at 1.0 (2406.12045), tau2-bench at 0
+# (2506.07982), SimulatorArena at 0.7 (2510.05444); none measured the
+# effect. Convention, untested; ``local_model(user_temperature=)`` moves it.
+USER_TURN_TEMPERATURE = 0.475
+# HUMAN_TOOL_TEMPERATURE = 0.9: temperature of the answer a ``kind="human"``
+# tool gets. Hotter than a follow-up because it is one shot, no accept
+# gate, and the stance (mistaken, unsure, adversarial) has to come through
+# in the wording; 78% plain-yes answers were measured at the old fixed
+# posture, not at a temperature (convention, untested; the same
+# ``user_temperature`` overrides it).
+HUMAN_TOOL_TEMPERATURE = 0.9
+# USER_TURN_MAX_TOKENS = 180 / USER_RETRY_MAX_TOKENS = 120: reply budgets
+# of the first and the retried follow-up prompt; a user line is one short
+# line, and the retry prompt asks for less (convention, untested).
+USER_TURN_MAX_TOKENS = 180
+USER_RETRY_MAX_TOKENS = 120
+# HUMAN_TOOL_MAX_TOKENS = 120: "one or two short lines" (convention).
+HUMAN_TOOL_MAX_TOKENS = 120
+# OPENER_MAX_TOKENS = 120: the agent's greeting when it opens (convention).
+OPENER_MAX_TOKENS = 120
+# USER_TURN_WAIT_S = 5 / USER_TURN_WAIT_ASKED_S = 8 / USER_TURN_WAIT_CAP_S =
+# 30: seconds a follow-up may take, half the rollout timeout clamped to
+# this band. Floor, not ceiling: a 5 s wait on a busy endpoint silently
+# killed every follow-up and collapsed whole datasets to single-turn; an
+# answer to a question gets the longer floor (measured on the hosted pool,
+# the cap is convention).
+USER_TURN_WAIT_S = 5.0
+USER_TURN_WAIT_ASKED_S = 8.0
+USER_TURN_WAIT_CAP_S = 30.0
+# USER_TRACE_CHARS = 2400: how much of the thread the user simulator sees,
+# newest turns first (about 800 tokens of a 4k window; convention).
+USER_TRACE_CHARS = 2400
+# USER_TURN_MAX_CHARS = 2000: a follow-up longer than this is a document,
+# not a line, and is dropped (convention, untested).
+USER_TURN_MAX_CHARS = 2000
+# DETAIL_HINTS_MAX = 8 / TOOL_WORLD_MAX = 12: how many parameter names and
+# tool names the user-sim prompt lists, so a 40-tool agent does not fill
+# the prompt with its schema (convention).
+DETAIL_HINTS_MAX = 8
+TOOL_WORLD_MAX = 12
 _USER_SIM_SYSTEM = (
     "You write only the human's next spoken line. You are not the assistant. "
     "Ordinary speech. No emojis, no em dashes, no thanks, no you're welcome. "
@@ -1113,7 +1297,7 @@ def _detail_hints(tools: list | None) -> list[str]:
             label = re.sub(r"[_\-]+", " ", str(key)).strip().lower()
             if label and label not in out and len(label) <= 24:
                 out.append(label)
-    return out[:8]
+    return out[:DETAIL_HINTS_MAX]
 
 
 _LEAVE_NOTE = (
@@ -1163,7 +1347,7 @@ def _scrub_ai_traces(text: str) -> str:
 
 
 def _render_user_trace(
-    messages: list[dict] | None, steps: list[dict] | None, *, limit: int = 2400
+    messages: list[dict] | None, steps: list[dict] | None, *, limit: int = USER_TRACE_CHARS
 ) -> str:
     """Plain-text script. Never packed as chat roles."""
     lines: list[str] = []
@@ -1271,7 +1455,7 @@ def _persona_notes(prior: str) -> str:
     text = str(prior or "")
     notes: list[str] = []
     letters = [c for c in text if c.isalpha()]
-    if letters and sum(c.isupper() for c in letters) / len(letters) < 0.08:
+    if letters and sum(c.isupper() for c in letters) / len(letters) < LOWERCASE_UPPER_SHARE:
         notes.append("Keep every letter small. Do not mention how you type.")
     elif text[:1].isupper():
         notes.append("Capitalize normally, the way the opening line does.")
@@ -1288,12 +1472,33 @@ def _persona_notes(prior: str) -> str:
     return " ".join(notes)
 
 
+# The user-side scrubbers and gates below are English lexicons and
+# overlap rules. Fixed on purpose: they describe the hosted writer's
+# habits (stock closers, thanks-only turns, echoes), not the customer's
+# domain, and a run in another language sets ``user_model=`` to a writer
+# that does not produce them. The thresholds are conventions, untested.
+# LOWERCASE_UPPER_SHARE = 0.08: an opener with fewer capitals than this
+# share of its letters is typed lowercase, and the persona keeps it so.
+LOWERCASE_UPPER_SHARE = 0.08
+# THANKS_SHARE = 0.25: a follow-up whose words are a quarter thanks and
+# carries no new ask is a rubber stamp, not a turn.
+THANKS_SHARE = 0.25
+# ECHO_OVERLAP = 0.70: a user line sharing this share of its words with
+# the agent's line is a restatement, not an answer (identifiers exempt).
+ECHO_OVERLAP = 0.70
+# REPEAT_OVERLAP = 0.78: a user line this close to an earlier user line is
+# the same line again (Self-Instruct drops a new instruction above ROUGE-L
+# 0.7 against the pool, 2212.10560; a word-set Jaccard-style overlap is a
+# coarser measure, so the bar sits a little higher).
+REPEAT_OVERLAP = 0.78
+
+
 def _mostly_thanks(text: str) -> bool:
     words = re.findall(r"[a-z']+", str(text or "").lower())
     if not words:
         return False
     hits = sum(1 for w in words if w in _THANKS_WORDS)
-    if hits / len(words) < 0.25:
+    if hits / len(words) < THANKS_SHARE:
         return False
     return not re.search(r"\b(also|but|instead|wrong|pr|issue|repo|#\d+)\b", text, re.I)
 
@@ -1316,7 +1521,7 @@ _ASKS_CONFIRM = re.compile(
 def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     from .generator import usable_user_message
 
-    if not text or text == prior or len(text) > 2000:
+    if not text or text == prior or len(text) > USER_TURN_MAX_CHARS:
         return False
     # A person never types call syntax: name_with_underscores( or a JSON dump.
     if re.search(r"\b\w+_\w+\s*\(", text) or text.count('"') >= 4:
@@ -1361,7 +1566,7 @@ def _repeats_user_history(text: str, messages: list[dict] | None) -> bool:
         if len(prior) < 5:
             continue
         overlap = len(current & prior) / min(len(current), len(prior))
-        if overlap >= 0.78:
+        if overlap >= REPEAT_OVERLAP:
             return True
     return False
 
@@ -1375,7 +1580,7 @@ def _tool_world(tools: list | None) -> str:
         name = str((fn or {}).get("name") or "").strip()
         if name and name not in names:
             names.append(name)
-    return ", ".join(names[:12])
+    return ", ".join(names[:TOOL_WORLD_MAX])
 
 
 def _user_followup(
@@ -1395,6 +1600,7 @@ def _user_followup(
     extra: Mapping[str, Any] | None = None,
     turn_stats: dict | None = None,
     may_leave: bool = False,
+    temperature: float = USER_TURN_TEMPERATURE,
 ) -> str:
     """The simulated user's next line, or ``""`` when the writer produced
     none worth keeping. ``extra`` carries the agent's request fields
@@ -1454,9 +1660,11 @@ def _user_followup(
         tags["texture"] = "no_punctuation"
     if persona and "Capitalize normally" in persona and "texture" not in tags:
         tags["texture"] = "standard"
-    # Floor, not ceiling: a 5s wait on a busy endpoint silently killed
-    # every follow-up and collapsed whole datasets to single-turn.
-    wait = max(8.0 if asked else 5.0, min(30.0, float(timeout or 30) / 2))
+    # Floor, not ceiling: see USER_TURN_WAIT_S.
+    wait = max(
+        USER_TURN_WAIT_ASKED_S if asked else USER_TURN_WAIT_S,
+        min(USER_TURN_WAIT_CAP_S, float(timeout or USER_TURN_WAIT_CAP_S) / 2),
+    )
     attempts = list(
         (body, retry_body, retry_body) if force else ((body, retry_body) if asked else (body,))
     )
@@ -1475,8 +1683,8 @@ def _user_followup(
                 ],
                 tools=None,
                 api_key=api_key,
-                temperature=(_RESPONSE_TEMP_LO + _RESPONSE_TEMP_HI) / 2,
-                max_tokens=120 if attempt > 1 else 180,
+                temperature=float(temperature),
+                max_tokens=USER_RETRY_MAX_TOKENS if attempt > 1 else USER_TURN_MAX_TOKENS,
                 timeout=wait,
                 extra=extra,
             )
@@ -1489,7 +1697,7 @@ def _user_followup(
         # retried instead of gone (#289).
         if may_leave and _user_left(reply.get("content") or ""):
             return USER_LEFT
-        if (closed or unclosed) and len(spoken.strip()) < _MIN_SPOKEN:
+        if (closed or unclosed) and len(spoken.strip()) < MIN_SPOKEN_CHARS:
             # Reasoning and no spoken line. One more try with the short
             # prompt; never a fragment, never empty user speech.
             if not retried_for_reasoning:
@@ -1518,7 +1726,7 @@ def _echoes_agent(user: str, agent: str) -> bool:
     if len(u) < 4 or not a:
         # Too few words to call a restatement; short replies are answers.
         return False
-    return (len(u & a) / len(u)) >= 0.70
+    return (len(u & a) / len(u)) >= ECHO_OVERLAP
 
 
 #: Generation-side cue only; never enters the exported conversation.
@@ -1551,6 +1759,7 @@ def _human_answer(
     stance: str = "",
     extra: Mapping[str, Any] | None = None,
     turn_stats: dict | None = None,
+    temperature: float = HUMAN_TOOL_TEMPERATURE,
 ) -> str:
     """The simulated user answers the agent's question, in character.
 
@@ -1594,14 +1803,14 @@ def _human_answer(
         model,
         msgs,
         api_key=api_key,
-        temperature=0.9,
+        temperature=float(temperature),
         timeout=timeout,
-        max_tokens=120,
+        max_tokens=HUMAN_TOOL_MAX_TOKENS,
         extra=extra,
     )
     spoken, closed, unclosed = split_reasoning(reply.get("content") or "")
     _note_user_turn(turn_stats, closed, unclosed)
-    if (closed or unclosed) and len(spoken.strip()) < _MIN_SPOKEN:
+    if (closed or unclosed) and len(spoken.strip()) < MIN_SPOKEN_CHARS:
         return ""
     return _strip_tool_markup(spoken).strip()
 
@@ -1629,9 +1838,14 @@ def _answer_tool_call(env: Any, execute: Callable | None, tool: str, arguments: 
     return {"status": "ok", "result": result}
 
 
-#: Sampling temperature a model-backed rollout uses unless simulate(temperature=)
-#: says otherwise. Recorded on every row under ``sampling`` (rlhf-book ch. 9:
-#: rejection sampling is run at 0.7 to 1.0; the row has to say what it was).
+# LOCAL_MODEL_TEMPERATURE = 0.8: sampling temperature of a model-backed
+# rollout unless simulate(advanced={"temperature": ...}) says otherwise,
+# recorded on every row under ``sampling``. Inside the 0.7 to 1.0 band
+# rejection sampling is run at (rlhf-book ch. 9, Rejection Sampling) and
+# under the 1.0 RL rollouts use (DAPO 2503.14476, group size 16); the
+# agent benchmarks that want reproducible scores run at 0 (tau-bench
+# 2406.12045, tau2-bench 2506.07982), which is what ``reproducible=`` and
+# an explicit temperature are for. 0.8 within the band is a convention.
 LOCAL_MODEL_TEMPERATURE = 0.8
 # Seconds one completion may take. A served model that scaled to zero
 # takes two to three minutes to answer its first request (113 s measured
@@ -1641,14 +1855,22 @@ LOCAL_MODEL_TEMPERATURE = 0.8
 LOCAL_MODEL_TIMEOUT = 300.0
 
 
+# REPLY_TOKENS = 768 / REPLY_TOKENS_LARGE = 2048: an agent reply's token
+# budget on a small and a large context window. 768 is what a 4k window
+# leaves after the history and tools; a coding agent's diff does not fit
+# in it, and a reasoning model's thinking does not fit in 2048, which is
+# what ``agent_max_tokens`` is for (convention, sized to hosted Qwen).
+REPLY_TOKENS = 768
+REPLY_TOKENS_LARGE = 2048
+
+
 def reply_budget(max_tokens: int | None = None) -> int:
     """Tokens one agent reply may use: ``simulate(agent_max_tokens=)`` when
-    set, else 768, or 2048 above an 8k context (``ZP_CONTEXT_TOKENS``). A
-    coding agent's diff does not fit in 768; a reasoning model's thinking
-    does not fit in 2048."""
+    set, else ``REPLY_TOKENS``, or ``REPLY_TOKENS_LARGE`` above an 8k
+    context (``ZP_CONTEXT_TOKENS``)."""
     if max_tokens:
         return int(max_tokens)
-    return 768 if CONTEXT_TOKENS <= 8192 else 2048
+    return REPLY_TOKENS if CONTEXT_TOKENS <= LARGE_CONTEXT_TOKENS else REPLY_TOKENS_LARGE
 
 
 def local_model(
@@ -1659,7 +1881,7 @@ def local_model(
     system: str = "",
     api_key: str | None = None,
     max_turns: int | None = None,
-    avg_turns: float = 6,
+    avg_turns: float = DEFAULT_AVG_TURNS,
     min_user_turns: int = 1,
     turn_stats: dict | None = None,
     temperature: float = LOCAL_MODEL_TEMPERATURE,
@@ -1673,7 +1895,8 @@ def local_model(
     max_tokens: int | None = None,
     user_model: str | None = None,
     thinking: bool | None = None,
-    patience: str = "normal",
+    patience: Patience | None = "normal",
+    user_temperature: float | None = None,
 ) -> Callable:
     """An agent that talks to an OpenAI-compatible endpoint (a served
     adapter, a local vLLM, any chat server) for ``simulate(agent=...)``.
@@ -1726,7 +1949,19 @@ def local_model(
     every rollout of the first pass. When a call still times out the run
     says so in ``data.warnings`` with the fix (raise ``timeout=``, or send
     one throwaway request first so the endpoint is warm).
+
+    ``patience`` is a level name (``PATIENCE_LEVELS``) or a table
+    ``{"second": p, "later": q}``: the chance the person leaves at the
+    agent's second question and at every later one, fitted from your own
+    traces (see ``PATIENCE_HAZARDS``). ``user_temperature`` is the
+    sampling temperature of every simulated-user line, follow-ups
+    (``USER_TURN_TEMPERATURE``) and human-tool answers
+    (``HUMAN_TOOL_TEMPERATURE``) alike; ``None`` keeps those two defaults.
     """
+    hazards = patience_hazards(patience)
+    may_leave = patience_may_leave(patience)
+    followup_temp = USER_TURN_TEMPERATURE if user_temperature is None else float(user_temperature)
+    human_temp = HUMAN_TOOL_TEMPERATURE if user_temperature is None else float(user_temperature)
     local = threading.local()
     plans = fault_plans if fault_plans is not None else {}
     extras: dict[str, Any] | None = (
@@ -1778,7 +2013,7 @@ def local_model(
                     api_key=api_key,
                     temperature=temperature,
                     timeout=timeout,
-                    max_tokens=120,
+                    max_tokens=OPENER_MAX_TOKENS,
                     extra=extras,
                 )
                 opener_text = (_spoken_text(greet) or "").strip()
@@ -1858,6 +2093,7 @@ def local_model(
                             stance=stance,
                             extra=user_extras,
                             turn_stats=turn_stats,
+                            temperature=human_temp,
                         )
                         # an empty answer used to default to "go ahead", which
                         # silently taught the agent that asking always clears
@@ -1945,7 +2181,7 @@ def local_model(
                     budget=budget,
                     agent_text=spoken,
                     questions=prior_questions,
-                    patience=patience,
+                    patience=hazards,
                 )
             ):
                 follow = _user_followup(
@@ -1963,7 +2199,8 @@ def local_model(
                     force=force_followup,
                     extra=user_extras,
                     turn_stats=turn_stats,
-                    may_leave=patience != "endless",
+                    may_leave=may_leave,
+                    temperature=followup_temp,
                 )
                 if follow == USER_LEFT:
                     # The person could not or would not answer this one.
@@ -1990,7 +2227,7 @@ def local_model(
                 and not force_followup
                 and n_user < _user_turn_cap(budget)
                 and _agent_asked(spoken)
-                and _user_walks_away(message, turn_i, questions=prior_questions, patience=patience)
+                and _user_walks_away(message, turn_i, questions=prior_questions, patience=hazards)
             )
             return _done(steps, spoken or final_text, ended_by="user_left" if left else "")
         return _done(steps, final_text)

@@ -5,6 +5,25 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Every default in the situation and user side of the engine
+  (`whileai/simulations/generate/`) is now a named constant with a
+  one-line comment saying why it is that number and where the number
+  comes from: a measurement, a chapter of rlhfbook.com, a paper by arXiv
+  id, or "convention, untested" when that is the truth. No default
+  changed; `scripts/golden.py` is byte-identical before and after. Two
+  dead constants went (a ten-point tier bag that contradicted
+  `HARD_SHARE`, an unused writer token cap), and the values two modules
+  shared (transient retry count and backoff, samples per request, chars
+  per token) moved to `whileai/simulations/defaults.py` so they cannot
+  drift apart. Three knobs for the defaults a caller plausibly needs to
+  move: `local_model(patience=)` takes a hazard table `{"second": p,
+  "later": q}` (the chance the person leaves at the agent's second
+  question and at every later one, fitted from your own traces) as well
+  as a level name; `local_model(user_temperature=)` sets the sampling
+  temperature of every simulated-user line, follow-ups and human-tool
+  answers alike; `simulate(advanced={"writer_temperature": t})` pins the
+  situation writer's temperature, or `(lo, hi)` narrows the band it
+  draws from per batch. A bad value is refused with the fix, offline too.
 - No number in the run engine is inline any more. Every value
   `simulate()`'s engine used to carry as a bare literal (the eight empty
   rounds before a writer failure, the four idle rounds before a writer

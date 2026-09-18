@@ -369,9 +369,9 @@ def test_writer_prompt_keeps_tools_off_the_page():
     assert "Rules" not in prompt
     assert "capability and scenario cards" in prompt
     from whileai.simulations.generate.agents import CONTEXT_TOKENS
-    from whileai.simulations.generate.generator import _OUT_TOKENS, _token_estimate
+    from whileai.simulations.generate.generator import WRITER_OUT_TOKENS, _token_estimate
 
-    assert _OUT_TOKENS >= 256
+    assert WRITER_OUT_TOKENS >= 256
     assert _token_estimate(prompt) < CONTEXT_TOKENS - 256
 
 
