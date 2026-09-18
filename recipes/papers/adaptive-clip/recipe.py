@@ -677,7 +677,7 @@ def main() -> None:
     ap.add_argument(
         "--num-iterations",
         type=int,
-        default=1,
+        default=2,
         help="policy updates per batch of rollouts; at 1 the run is on-policy and no clip binds",
     )
     ap.add_argument("--selftest", action="store_true", help="the clip schedule, offline")

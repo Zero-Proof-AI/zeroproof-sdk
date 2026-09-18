@@ -24,9 +24,12 @@ The table is generated: `python recipes/papers/check.py --write` reads every
 ## Run one
 
 ```bash
-pip install whileai modal
+# datasets: every recipe builds its train/holdout split locally, before Modal.
+# the modal extra: needed when outbound traffic goes through an HTTPS proxy,
+# harmless when it does not.
+pip install whileai datasets 'modal[api-proxy-support]'
 export WHILEAI_API_KEY=...        # run page + datasets at zeroproofai.com/platform
-modal token set --token-id ... --token-secret ...
+modal token set --token-id ... --token-secret ...   # or MODAL_TOKEN_ID / _SECRET in the environment
 cd recipes/papers/<slug>
 python recipe.py                    # both arms, writes results.json
 ```
