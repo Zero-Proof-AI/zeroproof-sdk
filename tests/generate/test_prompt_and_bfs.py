@@ -1793,8 +1793,10 @@ def test_followup_depth_tracks_avg_turns():
         lens = []
         for i in range(2000):
             n = 1
-            while _want_followup(f"m{i}", n, user_turns=n, budget=budget,
-                                 agent_text="4821 orders.") and n < 50:
+            while (
+                _want_followup(f"m{i}", n, user_turns=n, budget=budget, agent_text="4821 orders.")
+                and n < 50
+            ):
                 n += 1
             lens.append(n)
         return statistics.mean(lens)
