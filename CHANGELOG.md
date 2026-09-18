@@ -140,6 +140,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   (under about 10% of rows), not the per-call rate the injection papers
   bound at 0.05 to 0.3.
 
+## 0.72 (2026-09-18)
+
+- `whileai login` and `whileai signup` talk to the While platform API and
+  send people to the While site to approve; the ZeroProof gate is off the
+  login path. `WHILEAI_API_URL` still overrides. Keys are unchanged.
+
 ## 0.71 (2026-09-18)
 
 - `skills/`: six tested playbooks, one per way to train, that a coding agent
