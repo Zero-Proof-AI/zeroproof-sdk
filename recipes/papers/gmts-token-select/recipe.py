@@ -569,6 +569,14 @@ def run_arm(
         ],
     )
     last_batch: list[dict] = []
+    # TRL 0.19.1 builds the LoRA adapter (get_peft_model) before it applies
+    # GRPOConfig.seed, so the adapter's init is drawn from whatever RNG state
+    # the process is in. The first arm runs the base evals first and advances
+    # it; the second does not. Seed here so both arms draw the same A matrix.
+    # Rounds 1 and 2 in the README predate this line.
+    from transformers import set_seed
+
+    set_seed(17)
     trainer = gmts_trainer(GRPOTrainer)(
         model=model,
         reward_funcs=[make_reward(last_batch)],
