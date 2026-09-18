@@ -949,6 +949,9 @@ wai.holdout_size(
     0.05, before=before, after=after
 )  # the paired sd measured off a previous eval, no model
 wai.holdout_size(0.05, task_std=0.38)  # or the sd read off a delta_report interval
+wai.eval_power(
+    base.rows()
+)  # before training: verdict usable / underpowered / saturated / floored, in_band, resolvable, n_needed
 wai.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_after_fault"])
 wai.delta_report(before, after, target="pass_at_1", by="category")  # the target per kind of prompt
 before = wai.simulate(agent, tools=TOOLS, tasks=base, runs=3)  # the same eval three times

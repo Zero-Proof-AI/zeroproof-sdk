@@ -3,6 +3,23 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `eval_power(rows)`: can this held-out set prove a gain, asked of the
+  base run before any training spend. It reads `holdout_size` and
+  `detectable_effect` off the same rows (one model, `_paired_task_sd`), so
+  `n_needed` and `resolvable` agree with them by construction, and adds
+  where the tasks sit: `in_band` against `DIFFICULTY_BAND` (`band=` moves
+  it), `tied_pass`, `tied_fail`, `single_rollout`. The verdict is `usable`,
+  `underpowered` (this n and k cannot prove `effect`), `saturated` (less
+  than `effect` left to gain) or `floored` (every task fails every
+  rollout: the pass rate cannot tell hard from broken, check `dead_tools`
+  first); anything but `usable` puts a line in `warnings` naming the fix.
+  Measured on one agent, a set built to be "harder" came back base 0.000
+  with 0 of 60 tasks in band; its base score was the only number on it
+  that looked like progress. `PROVE_EFFECT = 0.05` is the effect it sizes
+  for; `PLATFORM_HOLDOUT_PROVE_EFFECT` now reads it.
+
 ## 0.78 (2026-09-18)
 
 - `whileai agents | agent <id> | runs <id> | verdict <id> | promote <id> <v> |
