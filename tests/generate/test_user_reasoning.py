@@ -34,7 +34,9 @@ def _is_user_sim_call(messages: list[dict], kwargs: dict) -> bool:
         kwargs.get("tools") is None
         and bool(messages)
         and messages[0].get("role") == "system"
-        and messages[0].get("content") == user_sim_system(TOOLS)
+        # the default patience offers the way out, "endless" does not; either is the user sim
+        and messages[0].get("content")
+        in (user_sim_system(TOOLS), user_sim_system(TOOLS, may_leave=True))
     )
 
 

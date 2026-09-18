@@ -1834,3 +1834,91 @@ def test_followup_depth_does_not_depend_on_success_phrasing():
     assert abs(active - plain) < 0.3, (active, plain)
     # a question still earns an answer, which is the one phrasing that should matter
     assert depth("Do you want me to cancel it?") > active
+
+
+def test_asking_costs_the_thread_from_the_second_question():
+    """A question used to be answered unconditionally, so no rollout ever ended
+    on one and no criterion about HOW the agent asks could fail (#289). Now
+    the first question is always tried and from the second on the person may
+    walk away at the odds ``patience`` sets; ``"endless"`` is the old loop."""
+    from whileai.simulations.generate.agents import _want_followup
+
+    asked = "Which order and which item?"
+
+    def answered(budget, questions, patience="normal", n=3000):
+        return (
+            sum(
+                1
+                for i in range(n)
+                if _want_followup(
+                    f"m{i}",
+                    1 + questions,
+                    user_turns=1 + questions,
+                    budget=budget,
+                    agent_text=asked,
+                    questions=questions,
+                    patience=patience,
+                )
+            )
+            / n
+        )
+
+    assert answered(12, 0) == 1.0, "the first question is always tried"
+    assert answered(12, 0, "short") == 1.0
+    # From the second question on the default walks away at a real rate.
+    assert 0.60 < answered(12, 1) < 0.70, answered(12, 1)
+    assert 0.35 < answered(12, 2) < 0.45, answered(12, 2)
+    assert answered(12, 1, "short") < answered(12, 1)
+    # "endless" answers every question to the cap, as before the knob.
+    assert answered(12, 1, "endless") == 1.0
+    assert answered(12, 4, "endless") == 1.0
+
+
+def test_first_question_still_earns_an_answer_more_than_a_statement():
+    """A question must still earn an answer more often than a plain statement
+    does; it is repeated asking that costs the thread, not asking."""
+    from whileai.simulations.generate.agents import _want_followup
+
+    def keep(text, patience, n=1500):
+        return (
+            sum(
+                1
+                for i in range(n)
+                if _want_followup(
+                    f"m{i}", 1, user_turns=1, budget=12, agent_text=text, patience=patience
+                )
+            )
+            / n
+        )
+
+    for patience in ("short", "normal", "endless"):
+        assert keep("Do you want me to cancel it?", patience) > keep(
+            "There are 4821 orders.", patience
+        )
+
+
+def test_short_threads_still_answer_the_question():
+    """With room for one exchange, abandoning leaves the agent's question as
+    the whole rollout and the set fills with stubs; the cap ends it instead."""
+    from whileai.simulations.generate.agents import _user_walks_away, _want_followup
+
+    assert all(
+        _want_followup(
+            f"m{i}", 1, user_turns=1, budget=2, agent_text="Which repo?", patience="short"
+        )
+        for i in range(200)
+    )
+    # At the cap the budget ends the thread before the hazard is consulted.
+    assert not any(
+        _want_followup(
+            f"m{i}",
+            3,
+            user_turns=2,
+            budget=2,
+            agent_text="Which repo?",
+            questions=3,
+            patience="short",
+        )
+        for i in range(200)
+    )
+    assert any(_user_walks_away(f"m{i}", 3, questions=3, patience="short") for i in range(200))

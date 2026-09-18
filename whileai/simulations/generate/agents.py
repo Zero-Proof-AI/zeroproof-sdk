@@ -911,8 +911,122 @@ def _agent_asked(text: str) -> bool:
     return bool(t) and ("?" in t)
 
 
+#: ``simulate(patience=)``: how long the simulated person keeps answering
+#: the agent's questions. The first question is always attempted; from the
+#: second on the person may walk away at these odds, per level. ``endless``
+#: is what every run did before the knob existed: every question answered
+#: until the depth cap, so whether a thread ended was decided by the turn
+#: budget and never by what the agent said, and no rubric criterion about
+#: asking could fail (#289). The odds are a default, not a measurement: to
+#: ground them, fit a Kaplan-Meier hazard per question index on source
+#: traces (of the threads still answering at question k, the share that
+#: leave at k) and set the levels from it. The 63% of asked source threads
+#: that ended with the person walking away says the shape is common, not
+#: what the per-question hazard is.
+PATIENCE_LEVELS = ("short", "normal", "endless")
+_WALK_AWAY_ODDS = {
+    "short": (0.6, 0.9),
+    "normal": (0.35, 0.6),
+    "endless": (0.0, 0.0),
+}
+#: What ``_user_followup`` returns when the person gives up on the question.
+USER_LEFT = "[leaves]"
+_LEAVES = re.compile(r"\W*leaves\W*", re.I)
+
+
+def _draw(message: str, turn_i: int, salt: str) -> float:
+    """A uniform draw in [0, 1), fixed by the message and turn so a seeded
+    run reproduces exactly."""
+    digest = hashlib.sha256(f"{message}:{turn_i}:{salt}".encode()).hexdigest()
+    return int(digest[:8], 16) / float(1 << 32)
+
+
+def _walk_away_hazard(patience: str, questions: int) -> float:
+    """Chance the person leaves instead of answering, given how many
+    questions the agent already asked on this thread (not counting this
+    one). Zero on the first question: the person always tries once."""
+    second, later = _WALK_AWAY_ODDS.get(
+        str(patience or "normal").lower(), _WALK_AWAY_ODDS["normal"]
+    )
+    if questions <= 0:
+        return 0.0
+    return second if questions == 1 else later
+
+
+def _user_turn_cap(budget: int) -> int:
+    """How many times the person speaks at most on a thread of ``budget``
+    turns. The budget's rule, kept apart from the person's patience: a
+    thread the cap ends is not one the person left."""
+    return max(2, int(budget) // 2)
+
+
+def _user_walks_away(
+    message: str,
+    turn_i: int,
+    *,
+    questions: int = 0,
+    patience: str = "normal",
+) -> bool:
+    """True when the person gives up on the agent's question rather than
+    answer it (#289): the patience hazard at this question index, and
+    nothing about the budget. Deterministic in the message and turn, so a
+    seeded run reproduces."""
+    hazard = _walk_away_hazard(patience, questions)
+    if hazard <= 0:
+        return False
+    return _draw(message, turn_i, "abandon") < hazard
+
+
+def _user_left(text: str) -> bool:
+    """The user-sim's answer was the leave mark and nothing else."""
+    body = re.sub(r"<think>.*?</think>", "", str(text or ""), flags=re.S).strip()
+    return bool(body) and bool(_LEAVES.fullmatch(body))
+
+
+def ended_on_question(rows) -> dict:
+    """``{"share", "n", "user_left"}``: of ``n`` rows, the share that ended
+    on the agent's question, and how many of those the person left
+    (``ended_by="user_left"``; the rest hit the turn budget).
+
+    Report this next to any criterion about how the agent asks. Before #289
+    it was structurally zero, so a lane could not tell "the agent never asked
+    badly" from "the loop cannot produce that ending". The engine writes it
+    to ``search["ended_on_question"]`` on every run.
+    """
+    total = 0
+    ended = 0
+    left = 0
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        total += 1
+        turns = row.get("messages") or row.get("trajectory") or []
+        last_agent = ""
+        for turn in turns:
+            if isinstance(turn, dict) and turn.get("role") == "assistant":
+                last_agent = str(turn.get("content") or "")
+        if not turns:
+            last_agent = str(row.get("final_text") or "")
+        if last_agent and _agent_asked(last_agent):
+            ended += 1
+        if row.get("ended_by") == "user_left":
+            left += 1
+    return {
+        "share": (ended / total if total else 0.0),
+        "n": total,
+        "user_left": left,
+    }
+
+
 def _want_followup(
-    message: str, turn_i: int, *, user_turns: int = 1, budget: int = 6, agent_text: str = ""
+    message: str,
+    turn_i: int,
+    *,
+    user_turns: int = 1,
+    budget: int = 6,
+    agent_text: str = "",
+    questions: int = 0,
+    patience: str = "normal",
 ) -> bool:
     """True when the human would naturally speak again.
 
@@ -933,13 +1047,28 @@ def _want_followup(
     and asks, the user says yes, the agent acts. At 1.5 user turns most
     rollouts never reach the write, so the rule is never exercised and the
     training set cannot demonstrate it.
+
+    A question no longer earns an answer unconditionally. ``questions`` is
+    how many the agent already asked on this thread; from the second one
+    the person may walk away at the odds ``patience`` sets (#289). Before
+    this, whether a thread ended was decided by the turn budget and never
+    by what the agent said, so no rubric criterion about asking could
+    fail: in source traces 63% of asked threads ended with the person
+    walking away, in generated data 19-22%, all of those depth-cap cuts.
     """
-    cap = max(2, int(budget) // 2)
+    cap = _user_turn_cap(budget)
     if int(user_turns) >= cap:
         return False
     text = str(agent_text or "")
     if _agent_asked(text):
-        return True
+        # Asking is free in simulation and costly in reality. This used to be
+        # an unconditional True (#289); now the person always tries the first
+        # question and from the second on may walk away at the odds
+        # ``patience`` sets. Short threads (budget under 4) never reach a
+        # second question, so the old contract holds there: with room for
+        # one exchange, abandoning would leave the question as the whole
+        # rollout and fill the set with stubs.
+        return not _user_walks_away(message, turn_i, questions=questions, patience=patience)
     if _AGENT_REFUSAL.search(text):
         return True
     if int(budget) < 4:
@@ -948,9 +1077,7 @@ def _want_followup(
         return False
     # Geometric with p = 1 - 1/cap: a thread of cap turns in expectation,
     # deterministic in the message and turn so a seeded run reproduces.
-    digest = hashlib.sha256(f"{message}:{turn_i}:react".encode()).hexdigest()
-    draw = int(digest[:8], 16) / float(1 << 32)
-    return draw < (1.0 - 1.0 / float(cap))
+    return _draw(message, turn_i, "react") < (1.0 - 1.0 / float(cap))
 
 
 # Follow-up user turns only. Opener temperature lives on the writer (0.45–1.05).
@@ -962,6 +1089,7 @@ _USER_SIM_SYSTEM = (
     "Stay in the same world as the opening line and the tools on this thread. "
     "If the agent asked a question, answer it with a concrete detail a person "
     "here would know ({hints}whatever this thread is actually about). "
+    "{leave_note}"
     "{code_note}"
     "If they already acted, react: push back, correct them, or ask for the next thing. "
     "Do not acknowledge. Do not repeat their question. Do not describe a persona."
@@ -988,8 +1116,17 @@ def _detail_hints(tools: list | None) -> list[str]:
     return out[:8]
 
 
-def user_sim_system(tools: list | None = None) -> str:
-    """The user simulator's instructions for this agent's world."""
+_LEAVE_NOTE = (
+    "Only when their question asks for something this person could not know, "
+    "or asks again what was already answered on this thread, the person may "
+    "give up instead: then write exactly [leaves] and nothing else. "
+)
+
+
+def user_sim_system(tools: list | None = None, may_leave: bool = False) -> str:
+    """The user simulator's instructions for this agent's world.
+    ``may_leave`` adds the one way out: a question this person cannot or
+    would not answer may be met with the leave mark (#289)."""
     hints = _detail_hints(tools)
     names = " ".join(_tool_world(tools).split(",")) + " " + " ".join(hints)
     code_note = (
@@ -999,7 +1136,9 @@ def user_sim_system(tools: list | None = None) -> str:
         else ""
     )
     return _USER_SIM_SYSTEM.format(
-        hints=(", ".join(hints) + ", ") if hints else "", code_note=code_note
+        hints=(", ".join(hints) + ", ") if hints else "",
+        leave_note=_LEAVE_NOTE if may_leave else "",
+        code_note=code_note,
     )
 
 
@@ -1255,6 +1394,7 @@ def _user_followup(
     persona_tags: dict | None = None,
     extra: Mapping[str, Any] | None = None,
     turn_stats: dict | None = None,
+    may_leave: bool = False,
 ) -> str:
     """The simulated user's next line, or ``""`` when the writer produced
     none worth keeping. ``extra`` carries the agent's request fields
@@ -1330,7 +1470,7 @@ def _user_followup(
                 base_url,
                 model,
                 [
-                    {"role": "system", "content": user_sim_system(tools)},
+                    {"role": "system", "content": user_sim_system(tools, may_leave=may_leave)},
                     {"role": "user", "content": content},
                 ],
                 tools=None,
@@ -1344,6 +1484,11 @@ def _user_followup(
             continue
         spoken, closed, unclosed = split_reasoning(reply.get("content") or "")
         _note_user_turn(turn_stats, closed, unclosed)
+        # A leave mark is an answer of its own kind: read it before the
+        # reasoning-only retry rule, or a person who thinks then leaves is
+        # retried instead of gone (#289).
+        if may_leave and _user_left(reply.get("content") or ""):
+            return USER_LEFT
         if (closed or unclosed) and len(spoken.strip()) < _MIN_SPOKEN:
             # Reasoning and no spoken line. One more try with the short
             # prompt; never a fragment, never empty user speech.
@@ -1528,6 +1673,7 @@ def local_model(
     max_tokens: int | None = None,
     user_model: str | None = None,
     thinking: bool | None = None,
+    patience: str = "normal",
 ) -> Callable:
     """An agent that talks to an OpenAI-compatible endpoint (a served
     adapter, a local vLLM, any chat server) for ``simulate(agent=...)``.
@@ -1641,11 +1787,13 @@ def local_model(
                         len(messages) - 1, {"role": "assistant", "content": opener_text}
                     )
 
-        def _done(done_steps: list, final: str) -> dict:
+        def _done(done_steps: list, final: str, ended_by: str = "") -> dict:
             out = _finish_on_agent(done_steps, final)
             if opener_text:
                 out["opener"] = opener_text
                 out["opening"] = "agent"
+            if ended_by:
+                out["ended_by"] = ended_by
             return out
 
         steps: list[dict] = []
@@ -1783,10 +1931,21 @@ def local_model(
                 continue
             need_first = n_user < 2
             force_followup = n_user < min_users
+            # Questions the agent already asked on this thread, not counting
+            # this one: the person's patience runs out with them (#289).
+            prior_questions = sum(
+                1 for s in steps if isinstance(s, dict) and _agent_asked(str(s.get("text") or ""))
+            ) - (1 if _agent_asked(spoken) else 0)
             if (room or need_first) and (
                 force_followup
                 or _want_followup(
-                    message, turn_i, user_turns=n_user, budget=budget, agent_text=spoken
+                    message,
+                    turn_i,
+                    user_turns=n_user,
+                    budget=budget,
+                    agent_text=spoken,
+                    questions=prior_questions,
+                    patience=patience,
                 )
             ):
                 follow = _user_followup(
@@ -1804,7 +1963,11 @@ def local_model(
                     force=force_followup,
                     extra=user_extras,
                     turn_stats=turn_stats,
+                    may_leave=patience != "endless",
                 )
+                if follow == USER_LEFT:
+                    # The person could not or would not answer this one.
+                    return _done(steps, spoken or final_text, ended_by="user_left")
                 if follow:
                     last_user = follow
                     n_user += 1
@@ -1818,7 +1981,18 @@ def local_model(
                     # these means the dataset is going single-turn.
                     with turn_stats["lock"]:
                         turn_stats["followup_misses"] = turn_stats.get("followup_misses", 0) + 1
-            return _done(steps, spoken or final_text)
+                return _done(steps, spoken or final_text)
+            # No follow-up. Under the cap and asked, that was the person's
+            # patience; at the cap it was the budget, and the row says so
+            # by carrying no ended_by.
+            left = (
+                (room or need_first)
+                and not force_followup
+                and n_user < _user_turn_cap(budget)
+                and _agent_asked(spoken)
+                and _user_walks_away(message, turn_i, questions=prior_questions, patience=patience)
+            )
+            return _done(steps, spoken or final_text, ended_by="user_left" if left else "")
         return _done(steps, final_text)
 
     agent.__name__ = f"local_model[{model}]"

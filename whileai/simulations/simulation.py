@@ -101,6 +101,7 @@ def simulate(
     timeout: float | None = None,
     logprobs: bool | None = None,
     hard_share: float | None = None,
+    patience: str | None = None,
     **passed: Any,
 ) -> SimulationData:
     """Inspect an agent, generate situations, and roll them out.
@@ -194,6 +195,23 @@ def simulate(
     ``same_model`` and ``warnings`` says which call separates them.
     Training on a model's own unfiltered output teaches it its own habits
     (rlhf-book ch. 12), so the row says who wrote what.
+
+    ``patience=`` is how long the simulated person keeps answering the
+    agent's questions. ``"normal"`` (the default) always tries to answer
+    the first question, and from the second question on may walk away
+    (35% on the second, 60% on each after that, drawn per thread so a
+    seeded run reproduces); at any question the person may also leave
+    when it asks for something they could not or would not know.
+    ``"short"`` walks away sooner (60% then 90%); ``"endless"`` never
+    walks away, which is what every run did before this knob: the
+    person answered every question until the depth cap, so no rubric
+    criterion about asking could fail. The odds are a default, not a
+    measurement: to ground them, fit a Kaplan-Meier hazard per question
+    index on source traces and set the levels from it. A row the person
+    left carries ``ended_by="user_left"`` and ends on the agent's
+    question; ``search["ended_on_question"]`` is ``{"share", "n",
+    "user_left"}``: of ``n`` rows, the share that ended on a question and
+    how many of those the person left.
 
     ``scaffold=`` is generation-only guidance appended to the system prompt
     of the MODEL-BACKED teacher during rollout (and to the scene writer).
@@ -301,6 +319,7 @@ def simulate(
         ("timeout", timeout),
         ("logprobs", logprobs),
         ("hard_share", hard_share),
+        ("patience", patience),
     ):
         if _val is not None:
             passed[_name] = _val
