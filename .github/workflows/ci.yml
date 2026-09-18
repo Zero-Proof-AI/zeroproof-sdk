@@ -132,6 +132,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -139,3 +141,25 @@ jobs:
       # Advisory on a PR: tells you now whether the version you picked will be
       # accepted by the publish gate after merge.
       - run: python .github/scripts/check_version.py
+      # A bump lands through the release workflow (gh workflow run
+      # release.yml), which leaves a fresh `## Unreleased` behind. A PR that
+      # bumps by hand may touch only the four release files, and no PR may
+      # drop the header the next cut renames.
+      - name: release commits touch only release files
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          grep -qx '## Unreleased' CHANGELOG.md || {
+            echo "CHANGELOG.md has no '## Unreleased' header; put it back above the newest version"
+            exit 1
+          }
+          if git diff "$BASE"...HEAD -- pyproject.toml | grep -q '^+version = '; then
+            extra=$(git diff --name-only "$BASE"...HEAD               | grep -vxE 'CHANGELOG.md|pyproject.toml|compat/zeroproof/pyproject.toml|uv.lock' || true)
+            if [ -n "$extra" ]; then
+              echo "This PR bumps the version and also changes:"; echo "$extra"
+              echo "Cut releases with: gh workflow run release.yml. Keep code changes in their own PR."
+              exit 1
+            fi
+          fi
+          echo ok
