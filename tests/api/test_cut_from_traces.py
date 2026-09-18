@@ -78,3 +78,56 @@ def test_cuts_reads_the_summary_without_making_anything(calls):
     assert calls[0]["method"] == "GET"
     assert calls[0]["path"] == "/traces/cuts?agent=a&from=24h"
     assert summary["rl"]["prompts"] == 30
+
+
+# ---- format_cuts: the summary as the sentence the traces page leads with ----
+
+# The real payload of the walk that asked for this: 20 prompts, 3 in the band,
+# too few to hold any back.
+LIVE = {
+    "runs": 60,
+    "prompts": 20,
+    "noReward": 0,
+    "kinds": {"fail": {"prompts": 2}, "band": {"prompts": 3}, "solved": {"prompts": 15}},
+    "rl": {"prompts": 3, "rows": 9, "support": 0.889, "passRate": 0.667, "train": 3, "holdout": 0},
+    "sft": {"prompts": 18, "rows": 18, "train": 14, "holdout": 4},
+    "more": {"prompts": 0},
+}
+
+
+def test_format_cuts_answers_in_three_lines_and_names_the_next_call():
+    out = wai.format_cuts(LIVE, agent="getting-started")
+
+    assert out.splitlines() == [
+        "  3 prompts are worth training on",
+        "  9 runs · 3 train · none held out",
+        '  next: wai.cut(agent="getting-started", kind="rl")',
+    ]
+    # No RL jargon in what a researcher prints: `support` stays in the payload.
+    assert "support" not in out
+
+
+def test_format_cuts_falls_back_to_sft_and_counts_the_holdout():
+    out = wai.format_cuts({**LIVE, "rl": {"prompts": 0}})
+
+    assert "18 prompts have a run worth copying" in out
+    assert "best run each · 14 train · 4 held out" in out
+    assert 'next: wai.cut(kind="sft")' in out
+
+
+def test_format_cuts_sends_ungraded_runs_to_the_call_that_grades_them():
+    ungraded = {**LIVE, "prompts": 0, "noReward": 12, "rl": {}, "sft": {}}
+
+    out = wai.format_cuts(ungraded)
+
+    assert "12 runs have a prompt, none has a pass or fail" in out
+    assert 'next: wai.send_score("<trace id>", 1.0)' in out
+
+
+def test_format_cuts_never_ends_on_a_dead_stop():
+    for report in [
+        {},
+        {**LIVE, "prompts": 0, "rl": {}, "sft": {}},
+        {**LIVE, "rl": {}, "sft": {}, "more": {"prompts": 4}},
+    ]:
+        assert "next: " in wai.format_cuts(report)
