@@ -20,6 +20,28 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   plain words ("Can you check an order for me?") instead of its
   description, which a tester saw quoted verbatim ("Can you look up an
   order by id. Returns item, total, order date and status for me?").
+- `zp` and `wai` are console scripts for the same CLI as `whileai`, so
+  `zp login` works on a machine where someone typed the product's name.
+  The help text still says `whileai`.
+- Every seed is run. `situations=` is sized up to `len(seeds)` when you
+  pass a smaller number, and the search no longer spends a seed's slot on
+  an ask it wrote itself, so `simulate(seeds=[10 asks], situations=3)`
+  runs all ten instead of two. When `budget` cannot pay for
+  `len(seeds) * repeats` rows the run says so before it starts
+  (`budget=12 covers 3 of 10 seeds at repeats=4; raise budget to 40+ or
+  drop seeds`), drops the seeds it named, and lists them in
+  `search["seeds_dropped"]`.
+- `coverage_warnings` also names a run that is hollow in part: rows that
+  made no tool call while other rows did score on the reply alone and
+  lift the pass rate. The note gives the count, the situations and the
+  first three asks, and fires once two rows (or a tenth of the run) are
+  silent.
+- `SimulationData` iterates: `list(data)`, `for row in data` and
+  `len(data)` work on a run, the way they already did on `ScoredData`.
+- The judge contract says where a judge's extra keys go: `reward`,
+  `reason`, `markers` and `failure_class` land on the row, everything
+  else under `row["judge_meta"]` (a returned `failures` list reads back
+  as `row["judge_meta"]["failures"]`). Also in `docs/evals.md`.
 
 ## 0.60 (2026-09-17)
 

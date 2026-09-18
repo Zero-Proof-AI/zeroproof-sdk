@@ -8,7 +8,7 @@ import contextlib
 import hashlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -676,6 +676,15 @@ class SimulationData:
         ``scored.rows()`` is a ``TypeError``. Method here, list there.
         """
         return RowList(export_row(t) for t in self.trajectories)
+
+    def __iter__(self) -> Iterator[dict]:
+        """Iterates as plain trajectory dicts, the way ``ScoredData``
+        does, so ``list(data)``, ``for row in data`` and ``len(data)``
+        work on a run without reaching for ``.trajectories``."""
+        return iter(self.trajectories)
+
+    def __len__(self) -> int:
+        return len(self.trajectories)
 
     def push(
         self,

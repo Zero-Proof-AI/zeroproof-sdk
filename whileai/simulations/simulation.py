@@ -122,6 +122,17 @@ def simulate(
     ids in the seeds or the tool descriptions, or the writer invents
     ids and every rollout is "not found".
 
+    Every seed is run. Each one becomes at least one situation:
+    ``situations`` is sized up to ``len(seeds)`` when you pass a smaller
+    number, and the search never spends a seed's slot on an ask it wrote
+    itself. The one thing that can still drop a seed is ``budget``,
+    which pays for ``len(seeds) * repeats`` rows before anything else;
+    when it cannot, the run says which seeds it dropped in ``warnings``
+    and lists them in ``search["seeds_dropped"]`` before rolling out.
+    Seeds are asks to build a run around, not the eval set: to check
+    that a fixed list of asks all ran and how each scored, use
+    ``evaluate(eval_set=asks)``.
+
     Input is an intent or an agent: ``system_prompt`` alone, ``tools``
     plus a prompt, or ``spec=``. Search writes a grid of human requests
     (ordinary, vague, complex, adversarial) and a spread of agent replies.

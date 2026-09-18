@@ -765,9 +765,12 @@ def amplify_seeds(
     the writer model and asks for same-intent asks in a rotated style
     axis (direct, indirect, adversarial, multilingual, casual, formal,
     playful, contextual). Results are deduplicated against the examples
-    and each other. Originals always survive, first. Returns early with
-    what it has if the backend fails or rounds run out; callers should
-    treat the returned length as the real situation count.
+    and each other. Originals always survive, first, even when ``target``
+    is below the number of examples: the run sizes its situation target
+    up to the number of seeds rather than trading a seed for a minted
+    ask. Returns early with what it has if the backend fails or rounds
+    run out; callers should treat the returned length as the real
+    situation count.
     """
     kept: list[str] = []
     seen: set[str] = set()

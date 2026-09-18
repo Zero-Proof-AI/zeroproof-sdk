@@ -38,6 +38,10 @@ Datasets = "https://huggingface.co/datasets/zero-proof-ai/agent-simulations"
 
 [project.scripts]
 whileai = "whileai.cli:main"
+# same CLI under the two names people type: the product is "zp"
+# (keys start with zp_) and "wai" is the short import alias.
+zp = "whileai.cli:main"
+wai = "whileai.cli:main"
 whileai-simulations = "whileai.simulations.score.quality:main"
 
 [project.optional-dependencies]

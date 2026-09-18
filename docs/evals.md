@@ -94,6 +94,9 @@ reads as one column then. A marker that does not apply to a row is
 `None`, so its rate counts only the rows it measured. A verifier
 (`wai.verify.*`) is a judge too, when the answer is checkable.
 
+Any other key you return is kept under `row["judge_meta"]`, not on the row:
+a judge that returns `failures` reads back as `row["judge_meta"]["failures"]`.
+
 ## 3b. Find what your tests miss
 
 The suite you have sends a set of asks. Which parts of the policy do they

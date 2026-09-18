@@ -332,7 +332,10 @@ def coverage_warnings(
 
     A pass@1 of 1.00 over rows where the agent never called a tool, or a
     marker that fired on no row, is the most expensive eval failure there
-    is, because it reads as a result. ``run_judge`` (so ``evaluate`` and
+    is, because it reads as a result. A run can be hollow in part, too:
+    rows that called no tool score on the reply alone and lift the pass
+    rate of the rows that did the work, so they get their own note once
+    there are two of them (or a tenth of the run). ``run_judge`` (so ``evaluate`` and
     ``data.grade``) attaches these to ``ScoredData.warnings`` and logs
     them once. ``tools=`` is the declared tool list (OpenAI or bare shape,
     or just names); ``evaluate(data, judge)`` and ``data.grade`` read it
@@ -353,6 +356,20 @@ def coverage_warnings(
     if names and with_calls == 0:
         out.append(f"0 of {n} rows called a tool, so this score says nothing about tool use. {fix}")
     elif names:
+        # Part of a run can be hollow too. Rows that never touch a tool
+        # pass on the reply alone, and they lift the run's pass rate
+        # while measuring nothing. Two rows, or a tenth of them, is
+        # enough to say so; one odd row is not worth the noise.
+        silent = [r for r in row_list if tool_calls(r) == 0]
+        if silent and (len(silent) >= 2 or len(silent) / n >= 0.1):
+            asks = list(dict.fromkeys(str(r.get("prompt") or "") for r in silent))
+            shown = "; ".join(a[:60] for a in asks[:3] if a)
+            out.append(
+                f"{len(silent)} of {n} rows made no tool call "
+                f"({len(asks)} situations{': ' + shown if shown else ''}); "
+                "they score without touching a tool. Drop them from the eval "
+                "or give them a seed that reaches one."
+            )
         called: set[str] = set()
         for r in row_list:
             for s in r.get("steps") or r.get("tool_trace") or []:

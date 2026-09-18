@@ -213,6 +213,15 @@ class Run:
         self.inflight: dict = {}
         self.scenario_futs: list = []
         self.generated_pool: list[str] = []
+        # The caller's own asks, filled by _seed_pool; never evicted by
+        # the situations quota. Seeds the budget cannot pay for are
+        # dropped before the run and named here.
+        self.seed_prompt_set: set[str] = set()
+        self.seeds_dropped: list[str] = []
+        self.seed_budget_note: str = ""
+        # Loop state the seed reservation reads; _init_loop_state resets both.
+        self.prompt_rollouts: dict[str, int] = {}
+        self.used: set[str] = set()
 
     # ------------------------------------------------------------ driver
 
@@ -298,6 +307,19 @@ class Run:
 
     def _amplify_seeds(self) -> None:
         c = self.c
+        # The asks the caller handed in (plus a spec's situations and any
+        # failing asks mined from traces), before the writer mints
+        # variants of them. Every one of these is run: the situations
+        # quota never evicts them and a writer ask never takes their
+        # rows. Only the budget can drop one, and _fit_seeds_to_budget
+        # says which before the run starts.
+        self.given_seeds: list[str] = list(dict.fromkeys(self.seed_prompts))
+        self._fit_seeds_to_budget()
+        if c.n_situations_target and len(self.given_seeds) > int(c.n_situations_target):
+            # situations= below the number of seeds used to evict the
+            # extra seeds. The seeds win: they are the asks the caller
+            # wrote, so the target grows to hold them.
+            c.n_situations_target = len(self.given_seeds)
         # Amplifies seed prompts only when seeds= is given; advanced["seed_prompts"]
         # stays literal. Offline runs (simulator=False) make no network calls.
         # Runs after inspect() so the writer hint carries the resolved policy.
@@ -424,6 +446,9 @@ class Run:
         if self.tool_draft_failed:
             data.degraded.append("tool_draft_unavailable")
         self.data = data
+        if self.seed_budget_note:
+            data.warnings.append(self.seed_budget_note)
+            data.search["seeds_dropped"] = list(self.seeds_dropped)
         self.scene_box: dict[str, Any] = {"brief": ""}
         self.shape_box: dict[str, dict] = {}
         self.trace_exemplars: dict[str, list] = {}
@@ -433,6 +458,50 @@ class Run:
             # did not show.
             self.trace_exemplars = mine_result_exemplars(self.trace_rows)
             self.shape_box.update(exemplar_result_shapes(self.trace_exemplars))
+
+    def _fit_seeds_to_budget(self) -> None:
+        """Work out which seeds the budget cannot pay for, before the run.
+
+        Every seed costs ``repeats`` rows. When ``budget`` is smaller
+        than that bill the run used to spend it on whichever seeds came
+        first, and the caller had to count asks in the output to notice
+        the rest were gone. The seeds that do not fit are dropped here,
+        named in ``warnings`` and listed in ``search["seeds_dropped"]``
+        once the run object exists.
+        """
+        c = self.c
+        seeds = list(self.given_seeds)
+        if not seeds or c.budget is None:
+            return
+        k = max(1, int(c.repeat_count))
+        covered = max(1, int(c.budget) // k)
+        if covered >= len(seeds):
+            return
+        dropped = seeds[covered:]
+        gone = set(dropped)
+        self.seed_prompts = [p for p in self.seed_prompts if p not in gone]
+        self.given_seeds = seeds[:covered]
+        self.seeds_dropped = dropped
+        self.seed_budget_note = (
+            f"budget={int(c.budget)} covers {covered} of {len(seeds)} seeds at "
+            f"repeats={k}; raise budget to {len(seeds) * k}+ or drop seeds"
+        )
+
+    def _seeds_waiting(self) -> int:
+        """Seeds the run has not started yet. Their situation slots and
+        their rows are held for them: a writer ask never takes one."""
+        if not self.seed_prompt_set:
+            return 0
+        return sum(1 for p in self.seed_prompt_set if p not in self.used)
+
+    def _room_for_a_new_ask(self) -> bool:
+        """False when every row left in the budget is owed to a seed."""
+        c = self.c
+        waiting = self._seeds_waiting()
+        if not waiting or c.budget is None:
+            return True
+        scheduled = sum(self.prompt_rollouts.values())
+        return int(c.cap) - scheduled - waiting * max(1, int(c.repeat_count)) > 0
 
     def _start_scene_thread(self) -> None:
         self.scene_thread: threading.Thread | None = None
@@ -962,7 +1031,7 @@ class Run:
         self.explore_only = False
         self.failing_regions: list[dict] = []
         self.failing_rows: list[dict] = []
-        self.used: set[str] = set()
+        self.used = set()
         self.rerolls: dict[str, int] = {}
         self.discarded: set[str] = set()
         self.used_situations: set[str] = set()
@@ -979,7 +1048,7 @@ class Run:
         self.pinned_plans: dict[str, dict] = {}
         self.scenario_families: list[tuple[str, frozenset[str]]] = []
         self.situation_prompts: dict[str, list[str]] = {}
-        self.prompt_rollouts: dict[str, int] = {}
+        self.prompt_rollouts = {}
         self.verify_queue: list[tuple] = []
         self.allocator_counts: dict[str, int] = {"explore": 0, "expand": 0, "verify": 0}
         # Successive allocation (rl): one label per finished rollout of a
@@ -1069,6 +1138,7 @@ class Run:
                 # The runner reads this dict by prompt: the mock world
                 # answers under the same faults and world state as before.
                 self.fault_plans[prompt] = plan
+        self.seed_prompt_set = {str(t).strip() for t in self.given_seeds if str(t).strip()}
         for text in self.seed_prompts:
             text = str(text).strip()
             if not text:
@@ -1117,6 +1187,12 @@ class Run:
             # A pinned prompt is owed its rollouts whatever the situation
             # caps say; the caller fixed the task set.
             return True
+        if prompt in self.seed_prompt_set:
+            # So is a seed: it is the ask the caller wrote, not a
+            # situation the search picked, so the situations= quota
+            # never evicts it. Only the budget can, and the run says so
+            # up front when it does.
+            return True
         meta = self.generator.meta.get(prompt) or {}
         sk = _situation_key_from_meta(meta, prompt)
         if self.explore_only:
@@ -1126,11 +1202,14 @@ class Run:
             if sk and sk in self.used_situations:
                 return False
         elif sk:
+            if not self._room_for_a_new_ask():
+                # Every row left is owed to a seed that has not gone out.
+                return False
             if (
                 c.n_situations_target
                 and not self.cap_lifted["lifted"]
                 and sk not in self.used_situations
-                and len(self.used_situations) >= c.n_situations_target
+                and len(self.used_situations) + self._seeds_waiting() >= c.n_situations_target
             ):
                 return False
             if len(self.situation_prompts.get(sk, [])) >= c.n_req and prompt not in (
@@ -1732,16 +1811,19 @@ class Run:
     ) -> int:
         c = self.c
         sk = _situation_key_from_meta(meta, prompt)
-        if (
-            action == "explore"
-            and c.n_situations_target
-            and not self.cap_lifted["lifted"]
-            and (
-                sk not in self.used_situations
-                and len(self.used_situations) >= c.n_situations_target
-            )
-        ):
-            return 0
+        if prompt not in self.seed_prompt_set:
+            # Seeds are served first: a writer ask waits for the
+            # situation slots and the rows the seeds have not spent yet.
+            if action in ("explore", "expand") and not self._room_for_a_new_ask():
+                return 0
+            if (
+                action == "explore"
+                and c.n_situations_target
+                and not self.cap_lifted["lifted"]
+                and sk not in self.used_situations
+                and len(self.used_situations) + self._seeds_waiting() >= c.n_situations_target
+            ):
+                return 0
         before = len(batch)
         self._schedule_prompt(batch, prompt, meta, row, action)
         added = len(batch) - before
@@ -2785,6 +2867,10 @@ class Run:
         data.allocator = dict(self.allocator_counts)
         if self.seed_amp_report:
             data.search["seed_amplification"] = self.seed_amp_report
+        if self.seeds_dropped:
+            # search is rebuilt every batch, so the note written before
+            # the run is put back here, on the run the caller reads.
+            data.search["seeds_dropped"] = list(self.seeds_dropped)
         if c.pinned_tasks:
             ran = {str(t.get("prompt") or "") for t in data.trajectories}
             pinned = set(self.pinned_prompts)
