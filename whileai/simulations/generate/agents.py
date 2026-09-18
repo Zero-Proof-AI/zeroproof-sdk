@@ -1445,6 +1445,13 @@ def reply_budget(max_tokens: int | None = None) -> int:
     return 768 if CONTEXT_TOKENS <= 8192 else 2048
 
 
+#: A scale-to-zero endpoint's first request after idle was measured at 113s
+#: (#302). At the old default of 60 the pass returned zero rows and raised
+#: nothing, because the timeout fired before the model ever answered. A
+#: longer bound costs nothing on a warm endpoint: it only caps the wait.
+LOCAL_MODEL_TIMEOUT = 180.0
+
+
 def local_model(
     base_url: str,
     model: str,
@@ -1463,7 +1470,7 @@ def local_model(
     opening_rate: float = 0.0,
     human_tools: set | None = None,
     execute: Callable | None = None,
-    timeout: float = 60,
+    timeout: float = LOCAL_MODEL_TIMEOUT,
     max_tokens: int | None = None,
     user_model: str | None = None,
     thinking: bool | None = None,

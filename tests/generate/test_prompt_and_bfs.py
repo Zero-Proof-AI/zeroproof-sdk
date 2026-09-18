@@ -1834,3 +1834,14 @@ def test_followup_depth_does_not_depend_on_success_phrasing():
     assert abs(active - plain) < 0.3, (active, plain)
     # a question still earns an answer, which is the one phrasing that should matter
     assert depth("Do you want me to cancel it?") > active
+
+
+def test_local_model_timeout_outlives_a_cold_start():
+    """113s measured on a scale-to-zero endpoint; the old default of 60 returned
+    zero rows and raised nothing, because the timeout fired first (#302)."""
+    import inspect
+
+    from whileai.simulations.generate.agents import LOCAL_MODEL_TIMEOUT, local_model
+
+    assert LOCAL_MODEL_TIMEOUT >= 120
+    assert inspect.signature(local_model).parameters["timeout"].default == LOCAL_MODEL_TIMEOUT
