@@ -57,9 +57,11 @@ def test_375a_offline_writers_compare(tmp_path):
         budget=16,
         advanced={"model_version": "v1"},
     )
-    judge = lambda row: {
-        "reward": 1.0 if "refund" in str(row.get("final_text", "")).lower() else 0.0
-    }
+
+    def judge(row: dict) -> dict:
+        got = str(row.get("final_text", "")).lower()
+        return {"reward": 1.0 if "refund" in got else 0.0}
+
     a = wai.evaluate(before.rows, judge)
     b = wai.evaluate(after.rows, judge)
     # force the two arms to report different offline writers
