@@ -4,13 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whileai"
-<<<<<<< HEAD
-version = "0.64"
-description = "Post-training data and evaluation for tool-using LLM agents: simulate, grade, measure, select, train, export, with the checks from rlhfbook.com."
-=======
 version = "0.65"
-description = "While Python SDK: trace ingestion and verification client, plus agent simulations grounded in your tools and system prompt."
->>>>>>> origin/main
+description = "Post-training data and evaluation for tool-using LLM agents: simulate, grade, measure, select, train, export, with the checks from rlhfbook.com."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
