@@ -1203,7 +1203,7 @@ def behavior_state(
         v = str(r.get("model_version") or "")
         if v and v not in versions:
             versions.append(v)
-    if len(versions) >= 2:
+    if len(versions) >= 2:  # noqa: PLR2004  # two versions before a comparison
 
         def bucket_of(idx, r):
             return str(r.get("model_version") or versions[0])

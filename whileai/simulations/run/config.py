@@ -24,6 +24,7 @@ from ..defaults import (
     DEFAULT_COMPLETIONS_PER_REQUEST,
     DEFAULT_CONCURRENCY,
     DEFAULT_EXTRA_CARDS,
+    DEFAULT_FAULT_RATE,
     DEFAULT_MIN_USER_TURNS,
     DEFAULT_POOL_SIZE,
     DEFAULT_PROBE,
@@ -33,6 +34,7 @@ from ..defaults import (
     MAX_COMPLETIONS_PER_REQUEST,
     RL_FAULT_RATE,
     RL_ROLLOUTS_PER_PROMPT,
+    SAMPLING_TEMPERATURE_MAX,
     SATURATION_CAP,
     SFT_PHRASINGS_PER_SITUATION,
     STOP_GRACE_S,
@@ -40,9 +42,9 @@ from ..defaults import (
     resolve_knobs,
 )
 from ..generate.adapters import resolve_system_prompt
-from ..generate.agents import LOCAL_MODEL_TIMEOUT, PATIENCE_LEVELS
+from ..generate.agents import LOCAL_MODEL_TIMEOUT, Patience, patience_hazards
 from ..generate.diversity import adaptive_allocator
-from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS, check_dimensions
+from ..generate.scenarios import SEARCH_ARMS, check_dimensions
 from .spec import spec_rubric
 
 if TYPE_CHECKING:
@@ -394,7 +396,10 @@ class RunConfig:
     max_turns: Any
     avg_turns: float
     min_user_turns: int
-    patience: str
+    # a level name, or (second, later) walk-away chances (see patience_hazards)
+    patience: Patience
+    # one temperature for every simulated-user line, or None for the defaults
+    user_temperature: float | None
     temperature: Any
     agent_max_tokens: int | None
     sampling: dict | None
@@ -556,11 +561,26 @@ def resolve_run_config(
     max_turns = cfg.pop("max_turns", None)
     avg_turns = float(cfg.pop("avg_turns", DEFAULT_AVG_TURNS))
     min_user_turns = max(1, int(cfg.pop("min_user_turns", DEFAULT_MIN_USER_TURNS)))
-    patience = str(cfg.pop("patience", None) or "normal").strip().lower()
-    if patience not in PATIENCE_LEVELS:
+    # patience: a level name ("normal", "short", "endless") or a table
+    # {"second": p, "later": q} / (p, q) of walk-away chances fitted from
+    # your own traces. patience_hazards() is the one validator, so a bad
+    # value fails here with the fix before any model is touched.
+    raw_patience = cfg.pop("patience", None)
+    patience: Patience
+    if raw_patience is None or isinstance(raw_patience, str):
+        patience = str(raw_patience or "normal").strip().lower()
+        patience_hazards(patience)
+    else:
+        patience = patience_hazards(raw_patience)
+    # user_temperature: the sampling temperature of every simulated-user
+    # line (follow-ups and human-tool answers alike); None keeps the two
+    # named defaults in generate/agents.py.
+    raw_user_temperature = cfg.pop("user_temperature", None)
+    user_temperature = None if raw_user_temperature is None else float(raw_user_temperature)
+    if user_temperature is not None and not 0.0 <= user_temperature <= SAMPLING_TEMPERATURE_MAX:
         raise ValueError(
-            f"patience={patience!r} is not a level; use one of "
-            + ", ".join(repr(p) for p in PATIENCE_LEVELS)
+            f"user_temperature={user_temperature!r} is outside 0..2; it is a sampling "
+            "temperature for the simulated user's lines (None keeps the defaults)"
         )
     temperature = cfg.pop("temperature", None)
     # The model agent's reply budget. Default: 768 tokens, or 2048 above an
@@ -724,6 +744,27 @@ def resolve_run_config(
         from ..world.sandbox import WorldOptions
 
         world_options = WorldOptions.coerce(world_options)
+    # A tool_condition the world cannot answer would steer cells at a fault
+    # that never fires. "success", a condition in the world's condition_modes,
+    # or a fault mode the world knows (shipped or added through
+    # advanced={"world": {"fault_modes": ...}}) are the values that land.
+    if isinstance(dimensions, dict) and dimensions.get("tool_condition"):
+        from ..world.sandbox import WorldOptions
+
+        world = WorldOptions.coerce(world_options)
+        unknown_conditions = [
+            str(v)
+            for v in dimensions["tool_condition"]
+            if str(v) != "success" and world.fault_mode_for(str(v)) is None
+        ]
+        if unknown_conditions:
+            raise ValueError(
+                f"dimensions= tool_condition values {unknown_conditions} name no fault mode "
+                "the mock "
+                f"world knows; use success, {', '.join(sorted(world.condition_modes))} "
+                f"or a key of fault_modes ({', '.join(sorted(world.fault_modes))}). Add a "
+                'builder with advanced={"world": {"fault_modes": {**FAULT_MODES, name: fn}}}.'
+            )
 
     cap = budget if budget is not None else SATURATION_CAP
     return RunConfig(
@@ -774,6 +815,7 @@ def resolve_run_config(
         avg_turns=avg_turns,
         min_user_turns=min_user_turns,
         patience=patience,
+        user_temperature=user_temperature,
         temperature=temperature,
         agent_max_tokens=agent_max_tokens,
         sampling=sampling,

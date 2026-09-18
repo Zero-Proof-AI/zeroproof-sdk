@@ -143,10 +143,22 @@ _T975 = {
 }  # fmt: skip
 
 
+#: Lentz's continued fraction guards: a floor that keeps a near-zero
+#: denominator finite, and the step size at which the fraction has
+#: converged to double precision (Numerical Recipes 6.4).
+_BETACF_TINY = 1e-300
+_BETACF_EPS = 3e-16
+#: A within-minus-between variance under this is zero at double precision.
+_VARIANCE_EPS = 1e-12
+#: The sign-flip null: each paired difference keeps or flips its sign on a
+#: fair coin, one half by definition.
+_FAIR_COIN = 0.5
+
+
 def _betacf(a: float, b: float, x: float) -> float:
     """Continued fraction for the incomplete beta function (Lentz's
     method, as in Numerical Recipes 6.4)."""
-    tiny = 1e-300
+    tiny = _BETACF_TINY
     qab, qap, qam = a + b, a + 1.0, a - 1.0
     c, d = 1.0, 1.0 - qab * x / qap
     d = 1.0 / (d if abs(d) > tiny else tiny)
@@ -164,7 +176,7 @@ def _betacf(a: float, b: float, x: float) -> float:
         c = 1.0 + aa / (c if abs(c) > tiny else tiny)
         step = d * c
         h *= step
-        if abs(step - 1.0) < 3e-16:
+        if abs(step - 1.0) < _BETACF_EPS:
             break
     return h
 
@@ -190,6 +202,13 @@ def _t_cdf(t: float, df: int) -> float:
     return 1.0 - tail if t >= 0 else tail
 
 
+# _T_BRACKET_HI = 1000: the upper end of the bisection bracket for a t
+# quantile (no level anyone asks for needs a larger t at df >= 1);
+# _T_TOLERANCE = 1e-10: the bracket width at which the inversion stops.
+_T_BRACKET_HI = 1000.0
+_T_TOLERANCE = 1e-10
+
+
 def _t_quantile(df: int, level: float = CI_LEVEL) -> float:
     """The two-sided t quantile at ``df`` degrees of freedom and ``level``:
     the table to 30 at the default level, the Cornish-Fisher expansion in
@@ -202,14 +221,14 @@ def _t_quantile(df: int, level: float = CI_LEVEL) -> float:
         z = Z_95
         return z + (z**3 + z) / (4 * n) + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * n * n)
     target = (1 + level) / 2
-    lo, hi = 0.0, 1000.0
+    lo, hi = 0.0, _T_BRACKET_HI
     for _ in range(200):
         mid = (lo + hi) / 2
         if _t_cdf(mid, n) < target:
             lo = mid
         else:
             hi = mid
-        if hi - lo < 1e-10:
+        if hi - lo < _T_TOLERANCE:
             break
     return (lo + hi) / 2
 
@@ -302,7 +321,7 @@ def _rows_base_and_k(rows: Sequence[dict]) -> tuple[float, int, float | None, fl
     rates = [_mean(v) for v in groups.values()]
     base = _mean(rates)
     k = min(len(v) for v in groups.values())
-    spread = _sample_sd(rates) if len(rates) >= 2 else None
+    spread = _sample_sd(rates) if len(rates) >= 2 else None  # noqa: PLR2004  # a spread needs a pair
     return base, k, spread, _independence_ratio(rates)
 
 
@@ -318,12 +337,12 @@ def _independence_ratio(rates: Sequence[float]) -> float | None:
     finite unless every task is a sure pass or a sure fail, when it is
     ``None``: the model's variance is then all between tasks and pairing
     removes all of it)."""
-    if len(rates) < 2:
+    if len(rates) < 2:  # noqa: PLR2004  # a spread needs a pair
         return None
     mean = _mean(rates)
     within = mean * (1 - mean)
     between = sum((r - mean) ** 2 for r in rates) / len(rates)
-    if within <= 0 or within - between <= 1e-12:
+    if within <= 0 or within - between <= _VARIANCE_EPS:
         return None
     return within / (within - between)
 
@@ -820,7 +839,7 @@ def eval_variance(
         return by_run, covered
 
     def _sample_std(values: list[float]) -> float | None:
-        if len(values) < 2:
+        if len(values) < 2:  # noqa: PLR2004  # a spread needs a pair
             return None
         centre = _mean(values)
         return (sum((v - centre) ** 2 for v in values) / (len(values) - 1)) ** 0.5
@@ -923,7 +942,7 @@ def compare_runs(
         n = len(diffs)
         extreme = 0
         for _ in range(n_boot):
-            flipped = _mean([d if rng.random() < 0.5 else -d for d in diffs])
+            flipped = _mean([d if rng.random() < _FAIR_COIN else -d for d in diffs])
             if abs(flipped) >= observed - 1e-12:
                 extreme += 1
         p_value = (extreme + 1) / (n_boot + 1)
@@ -1073,7 +1092,7 @@ def _distinct_task_similarity(
             if task_ids[b] is None or task_ids[b] == task_ids[a]:
                 continue
             sims.append(float(sum(x * y for x, y in zip(vectors[a], vectors[b]))))
-    if len(sims) < 2:
+    if len(sims) < 2:  # noqa: PLR2004  # a spread needs a pair
         return None
     sims.sort()
     return min(1.0, sims[round(DISTINCT_TASK_PERCENTILE * (len(sims) - 1))])

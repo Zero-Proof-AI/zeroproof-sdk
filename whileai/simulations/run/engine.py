@@ -25,6 +25,7 @@ import logging
 import re
 import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,7 @@ from ..score.grading import (
     dead_tools_note,
     tool_outcomes,
 )
+from ..world.sandbox import WorldOptions
 from .config import RunConfig
 from .rows import (
     LOST_REASONS,
@@ -214,6 +216,13 @@ def _agent_error_text(exc: BaseException) -> str:
 
 FINISH_REASONS = ("stop", "length", "tool", "error")
 
+__all__ = ["FINISH_REASONS", "Run", "progress_line"]
+
+#: A queued job is ``(prompt, plan, meta, selection)``; older tuples are
+#: shorter, so the two trailing slots are read by index with a length check.
+_JOB_META = 2
+_JOB_SELECTION = 3
+
 
 def _finish_reason(raw: dict, steps: list, final_text: str) -> str:
     """Why the rollout ended, on the row where a trainer can read it.
@@ -238,26 +247,31 @@ def _finish_reason(raw: dict, steps: list, final_text: str) -> str:
     return "stop"
 
 
+#: Seconds in a minute and in an hour, for the clock text.
+_MINUTE_S = 60
+_HOUR_S = 60 * _MINUTE_S
+
+
 def _clock_text(seconds: float) -> str:
     """Seconds as a short human span: ``45s``, ``1m40s``, ``1h4m``."""
     total = max(0, int(seconds))
-    if total < 60:
+    if total < _MINUTE_S:
         return f"{total}s"
-    if total < 3600:
-        minutes, rest = divmod(total, 60)
+    if total < _HOUR_S:
+        minutes, rest = divmod(total, _MINUTE_S)
         return f"{minutes}m{rest}s" if rest else f"{minutes}m"
-    hours, rest = divmod(total, 3600)
-    minutes = rest // 60
+    hours, rest = divmod(total, _HOUR_S)
+    minutes = rest // _MINUTE_S
     return f"{hours}h{minutes}m" if minutes else f"{hours}h"
 
 
 def _left_text(seconds: float) -> str:
     """The same span, rounded, for an estimate nobody should read to the
     second: whole minutes over a minute, whole seconds under it."""
-    if seconds < 60:
+    if seconds < _MINUTE_S:
         return f"{max(1, round(seconds))}s"
-    if seconds < 3600:
-        return f"{max(1, round(seconds / 60))}m"
+    if seconds < _HOUR_S:
+        return f"{max(1, round(seconds / _MINUTE_S))}m"
     return _clock_text(seconds)
 
 
@@ -691,6 +705,10 @@ class Run:
             runner_kw["logprobs"] = c.logprobs
         if c.user_model:
             runner_kw["user_model"] = c.user_model
+        if c.user_temperature is not None:
+            runner_kw["user_temperature"] = float(c.user_temperature)
+        if c.world_options is not None:
+            runner_kw["world_options"] = c.world_options
         # Who plays the user: the agent's own model unless user_model= names
         # another. Callable and HTTP agents take one message and never get a
         # simulated user, so they carry no tag.
@@ -762,6 +780,7 @@ class Run:
             arm_weights=self.arm_weights,
             simulator=self.simulator,
             hard_share=c.hard_share,
+            world=c.world_options,
             kind=self.writer_kind,
             scenarios_per_request=c.scenarios_per_request,
             completions_per_request=c.completions_per_request,
@@ -1661,6 +1680,7 @@ class Run:
             dimensions=self.dimensions,
             simulator=self.simulator,
             hard_share=c.hard_share,
+            world=c.world_options,
             kind=self.writer_kind,
             scenarios_per_request=n_cards,
             completions_per_request=n_comp,
@@ -2549,7 +2569,7 @@ class Run:
             self.region_sigs.setdefault(rid, set()).add(t["behavior_signature"])
             if mutation_worthy(t):
                 self.region_fails[rid] = self.region_fails.get(rid, 0) + 1
-            sel = job[3] if len(job) > 3 else {}
+            sel = job[_JOB_SELECTION] if len(job) > _JOB_SELECTION else {}
             nov = sel.get("novelty") if isinstance(sel, dict) else None
             if nov is not None:
                 prev = self.region_novelty.get(rid, float(nov))
@@ -2675,8 +2695,8 @@ class Run:
                     want_verify = True
             if not want_verify:
                 continue
-            meta = job[2] if len(job) > 2 else {}
-            sel = job[3] if len(job) > 3 else {}
+            meta = job[_JOB_META] if len(job) > _JOB_META else {}
+            sel = job[_JOB_SELECTION] if len(job) > _JOB_SELECTION else {}
             self.verify_queue.append(
                 (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})
             )
@@ -2958,8 +2978,8 @@ class Run:
         return laplace(self.groups_mixed, self.groups_probed, self.c.knobs.smoothing_alpha)
 
     def _queue_verify(self, prompt: str, job: tuple, count: int) -> None:
-        meta = job[2] if len(job) > 2 else {}
-        sel = job[3] if len(job) > 3 else {}
+        meta = job[_JOB_META] if len(job) > _JOB_META else {}
+        sel = job[_JOB_SELECTION] if len(job) > _JOB_SELECTION else {}
         for _ in range(max(0, int(count))):
             self.verify_queue.append(
                 (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})
@@ -3253,6 +3273,13 @@ class Run:
         data.coverage["unique"] = c.unique_cards
         data.coverage["unique_situations"] = c.unique_cards
         data.coverage["repeats"] = c.repeat_count
+        # The knobs the run resolved, so a report says what it ran under:
+        # every RunKnobs field, and the three named advanced keys that
+        # steer the simulated user and the world.
+        data.coverage["knobs"] = asdict(c.knobs)
+        data.coverage["patience"] = c.patience
+        data.coverage["user_temperature"] = c.user_temperature
+        data.coverage["world"] = WorldOptions.coerce(c.world_options).summary()
         data.coverage["mode"] = c.topo["mode"]
         data.coverage["repeat_policy"] = c.topo["repeat_policy"]
         data.coverage["until"] = c.until_key

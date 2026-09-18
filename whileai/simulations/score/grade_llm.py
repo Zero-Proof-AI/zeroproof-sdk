@@ -619,6 +619,9 @@ def _parse_binary(text: str) -> int | None:
     return score
 
 
+# JUDGE_WARMUP_TIMEOUT = 600: seconds to wait for a cold hosted judge to
+# answer its first call; a Modal container start takes two to three
+# minutes and a queue can double it (convention).
 JUDGE_WARMUP_TIMEOUT = 600.0
 
 

@@ -35,6 +35,7 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ..defaults import TEXT_HEURISTICS
 from ..world.sandbox import MockEnvironment
 from .agents import current_rollout
 
@@ -221,7 +222,11 @@ def seeded_agent(
         low = text.lower()
         target = tool_list[0]
         for t in tool_list:
-            words = [x for x in _tool_name(t).lower().split("_") if len(x) > 2]
+            words = [
+                x
+                for x in _tool_name(t).lower().split("_")
+                if len(x) >= TEXT_HEURISTICS.tool_word_min_chars
+            ]
             if words and all(x in low for x in words):
                 target = t
                 break

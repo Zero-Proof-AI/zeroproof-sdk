@@ -29,6 +29,7 @@ import json
 import os
 import time
 from collections.abc import Mapping
+from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlparse
 
@@ -36,7 +37,7 @@ import requests
 
 from whileai._env import getenv
 
-from ..defaults import TRANSIENT_BACKOFF_S, TRANSIENT_TRIES
+from ..defaults import MIN_REPLY_TOKENS, TRANSIENT_BACKOFF_S, TRANSIENT_TRIES
 
 # The spec carries only the model name, so the base URL is fixed and doubles
 # as the marker that routes a call here.
@@ -286,17 +287,17 @@ def _raise_for_status(status: int, body: str, model: str, *, tries: int) -> None
     detail = _error_message(status, body)
     if status in {401, 403}:
         raise RuntimeError(f"Anthropic rejected the API key ({status}): {detail} Check {KEY_ENV}.")
-    if status == 404:
+    if status == HTTPStatus.NOT_FOUND:
         raise RuntimeError(
             f"Anthropic has no model {model!r} (404): {detail} "
             "Use a model id from console.anthropic.com."
         )
-    if status == 429:
+    if status == HTTPStatus.TOO_MANY_REQUESTS:
         raise RuntimeError(
             f"Anthropic rate-limited {model} (429) after {tries} tries: {detail} "
             "Lower concurrency= or wait for the limit to reset."
         )
-    if status >= 500:
+    if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
         raise RuntimeError(
             f"Anthropic returned {status} for {model} after {tries} tries: {detail} Retry later."
         )
@@ -326,13 +327,19 @@ def _one_call(
     for _ in range(8):
         response = requests.post(url, headers=headers, json=payload, timeout=timeout)
         status = int(response.status_code)
-        if status < 400:
+        if status < HTTPStatus.BAD_REQUEST:
             return reply_from_response(response.json())
         body = response.text or ""
-        if status == 400 and "max_tokens" in body and int(payload.get("max_tokens") or 0) > 256:
-            payload["max_tokens"] = max(256, int(payload["max_tokens"]) // 2)
+        if (
+            status == HTTPStatus.BAD_REQUEST
+            and "max_tokens" in body
+            and int(payload.get("max_tokens") or 0) > MIN_REPLY_TOKENS
+        ):
+            payload["max_tokens"] = max(MIN_REPLY_TOKENS, int(payload["max_tokens"]) // 2)
             continue
-        if (status == 429 or status >= 500) and transient < TRANSIENT_TRIES:
+        if (
+            status == HTTPStatus.TOO_MANY_REQUESTS or status >= HTTPStatus.INTERNAL_SERVER_ERROR
+        ) and transient < TRANSIENT_TRIES:
             time.sleep(_retry_after(response.headers, transient))
             transient += 1
             continue

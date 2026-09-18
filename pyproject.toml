@@ -79,7 +79,13 @@ target-version = "py310"
 extend-exclude = ["build", "dist"]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+# PLR2004 (magic value in a comparison) is the ruff half of the
+# no-hardcoding rule: scripts/check_no_hardcoding.py checks the comment
+# form on named constants, PLR2004 catches the bare number in a compare
+# whatever shape it sits in. Strings and bytes are exempt (status words,
+# role names); numbers are not, so a `2` that is structure carries a
+# `# noqa: PLR2004  # <why>`.
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "PLR2004"]
 ignore = [
     "E501",   # long lines: the formatter owns wrapping; prose in docstrings stays
     "RUF001", "RUF002", "RUF003",  # typographic dashes and arrows in prose
@@ -88,13 +94,32 @@ ignore = [
     "B905",    # zip(strict=) everywhere reads worse than the cases it protects
 ]
 
+[tool.ruff.lint.pylint]
+allow-magic-value-types = ["str", "bytes"]
+
 [tool.ruff.lint.per-file-ignores]
+# defaults.py documents every constant as `# NAME = value: why`, which
+# ERA001 (commented-out code) would read as dead code if it is ever enabled.
+"whileai/simulations/defaults.py" = ["ERA001"]
 # The package init re-exports the public surface; the re-exports are the point.
 "whileai/simulations/__init__.py" = ["F401", "E402"]
 "whileai/__init__.py" = ["F401"]
 # Examples and the identity generator set sys.path before importing.
-"recipes/**" = ["E402"]
-"tests/**" = ["E402"]
+"recipes/**" = ["E402", "PLR2004"]
+"tests/**" = ["E402", "PLR2004"]
+"scripts/**" = ["PLR2004"]
+# Skill playbooks are recipes: their check.py thresholds are the lesson, not engine defaults.
+"skills/**" = ["PLR2004"]
+".github/**" = ["PLR2004"]
+# The account, ingest and platform clients outside simulations/ are not
+# under the no-hardcoding rule (yet); their numbers are HTTP codes and
+# gate limits. Named one by one: a `whileai/*.py` glob would match the
+# whole package.
+"whileai/auth.py" = ["PLR2004"]
+"whileai/ingest.py" = ["PLR2004"]
+"whileai/init_evals.py" = ["PLR2004"]
+"whileai/platform.py" = ["PLR2004"]
+"whileai/cli.py" = ["PLR2004"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["whileai", "tests"]

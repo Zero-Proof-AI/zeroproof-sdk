@@ -46,12 +46,15 @@ SHOP = [
 
 def test_defaults_are_the_named_numbers_in_one_home():
     o = DEFAULT_WORLD
-    assert o.search_hits == defaults.WORLD_SEARCH_HITS == (1, 6)
-    assert o.exists_share == defaults.WORLD_EXISTS_SHARE == 0.7
-    assert o.default_fault_mode == defaults.WORLD_DEFAULT_FAULT_MODE == "timeout"
-    assert o.default_fault_rate == defaults.WORLD_DEFAULT_FAULT_RATE == 1.0
-    assert o.jitter_divisor == defaults.WORLD_JITTER_DIVISOR == 3
+    # the knob reaches the code: each field is the named default, whatever
+    # its value is today
+    assert o.search_hits == defaults.WORLD_SEARCH_HITS
+    assert o.exists_share == defaults.WORLD_EXISTS_SHARE
+    assert o.default_fault_mode == defaults.WORLD_DEFAULT_FAULT_MODE
+    assert o.default_fault_rate == defaults.WORLD_DEFAULT_FAULT_RATE
+    assert o.jitter_divisor == defaults.WORLD_JITTER_DIVISOR
     assert o.id_range == defaults.WORLD_ID_RANGE and o.date_years == defaults.WORLD_DATE_YEARS
+    assert dict(o.condition_modes) == dict(defaults.WORLD_CONDITION_MODES)
     assert (
         set(o.fault_modes)
         == set(FAULT_MODES)
@@ -65,6 +68,39 @@ def test_defaults_are_the_named_numbers_in_one_home():
     assert o.result_kinds is RESULT_KINDS and set(o.payloads) == set(PAYLOAD_BUILDERS)
     assert WorldOptions.coerce(None) is DEFAULT_WORLD
     assert WorldOptions.coerce(o) is o
+
+
+def test_the_default_world_and_its_tables_are_read_only():
+    """A caller cannot widen DEFAULT_WORLD (or the shipped tables) in
+    place; the way to add a mode is a new WorldOptions."""
+    from types import MappingProxyType
+
+    def rate_limited(env, tool, arguments):
+        return {"status": "error", "error": "429"}
+
+    with pytest.raises(TypeError):
+        DEFAULT_WORLD.fault_modes["rate_limited"] = rate_limited  # type: ignore[index]
+    with pytest.raises(TypeError):
+        FAULT_MODES["rate_limited"] = rate_limited  # type: ignore[index]
+    with pytest.raises((TypeError, AttributeError)):
+        del DEFAULT_WORLD.payloads["record"]  # type: ignore[attr-defined]
+    with pytest.raises(TypeError):
+        DEFAULT_WORLD.condition_modes["timeout"] = "stale"  # type: ignore[index]
+    # a dict passed by a caller is wrapped too, so it cannot be edited
+    # under the world's feet after the options object exists
+    table = {**FAULT_MODES, "rate_limited": rate_limited}
+    custom = WorldOptions(fault_modes=table)
+    assert isinstance(custom.fault_modes, MappingProxyType)
+    table["stale"] = rate_limited
+    assert custom.fault_modes["stale"] is FAULT_MODES["stale"]
+    with pytest.raises(TypeError):
+        defaults.TRACE_STATE_PRIORITY["new"] = 0.0  # type: ignore[index]
+    with pytest.raises(TypeError):
+        defaults.TRAINING_KNOBS["clip"]["hi"] = 9.0  # type: ignore[index]
+    # the option validates its own table: a condition pointed at a mode
+    # that does not exist is refused with the fix
+    with pytest.raises(ValueError, match="condition_modes"):
+        WorldOptions(condition_modes={"timeout": "rate_limited"})
 
 
 def test_a_typo_in_the_options_is_an_error_not_a_silent_default():

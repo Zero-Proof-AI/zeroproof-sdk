@@ -66,6 +66,15 @@ from .hygiene import coverage_warnings
 log = logging.getLogger("whileai.simulations")
 
 _VALID_STATUSES = ("ok", "missing_reward", "invalid_result", "error", "timeout")
+# LENGTH_CONFOUND_MIN_PAIRS = 8 / LENGTH_CONFOUND_SHARE = 0.75: the chosen
+# reply being the longer one in three quarters of eight or more pairs is
+# flagged as a length confound; LENGTH_CONFOUND_ALL_FROM = 3: in every pair
+# once there are three, since a total confound is one at any size
+# (length is the confound rlhfbook.com/c/07-reward-models.html tells a
+# judge to ignore). The numbers are a convention, untested.
+LENGTH_CONFOUND_MIN_PAIRS = 8
+LENGTH_CONFOUND_SHARE = 0.75
+LENGTH_CONFOUND_ALL_FROM = 3
 
 
 def _scaled(value: float, scale: tuple[float, float]) -> tuple[float | int, dict[str, Any]]:
@@ -624,7 +633,9 @@ def length_confound_warning(chosen_longer: int, n: int) -> str | None:
     if n <= 0:
         return None
     frac = chosen_longer / n
-    if (n >= 8 and frac >= 0.75) or (n >= 3 and chosen_longer == n):
+    if (n >= LENGTH_CONFOUND_MIN_PAIRS and frac >= LENGTH_CONFOUND_SHARE) or (
+        n >= LENGTH_CONFOUND_ALL_FROM and chosen_longer == n
+    ):
         return (
             f"chosen is the longer reply in {chosen_longer}/{n} pairs; a preference "
             "trainer learns length before behavior (rlhf-book ch. 8)"

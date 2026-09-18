@@ -37,6 +37,8 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ..defaults import TEXT_HEURISTICS
+
 # Where a verifier looks for the gold, in order. privileged.reference is the
 # schema-native home (never exported to training rows).
 REFERENCE_FIELDS = ("reference", "answer", "target", "solution", "label", "expected")
@@ -145,7 +147,7 @@ def _reference_spellings(reference: Any) -> list[str]:
         # multi-line gold (code tests): a traceback echoes single lines
         for line in text.splitlines():
             line = line.strip()
-            if len(line) >= 8:
+            if len(line) >= TEXT_HEURISTICS.gold_line_min_chars:
                 found.add(line)
 
     walk(reference)

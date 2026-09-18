@@ -209,6 +209,8 @@ def test_dead_and_duplicated_constants_are_gone():
 
     assert not hasattr(anthropic_backend, "_TRANSIENT_TRIES")
     assert not hasattr(agents, "_TRANSIENT_TRIES")
-    assert defaults.TRANSIENT_TRIES == 3
-    assert embeddings.HASH_DIM == 256
+    # the wire, not the value: both backends read the one constant
+    assert agents.TRANSIENT_TRIES is defaults.TRANSIENT_TRIES
+    assert anthropic_backend.TRANSIENT_TRIES is defaults.TRANSIENT_TRIES
+    assert isinstance(embeddings.HASH_DIM, int) and embeddings.HASH_DIM > 0
     assert round(1.0 - diversity.ORDINARY_SHARE, 2) == diversity.HARD_SHARE

@@ -659,7 +659,14 @@ def test_turn_budget_and_context_max_span_a_range():
     assert cap <= 40
     assert default_max_turns(4096) < default_max_turns(16384)
     assert default_max_turns(CONTEXT_TOKENS) == cap
-    budgets = [sample_turn_budget(0, f"row-{i}", 40) for i in range(200)]
+    # with no target the sampler centres on the package default (12 since
+    # #206; one constant for simulate() and local_model())
+    from whileai.simulations.defaults import DEFAULT_AVG_TURNS
+
+    untargeted = [sample_turn_budget(0, f"row-{i}", 40) for i in range(200)]
+    assert abs(sum(untargeted) / len(untargeted) - DEFAULT_AVG_TURNS) <= 2.0
+    # the 15/75/10 shape, checked at a target of 6
+    budgets = [sample_turn_budget(0, f"row-{i}", 40, avg_turns=6.0) for i in range(200)]
     assert min(budgets) >= 2
     assert 1 not in budgets
     assert all(b % 2 == 0 for b in budgets)

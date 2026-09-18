@@ -4,9 +4,10 @@ A dataset is rollouts; an environment is what produces them. On-policy
 RL (GRPO, RLOO, PPO) samples its own rollouts from the policy under
 training, so what it needs from us is not rows but the three things a
 row came from: the task set, the world that answers tool calls, and the
-reward that grades the finished trajectory (rlhf-book ch. 6 on on-policy
-sampling, ch. 13 on multi-turn tool use with a single end-of-trajectory
-reward). ``export_environment`` writes those three as an installable
+reward that grades the finished trajectory
+(rlhfbook.com/c/11-policy-gradients.html on on-policy sampling,
+rlhfbook.com/c/14-reasoning.html on multi-turn tool use with a single
+end-of-trajectory reward). ``export_environment`` writes those three as an installable
 ``verifiers`` package, the shape Prime Intellect and TRL consume::
 
     import whileai.simulations as wai
@@ -70,8 +71,10 @@ DEFAULT_REWARD = "whileai.simulations.score.checklist:task_checklist"
 DEFAULT_BAND = DIFFICULTY_BAND
 #: Rubric weights, in the order the funcs are listed: only ``reward`` trains;
 #: ``n_calls``, ``judge_ok``, ``truncated`` and ``trace_clean`` are logged at
-#: weight 0 as monitors (rlhf-book ch. 14: watch the symptoms, do not train
-#: on them).
+#: weight 0 as monitors. Training on a symptom of over-optimization turns
+#: it into a proxy the policy games (Gao et al., arXiv:2210.10760;
+#: rlhfbook.com/c/17-over-optimization.html lists the symptoms); the book
+#: does not prescribe weight-0 logging, that is this package's choice.
 RUBRIC_WEIGHTS = (1.0, 0.0, 0.0, 0.0, 0.0)
 #: The version an export claims when the package is not installed as a
 #: distribution: the first release that carried this module.
@@ -209,9 +212,10 @@ def build_tasks(
 
     When a prompt has two or more graded rollouts its solve rate is known
     (partial credit counts as it is) and, with ``band``, prompts the policy
-    always or never solved are dropped: they carry no advantage (rlhf-book
-    ch. 7 difficulty filtering at 20 to 80 percent; DAPO's dynamic sampling
-    drops accuracy 0 and 1, arXiv:2503.14476). Ungraded prompts and single
+    always or never solved are dropped: they carry no advantage
+    (rlhfbook.com/c/14-reasoning.html, difficulty filtering at 20 to 80
+    percent; DAPO's dynamic sampling drops accuracy 0 and 1,
+    arXiv:2503.14476). Ungraded prompts and single
     rollouts are kept as they are. ``holdout`` is a fraction, split by
     scenario id (or the prompt) so a task is wholly on one side, or an
     explicit list of holdout prompts. Train and holdout are decontaminated
@@ -262,7 +266,7 @@ def build_tasks(
         privileged = first.get("privileged")
         if isinstance(privileged, dict) and privileged:
             info["privileged"] = privileged
-        if len(labels) >= 2:
+        if len(labels) >= 2:  # noqa: PLR2004  # two graded rollouts before a solve rate exists
             rate = sum(labels) / len(labels)
             info["calibration"] = {"pass_rate": round(rate, 4), "n": len(labels)}
             if min(labels) < max(labels):
@@ -707,8 +711,8 @@ def _make_env_class() -> type:
         def _was_truncated(state: dict) -> bool:
             # A rollout cut at the turn cap or the token cap never finished
             # the task; scoring it would reward whatever it was doing when
-            # the clock ran out (rlhf-book ch. 6: score only completions
-            # that end on their own).
+            # the clock ran out (DAPO's overlong filtering, arXiv:2503.14476:
+            # a truncated sample gets no reward signal).
             return bool(state.get("is_truncated")) or str(
                 state.get("stop_condition") or ""
             ).startswith("max_turns")
@@ -726,7 +730,7 @@ def _make_env_class() -> type:
             """1.0 when none of the SDK's trace flags fired (fabricated test
             claims, phantom edits, test tampering, ...). Logged, not
             trained on: a monitor for over-optimization symptoms
-            (rlhf-book ch. 14)."""
+            (rlhfbook.com/c/17-over-optimization.html)."""
             from .score.trace import trace_flags
 
             row = _row_from_state(state, state.get("zp_info") or {})

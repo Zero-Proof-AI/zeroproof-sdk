@@ -161,7 +161,7 @@ def judge_one(
             model,
             [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": payload}],
             api_key=api_key,
-            temperature=JUDGE_TEMPERATURE,  # a judge is read at zero (rlhf-book ch. 7)
+            temperature=JUDGE_TEMPERATURE,  # read at zero (rlhfbook.com/c/07-reward-models.html)
             max_tokens=max_tokens,
             timeout=timeout,
         )

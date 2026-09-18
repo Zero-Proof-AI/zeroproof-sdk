@@ -25,6 +25,11 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import MESSAGE_EXAMPLES, TEXT_HEURISTICS
+
+#: Untested policy rules named in the preflight summary before "and N more".
+_UNTESTED_SHOWN = 3
+
 FAILURE_CLASSES = (
     "fabrication",
     "unconfirmed_write",
@@ -186,10 +191,7 @@ def _policy_mentions(name: str, policy: str) -> bool:
     verb, nouns = tokens[0], [t for t in tokens[1:] if t not in _NAME_STOP]
     if not nouns:
         return bool(re.search(rf"\b{re.escape(verb)}", low))
-    nouns_seen = all(
-        re.search(rf"\b{re.escape(n[:-1] if len(n) > 4 and n.endswith('s') else n)}", low)
-        for n in nouns
-    )
+    nouns_seen = all(re.search(rf"\b{re.escape(_stem(n))}", low) for n in nouns)
     verb_seen = any(re.search(rf"\b{re.escape(v)}", low) for v in _VERB_SYNONYMS.get(verb, (verb,)))
     return nouns_seen and verb_seen
 
@@ -232,8 +234,8 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
     if missing_shapes:
         warnings.append(
             f"{len(missing_shapes)} of {len(tools)} tools declare no result "
-            f"shape ({', '.join(missing_shapes[:5])}"
-            f"{', ...' if len(missing_shapes) > 5 else ''}): grounding is "
+            f"shape ({', '.join(missing_shapes[:MESSAGE_EXAMPLES])}"
+            f"{', ...' if len(missing_shapes) > MESSAGE_EXAMPLES else ''}): grounding is "
             "harder and grounding-style scaffolds can convert fabrication "
             "into refusal instead of correct service; add a `returns` key "
             "to each tool (an example result or a JSON schema)"
@@ -626,14 +628,16 @@ _GAP_STOP = frozenset(
 
 def _stem(word: str) -> str:
     """``refunds`` and ``orders`` overlap ``refund`` and ``order``."""
-    return word[:-1] if len(word) > 4 and word.endswith("s") else word
+    return (
+        word[:-1] if len(word) >= TEXT_HEURISTICS.plural_min_chars and word.endswith("s") else word
+    )
 
 
 def _content_words(text: str) -> set[str]:
     return {
         _stem(word)
         for word in _GAP_WORD.findall(str(text or "").lower())
-        if len(word) >= 3 and word not in _GAP_STOP
+        if len(word) >= TEXT_HEURISTICS.gap_word_min_chars and word not in _GAP_STOP
     }
 
 
@@ -804,7 +808,7 @@ def coverage_gap(
         hit_rules = []
         for rule in rules:
             if branch[rule]:
-                reached = len(words & rule_words[rule]) >= 2
+                reached = len(words & rule_words[rule]) >= 2  # noqa: PLR2004  # two shared words is the overlap floor (convention)
             elif rule_tools[rule]:
                 reached = any(n in hit_tools for n in rule_tools[rule])
             else:
@@ -876,8 +880,12 @@ def coverage_gap(
         f"{'s' if len(names) != 1 else ''}"
     ]
     if untested_rules:
-        shown = ", ".join(_short_rule(rule) for rule in untested_rules[:3])
-        more = f", and {len(untested_rules) - 3} more" if len(untested_rules) > 3 else ""
+        shown = ", ".join(_short_rule(rule) for rule in untested_rules[:_UNTESTED_SHOWN])
+        more = (
+            f", and {len(untested_rules) - _UNTESTED_SHOWN} more"
+            if len(untested_rules) > _UNTESTED_SHOWN
+            else ""
+        )
         summary_bits.append(f"untested: {shown}{more}")
     if untested_tools:
         summary_bits.append("no ask reaches " + ", ".join(untested_tools))

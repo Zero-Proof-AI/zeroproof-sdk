@@ -10,7 +10,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
-from ..defaults import CHARS_PER_TOKEN, MAX_SAMPLES_PER_CALL
+from ..defaults import CHARS_PER_TOKEN, MAX_SAMPLES_PER_CALL, TEXT_HEURISTICS
 from .agents import CONTEXT_TOKENS, complete, default_simulator_spec, parse_backend_spec
 from .diversity import (
     DEFAULT_TEXTURE_RATE,
@@ -38,16 +38,18 @@ from .scenarios import (
 
 # WRITER_OUT_TOKENS = 768: the writer's reply ceiling for one card batch
 # (twelve cards at about 50 tokens each plus JSON); the model stops at
-# EOS, so this only bounds a runaway. ``advanced={"out_tokens": n}``
-# moves it within WRITER_OUT_TOKENS_MIN..MAX. _OUT_MARGIN = 64 is slack
-# for the chat template (convention, sized to hosted Qwen).
+# EOS, so this only bounds a runaway.
+# WRITER_OUT_TOKENS_MIN = 256 / WRITER_OUT_TOKENS_MAX = 2048: the band
+# ``advanced={"out_tokens": n}`` moves it within.
+# _OUT_MARGIN = 64: slack for the chat template (convention, sized to
+# hosted Qwen).
 WRITER_OUT_TOKENS = 768
 WRITER_OUT_TOKENS_MIN = 256
 WRITER_OUT_TOKENS_MAX = 2048
 _OUT_MARGIN = 64
-# Cards per writer request: 12 by default (``advanced={"scenarios_per_
-# request": n}``), never under 2 or over 28, which is what fits a 4k
-# window beside the system prompt (convention, sized to hosted Qwen).
+#: Cards per writer request: 12 by default (``advanced={"scenarios_per_
+#: request": n}``), never under 2 or over 28, which is what fits a 4k
+#: window beside the system prompt (convention, sized to hosted Qwen).
 _MAX_CELLS_PER_CALL = 28
 _DEFAULT_CELLS_PER_CALL = 12
 _MIN_CELLS_PER_CALL = 2
@@ -55,6 +57,13 @@ _MIN_CELLS_PER_CALL = 2
 # (``advanced={"extra_cards": n}``, at most _MAX_EXTRA_CARDS).
 _EXTRAS_PER_CALL = 1
 _MAX_EXTRA_CARDS = 4
+# _OPEN_ENDED_EXTRA_FLOOR = 0.05: an open-ended arm weight at or above this
+# earns at least one extra card per request even when the rounded share is
+# zero, so a pinned-low arm is not silently off (convention).
+_OPEN_ENDED_EXTRA_FLOOR = 0.05
+# _LOWERCASE_MAX_UPPER_SHARE = 0.2: a card asked to type in lowercase
+# fails the texture check above this share of capital letters (convention).
+_LOWERCASE_MAX_UPPER_SHARE = 0.2
 # _WRITER_TIMEOUT = 30 s per writer call: a card batch on a warm endpoint
 # takes a few seconds; a cold start is the scene thread's problem, not
 # the writer's (convention).
@@ -97,7 +106,7 @@ def writer_policy_digest(policy: str, *, max_chars: int = _WRITER_POLICY_MAX_CHA
             re.sub(r"\s+", " ", part).strip(" \t#-*•")
             for part in re.split(r"\n+|(?<=[.!?])\s+", text)
         ]
-        raw = [part for part in raw if len(part) >= 8]
+        raw = [part for part in raw if len(part) >= TEXT_HEURISTICS.sentence_min_chars]
         if not raw:
             raw = [re.sub(r"\s+", " ", text)]
         take = min(8, len(raw))
@@ -238,7 +247,7 @@ def scene_leaked(message: str, brief: str = "") -> bool:
         return True
     for sentence in re.split(r"[\n;.]", str(brief or "")):
         chunk = re.sub(r"^\w+:\s*", "", sentence.strip().lower())
-        if len(chunk) >= 28 and chunk in text:
+        if len(chunk) >= TEXT_HEURISTICS.repeated_chunk_chars and chunk in text:
             return True
     return False
 
@@ -294,7 +303,7 @@ def _inject_typo(text: str) -> str:
     words = text.split()
     for i, word in enumerate(words):
         idx = [j for j, ch in enumerate(word) if ch.isalpha()]
-        if len(idx) < 5:
+        if len(idx) < TEXT_HEURISTICS.word_min_letters:
             continue
         chars = list(word)
         a, b = idx[1], idx[2]
@@ -401,9 +410,10 @@ def message_realizes_tags(message: str, tags: dict | None = None, *, ask_family:
     tags = dict(tags or {})
     words = _word_count(text)
     length = str(tags.get("length") or "")
-    if "short" in length and not (3 <= words <= 16):
+    short_lo, short_hi = TEXT_HEURISTICS.short_words
+    if "short" in length and not (short_lo <= words <= short_hi):
         return False
-    if "long" in length and words < 40:
+    if "long" in length and words < TEXT_HEURISTICS.long_min_words:
         return False
     tone = str(tags.get("tone") or "")
     if tone in {"frustrated", "impatient"} and _CALM_OPENER.search(text):
@@ -413,13 +423,17 @@ def message_realizes_tags(message: str, tags: dict | None = None, *, ask_family:
     if tone == "impatient" and not (_IMPATIENT.search(text) or _FRUSTRATED.search(text)):
         return False
     if tone == "curt" and (
-        words > 22 or re.search(r"\b(please|thanks|thank you|just wanted)\b", text, re.I)
+        words > TEXT_HEURISTICS.curt_max_words
+        or re.search(r"\b(please|thanks|thank you|just wanted)\b", text, re.I)
     ):
         return False
     texture = str(tags.get("texture") or "")
     if texture == "lowercase":
         letters = [c for c in text if c.isalpha()]
-        if letters and sum(c.isupper() for c in letters) / len(letters) > 0.2:
+        if (
+            letters
+            and sum(c.isupper() for c in letters) / len(letters) > _LOWERCASE_MAX_UPPER_SHARE
+        ):
             return False
     if texture == "standard":
         first_alpha = next((c for c in text if c.isalpha()), "")
@@ -638,10 +652,10 @@ def assistant_kind(policy: str = "", name: str = "") -> str:
 # assistant" label so not every ask presumes the assistant's job
 # (convention, untested).
 OMIT_KIND_ONE_IN = 50
-# Ask families per card, as slots of ten: ASK_FAMILY_VAGUE_FROM = 9 makes
-# 10% vague (no action named), ASK_FAMILY_GENERAL_FROM = 8 another 10%
-# general (a real request, no tool named), the rest tool asks. Most real
-# asks name what they want; the split is a convention, untested.
+#: Ask families per card, as slots of ten: ASK_FAMILY_VAGUE_FROM = 9 makes
+#: 10% vague (no action named), ASK_FAMILY_GENERAL_FROM = 8 another 10%
+#: general (a real request, no tool named), the rest tool asks. Most real
+#: asks name what they want; the split is a convention, untested.
 ASK_FAMILY_SLOTS = 10
 ASK_FAMILY_VAGUE_FROM = 9
 ASK_FAMILY_GENERAL_FROM = 8
@@ -717,18 +731,18 @@ def _tool_briefs(tools: Sequence[dict]) -> dict[str, dict[str, Any]]:
 
 
 _SCENE_KEYS = ("who", "usually_want", "tools")
-# The one-time scene pass: 400 chars of private writer context, 160 reply
-# tokens, 8 s (it runs in a background thread; a slow answer is dropped,
-# not waited for). SCENE_TEMPERATURE = 0.3: a structured-JSON pass, sampled
-# low so the fields parse; Magpie generates its structured responses at 0
-# (2406.08464 repo default). Conventions, untested.
+#: The one-time scene pass: 400 chars of private writer context, 160 reply
+#: tokens, 8 s (it runs in a background thread; a slow answer is dropped,
+#: not waited for). SCENE_TEMPERATURE = 0.3: a structured-JSON pass, sampled
+#: low so the fields parse; Magpie generates its structured responses at 0
+#: (2406.08464 repo default). Conventions, untested.
 _SCENE_MAX_CHARS = 400
 _SCENE_TIMEOUT = 8.0
 _SCENE_OUT_TOKENS = 160
 SCENE_TEMPERATURE = 0.3
-# Tool digests handed to the auxiliary passes: at most 16 tools, 160 chars
-# of description and 8 field names each, so a 40-tool agent fits in the
-# window (convention).
+#: Tool digests handed to the auxiliary passes: at most 16 tools, 160 chars
+#: of description and 8 field names each, so a 40-tool agent fits in the
+#: window (convention).
 _DIGEST_TOOLS = 16
 _DIGEST_DESCRIPTION_CHARS = 160
 _DIGEST_FIELDS = 8
@@ -781,7 +795,11 @@ def _format_scene_brief(text: str, *, policy: str = "") -> str:
         val = re.sub(r"\s+", " ", cleaned).strip()
         if val:
             lines.append(val)
-    clauses = [c.strip() for c in re.split(r"[.\n]", str(policy or "")) if len(c.strip()) > 24]
+    clauses = [
+        c.strip()
+        for c in re.split(r"[.\n]", str(policy or ""))
+        if len(c.strip()) > TEXT_HEURISTICS.policy_clause_min_chars
+    ]
     kept: list[str] = []
     for line in lines:
         if any(clause.lower() in line.lower() for clause in clauses):
@@ -803,12 +821,12 @@ _AMPLIFY_AXES = (
     "playful or joking",
     "multi-part or contextual",
 )
-# Seed amplification: 25 new asks per round, up to 40 rounds, at
-# AMPLIFY_TEMPERATURE = 1.0 with AMPLIFY_OUT_TOKENS = 900. The temperature
-# is Magpie's instruction-generation setting (1.0, top-p 1.0, 2406.08464
-# repo default); Self-Instruct used 0.7 (2212.10560) and sampled 8
-# in-context examples per step, this pass shows up to 12. The batch and
-# round caps are conventions.
+#: Seed amplification: 25 new asks per round, up to 40 rounds, at
+#: AMPLIFY_TEMPERATURE = 1.0 with AMPLIFY_OUT_TOKENS = 900. The temperature
+#: is Magpie's instruction-generation setting (1.0, top-p 1.0, 2406.08464
+#: repo default); Self-Instruct used 0.7 (2212.10560) and sampled 8
+#: in-context examples per step, this pass shows up to 12. The batch and
+#: round caps are conventions.
 _AMPLIFY_BATCH = 25
 _AMPLIFY_MAX_ROUNDS = 40
 _AMPLIFY_EXAMPLES = 12
@@ -889,7 +907,8 @@ def amplify_seeds(
         for line in lines:
             text = line.strip().strip("-*\u2022 \t\"'")
             key = _norm(text)
-            if 8 <= len(text) <= 300 and key and key not in seen:
+            card_lo, card_hi = TEXT_HEURISTICS.card_chars
+            if card_lo <= len(text) <= card_hi and key and key not in seen:
                 seen.add(key)
                 kept.append(text)
                 if len(kept) >= target:
@@ -950,9 +969,9 @@ def write_scene_brief(
     return _format_scene_brief(text, policy=writer_policy)
 
 
-# Drafting tools for a prose-only agent: 40 s, 1200 reply tokens (4 to 8
-# schemas), DRAFT_TEMPERATURE = 0.2 for parseable JSON; between 2 and 8
-# tools are kept (convention, untested).
+#: Drafting tools for a prose-only agent: 40 s, 1200 reply tokens (4 to 8
+#: schemas), DRAFT_TEMPERATURE = 0.2 for parseable JSON; between 2 and 8
+#: tools are kept (convention, untested).
 _DRAFT_TIMEOUT = 40.0
 _DRAFT_OUT_TOKENS = 1200
 DRAFT_TEMPERATURE = 0.2
@@ -1062,10 +1081,10 @@ def draft_tools(
     return out if len(out) >= _DRAFT_MIN_TOOLS else []
 
 
-# Generous: the pass runs in a background thread while writers flood the
-# same GPU, and a late fill is still useful for every later rollout.
+#: Generous: the pass runs in a background thread while writers flood the
+#: same GPU, and a late fill is still useful for every later rollout.
 _SHAPES_TIMEOUT = 45.0
-_SHAPES_OUT_TOKENS = 1500  # 11 record tools measured at 852 tokens
+_SHAPES_OUT_TOKENS = 1500  #: 11 record tools measured at 852 tokens
 _SHAPES_TOOLS_PER_CALL = 12
 # SHAPES_TEMPERATURE = 0.3: example results are JSON the sandbox fills;
 # sampled low so they parse (convention, untested).
@@ -1450,7 +1469,12 @@ class ModelSimulator:
         steering_weight: float | None = None,
         hard_share: float | None = None,
         writer_temperature: float | tuple[float, float] | None = None,
+        world: Any = None,
     ):
+        # The run's WorldOptions (advanced={"world": ...}); fault plans read
+        # its condition_modes so an added fault mode reaches model-written
+        # cards too.
+        self.world = world
         self.texture_rate = (
             DEFAULT_TEXTURE_RATE if texture_rate is None else max(0.0, float(texture_rate))
         )
@@ -1775,7 +1799,7 @@ region_id exactly and placing the human's words in message."""
         weights = self.arm_weights or SEARCH_ARMS
         oe = float(weights.get("open_ended") or 0.10)
         n_extra = min(self.extra_cards, max(0, round(oe * max(len(mixed), 1))))
-        if n_extra == 0 and self.extra_cards > 0 and oe >= 0.05:
+        if n_extra == 0 and self.extra_cards > 0 and oe >= _OPEN_ENDED_EXTRA_FLOOR:
             n_extra = 1
         extra_plan = mix_items_by_tier(
             [
@@ -2051,7 +2075,7 @@ Write one distinct message for every block. Return JSON [{{"region_id":...,"mess
             self.last_candidate_provenance[message] = meta
             self.last_provenance[message] = [f"llm_guided:{meta.get('region_id') or 'probe'}"]
             if region:
-                plan = fault_plan_for_region(region) or {}
+                plan = fault_plan_for_region(region, world=self.world) or {}
                 world = (
                     (assignment or {}).get("world_state") if isinstance(assignment, dict) else None
                 )
@@ -2123,6 +2147,8 @@ def make_default_generator(
     kind = template_kwargs.pop("kind", kind)
     mode = template_kwargs.pop("mode", None)
     prefer_success = template_kwargs.pop("prefer_success", None)
+    # The run's WorldOptions; both arms hand it to fault_plan_for_region.
+    world = template_kwargs.pop("world", None)
     # Left in template_kwargs on purpose: the template arm steers too.
     steering_weight = template_kwargs.get("steering_weight")
     writer_policy = writer_policy_digest(policy)
@@ -2135,6 +2161,7 @@ def make_default_generator(
         mode=mode,
         prefer_success=prefer_success,
         hard_share=hard_share,
+        world=world,
         **template_kwargs,
     )
     model = None
@@ -2169,6 +2196,7 @@ def make_default_generator(
             steering_weight=steering_weight,
             hard_share=hard_share,
             writer_temperature=writer_temperature,
+            world=world,
         )
 
     def _ingest_templates(

@@ -458,7 +458,7 @@ class HackMonitor(_callback_base()):  # type: ignore[misc]
             }
             if scan["regime"] == "reward_hack":
                 self._raise(entry, "feature", scan["warnings"][0], **self.last_scan)
-        if len(self.history) < 2:
+        if len(self.history) < 2:  # noqa: PLR2004  # two evals before a trend
             return
         then = self.history[max(0, len(self.history) - 1 - self.window)]
         gold_up: bool | None = None

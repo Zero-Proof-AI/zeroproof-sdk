@@ -204,7 +204,7 @@ def length_report(
     spread_groups = 0
     multi = 0
     for members in _group(rows).values():
-        if len(members) < 2:
+        if len(members) < 2:  # noqa: PLR2004  # a duplicate needs a pair
             continue
         multi += 1
         group_lengths = [reply_length(r) for r in members]

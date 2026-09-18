@@ -328,6 +328,8 @@ RUBRIC_JUDGE_SYSTEM = (
     'object and nothing else: {"criteria": {"1": true | false, "2": ..., ...}, '
     '"reason": "<one sentence>"}.'
 )
+# RUBRIC_JUDGE_MAX_TOKENS = 400: a criteria object plus one sentence of
+# reason; a ten-criterion rubric fits in about half (convention).
 RUBRIC_JUDGE_MAX_TOKENS = 400
 
 
@@ -485,6 +487,8 @@ RUBRIC_WRITER_SYSTEM = (
     "-1 or -2 for Pitfall). Do not copy the request or the reference into the "
     "descriptions; the reference is guidance, not the only good answer."
 )
+# RUBRIC_WRITER_MAX_TOKENS = 1200: room for eight to twelve criteria with a
+# description each; the writer stops at EOS well before it (convention).
 RUBRIC_WRITER_MAX_TOKENS = 1200
 
 

@@ -19,6 +19,8 @@ from .defaults import (
     DEFAULT_SELECT_TARGET,
     HOLDOUT_BUCKET_HEX_CHARS,
     JUDGE_CONCURRENCY_CAP,
+    JUDGE_MAX_TOKENS,
+    JUDGE_PAYLOAD_CHARS,
     LEAK_MIN_QUOTE_CHARS,
     PASS_REWARD,
     SHORT_HASH_CHARS,
@@ -439,6 +441,8 @@ class SimulationData:
         scale: tuple[float, float] | None = None,
         rubric: str | None = None,
         trust: str = "warn",
+        payload_chars: int = JUDGE_PAYLOAD_CHARS,
+        max_tokens: int = JUDGE_MAX_TOKENS,
     ):
         """Grade after simulation with the hosted judge or a custom callable.
 
@@ -497,6 +501,8 @@ class SimulationData:
                 path=path,
                 use_privileged=use_privileged,
                 trust=trust,
+                payload_chars=payload_chars,
+                max_tokens=max_tokens,
             )
 
         def score(t):
@@ -569,12 +575,18 @@ class SimulationData:
         use_privileged: bool = False,
         rubric: str | None = None,
         trust: str = "warn",
+        payload_chars: int = JUDGE_PAYLOAD_CHARS,
+        max_tokens: int = JUDGE_MAX_TOKENS,
     ):
         """Binary 0/1 situation grade. Default brain is the hosted judge
         (Phi-4 unless ``WHILEAI_JUDGE`` is set), never the policy model.
         ``use_privileged`` shows the judge each row's ``privileged`` block
         (principle, reference, hidden state) the agent never saw. ``trust``
-        is the judge check against human labels: see ``grade``."""
+        is the judge check against human labels: see ``grade``.
+        ``payload_chars`` caps the evidence the judge reads per row and
+        ``max_tokens`` its reply (defaults ``JUDGE_PAYLOAD_CHARS`` and
+        ``JUDGE_MAX_TOKENS`` in ``defaults.py``); both land in
+        ``judge_meta``."""
         require_judge_key(api_key, spec=spec, base_url=base_url, model=model)
         policy = str(self.profile.policy or "") if self.profile else ""
         tools = list(self.profile.tools) if self.profile else []
@@ -609,6 +621,8 @@ class SimulationData:
             limit=limit,
             degraded=self.degraded,
             trust=trust,
+            payload_chars=payload_chars,
+            max_tokens=max_tokens,
         )
         report["rubric"] = rubric_source
         if rubric_source == "conduct_floor":
@@ -942,6 +956,8 @@ def grade_llm(
     tools: list | None = None,
     use_privileged: bool = False,
     trust: str = "warn",
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+    max_tokens: int = JUDGE_MAX_TOKENS,
 ):
     """Binary 0/1 situation grade. Default brain is hosted Qwen.
 
@@ -989,6 +1005,8 @@ def grade_llm(
         limit=limit,
         use_privileged=use_privileged,
         trust=trust,
+        payload_chars=payload_chars,
+        max_tokens=max_tokens,
     )
     dest = path or output or src
     if dest:

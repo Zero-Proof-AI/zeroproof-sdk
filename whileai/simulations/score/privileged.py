@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..defaults import LEAK_MIN_QUOTE_CHARS
 from .style import assistant_text
 
 _WS = re.compile(r"\s+")
@@ -51,7 +52,7 @@ def _needles(privileged: Any, *, min_len: int) -> list[tuple[str, str]]:
     return out
 
 
-def leak_report(rows: Any, *, min_len: int = 12) -> dict[str, Any]:
+def leak_report(rows: Any, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> dict[str, Any]:
     """Which rows quote their own ``privileged`` block in the agent's text.
 
     Takes the ``SimulationData`` itself, ``data.trajectories``, or any list

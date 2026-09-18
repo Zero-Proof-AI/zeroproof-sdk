@@ -424,7 +424,7 @@ def pass_at(
     per_task = {prompt: sum(labels) / len(labels) for prompt, labels in groups.items()}
     pass_at_1 = sum(per_task.values()) / len(per_task)
 
-    multi = [len(labels) for labels in groups.values() if len(labels) >= 2]
+    multi = [len(labels) for labels in groups.values() if len(labels) >= 2]  # noqa: PLR2004  # a group of one carries no k
     resolved_k = int(k) if k is not None else (min(multi) if multi else 1)
     if resolved_k < 1:
         raise ValueError("k must be at least 1")

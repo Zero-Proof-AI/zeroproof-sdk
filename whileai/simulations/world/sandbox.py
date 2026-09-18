@@ -18,10 +18,13 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
+from types import MappingProxyType
 from typing import Any
 
 from ..defaults import (
+    TEXT_HEURISTICS,
     WORLD_CI_FAIL_ONE_IN,
+    WORLD_CONDITION_MODES,
     WORLD_CREATED_ID_MODULUS,
     WORLD_DATE_YEARS,
     WORLD_DEFAULT_FAULT_MODE,
@@ -218,8 +221,8 @@ _CODE_VERBS, _CODE_NOUNS, _CHECK_NAMES, _FILE_STEMS = (
     FILE_STEMS,
 )
 
-# Salts for the seeded picks below: distinct primes so each field of a
-# record draws independently of the others. Changing one changes golden rows.
+#: Salts for the seeded picks below: distinct primes so each field of a
+#: record draws independently of the others. Changing one changes golden rows.
 _SALT_TOPIC, _SALT_TOPIC_I = 97, 104729
 _SALT_ADJ, _SALT_ADJ_I = 7, 7919
 _SALT_STATUS, _SALT_STATUS_I = 13, 15485863
@@ -391,7 +394,11 @@ def _item_noun(tool: str) -> str:
     tokens = [t for t in re.split(r"[^a-z0-9]+", str(tool).lower()) if t]
     rest = tokens[1:] or tokens
     noun = rest[-1] if rest else ""
-    if len(noun) > 3 and noun.endswith("s") and not noun.endswith("ss"):
+    if (
+        len(noun) >= TEXT_HEURISTICS.plural_noun_min_chars
+        and noun.endswith("s")
+        and not noun.endswith("ss")
+    ):
         noun = noun[:-1]
     return noun
 
@@ -665,6 +672,12 @@ def _pytest_stdout(collected: int, failed: bool, n: int) -> str:
     )
 
 
+#: The shell flavor (``n % shell_flavors``) that answers with a directory
+#: listing; flavors 0, 1 and 2 are the permission error, the failing test
+#: run and the merge conflict, the rest pass.
+_SHELL_LS_FLAVOR = 3
+
+
 def _invented_shell(tool: str, arguments: dict, n: int, digest: str, o: WorldOptions) -> dict:
     command = str(
         next((arguments.get(k) for k in COMMAND_KEYS if arguments.get(k)), None) or "true"
@@ -684,7 +697,7 @@ def _invented_shell(tool: str, arguments: dict, n: int, digest: str, o: WorldOpt
             "stdout": _pytest_stdout(6 + n % 5, True, n),
             "stderr": "",
         }
-    if flavor == 2:
+    if flavor == 2:  # noqa: PLR2004  # the third shell flavor, after 0 and 1
         return {
             "command": command,
             "exit_code": 1,
@@ -695,7 +708,7 @@ def _invented_shell(tool: str, arguments: dict, n: int, digest: str, o: WorldOpt
             ),
             "stderr": "",
         }
-    if "ls" in command or flavor == 3:
+    if "ls" in command or flavor == _SHELL_LS_FLAVOR:
         return {
             "command": command,
             "exit_code": 0,
@@ -776,16 +789,19 @@ def _invented_record_payload(
 PayloadBuilder = Callable[[str, dict, int, str, "WorldOptions"], dict]
 
 #: Builder per result kind. A kind with no builder answers with a record.
-PAYLOAD_BUILDERS: dict[str, PayloadBuilder] = {
-    "file": _invented_file,
-    "files": _invented_files,
-    "grep": _invented_grep,
-    "shell": _invented_shell,
-    "git": _invented_git,
-    "ci": _invented_ci,
-    "money": _invented_money,
-    "record": _invented_record_payload,
-}
+#: Read-only; add a builder with ``WorldOptions(payloads={**PAYLOAD_BUILDERS, ...})``.
+PAYLOAD_BUILDERS: Mapping[str, PayloadBuilder] = MappingProxyType(
+    {
+        "file": _invented_file,
+        "files": _invented_files,
+        "grep": _invented_grep,
+        "shell": _invented_shell,
+        "git": _invented_git,
+        "ci": _invented_ci,
+        "money": _invented_money,
+        "record": _invented_record_payload,
+    }
+)
 
 
 def _invented_payload(
@@ -867,7 +883,7 @@ def _evaluate_expression(tool: str, arguments: dict) -> dict[str, Any] | None:
         ast.UAdd: op.pos,
     }
 
-    def walk(node):
+    def walk(node: ast.AST) -> int | float:
         if isinstance(node, ast.Expression):
             return walk(node.body)
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
@@ -892,7 +908,7 @@ def _hint_from_args(arguments: dict | None) -> str:
     """Caller-named object, if any. Used to fill identity strings per call."""
     for key in HINT_KEYS:
         val = (arguments or {}).get(key)
-        if isinstance(val, str) and len(val.strip()) >= 2:
+        if isinstance(val, str) and len(val.strip()) >= 2:  # noqa: PLR2004  # a one-character hint is noise
             return re.sub(r"\s+", " ", val.strip())[:WORLD_HINT_CHARS]
     return ""
 
@@ -1134,12 +1150,16 @@ def _fault_permission_denied(env: MockEnvironment, tool: str, arguments: dict) -
     return {"status": "permission_denied"}
 
 
-FAULT_MODES: dict[str, FaultMode] = {
-    "timeout": _fault_timeout,
-    "malformed": _fault_malformed,
-    "stale": _fault_stale,
-    "permission_denied": _fault_permission_denied,
-}
+#: The shipped fault modes, mode name -> builder. Read-only; add one with
+#: ``WorldOptions(fault_modes={**FAULT_MODES, "rate_limited": build})``.
+FAULT_MODES: Mapping[str, FaultMode] = MappingProxyType(
+    {
+        "timeout": _fault_timeout,
+        "malformed": _fault_malformed,
+        "stale": _fault_stale,
+        "permission_denied": _fault_permission_denied,
+    }
+)
 
 
 # ------------------------------------------------------------- the options
@@ -1152,36 +1172,57 @@ class WorldOptions:
     Pass one to ``MockEnvironment(options=)``, or the same fields as a dict
     through ``simulate(advanced={"world": {...}})`` and
     ``export_environment(world={...})``; unknown keys raise so a typo is not
-    a silent default.
+    a silent default. The instance is frozen and its mapping fields are
+    read-only views: to add a fault mode or a payload builder, build a new
+    ``WorldOptions`` with the wider table.
+
+    Attributes:
+        fault_modes: mode name -> builder; ``FAULT_MODES`` plus whatever a
+            caller adds. A read-only mapping.
+        condition_modes: coverage-grid ``tool_condition`` value -> the
+            fault mode a situation with that condition carries
+            (``WORLD_CONDITION_MODES``). A condition that is itself a
+            ``fault_modes`` key needs no entry; every value here must be
+            a ``fault_modes`` key. A read-only mapping.
+        default_fault_mode: the mode a fault plan gets when it names none.
+        default_fault_rate: the fire probability a plan gets when it names
+            none.
+        stale_as_of: the age stamped on a stale read.
+        malformed_payload: what a malformed fault returns.
+        exists_share: share of user-named references that exist when no
+            world state says otherwise.
+        search_hits: records a search returns, inclusive bounds.
+        template_hits: records a model-written list template expands to,
+            inclusive bounds.
+        id_range: generated record ids, ``[lo, hi)``.
+        date_years: ``(first year, span)`` generated dates fall in.
+        jitter_divisor: a template number moves by up to 1/this of itself.
+        shell_flavors: one shell call in this many takes each failing
+            flavor; the rest pass.
+        ci_fail_one_in: one CI listing in this many carries a failed check.
+        result_kinds: the routing table, ``(kind, rule)`` in order.
+        payloads: kind -> payload builder. A read-only mapping.
+        people, adjectives, topics, statuses, code_verbs, code_nouns,
+            check_names, file_stems: the content pools generated records
+            draw from.
     """
 
-    #: mode name -> builder; ``FAULT_MODES`` plus whatever a caller adds
-    fault_modes: Mapping[str, FaultMode] = field(default_factory=lambda: dict(FAULT_MODES))
-    #: the mode a plan gets when it names none
+    fault_modes: Mapping[str, FaultMode] = field(default_factory=lambda: FAULT_MODES)
+    condition_modes: Mapping[str, str] = field(default_factory=lambda: WORLD_CONDITION_MODES)
     default_fault_mode: str = WORLD_DEFAULT_FAULT_MODE
-    #: the fire probability a plan gets when it names none
     default_fault_rate: float = WORLD_DEFAULT_FAULT_RATE
     stale_as_of: str = WORLD_STALE_AS_OF
     malformed_payload: Any = WORLD_MALFORMED_PAYLOAD
-    #: share of user-named references that exist when no world state says
     exists_share: float = WORLD_EXISTS_SHARE
-    #: records a search returns, inclusive bounds
     search_hits: tuple[int, int] = WORLD_SEARCH_HITS
-    #: records a model-written list template expands to, inclusive bounds
     template_hits: tuple[int, int] = WORLD_TEMPLATE_HITS
-    #: generated record ids, ``[lo, hi)``
     id_range: tuple[int, int] = WORLD_ID_RANGE
-    #: (first year, span) generated dates fall in
     date_years: tuple[int, int] = WORLD_DATE_YEARS
-    #: a template number moves by up to 1/this of itself
     jitter_divisor: int = WORLD_JITTER_DIVISOR
     shell_flavors: int = WORLD_SHELL_FLAVORS
     ci_fail_one_in: int = WORLD_CI_FAIL_ONE_IN
-    #: the routing table, ``(kind, rule)`` in order
     result_kinds: tuple[tuple[str, KindRule], ...] = RESULT_KINDS
-    #: kind -> payload builder
-    payloads: Mapping[str, PayloadBuilder] = field(default_factory=lambda: dict(PAYLOAD_BUILDERS))
-    #: content pools
+    payloads: Mapping[str, PayloadBuilder] = field(default_factory=lambda: PAYLOAD_BUILDERS)
     people: tuple[str, ...] = PEOPLE
     adjectives: tuple[str, ...] = ADJECTIVES
     topics: tuple[str, ...] = TOPICS
@@ -1192,6 +1233,12 @@ class WorldOptions:
     file_stems: tuple[str, ...] = FILE_STEMS
 
     def __post_init__(self) -> None:
+        # The mapping fields are read-only views whatever was passed, so
+        # DEFAULT_WORLD (and every options object) cannot be edited in place.
+        for name in ("fault_modes", "condition_modes", "payloads"):
+            value = getattr(self, name)
+            if not isinstance(value, MappingProxyType):
+                object.__setattr__(self, name, MappingProxyType(dict(value)))
         if not 0.0 <= float(self.exists_share) <= 1.0:
             raise ValueError("exists_share is a share in [0, 1]")
         if not 0.0 <= float(self.default_fault_rate) <= 1.0:
@@ -1213,6 +1260,19 @@ class WorldOptions:
                 f"default_fault_mode {self.default_fault_mode!r} is not in fault_modes "
                 f"({', '.join(sorted(self.fault_modes))})"
             )
+        unknown_modes = sorted(
+            f"{cond} -> {mode}"
+            for cond, mode in self.condition_modes.items()
+            if mode not in self.fault_modes
+        )
+        if unknown_modes:
+            raise ValueError(
+                f"condition_modes names a mode that is not in fault_modes: "
+                f"{', '.join(unknown_modes)}; fault_modes are "
+                f"{', '.join(sorted(self.fault_modes))}. Add the builder to fault_modes "
+                "or point the condition at a shipped mode."
+            )
+
         for name in (
             "people",
             "adjectives",
@@ -1225,6 +1285,15 @@ class WorldOptions:
         ):
             if not getattr(self, name):
                 raise ValueError(f"{name}: a non-empty tuple of words")
+
+    def fault_mode_for(self, condition: str) -> str | None:
+        """The fault mode a coverage-grid ``tool_condition`` carries:
+        ``condition_modes[condition]``, else the condition itself when it
+        is a ``fault_modes`` key, else ``None`` (a clean call)."""
+        mode = self.condition_modes.get(condition)
+        if mode is None and condition in self.fault_modes:
+            mode = condition
+        return mode
 
     @classmethod
     def coerce(cls, value: WorldOptions | Mapping[str, Any] | None) -> WorldOptions:
@@ -1262,7 +1331,28 @@ class WorldOptions:
                 fixed[name] = tuple(str(x) for x in fixed[name])
         if "result_kinds" in fixed:
             fixed["result_kinds"] = tuple((str(k), r) for k, r in fixed["result_kinds"])
+        if "condition_modes" in fixed:
+            fixed["condition_modes"] = {
+                str(k): str(v) for k, v in dict(fixed["condition_modes"]).items()
+            }
         return replace(DEFAULT_WORLD, **fixed)
+
+    def summary(self) -> dict[str, Any]:
+        """The options as plain data for a run record: every non-callable
+        field as it is, and the callable tables (``fault_modes``,
+        ``payloads``, ``result_kinds``) as the sorted names they carry."""
+        out: dict[str, Any] = {}
+        for spec in fields(self):
+            value = getattr(self, spec.name)
+            if spec.name in ("fault_modes", "payloads"):
+                out[spec.name] = sorted(value)
+            elif spec.name == "result_kinds":
+                out[spec.name] = [kind for kind, _ in value]
+            elif isinstance(value, Mapping):
+                out[spec.name] = dict(value)
+            else:
+                out[spec.name] = value
+        return out
 
 
 #: The world every call gets unless told otherwise.

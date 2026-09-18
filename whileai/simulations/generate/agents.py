@@ -11,6 +11,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Mapping
+from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlparse
 
@@ -19,12 +20,15 @@ from whileai.auth import SIGN_IN_URL
 
 from ..defaults import (
     CHARS_PER_TOKEN,
+    LOCAL_MODEL_TEMPERATURE,
     MAX_SAMPLES_PER_CALL,
+    MIN_REPLY_TOKENS,
+    TEXT_HEURISTICS,
     TRANSIENT_BACKOFF_S,
     TRANSIENT_TRIES,
 )
 from ..text import split_reasoning
-from ..world.sandbox import MockEnvironment
+from ..world.sandbox import MockEnvironment, WorldOptions
 from .anthropic_backend import ANTHROPIC_BASE_URL, is_anthropic_url
 from .anthropic_backend import DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL
 from .anthropic_backend import complete as anthropic_complete
@@ -38,7 +42,8 @@ DEFAULT_AGENT = (
 )
 DEFAULT_SIMULATOR = DEFAULT_AGENT
 # The judge is a different model family from the policy on purpose: a
-# judge grading its own writing prefers it (rlhf-book ch. 5, 12). Phi-4
+# judge grading its own writing prefers it (self-preference bias,
+# rlhfbook.com/c/07-reward-models.html, LLM-as-a-judge). Phi-4
 # on its own vLLM app in the same Modal workspace, same VLLM_API_KEY.
 DEFAULT_JUDGE = "vllm:microsoft/phi-4@https://zeroproofai--zeroproof-judge-serve.modal.run/v1"
 # The account route. These two endpoints sit behind the zeroproof-serve
@@ -136,9 +141,9 @@ def default_simulator_spec() -> str:
     return getenv("SURROGATE") or (ACCOUNT_AGENT if _account_route() else DEFAULT_SIMULATOR)
 
 
-# Working context estimate for the rollout backend. Sized to hosted Qwen
-# by default; a bigger-window backend sets ZP_CONTEXT_TOKENS and every
-# derived budget (turn caps, shrink threshold) scales with it.
+#: Working context estimate for the rollout backend. Sized to hosted Qwen
+#: by default; a bigger-window backend sets ZP_CONTEXT_TOKENS and every
+#: derived budget (turn caps, shrink threshold) scales with it.
 # CONTEXT_FLOOR_TOKENS = 2048: the smallest window the loop is sized for;
 # below it one system prompt plus one tool schema leaves no room for a
 # reply (convention, untested).
@@ -149,10 +154,10 @@ _CONTEXT_TOKENS = CONTEXT_TOKENS
 # long-horizon backend and raises the turn cap and the reply budget
 # (convention: the hosted 4k Qwen is below it, every 16k+ server above).
 LARGE_CONTEXT_TOKENS = 8192
-# The turn cap is what the window can hold: the reserved head (system
-# prompt, 64 tokens per tool schema up to 1536) comes off, and each
-# user+agent exchange is budgeted at 128 tokens (convention, untested;
-# a measured per-turn mean would replace it).
+#: The turn cap is what the window can hold: the reserved head (system
+#: prompt, 64 tokens per tool schema up to 1536) comes off, and each
+#: user+agent exchange is budgeted at 128 tokens (convention, untested;
+#: a measured per-turn mean would replace it).
 TURN_CAP_RESERVED_TOKENS = 2048
 TURN_CAP_TOOL_TOKENS = 64
 TURN_CAP_TOOLS_MAX_TOKENS = 1536
@@ -230,9 +235,9 @@ def ping_hosted(base_url: str | None = None, *, timeout: float = 3.0) -> bool:
         conn.close()
     except Exception:
         return False
-    if status >= 500 or status == 404:
+    if status >= HTTPStatus.INTERNAL_SERVER_ERROR or status == HTTPStatus.NOT_FOUND:
         return False
-    return 200 <= status < 500
+    return HTTPStatus.OK <= status < HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
@@ -345,7 +350,7 @@ def _quota_error(status: int, body: str) -> str | None:
     """The proxy's 429 for a spent daily allowance, or None. Not transient:
     every later call today answers the same, so the run stops instead of
     retrying into the clock. Carries ``QUOTA_FIX``, the two ways on."""
-    if int(status) != 429:
+    if int(status) != HTTPStatus.TOO_MANY_REQUESTS:
         return None
     text = str(body or "")
     if QUOTA_MARK not in text.lower():
@@ -594,18 +599,15 @@ def _thread_connection(parsed: Any, conn_key: tuple, timeout: float) -> http.cli
     return conn
 
 
-# MIN_REPLY_TOKENS = 256: no request asks for fewer reply tokens than
-# this; the input is shrunk instead, because a reply cut under 256 tokens
-# is a fragment the junk gate drops anyway (convention, untested).
-MIN_REPLY_TOKENS = 256
+# MIN_REPLY_TOKENS lives in defaults.py: both HTTP backends read it.
 # CONTEXT_MARGIN_TOKENS = 64: slack between the estimated input and the
 # window, for chat-template tokens the estimate does not see
 # (convention, untested).
 CONTEXT_MARGIN_TOKENS = 64
-# COMPLETE_TEMPERATURE = 0.7 / COMPLETE_MAX_TOKENS = 1024 / COMPLETE_TIMEOUT_S
-# = 60: what a bare ``complete()`` call uses when the caller names
-# nothing; every caller in this package names its own (convention, the
-# OpenAI client defaults).
+#: COMPLETE_TEMPERATURE = 0.7 / COMPLETE_MAX_TOKENS = 1024 / COMPLETE_TIMEOUT_S
+#: = 60: what a bare ``complete()`` call uses when the caller names
+#: nothing; every caller in this package names its own (convention, the
+#: OpenAI client defaults).
 COMPLETE_TEMPERATURE = 0.7
 COMPLETE_MAX_TOKENS = 1024
 COMPLETE_TIMEOUT_S = 60.0
@@ -710,16 +712,16 @@ def complete(
             resp = conn.getresponse()
             raw = resp.read()
             status, raw = _follow_redirects(resp, raw, headers, timeout)
-            if status >= 400:
+            if status >= HTTPStatus.BAD_REQUEST:
                 err = raw[:400].decode("utf-8", "replace")
                 if (
-                    status == 400
+                    status == HTTPStatus.BAD_REQUEST
                     and "max_tokens" in err
                     and int(payload["max_tokens"]) > MIN_REPLY_TOKENS
                 ):
                     payload["max_tokens"] = max(MIN_REPLY_TOKENS, int(payload["max_tokens"]) // 2)
                     raise RuntimeError("retry_max_tokens")
-                if status == 400 and _shrink_last_user(messages):
+                if status == HTTPStatus.BAD_REQUEST and _shrink_last_user(messages):
                     room = (
                         _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - CONTEXT_MARGIN_TOKENS
                     )
@@ -728,10 +730,14 @@ def complete(
                         min(int(payload["max_tokens"]), max(MIN_REPLY_TOKENS, room)),
                     )
                     raise RuntimeError("retry_shrink_input")
-                if status == 400 and payload.get("n"):
+                if status == HTTPStatus.BAD_REQUEST and payload.get("n"):
                     payload.pop("n", None)
                     raise RuntimeError("retry_drop_n")
-                if status == 400 and payload.get("logprobs") and "logprob" in err.lower():
+                if (
+                    status == HTTPStatus.BAD_REQUEST
+                    and payload.get("logprobs")
+                    and "logprob" in err.lower()
+                ):
                     payload.pop("logprobs", None)
                     raise RuntimeError("retry_drop_logprobs")
                 if status in {401, 403}:
@@ -743,7 +749,7 @@ def complete(
                 quota = _quota_error(status, err)
                 if quota:
                     raise RuntimeError(quota)
-                if status == 400:
+                if status == HTTPStatus.BAD_REQUEST:
                     if "context" in err.lower() or "input tokens" in err.lower():
                         raise RuntimeError(
                             f"hosted Qwen rejected the prompt ({status}); "
@@ -1046,7 +1052,7 @@ def patience_hazards(patience: Patience | None) -> tuple[float, float]:
         raw_second, raw_later = patience.get("second"), patience.get("later")
     else:
         items = tuple(patience)
-        raw_second, raw_later = (items[0], items[1]) if len(items) == 2 else (None, None)
+        raw_second, raw_later = (items[0], items[1]) if len(items) == 2 else (None, None)  # noqa: PLR2004  # a patience table is a pair (second, later)
     try:
         second, later = float(raw_second), float(raw_later)
     except (TypeError, ValueError):
@@ -1156,6 +1162,12 @@ def ended_on_question(rows) -> dict:
     }
 
 
+#: A thread budget under four turns has no room for a follow-up: the
+#: opener, the agent's reply, one more user line and the agent's answer to
+#: it (structural, not a tuning).
+_FOLLOWUP_MIN_BUDGET = 4
+
+
 def _want_followup(
     message: str,
     turn_i: int,
@@ -1209,7 +1221,7 @@ def _want_followup(
         return not _user_walks_away(message, turn_i, questions=questions, patience=patience)
     if _AGENT_REFUSAL.search(text):
         return True
-    if int(budget) < 4:
+    if int(budget) < _FOLLOWUP_MIN_BUDGET:
         # A short thread still ends on the agent: with room for one user line
         # there is nothing a second one could be for.
         return False
@@ -1247,12 +1259,12 @@ USER_RETRY_MAX_TOKENS = 120
 HUMAN_TOOL_MAX_TOKENS = 120
 # OPENER_MAX_TOKENS = 120: the agent's greeting when it opens (convention).
 OPENER_MAX_TOKENS = 120
-# USER_TURN_WAIT_S = 5 / USER_TURN_WAIT_ASKED_S = 8 / USER_TURN_WAIT_CAP_S =
-# 30: seconds a follow-up may take, half the rollout timeout clamped to
-# this band. Floor, not ceiling: a 5 s wait on a busy endpoint silently
-# killed every follow-up and collapsed whole datasets to single-turn; an
-# answer to a question gets the longer floor (measured on the hosted pool,
-# the cap is convention).
+#: USER_TURN_WAIT_S = 5 / USER_TURN_WAIT_ASKED_S = 8 / USER_TURN_WAIT_CAP_S =
+#: 30: seconds a follow-up may take, half the rollout timeout clamped to
+#: this band. Floor, not ceiling: a 5 s wait on a busy endpoint silently
+#: killed every follow-up and collapsed whole datasets to single-turn; an
+#: answer to a question gets the longer floor (measured on the hosted pool,
+#: the cap is convention).
 USER_TURN_WAIT_S = 5.0
 USER_TURN_WAIT_ASKED_S = 8.0
 USER_TURN_WAIT_CAP_S = 30.0
@@ -1295,7 +1307,7 @@ def _detail_hints(tools: list | None) -> list[str]:
         params = (fn or {}).get("parameters") or {}
         for key in (params.get("properties") or {}) if isinstance(params, dict) else {}:
             label = re.sub(r"[_\-]+", " ", str(key)).strip().lower()
-            if label and label not in out and len(label) <= 24:
+            if label and label not in out and len(label) <= TEXT_HEURISTICS.detail_label_max_chars:
                 out.append(label)
     return out[:DETAIL_HINTS_MAX]
 
@@ -1467,7 +1479,10 @@ def _persona_notes(prior: str) -> str:
         notes.append("You are still frustrated until this is actually solved.")
     elif re.search(r"\b(asap|right now|waiting)\b", text, re.I):
         notes.append("You are still in a hurry.")
-    elif re.search(r"\b(please|thanks|thank you)\b", text, re.I) and len(text) > 40:
+    elif (
+        re.search(r"\b(please|thanks|thank you)\b", text, re.I)
+        and len(text) > TEXT_HEURISTICS.polite_filler_min_chars
+    ):
         notes.append("Stay polite, but do not just thank them.")
     return " ".join(notes)
 
@@ -1524,14 +1539,14 @@ def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     if not text or text == prior or len(text) > USER_TURN_MAX_CHARS:
         return False
     # A person never types call syntax: name_with_underscores( or a JSON dump.
-    if re.search(r"\b\w+_\w+\s*\(", text) or text.count('"') >= 4:
+    if re.search(r"\b\w+_\w+\s*\(", text) or text.count('"') >= TEXT_HEURISTICS.code_quote_marks:
         return False
     # A bare yes is filler everywhere except where the agent asked for
     # exactly that. Confirm-then-execute data depends on it, so it wins
     # over the echo, stamp, and length gates below.
     if (
         _ASKS_CONFIRM.search(str(agent_text or ""))
-        and len(text) <= 60
+        and len(text) <= TEXT_HEURISTICS.confirm_reply_max_chars
         and re.match(
             r"^(yes|yep|yeah|sure|ok(ay)?|confirmed|do it|"
             r"go ahead|no\b)",
@@ -1546,24 +1561,24 @@ def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
         return False
     if _off_world_coding(text, prior, agent_text):
         return False
-    if _ID_FOLLOW.search(text) and len(text) >= 3:
+    if _ID_FOLLOW.search(text) and len(text) >= TEXT_HEURISTICS.id_reply_min_chars:
         return True
     if _echoes_agent(text, agent_text):
         return False
-    if len(text) < 8:
+    if len(text) < TEXT_HEURISTICS.followup_min_chars:
         return False
     return usable_user_message(text)
 
 
 def _repeats_user_history(text: str, messages: list[dict] | None) -> bool:
     current = set(re.findall(r"[a-z0-9]+", str(text).lower()))
-    if len(current) < 5:
+    if len(current) < TEXT_HEURISTICS.history_min_words:
         return False
     for message in messages or []:
         if message.get("role") != "user":
             continue
         prior = set(re.findall(r"[a-z0-9]+", str(message.get("content") or "").lower()))
-        if len(prior) < 5:
+        if len(prior) < TEXT_HEURISTICS.history_min_words:
             continue
         overlap = len(current & prior) / min(len(current), len(prior))
         if overlap >= REPEAT_OVERLAP:
@@ -1723,7 +1738,7 @@ def _echoes_agent(user: str, agent: str) -> bool:
         return False
     u = set(re.findall(r"[a-z]{3,}", (user or "").lower()))
     a = set(re.findall(r"[a-z]{3,}", (agent or "").lower()))
-    if len(u) < 4 or not a:
+    if len(u) < TEXT_HEURISTICS.echo_min_words or not a:
         # Too few words to call a restatement; short replies are answers.
         return False
     return (len(u & a) / len(u)) >= ECHO_OVERLAP
@@ -1838,20 +1853,13 @@ def _answer_tool_call(env: Any, execute: Callable | None, tool: str, arguments: 
     return {"status": "ok", "result": result}
 
 
-# LOCAL_MODEL_TEMPERATURE = 0.8: sampling temperature of a model-backed
-# rollout unless simulate(advanced={"temperature": ...}) says otherwise,
-# recorded on every row under ``sampling``. Inside the 0.7 to 1.0 band
-# rejection sampling is run at (rlhf-book ch. 9, Rejection Sampling) and
-# under the 1.0 RL rollouts use (DAPO 2503.14476, group size 16); the
-# agent benchmarks that want reproducible scores run at 0 (tau-bench
-# 2406.12045, tau2-bench 2506.07982), which is what ``reproducible=`` and
-# an explicit temperature are for. 0.8 within the band is a convention.
-LOCAL_MODEL_TEMPERATURE = 0.8
-# Seconds one completion may take. A served model that scaled to zero
-# takes two to three minutes to answer its first request (113 s measured
-# on the account's own endpoint, #302; the hosted judge is the same
-# shape), and the old 60 s dropped every rollout of the first pass and
-# returned an empty run that looked finished.
+# LOCAL_MODEL_TEMPERATURE lives in defaults.py (the monitor samples at
+# the same value); it is re-exported here for the callers that read it.
+#: Seconds one completion may take. A served model that scaled to zero
+#: takes two to three minutes to answer its first request (113 s measured
+#: on the account's own endpoint, #302; the hosted judge is the same
+#: shape), and the old 60 s dropped every rollout of the first pass and
+#: returned an empty run that looked finished.
 LOCAL_MODEL_TIMEOUT = 300.0
 
 
@@ -1897,6 +1905,7 @@ def local_model(
     thinking: bool | None = None,
     patience: Patience | None = "normal",
     user_temperature: float | None = None,
+    world_options: WorldOptions | Mapping[str, Any] | None = None,
 ) -> Callable:
     """An agent that talks to an OpenAI-compatible endpoint (a served
     adapter, a local vLLM, any chat server) for ``simulate(agent=...)``.
@@ -1957,8 +1966,13 @@ def local_model(
     sampling temperature of every simulated-user line, follow-ups
     (``USER_TURN_TEMPERATURE``) and human-tool answers
     (``HUMAN_TOOL_TEMPERATURE``) alike; ``None`` keeps those two defaults.
+    ``world_options`` is the mock world's dials (a ``WorldOptions`` or the
+    same fields as a dict: fault modes, hit counts, name pools, ...);
+    ``simulate(advanced={"world": {...}})`` lands here. ``None`` is the
+    defaults in ``defaults.py``.
     """
     hazards = patience_hazards(patience)
+    world_opts = WorldOptions.coerce(world_options)
     may_leave = patience_may_leave(patience)
     followup_temp = USER_TURN_TEMPERATURE if user_temperature is None else float(user_temperature)
     human_temp = HUMAN_TOOL_TEMPERATURE if user_temperature is None else float(user_temperature)
@@ -1993,7 +2007,9 @@ def local_model(
         world = str(plan.pop("world_state", "") or "")
         stance = str(plan.pop("stance", "") or "")
         persona_tags = {k: plan.pop(k) for k in ("tone", "texture") if plan.get(k)}
-        local.env = MockEnvironment(tools, faults=plan, world_state=world, result_shapes=shapes)
+        local.env = MockEnvironment(
+            tools, faults=plan, world_state=world, result_shapes=shapes, options=world_opts
+        )
         turns = split_user_turns(message)
         messages = ([{"role": "system", "content": policy_text}] if policy_text else []) + [
             {"role": "user", "content": turns[0]},
@@ -2145,7 +2161,7 @@ def local_model(
                     if isinstance(s, dict) and str(s.get("text") or "").strip():
                         prev = str(s["text"]).strip()
                         break
-                if prev and spoken.strip() == prev and n_user >= 2:
+                if prev and spoken.strip() == prev and n_user >= 2:  # noqa: PLR2004  # the second user turn is where an echo can start
                     return _done(steps, prev)
             messages.append({"role": "assistant", "content": spoken})
             if spoken:
@@ -2165,7 +2181,7 @@ def local_model(
                 steps.append({"user": last_user})
                 messages.append({"role": "user", "content": last_user})
                 continue
-            need_first = n_user < 2
+            need_first = n_user < 2  # noqa: PLR2004  # the first user turn is structural
             force_followup = n_user < min_users
             # Questions the agent already asked on this thread, not counting
             # this one: the person's patience runs out with them (#289).
@@ -2251,3 +2267,83 @@ def hosted_model(
     """The default simulation brain: hosted Qwen wearing these tools."""
     url, model = parse_backend_spec(default_agent_spec())
     return local_model(url, model, tools=tools, system=system, fault_plans=fault_plans, **kwargs)
+
+
+__all__ = [
+    "ACCOUNT_AGENT",
+    "ACCOUNT_JUDGE",
+    "COMPLETE_MAX_TOKENS",
+    "COMPLETE_TEMPERATURE",
+    "COMPLETE_TIMEOUT_S",
+    "CONTEXT_FLOOR_TOKENS",
+    "CONTEXT_MARGIN_TOKENS",
+    "CONTEXT_TOKENS",
+    "DEFAULT_AGENT",
+    "DEFAULT_JUDGE",
+    "DEFAULT_SIMULATOR",
+    "DETAIL_HINTS_MAX",
+    "ECHO_OVERLAP",
+    "HOSTED_DROPPED",
+    "HUMAN_TOOL_MAX_TOKENS",
+    "HUMAN_TOOL_TEMPERATURE",
+    "LARGE_CONTEXT_TOKENS",
+    "LENGTH_CUT_MIN_CHARS",
+    "LOCAL_MODEL_TEMPERATURE",
+    "LOCAL_MODEL_TIMEOUT",
+    "LOWERCASE_UPPER_SHARE",
+    "MIN_REPLY_TOKENS",
+    "MIN_SPOKEN_CHARS",
+    "MISSING_HOSTED_KEY",
+    "OPENER_MAX_TOKENS",
+    "PATIENCE_HAZARDS",
+    "PATIENCE_LEVELS",
+    "PREAMBLE_MAX_WORDS",
+    "QUOTA_FIX",
+    "QUOTA_MARK",
+    "REPEAT_OVERLAP",
+    "REPLY_TOKENS",
+    "REPLY_TOKENS_LARGE",
+    "SHRINK_USER_MIN_CHARS",
+    "THANKS_SHARE",
+    "TOOL_WORLD_MAX",
+    "TURN_CAP_LARGE",
+    "TURN_CAP_MIN",
+    "TURN_CAP_RESERVED_TOKENS",
+    "TURN_CAP_SMALL",
+    "TURN_CAP_TOKENS_PER_TURN",
+    "TURN_CAP_TOOLS_MAX_TOKENS",
+    "TURN_CAP_TOOL_TOKENS",
+    "USER_LEFT",
+    "USER_RETRY_MAX_TOKENS",
+    "USER_TRACE_CHARS",
+    "USER_TURN_MARK",
+    "USER_TURN_MAX_CHARS",
+    "USER_TURN_MAX_TOKENS",
+    "USER_TURN_TEMPERATURE",
+    "USER_TURN_WAIT_ASKED_S",
+    "USER_TURN_WAIT_CAP_S",
+    "USER_TURN_WAIT_S",
+    "Patience",
+    "complete",
+    "current_rollout",
+    "default_agent_spec",
+    "default_judge_spec",
+    "default_max_turns",
+    "default_simulator_spec",
+    "ended_on_question",
+    "hosted_model",
+    "human_tool_names",
+    "local_model",
+    "missing_hosted_key",
+    "parse_backend_spec",
+    "parse_text_tool_calls",
+    "patience_hazards",
+    "patience_may_leave",
+    "ping_hosted",
+    "public_llm_error",
+    "reply_budget",
+    "resolve_completion_key",
+    "split_user_turns",
+    "touch_hosted",
+    "user_sim_system",
+]
