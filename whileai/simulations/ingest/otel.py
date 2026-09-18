@@ -18,29 +18,59 @@ from typing import Any
 
 from ..schema import check, stamp
 
-_MESSAGE_KEYS = ("gen_ai.input.messages", "gen_ai.prompt", "llm.input_messages")
-_OUTPUT_KEYS = ("gen_ai.output.messages", "gen_ai.completion", "llm.output_messages")
-_TOOL_IN_KEYS = ("gen_ai.tool.call.arguments", "gen_ai.tool.input", "tool.input")
-_TOOL_OUT_KEYS = ("gen_ai.tool.call.result", "gen_ai.tool.output", "tool.output")
-_TOOL_NAME_KEYS = ("gen_ai.tool.name", "tool.name")
-_USAGE_IN_KEYS = (
+# Attribute dialects, first match wins. The GenAI semantic conventions come
+# first, then the OpenInference / LLM spellings the common instrumentations
+# emit. Public so a caller with another dialect can extend a tuple before
+# calling ``rows_from_otel``.
+MESSAGE_KEYS = ("gen_ai.input.messages", "gen_ai.prompt", "llm.input_messages")
+OUTPUT_KEYS = ("gen_ai.output.messages", "gen_ai.completion", "llm.output_messages")
+TOOL_IN_KEYS = ("gen_ai.tool.call.arguments", "gen_ai.tool.input", "tool.input")
+TOOL_OUT_KEYS = ("gen_ai.tool.call.result", "gen_ai.tool.output", "tool.output")
+TOOL_NAME_KEYS = ("gen_ai.tool.name", "tool.name")
+USAGE_IN_KEYS = (
     "gen_ai.usage.input_tokens",
     "gen_ai.usage.prompt_tokens",
     "llm.token_count.prompt",
     "llm.usage.prompt_tokens",
 )
-_USAGE_OUT_KEYS = (
+USAGE_OUT_KEYS = (
     "gen_ai.usage.output_tokens",
     "gen_ai.usage.completion_tokens",
     "llm.token_count.completion",
     "llm.usage.completion_tokens",
 )
-_CONVERSATION_KEYS = (
+CONVERSATION_KEYS = (
     "gen_ai.conversation.id",
     "conversation.id",
     "session.id",
     "gen_ai.session.id",
     "thread.id",
+)
+#: The span attribute a 0..1 reward rides on (``rows_from_otel(reward_keys=)``
+#: reads another), the attribute that names which weights produced the trace
+#: (the explicit key wins across all spans; the request model is the
+#: fallback), the tool status attribute and the values that mean failure.
+REWARD_KEYS = ("whileai.reward",)
+MODEL_VERSION_KEYS = ("zeroproof.model_version",)
+MODEL_KEYS = ("gen_ai.request.model",)
+TOOL_STATUS_KEYS = ("gen_ai.tool.status",)
+TOOL_ERROR_STATUSES = frozenset({"error", "failed", "failure"})
+EXCEPTION_MESSAGE_KEY = "exception.message"
+#: A reward is kept when it lies in this closed range; 0 and 1 become ints.
+REWARD_RANGE = (0.0, 1.0)
+#: Platform-gate span dumps stamp milliseconds; OTLP stamps nanoseconds.
+MS_TO_NS = 1_000_000
+_MESSAGE_KEYS, _OUTPUT_KEYS, _TOOL_IN_KEYS, _TOOL_OUT_KEYS = (
+    MESSAGE_KEYS,
+    OUTPUT_KEYS,
+    TOOL_IN_KEYS,
+    TOOL_OUT_KEYS,
+)
+_TOOL_NAME_KEYS, _USAGE_IN_KEYS, _USAGE_OUT_KEYS, _CONVERSATION_KEYS = (
+    TOOL_NAME_KEYS,
+    USAGE_IN_KEYS,
+    USAGE_OUT_KEYS,
+    CONVERSATION_KEYS,
 )
 
 
@@ -132,15 +162,15 @@ def _message_texts(value: Any, role: str) -> list[str]:
     return out
 
 
-def rows_from_otel(source: Any) -> list[dict]:
+def rows_from_otel(source: Any, *, reward_keys: Sequence[str] = REWARD_KEYS) -> list[dict]:
     """Conversations from an OTLP JSON batch or an iterable of spans.
 
     One row per conversation id (trace id when no conversation id is
     emitted): the first user message becomes ``prompt``, tool spans in
     time order become ``steps``, later user turns become user steps, and
-    the last assistant output becomes ``final_text``.
+    the last assistant output becomes ``final_text``. ``reward_keys`` names
+    the span attributes a 0..1 reward is read from (``REWARD_KEYS``).
     """
-    reward_keys = ("whileai.reward",)
     # Emitters like daisy set the conversation id on the root span only;
     # child spans carry just the trace id. First let any span's
     # conversation id claim its whole trace, then group.
@@ -151,7 +181,7 @@ def rows_from_otel(source: Any) -> list[dict]:
             continue
         attrs = _attributes(span)
         trace = str(span.get("traceId") or span.get("trace_id") or "")
-        conv = str(_first(attrs, _CONVERSATION_KEYS) or "")
+        conv = str(_first(attrs, CONVERSATION_KEYS) or "")
         if conv and trace and trace not in trace_conv:
             trace_conv[trace] = conv
         start = int(span.get("startTimeUnixNano") or span.get("start_time_unix_nano") or 0)
@@ -160,7 +190,7 @@ def rows_from_otel(source: Any) -> list[dict]:
             # Without a timestamp, step order silently becomes span
             # arrival order, which OTLP batch exporters do not preserve.
             ms = span.get("startedMs") or span.get("started_ms") or span.get("startTimeMs") or 0
-            start = int(ms) * 1_000_000
+            start = int(ms) * MS_TO_NS
         spans.append((trace, conv, start, span, attrs))
     groups: dict[str, list[tuple[int, dict, dict]]] = {}
     for trace, conv, start, span, attrs in spans:
@@ -184,19 +214,19 @@ def rows_from_otel(source: Any) -> list[dict]:
             # of the conversation sums into the row, the same shape a
             # simulated row carries, so production and simulated rows
             # report cost the same way.
-            span_in = _tokens(_first(attrs, _USAGE_IN_KEYS))
-            span_out = _tokens(_first(attrs, _USAGE_OUT_KEYS))
+            span_in = _tokens(_first(attrs, USAGE_IN_KEYS))
+            span_out = _tokens(_first(attrs, USAGE_OUT_KEYS))
             if span_in is not None or span_out is not None:
                 usage_seen = True
                 tokens_in += span_in or 0
                 tokens_out += span_out or 0
             # The explicit whileai key wins across ALL spans; a generic
             # model name on an earlier span must not freeze the choice.
-            mv = _first(attrs, ("zeroproof.model_version",))
+            mv = _first(attrs, MODEL_VERSION_KEYS)
             if mv and model_version is None:
                 model_version = str(mv)
             if model_generic is None:
-                generic = _first(attrs, ("gen_ai.request.model",))
+                generic = _first(attrs, MODEL_KEYS)
                 if generic:
                     model_generic = str(generic)
             raw_reward = _first(attrs, reward_keys)
@@ -205,24 +235,24 @@ def rows_from_otel(source: Any) -> list[dict]:
                     value = float(raw_reward)
                 except (TypeError, ValueError):
                     value = None
-                if value is not None and 0.0 <= value <= 1.0:
-                    reward = int(value) if value in (0.0, 1.0) else value
-            tool_args = _first(attrs, _TOOL_IN_KEYS)
+                if value is not None and REWARD_RANGE[0] <= value <= REWARD_RANGE[1]:
+                    reward = int(value) if value in REWARD_RANGE else value
+            tool_args = _first(attrs, TOOL_IN_KEYS)
             if tool_args is not None:
-                name = str(_first(attrs, _TOOL_NAME_KEYS) or span.get("name") or "tool")
-                result = _parse(_first(attrs, _TOOL_OUT_KEYS))
+                name = str(_first(attrs, TOOL_NAME_KEYS) or span.get("name") or "tool")
+                result = _parse(_first(attrs, TOOL_OUT_KEYS))
                 # Emitters like daisy flag failures via gen_ai.tool.status
                 # rather than inside the result payload. Surface that as a
                 # canonical failure result so fault mining and trace aiming
                 # see the error instead of a plain-looking output.
-                tool_status = str(_first(attrs, ("gen_ai.tool.status",)) or "").lower()
-                if tool_status in {"error", "failed", "failure"} and not (
+                tool_status = str(_first(attrs, TOOL_STATUS_KEYS) or "").lower()
+                if tool_status in TOOL_ERROR_STATUSES and not (
                     isinstance(result, dict) and result.get("status")
                 ):
                     error = ""
                     for event in span.get("events") or []:
                         for attr in (event or {}).get("attributes") or []:
-                            if attr.get("key") == "exception.message":
+                            if attr.get("key") == EXCEPTION_MESSAGE_KEY:
                                 error = str(_otlp_value(attr.get("value")))
                                 break
                     wrapped: dict = {"status": "error", "output": result}
@@ -237,7 +267,7 @@ def rows_from_otel(source: Any) -> list[dict]:
                     }
                 )
                 continue
-            for text in _message_texts(_first(attrs, _MESSAGE_KEYS), "user"):
+            for text in _message_texts(_first(attrs, MESSAGE_KEYS), "user"):
                 key = " ".join(text.lower().split())
                 if key in seen_users:
                     continue
@@ -246,7 +276,7 @@ def rows_from_otel(source: Any) -> list[dict]:
                     prompt = text
                 else:
                     steps.append({"user": text})
-            outputs = _message_texts(_first(attrs, _OUTPUT_KEYS), "assistant")
+            outputs = _message_texts(_first(attrs, OUTPUT_KEYS), "assistant")
             if outputs:
                 final_text = outputs[-1]
         if prompt or steps or final_text:

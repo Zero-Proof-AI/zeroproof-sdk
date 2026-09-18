@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from statistics import NormalDist
 
 import pytest
@@ -71,11 +72,15 @@ def test_every_default_says_why():
     """Each constant carries a one-line why in the comment above it."""
     import inspect
 
-    source = inspect.getsource(defaults)
+    comments = "\n".join(
+        line for line in inspect.getsource(defaults).splitlines() if line.startswith("#")
+    )
     for name in defaults.__all__:
         if not name.isupper():
             continue  # RunKnobs and the knob helpers are not constants
-        assert f"# {name} = " in source, name
+        # its own line, or named with its value inside a shared comment
+        # ("# A = 1 / B = 2: ...")
+        assert re.search(rf"(?<![A-Z_]){name} = ", comments), name
 
 
 # ------------------------------------------------------------------ level / alpha / power

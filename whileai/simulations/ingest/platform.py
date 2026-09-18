@@ -29,15 +29,45 @@ from typing import Any
 from whileai._env import getenv
 from whileai.auth import stored_api_key
 
+from ..defaults import (
+    PLATFORM_CREDENTIAL_TTL_S,
+    PLATFORM_ERROR_DETAIL_CHARS,
+    PLATFORM_HF_DATASET_TIMEOUT_S,
+    PLATFORM_HF_MODEL_POLL_S,
+    PLATFORM_HF_MODEL_TIMEOUT_S,
+    PLATFORM_HF_POLL_S,
+    PLATFORM_HOLDOUT_PROVE_EFFECT,
+    PLATFORM_IMPORT_MAX_ROWS,
+    PLATFORM_IMPORT_POLL_S,
+    PLATFORM_IMPORT_TIMEOUT_S,
+    PLATFORM_REQUEST_TIMEOUT_S,
+    PLATFORM_STUDIO_MAX_ROWS,
+    PLATFORM_TRACE_PAGE_SIZE,
+    PLATFORM_UNKNOWN_IDS_SHOWN,
+    PLATFORM_UPLOAD_TIMEOUT_S,
+)
+
 #: Overridable with ``WHILEAI_API_URL``, which is what a self-hosted gate or
 #: a staging one uses. The default is the production token gate behind the
 #: While AWS account, and the SDK prefers delegated credentials over static
 #: keys at runtime.
 DEFAULT_API_URL = "https://api.zeroproofai.com"
 
+#: What a dataset is for on the Datasets page, and the simulation mode that
+#: made it. The gate rejects anything else; the studio import takes MODES.
+PURPOSES = ("train", "holdout", "eval")
+MODES = ("explore", "sft", "rl", "adaptive")
+
 
 class PlatformError(RuntimeError):
     pass
+
+
+def _error_detail(err: urllib.error.HTTPError) -> str:
+    detail = err.read().decode(errors="replace")[:PLATFORM_ERROR_DETAIL_CHARS]
+    with contextlib.suppress(ValueError, AttributeError):
+        detail = json.loads(detail).get("error", detail)
+    return detail
 
 
 def _api_url() -> str:
@@ -63,7 +93,7 @@ def _call(
     raw_url: str | None = None,
     data: bytes | None = None,
     content_type: str | None = None,
-    timeout: int = 120,
+    timeout: float = PLATFORM_REQUEST_TIMEOUT_S,
     auth_token: str | None = None,
     require_api_key: bool = False,
     public: bool = False,
@@ -85,9 +115,7 @@ def _call(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = response.read()
     except urllib.error.HTTPError as err:
-        detail = err.read().decode(errors="replace")[:400]
-        with contextlib.suppress(ValueError, AttributeError):
-            detail = json.loads(detail).get("error", detail)
+        detail = _error_detail(err)
         raise PlatformError(f"{method} {url.split('?')[0]} -> {err.code}: {detail}") from None
     except urllib.error.URLError as err:
         raise PlatformError(f"{method} {url.split('?')[0]} failed: {err.reason}") from None
@@ -99,9 +127,9 @@ def _call(
 def issue_delegated_credential(
     clerk_token: str | None,
     *,
-    ttl_seconds: int = 3600,
+    ttl_seconds: int = PLATFORM_CREDENTIAL_TTL_S,
     name: str = "sdk-default",
-    timeout: int = 120,
+    timeout: float = PLATFORM_REQUEST_TIMEOUT_S,
 ) -> dict:
     """Create a short-lived delegated credential for SDK or backend use.
 
@@ -120,7 +148,11 @@ def issue_delegated_credential(
 
 
 def refresh_delegated_credential(
-    clerk_token: str | None, credential: str, *, ttl_seconds: int = 3600, timeout: int = 120
+    clerk_token: str | None,
+    credential: str,
+    *,
+    ttl_seconds: int = PLATFORM_CREDENTIAL_TTL_S,
+    timeout: float = PLATFORM_REQUEST_TIMEOUT_S,
 ) -> dict:
     """Refresh a delegated credential before it expires."""
     if not clerk_token:
@@ -136,7 +168,7 @@ def refresh_delegated_credential(
 
 
 def revoke_delegated_credential(
-    clerk_token: str | None, credential: str, *, timeout: int = 120
+    clerk_token: str | None, credential: str, *, timeout: float = PLATFORM_REQUEST_TIMEOUT_S
 ) -> dict:
     """Revoke a delegated credential for the authenticated user."""
     if not clerk_token:
@@ -156,8 +188,8 @@ def revoke_delegated_credential(
 
 
 DEFAULT_STUDIO_URL = "https://zeroproofai--zeroproof-studio-api-serve.modal.run"
-_STUDIO_MODES = ("explore", "sft", "rl", "adaptive")
-_STUDIO_MAX_ROWS = 20_000
+_STUDIO_MODES = MODES
+_STUDIO_MAX_ROWS = PLATFORM_STUDIO_MAX_ROWS
 
 
 def _studio_url() -> str:
@@ -172,6 +204,7 @@ def push_to_studio(
     tags: list[str] | None = None,
     filename: str | None = None,
     api_key: str | None = None,
+    timeout: float = PLATFORM_UPLOAD_TIMEOUT_S,
 ) -> dict:
     """Import rows into the studio runs store the platform UI reads.
 
@@ -186,11 +219,11 @@ def push_to_studio(
     ``mode`` labels the batch (one of explore/sft/rl/adaptive) and is
     required: the store would otherwise silently label everything "rl".
     """
-    if mode not in _STUDIO_MODES:
-        raise PlatformError(f"mode= must be one of {'/'.join(_STUDIO_MODES)}")
-    if len(rows) > _STUDIO_MAX_ROWS:
+    if mode not in MODES:
+        raise PlatformError(f"mode= must be one of {'/'.join(MODES)}")
+    if len(rows) > PLATFORM_STUDIO_MAX_ROWS:
         raise PlatformError(
-            f"studio import caps at {_STUDIO_MAX_ROWS} rows; got {len(rows)} - split the push"
+            f"studio import caps at {PLATFORM_STUDIO_MAX_ROWS} rows; got {len(rows)} - split the push"
         )
     body: dict = {"agent": agent, "mode": mode, "rows": list(rows)}
     if tags:
@@ -202,12 +235,10 @@ def push_to_studio(
     headers = {"X-Api-Key": _key(api_key), "Content-Type": "application/json"}
     request = urllib.request.Request(url, data=data, method="POST", headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=300) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = response.read()
     except urllib.error.HTTPError as err:
-        detail = err.read().decode(errors="replace")[:400]
-        with contextlib.suppress(ValueError, AttributeError):
-            detail = json.loads(detail).get("error", detail)
+        detail = _error_detail(err)
         hint = (
             " (is the agent registered in the studio? the studio "
             "registry is separate from trace agents)"
@@ -218,10 +249,6 @@ def push_to_studio(
     except urllib.error.URLError as err:
         raise PlatformError(f"POST {url} failed: {err.reason}") from None
     return json.loads(payload) if payload else {}
-
-
-PURPOSES = ("train", "holdout", "eval")
-MODES = ("explore", "sft", "rl", "adaptive")
 
 
 def _meta_body(
@@ -243,12 +270,16 @@ def _meta_body(
     return body
 
 
-HOLDOUT_PROVE_EFFECT = 0.05
+#: The gain a pushed holdout is sized to prove (defaults.py says why 5 points).
+HOLDOUT_PROVE_EFFECT = PLATFORM_HOLDOUT_PROVE_EFFECT
 
 
-def _warn_small_holdout(rows: Sequence[dict]) -> None:
-    """A holdout too small to prove a 5-point gain reads every round as
-    ``no_change_detected``; say so at push time, not after training (#257)."""
+def _warn_small_holdout(
+    rows: Sequence[dict], effect: float = PLATFORM_HOLDOUT_PROVE_EFFECT
+) -> None:
+    """A holdout too small to prove an ``effect`` gain (5 points by default)
+    reads every round as ``no_change_detected``; say so at push time, not
+    after training (#257)."""
     from ..score.stats import holdout_size, task_key
 
     groups: dict[str, int] = {}
@@ -260,13 +291,13 @@ def _warn_small_holdout(rows: Sequence[dict]) -> None:
     if not n_tasks:
         return
     try:
-        need = holdout_size(HOLDOUT_PROVE_EFFECT, rows=rows)
+        need = holdout_size(effect, rows=rows)
     except ValueError:
-        need = holdout_size(HOLDOUT_PROVE_EFFECT, k=min(groups.values()))
+        need = holdout_size(effect, k=min(groups.values()))
     if n_tasks < need["n_tasks"]:
         _warnings.warn(
             f"holdout has {n_tasks} tasks at k={need['k']}; proving a "
-            f"{HOLDOUT_PROVE_EFFECT:.0%} gain at 80% power needs about {need['n_tasks']} "
+            f"{effect:.0%} gain at 80% power needs about {need['n_tasks']} "
             "(holdout_size). A smaller holdout reads a real gain that size as "
             "no_change_detected.",
             stacklevel=3,
@@ -286,6 +317,7 @@ def push_rows(
     description: str | None = None,
     endorsed: Sequence[str] = (),
     strict_hacks: bool = False,
+    prove_effect: float = PLATFORM_HOLDOUT_PROVE_EFFECT,
 ) -> dict:
     """Upload rows as JSONL to your While account.
 
@@ -300,7 +332,9 @@ def push_rows(
     ``hack_scan``; ``strict_hacks=True`` refuses a set whose reward is
     best explained by something else.
     ``SimulationData.push`` gates by default; this row-level entry point
-    does not, because the caller may already have run ``optimize``.
+    does not, because the caller may already have run ``optimize``. A
+    ``purpose="holdout"`` push warns when the set is too small to prove a
+    ``prove_effect`` gain (5 points) at 80% power.
     """
     from ..schema import check
 
@@ -311,7 +345,7 @@ def push_rows(
         gate_report = publish_gate(rows, mode=mode, endorsed=endorsed, strict_hacks=strict_hacks)
     check(rows, where="push_rows")
     if purpose == "holdout":
-        _warn_small_holdout(rows)
+        _warn_small_holdout(rows, prove_effect)
     body: dict = {
         "name": name,
         **_meta_body(purpose, mode if mode in MODES else None, agent, description),
@@ -563,7 +597,8 @@ def send_score(
     if unknown:
         raise PlatformError(
             f"No run on this account with {'that trace id' if len(unknown) == 1 else 'those trace ids'}: "
-            f"{', '.join(unknown[:3])}. Ids come from the traces page or `whileai.list_traces`."
+            f"{', '.join(unknown[:PLATFORM_UNKNOWN_IDS_SHOWN])}. Ids come from the traces page "
+            "or `whileai.list_traces`."
         )
     rejected = [str(r.get("error") or r) for r in (out.get("rejected") or [])]
     raise PlatformError(rejected[0] if rejected else "Nothing was applied.")
@@ -747,7 +782,8 @@ def hf_publish(
     repo: str | None = None,
     private: bool = False,
     wait: bool = True,
-    timeout: float = 600,
+    timeout: float = PLATFORM_HF_DATASET_TIMEOUT_S,
+    poll: float = PLATFORM_HF_POLL_S,
     api_key: str | None = None,
 ) -> dict:
     """Push one of your datasets to a Hugging Face dataset repo you own.
@@ -768,7 +804,7 @@ def hf_publish(
     out = _call("POST", f"/datasets/{dataset_id}/hf-publish", api_key, body)
     if not wait:
         return out["hf"]
-    return _wait_hf(lambda: _call("GET", f"/datasets/{dataset_id}", api_key), timeout, 2.5)
+    return _wait_hf(lambda: _call("GET", f"/datasets/{dataset_id}", api_key), timeout, poll)
 
 
 def hf_publish_run(
@@ -778,7 +814,8 @@ def hf_publish_run(
     repo: str | None = None,
     private: bool = True,
     wait: bool = True,
-    timeout: float = 900,
+    timeout: float = PLATFORM_HF_MODEL_TIMEOUT_S,
+    poll: float = PLATFORM_HF_MODEL_POLL_S,
     api_key: str | None = None,
 ) -> dict:
     """Push a finished training run's LoRA adapter to a Hugging Face model
@@ -794,7 +831,7 @@ def hf_publish_run(
     out = _call("POST", f"/runs/{run_id}/hf-publish", api_key, body)
     if not wait:
         return out["hf"]
-    return _wait_hf(lambda: _call("GET", f"/runs/{run_id}", api_key), timeout, 3.0)
+    return _wait_hf(lambda: _call("GET", f"/runs/{run_id}", api_key), timeout, poll)
 
 
 def import_hf(
@@ -808,9 +845,10 @@ def import_hf(
     mode: str | None = None,
     agent: str | None = None,
     description: str | None = None,
-    max_rows: int = 100_000,
+    max_rows: int = PLATFORM_IMPORT_MAX_ROWS,
     wait: bool = True,
-    timeout: float = 900,
+    timeout: float = PLATFORM_IMPORT_TIMEOUT_S,
+    poll: float = PLATFORM_IMPORT_POLL_S,
     api_key: str | None = None,
 ) -> dict:
     """Bring one split of a Hugging Face dataset onto your account as rows,
@@ -843,7 +881,7 @@ def import_hf(
             raise PlatformError(
                 f"import of {repo}:{split} still running after {int(timeout)} s; it is {row['datasetId']}"
             )
-        time.sleep(3.0)
+        time.sleep(poll)
         row = _call("GET", f"/datasets/{row['datasetId']}", api_key)
     if row.get("status") == "failed":
         raise PlatformError(
@@ -903,11 +941,15 @@ def delete(dataset_id: str, *, api_key: str | None = None) -> dict:
     return _call("DELETE", f"/datasets/{dataset_id}", api_key)
 
 
-def _agent_trace_ids(slug: str, api_key: str | None) -> list[str]:
+def _agent_trace_ids(
+    slug: str, api_key: str | None, page_size: int = PLATFORM_TRACE_PAGE_SIZE
+) -> list[str]:
     ids: list[str] = []
     page = 1
     while True:
-        d = _call("GET", f"/traces?agent={slug}&from=all&limit=200&page={page}", api_key)
+        d = _call(
+            "GET", f"/traces?agent={slug}&from=all&limit={int(page_size)}&page={page}", api_key
+        )
         rows = d.get("traces") or []
         ids.extend(str(t["traceId"]) for t in rows if t.get("traceId"))
         if not rows or page >= int(d.get("pages") or 1):

@@ -13,7 +13,7 @@ animated version is at
 | 01 | Axes | Declare what varies: tool, policy clause, world state, fault, persona, history. A situation is a point in that space, not a prompt. | `generate/scenarios.py` |
 | 02 | Cover | Plan cells so every pair of axis values co-occurs at least once (a pairwise covering array). Most failures are two-factor interactions [6]. `data.coverage["pairwise"]` is planned pairs, covered pairs, and the fraction: pairwise cells of the 6-axis grid, which is training-data coverage, not policy coverage. A low fraction on a short run is a small sample of a large grid, not a failed eval; for policy coverage use `coverage_gap`. | `generate/coverage.py` |
 | 03 | Search | Five situation writers fill the grid. Each batch, weights move toward the arms that produced new behavior signatures: `w' = w(1 + 0.5 * yield)`, renormalized, with variety floors and rare caps. Novelty search, not importance sampling [7]. Stops at saturation. | `generate/scenarios.py`, `generate/diversity.py` |
-| 04 | World | Tools answer from schema-shaped state. Deterministic per seed. Unknown id: not found. An argument that echoes the schema instead of the customer: refused with a hint. | `world/sandbox.py` |
+| 04 | World | Tools answer from schema-shaped state. Deterministic per seed. Unknown id: not found. An argument that echoes the schema instead of the customer: refused with a hint. Every dial (fault modes, hit counts, id and date ranges, name pools, the result-kind routing table) is a `WorldOptions` field with its reason in `defaults.py`; `advanced={"world": {...}}` or `MockEnvironment(options=)` turns it. | `world/sandbox.py`, `defaults.py` |
 | 05 | Rollout | Run the agent on N tasks x n phrasings x k samples. With `logprobs=True` every row keeps the policy's per-token log-probabilities, token count, policy version and temperature. | `run/engine.py` |
 | 06 | Grade | Deterministic conduct rules first, then your judge. The judge is scored against gold labels before its grades are trusted. | `score/grading.py`, `score/judge_trust.py` |
 | 07 | Cut | SFT rows (reward=1, loss mask on agent turns), DPO pairs with margin, GRPO groups in the 20 to 80 percent band [4, 5], or a reward-model set. | `score/optimize.py`, `score/publish_gate.py`, `export.py` |
@@ -27,7 +27,9 @@ animated version is at
   `behavior_targeted`, `failure_mutation`, weighted each batch by the yield
   of new behavior signatures. Novelty search, not importance sampling [7].
 - **Sandbox world.** Built from the tool JSON schemas. Deterministic per
-  seed. Unknown id: not found. Schema-echo argument: refused.
+  seed. Unknown id: not found. Schema-echo argument: refused. Every
+  number it answers with is a named default (`defaults.py`) and a
+  `WorldOptions` field.
 - **Cuts.** SFT: reward=1 rows, loss mask on agent turns. DPO: pairs with
   margin and length gap. GRPO: mixed groups, 20 to 80 percent band [4, 5].
   RM: all graded rows.

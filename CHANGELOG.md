@@ -5,6 +5,60 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Every number the mock world, trace ingest, platform client, training
+  client, hack monitor and environment export ship with is now a named
+  default in `whileai/simulations/defaults.py`, one line each with the
+  reason it is what it is (a measurement, an rlhfbook.com chapter, an
+  arXiv id, or "convention, untested"), and every one of them has a way
+  in from user code. No default changed: `scripts/golden.py` reports all
+  13 configurations identical, and the sandbox answers byte-for-byte the
+  same over 9,600 seeded worlds. What is new:
+  - `WorldOptions` (exported): the mock world's dials in one dataclass:
+    fault modes (a mapping you can add to, `FAULT_MODES`), the mode and
+    rate a plan gets when it names none, `stale_as_of`, `exists_share`,
+    `search_hits`, `template_hits`, `id_range`, `date_years`,
+    `jitter_divisor`, the result-kind routing table (`RESULT_KINDS`, a
+    tuple of `(kind, rule)` in order) with a payload builder per kind
+    (`PAYLOAD_BUILDERS`), and the name pools. Reach it with
+    `MockEnvironment(options=)`, `simulate(advanced={"world": {...}})`
+    (validated in `resolve_run_config`, lands on
+    `RunConfig.world_options`), `export_environment(world={...})` (written
+    into `spec.json`) and `load_environment(world=)`. A typo in the dict
+    raises and names the fields. The lexicons (`CREATE_VERBS`,
+    `REFERENCE_KEY`, `PLACEHOLDER_VALUE`, `QUANTITY_CUE`, `IDENTITY_KEYS`,
+    `WORLD_STATES`, ...) are public module constants.
+  - Trace ingest: `mine_result_exemplars(max_chars=)`,
+    `leakage_report(examples=)` / `drop_leaky_rows(examples=)`,
+    `dimensions_from_traces(fault_to_axis=)` over the public
+    `FAULT_TO_AXIS`, `behavior_state(min_support=, priority=,
+    max_exploration=)`, `rows_from_otel(reward_keys=)`; the row-key
+    spellings (`PROMPT_KEYS`, `STEP_KEYS`, `ARG_KEYS`, ...) and the OTel
+    attribute dialects are public, and `RESULT_BINDING` documents why the
+    id -> name -> FIFO result binding is fixed. The minimum support of 3
+    graded rows now states its reason (the 95% upper bound on 0 of n
+    first drops under two thirds at n=3).
+  - Platform client: `_call(timeout=)` and the credential TTL default to
+    named numbers; `push_rows(prove_effect=)`, `hf_publish(poll=)`,
+    `hf_publish_run(poll=)`, `import_hf(poll=)`, `push_to_studio(timeout=)`,
+    `RewardModel(batch=)`; `MODES` is the one home of the mode list.
+  - Training: `train` checks every knob against `TRAINING_KNOBS`, one
+    table of accepted range, reference value and source (DAPO
+    arXiv:2503.14476, Dr. GRPO 2503.20783, ProRL 2505.24864, CISPO
+    2506.13585, DPO 2305.18290, LoRA 2106.09685, rlhfbook.com SFT and
+    policy-gradient chapters), and a rejected value is told the reference
+    ("learning_rate: a positive step below 1 (reference 0.0002; ...)").
+    `training_run(max_batch=)` / `TrainingRun(max_batch=)`.
+  - Hack monitor: `HackMonitor(n_boot=, n_perm=, scan_min=, sampling=)`;
+    `sampling` (`temperature`, `top_p`, `batch`) steers the default sampler.
+  - Environment export: `build_tasks(ngram=)` / `export_environment(ngram=)`
+    for the train-vs-holdout decontamination size (8, the overlap size
+    rlhfbook.com/c/16-evaluation.html found its contaminations with); the
+    band imports `DEFAULT_BAND` from `score/optimize.py` instead of
+    repeating it; `RUBRIC_WEIGHTS` names why only `reward` trains.
+  - `run/config.py`: one new `advanced=` key, `world`, popped and
+    validated into `RunConfig.world_options`. The engine does not yet hand
+    it to `MockEnvironment(options=)`; that is the run/ and generate/
+    lanes' one-line follow-up.
 - Every number a `score/` verdict rests on now has one home and one knob.
   `whileai/simulations/defaults.py` holds the values more than one module
   read (`ALPHA` 0.05, `CI_LEVEL` 0.95, `POWER` 0.8, `BOOTSTRAP_DRAWS` 2000,

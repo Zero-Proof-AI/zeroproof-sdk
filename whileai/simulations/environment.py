@@ -46,11 +46,19 @@ import importlib
 import json
 import re
 import statistics
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .defaults import DIFFICULTY_BAND
+from .defaults import (
+    DIFFICULTY_BAND,
+    ENV_DECONTAMINATION_EXAMPLES,
+    ENV_DECONTAMINATION_NGRAM,
+    ENV_EVAL_EXAMPLES,
+    ENV_EVAL_ROLLOUTS,
+    ENV_HOLDOUT_FRACTION,
+    ENV_MAX_TURNS_FALLBACK,
+)
 from .export import _resolve
 from .score.checklist import _task_has_outcome_rule
 from .score.judging import normalize_judge_result
@@ -58,7 +66,16 @@ from .score.stats import decontaminate
 
 SPEC_FILE = "spec.json"
 DEFAULT_REWARD = "whileai.simulations.score.checklist:task_checklist"
+#: The difficulty band build_tasks() keeps by default, the package-wide one.
 DEFAULT_BAND = DIFFICULTY_BAND
+#: Rubric weights, in the order the funcs are listed: only ``reward`` trains;
+#: ``n_calls``, ``judge_ok``, ``truncated`` and ``trace_clean`` are logged at
+#: weight 0 as monitors (rlhf-book ch. 14: watch the symptoms, do not train
+#: on them).
+RUBRIC_WEIGHTS = (1.0, 0.0, 0.0, 0.0, 0.0)
+#: The version an export claims when the package is not installed as a
+#: distribution: the first release that carried this module.
+_FIRST_ENV_RELEASE = "0.42"
 _TASK_META = (
     "scenario_dimensions",
     "stance",
@@ -184,19 +201,23 @@ def _label(value: Any) -> float | None:
 def build_tasks(
     rows: Sequence[dict],
     *,
-    holdout: float | Sequence[str] = 0.2,
+    holdout: float | Sequence[str] = ENV_HOLDOUT_FRACTION,
     band: tuple[float, float] | None = DEFAULT_BAND,
+    ngram: int = ENV_DECONTAMINATION_NGRAM,
 ) -> tuple[list[dict], list[dict], dict[str, Any]]:
     """One task per distinct prompt, split into train and holdout.
 
     When a prompt has two or more graded rollouts its solve rate is known
     (partial credit counts as it is) and, with ``band``, prompts the policy
     always or never solved are dropped: they carry no advantage (rlhf-book
-    ch. 7, difficulty filtering at 20 to 80 percent). Ungraded prompts and
-    single rollouts are kept as they are. ``holdout`` is a fraction, split by scenario id
-    (or the prompt) so a task is wholly on one side, or an explicit list
-    of holdout prompts. Train and holdout are decontaminated against each
-    other at 8-grams and the report says what overlapped.
+    ch. 7 difficulty filtering at 20 to 80 percent; DAPO's dynamic sampling
+    drops accuracy 0 and 1, arXiv:2503.14476). Ungraded prompts and single
+    rollouts are kept as they are. ``holdout`` is a fraction, split by
+    scenario id (or the prompt) so a task is wholly on one side, or an
+    explicit list of holdout prompts. Train and holdout are decontaminated
+    against each other at ``ngram``-grams (8: the overlap size
+    rlhfbook.com/c/16-evaluation.html found its contaminations with) and
+    the report says what overlapped.
     """
     by_prompt: dict[str, list[dict]] = {}
     for row in rows:
@@ -264,12 +285,15 @@ def build_tasks(
         _, decon_full = decontaminate(
             [{"prompt": t["prompt"], "final_text": ""} for t in train],
             [[{"prompt": t["prompt"], "final_text": ""} for t in held]],
-            n=8,
+            n=int(ngram),
         )
         decon = {
             k: decon_full[k] for k in ("n_contaminated", "contamination_rate") if k in decon_full
         }
-        decon["examples"] = [e.get("match") for e in decon_full.get("examples", [])[:3]]
+        decon["ngram"] = int(ngram)
+        decon["examples"] = [
+            e.get("match") for e in decon_full.get("examples", [])[:ENV_DECONTAMINATION_EXAMPLES]
+        ]
     report = {
         "prompts": len(by_prompt),
         "tasks": len(tasks),
@@ -326,8 +350,8 @@ include = ["{name}/**", "pyproject.toml", "README.md"]
 packages = ["{name}"]
 
 [tool.verifiers.eval]
-num_examples = 5
-rollouts_per_example = 3
+num_examples = {eval_examples}
+rollouts_per_example = {eval_rollouts}
 """
 
 
@@ -337,7 +361,7 @@ def _sdk_version() -> str:
 
         return version("whileai")
     except Exception:
-        return "0.42"  # the first release that carries this module
+        return _FIRST_ENV_RELEASE
 
 
 def _write_jsonl(path: Path, rows: Sequence[dict]) -> None:
@@ -382,7 +406,8 @@ def _readme(name: str, spec: dict, report: dict) -> str:
         )
     if decon:
         lines.append(
-            f"- **Train vs holdout 8-gram overlap**: {decon.get('n_contaminated', 0)} tasks "
+            f"- **Train vs holdout {decon.get('ngram', ENV_DECONTAMINATION_NGRAM)}-gram overlap**: "
+            f"{decon.get('n_contaminated', 0)} tasks "
             f"({(decon.get('contamination_rate') or 0):.1%})"
         )
     lines += [
@@ -416,10 +441,12 @@ def export_environment(
     execute: Any = None,
     system_prompt: str | None = None,
     tools: Sequence[dict] | None = None,
-    holdout: float | Sequence[str] = 0.2,
+    holdout: float | Sequence[str] = ENV_HOLDOUT_FRACTION,
     band: tuple[float, float] | None = DEFAULT_BAND,
     max_turns: int | None = None,
     description: str = "",
+    ngram: int = ENV_DECONTAMINATION_NGRAM,
+    world: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write ``source`` as an installable verifiers environment under ``out``.
 
@@ -433,8 +460,26 @@ def export_environment(
     nothing (see recipes/03-select/prime-intellect-rl). ``execute`` names a live
     world ``(tool, arguments) -> result``; without it the SDK's mock
     world answers, seeded per task so every rollout of a task sees the
-    same world. Returns the report; the same text is the package README.
+    same world. ``world`` is a dict of the mock world's dials
+    (``WorldOptions`` fields: ``search_hits``, ``exists_share``,
+    ``default_fault_mode``, name pools, ...); it is written into
+    ``spec.json`` and the trainer's world is built from it, so the world a
+    policy trains against is the one the export says. ``ngram`` is the
+    train-vs-holdout decontamination size. Returns the report; the same
+    text is the package README.
     """
+    from .world.sandbox import WorldOptions
+
+    world_options = dict(world) if world else None
+    if world_options is not None:
+        WorldOptions.coerce(world_options)  # a typo fails here, not in the trainer
+        try:
+            json.dumps(world_options)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "world= must be JSON (it is written into spec.json); pass callables such as "
+                "fault_modes to load_environment(world=) instead"
+            ) from exc
     rows, system, resolved_tools, _ = _resolve(source)
     if system_prompt is not None:
         system = str(system_prompt)
@@ -450,7 +495,7 @@ def export_environment(
     reward_ref = DEFAULT_REWARD if reward is None else _ref_of(reward)
     execute_ref = _ref_of(execute) if execute is not None else None
 
-    train, held, report = build_tasks(rows, holdout=holdout, band=band)
+    train, held, report = build_tasks(rows, holdout=holdout, band=band, ngram=ngram)
     if reward is None:
         checkable = sum(1 for t in train + held if _task_has_outcome_rule(t["info"]))
         report["outcome_checkable"] = checkable
@@ -482,6 +527,8 @@ def export_environment(
         "execute": execute_ref,
         "sdk_version": _sdk_version(),
     }
+    if world_options is not None:
+        spec["world"] = world_options
     report.update(
         {"name": name, "reward": reward_ref, "execute": execute_ref, "warnings": warnings}
     )
@@ -498,6 +545,8 @@ def export_environment(
             name=name,
             description=description or f"While RL environment: {name}",
             sdk_version=spec["sdk_version"],
+            eval_examples=ENV_EVAL_EXAMPLES,
+            eval_rollouts=ENV_EVAL_ROLLOUTS,
         ),
         encoding="utf-8",
     )
@@ -549,7 +598,7 @@ def _make_env_class() -> type:
     import verifiers as vf
 
     from .generate.agents import current_rollout
-    from .world.sandbox import MockEnvironment
+    from .world.sandbox import MockEnvironment, WorldOptions
 
     class WhileEnv(vf.StatefulToolEnv):
         """One SDK world per rollout; the spec's tools; the reward as the rubric."""
@@ -560,11 +609,14 @@ def _make_env_class() -> type:
             *,
             reward: Callable[[dict], Any],
             execute: Callable[[str, dict], Any] | None = None,
+            world: WorldOptions | Mapping[str, Any] | None = None,
             **kwargs: Any,
         ) -> None:
             self.spec = spec
             self.reward = reward
             self.execute = execute
+            # the mock world's dials: the call wins, then the spec, then defaults
+            self.world = WorldOptions.coerce(world if world is not None else spec.get("world"))
             self._tool_defs_raw = list(spec.get("tools") or [])
             rubric = vf.Rubric(
                 funcs=[
@@ -574,10 +626,14 @@ def _make_env_class() -> type:
                     self.truncated,
                     self.trace_clean,
                 ],
-                weights=[1.0, 0.0, 0.0, 0.0, 0.0],
+                weights=list(RUBRIC_WEIGHTS),
             )
             kwargs.setdefault("rubric", rubric)
-            super().__init__(tools=[], max_turns=int(spec.get("max_turns") or 10), **kwargs)
+            super().__init__(
+                tools=[],
+                max_turns=int(spec.get("max_turns") or ENV_MAX_TURNS_FALLBACK),
+                **kwargs,
+            )
             self.tool_defs = self._normalize_tool_defs(self._tool_defs_raw)
             for tool in self._tool_defs_raw:
                 self.tool_monitor_rubric.add_tool_metric(tool["name"])
@@ -594,6 +650,7 @@ def _make_env_class() -> type:
                     seed=int(seed) if isinstance(seed, int) else 0,
                     faults=dict(info.get("faults") or {}),
                     world_state=str(info.get("world_state") or ""),
+                    options=self.world,
                 )
             return state
 
@@ -692,13 +749,16 @@ def load_environment(
     split: str = "train",
     reward: Any = None,
     execute: Any = None,
+    world: Any = None,
     **kwargs: Any,
 ) -> Any:
     """Build the verifiers environment from an exported ``spec.json``.
 
     ``split`` picks the training task set; the holdout file, when present,
     becomes ``eval_dataset``. ``reward`` and ``execute`` override the
-    spec's references (a callable or ``'module:attr'``).
+    spec's references (a callable or ``'module:attr'``). ``world`` (a
+    ``WorldOptions`` or a dict of its fields) overrides the mock world's
+    dials the spec carries; here callables such as ``fault_modes`` are fine.
     """
     try:
         from datasets import Dataset
@@ -751,6 +811,7 @@ def load_environment(
         spec_dict,
         reward=reward_obj,
         execute=execute_obj,
+        world=world,
         dataset=Dataset.from_list(train),
         eval_dataset=Dataset.from_list(held) if held else None,
         **kwargs,
