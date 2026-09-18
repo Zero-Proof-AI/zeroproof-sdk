@@ -141,6 +141,20 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   new default (`LOCAL_MODEL_TIMEOUT`). When a call still times out the
   run puts one note in `data.warnings` with the fix: raise `timeout=`,
   or send one throwaway request first so the endpoint is warm.
+- The judge payload is reduced field by field and always parses. Before,
+  an oversized payload was serialised and then sliced to the character
+  cap, which cut mid-string; `rubric_judge` could not parse it, the row was
+  recorded ungraded, and it left every rate's denominator: 37 of 120 and
+  35 of 120 rows on one paired eval, deterministic, retries recovering
+  none. The rows lost were the long ones, and long trajectories are the
+  hard ones, so judge-scored pass rates came out too high (one base score
+  moved from 0.717 to 0.603 once repaired). Now steps shrink first, then
+  the world state, the planted faults and the judge-only block, then the
+  situation, the policy and the final reply; each cut says how many
+  characters it dropped, and `payload_reduced` marks a payload that lost
+  evidence. The first version never shrank `world_state`,
+  `injected_faults` or the judge-only block, so one large world state
+  skipped every gentler cut and the judge saw the final reply alone. (#290)
 
 ## 0.62 (2026-09-17)
 

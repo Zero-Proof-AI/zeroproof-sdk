@@ -327,3 +327,77 @@ def test_a_reduced_payload_says_that_it_was_reduced():
     )
     assert payload.get("payload_reduced") is True
     assert "chars omitted" in payload["situation"]
+
+
+def test_large_context_fields_shrink_before_the_reply_only_fallback():
+    """world_state, injected_faults and the judge-only block never shrank, so
+    one large world_state skipped every gentler cut and landed on the
+    reply-only fallback: the judge lost the steps, the situation and the
+    policy over the field it needed least."""
+    import json as _json
+
+    from whileai.simulations.score.grade_llm import _PAYLOAD_CHARS, _render_payload
+
+    row = {
+        "prompt": "cancel order 4821",
+        "final_text": "Done, cancelled.",
+        "world_state": {"orders": [{"id": i, "note": "n" * 40} for i in range(400)]},
+        "faults": {"cancel_order": {"mode": "timeout", "detail": "d" * 3000}},
+        "steps": [
+            {"tool": "cancel_order", "arguments": {"id": 4821}, "result": {"status": "timeout"}}
+        ],
+    }
+    privileged = {
+        "principle": "P" * 1900,
+        "reference": "R" * 1900,
+        "hidden_state": {"ledger": ["x" * 50] * 100},
+    }
+    text = _render_payload(row, policy="refunds need a ticket", privileged=privileged)
+    assert len(text) <= _PAYLOAD_CHARS
+    payload = _json.loads(text)
+    assert payload["payload_reduced"] is True
+    # the gentle cuts were enough: the evidence the verdict needs is still there
+    assert "note" not in payload
+    assert payload["steps"][0]["tool"] == "cancel_order"
+    assert payload["situation"] == "cancel order 4821"
+    assert payload["agent_policy"] == "refunds need a ticket"
+    assert "chars omitted" in payload["world_state"]
+    # the planted fault and the judge-only block are shortened, and say so,
+    # or left alone once the payload fits
+    for value in (
+        payload["injected_faults"],
+        payload["judge_only"]["hidden_state"],
+        payload["judge_only"]["principle"],
+    ):
+        assert not isinstance(value, str) or len(value) <= 1600 + 40 or "chars omitted" in value
+    # the caller's privileged dict is not mutated by the cut
+    assert len(privileged["principle"]) == 1900
+    assert isinstance(privileged["hidden_state"], dict)
+
+
+def test_context_cuts_run_in_order_and_stop_when_it_fits():
+    import json as _json
+
+    from whileai.simulations.score.grade_llm import _cut, _fit_payload
+
+    blob = {
+        "tools": ["a"],
+        "situation": "s",
+        "world_state": "w" * 5000,
+        "injected_faults": {"a": "f" * 2000},
+        "final_text": "f",
+        "judge_only": {"hidden_state": {"k": "h" * 2000}, "principle": "p" * 1500},
+        "steps": [],
+    }
+    # a limit that the first cut alone reaches: nothing past it is touched
+    first = dict(blob, payload_reduced=True, world_state=_cut(blob["world_state"], 1500))
+    payload = _json.loads(_fit_payload(blob, len(_json.dumps(first))))
+    assert payload == first
+    assert blob["world_state"] == "w" * 5000  # the caller's blob is untouched
+
+    tight = _json.loads(_fit_payload(blob, 2500))
+    assert tight["world_state"].endswith("...[4700 chars omitted]")
+    assert "chars omitted" in tight["injected_faults"]
+    assert "chars omitted" in tight["judge_only"]["hidden_state"]
+    assert "chars omitted" in tight["judge_only"]["principle"]
+    assert tight["situation"] == "s" and tight["steps"] == []

@@ -229,6 +229,31 @@ def _shrink_step(step: Any, cap: int) -> Any:
     return out
 
 
+def _cut_any(value: Any, cap: int) -> Any:
+    """``_cut`` for a field of any type: a non-string is rendered first."""
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return _cut(text, cap) if len(text) > cap else value
+
+
+# Context the verdict needs less than the reply, in the order it is
+# shortened: the world the agent acted in, the faults that were planted,
+# and the judge-only block (hidden state, principle, reference). Each cap
+# is tried once at the wide setting, then once at the narrow one.
+_CONTEXT_CUTS: tuple[tuple[str, int], ...] = (
+    ("world_state", 1500),
+    ("injected_faults", 800),
+    ("hidden_state", 1500),
+    ("principle", 800),
+    ("reference", 800),
+    ("world_state", 300),
+    ("injected_faults", 200),
+    ("hidden_state", 300),
+    ("principle", 300),
+    ("reference", 300),
+)
+_JUDGE_ONLY_FIELDS = frozenset({"hidden_state", "principle", "reference"})
+
+
 def _fit_payload(blob: dict, limit: int) -> str:
     """Serialise inside ``limit`` by reducing STRUCTURE, never slicing the JSON.
 
@@ -258,6 +283,30 @@ def _fit_payload(blob: dict, limit: int) -> str:
     blob["payload_reduced"] = True
     for cap in (800, 300, 80):
         blob["steps"] = [_shrink_step(x, cap) for x in (blob.get("steps") or [])]
+        text = json.dumps(blob, default=str)
+        if len(text) <= limit:
+            return text
+
+    # World state, planted faults and the judge-only block go before the
+    # situation: none of them used to shrink at all, so one large world_state
+    # fell straight through to the reply-only fallback and the judge lost the
+    # steps, the situation and the policy over a field it needed least.
+    # Each cut starts from the caller's value, never from the wider cut, so
+    # the omitted count in the text is the true one.
+    original = dict(blob)
+    original_judge: dict = blob["judge_only"] if isinstance(blob.get("judge_only"), dict) else {}
+    for field, cap in _CONTEXT_CUTS:
+        nested = field in _JUDGE_ONLY_FIELDS
+        raw = (original_judge if nested else original).get(field)
+        if raw is None:
+            continue
+        cut = _cut_any(raw, cap)
+        if cut is raw:
+            continue
+        if nested:
+            blob["judge_only"] = dict(blob["judge_only"], **{field: cut})
+        else:
+            blob[field] = cut
         text = json.dumps(blob, default=str)
         if len(text) <= limit:
             return text
