@@ -333,6 +333,52 @@ Names: zp, ZeroProof and While are the same product; install `whileai`.
 same rollouts before export), and `scored.failures()` beside
 `scored.failed_traces()` / `scored.traces`.
 
+## Evaluate: did it move, and can the number be read?
+
+Training is only half. The claim is "trained beats base on situations it never
+saw", and that claim has to survive someone checking it.
+
+Pin the eval set first. `simulate(tasks=...)` fixes the situations so both arms
+face the same ones; a re-run is not a baseline, it draws new situations. Hold
+the eval out of training and check it with `decontaminate(train, eval)`.
+
+Then run both arms and compare:
+
+```python
+report = wai.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_on_fault"])
+print(wai.format_delta_report(report))
+```
+
+**Three things make a delta unreadable, and none of them show up in the
+number.** Check each before quoting a result:
+
+- **The arms must be distinguishable.** Base and an adapter can share a served
+  model name, so both arms stamp the same `policy_version` and nothing says
+  which weights produced which. Pass `advanced={"model_version": "...-base"}`
+  and `"...-sft"`.
+- **The environment must not move with the arm.** With no `user_model=`, the
+  simulated user runs on the agent's own model, so the trained arm talks to a
+  different person than the base arm did and the delta measures the pair. Pin
+  `user_model=` to one fixed model on both arms. The run warns about this and
+  adds `same_model` to `data.degraded`; do not ignore it.
+- **One run per arm is a draw, not a distribution.** Use
+  `simulate(tasks=..., runs=3)` so `delta_report` can compute the eval's own
+  re-run noise; without it the verdict reads `moved_unreplicated`.
+
+Read the report's `ceiling`, `warnings`, `within_noise` and `over_optimized`
+fields, not just `target_delta`. A `target_verdict` of `moved` with `ceiling`
+set means the eval had no room to show anything.
+
+Before spending a GPU hour, check the eval can show a gain at all:
+`pass_at(rows)` gives pass@1, pass^k and `headroom` (pass@k minus pass@1, what
+a grouped update has to learn from), and per-criterion failure rates say
+whether the eval contains the behaviour being trained. A criterion that never
+fails cannot show an improvement. `recipes/02-measure/is-your-eval-any-good/`
+runs all of this as one command.
+
+Report the delta with its interval and the situation count, nulls included. A
+null on a sound setup is a result; a gain on an unsound one is not.
+
 ## Deliverable
 
 Return the generated JSONL and a concise report containing inputs used, model,

@@ -63,6 +63,7 @@ fork's pull request gets no secrets from this repository, by design.
 | Recipe | What you learn | Needs | Takes |
 |---|---|---|---|
 | [`eval-your-agent`](02-measure/eval-your-agent) | evals for the agent you already have: wrap it, write the policy as a judge, pass@1 with an interval per policy branch, the coverage warnings that catch a hollow run, a CI gate | nothing | seconds |
+| [`is-your-eval-any-good`](02-measure/is-your-eval-any-good) | whether a number your eval produced means anything: ceiling, headroom, criteria that cannot fail, self-noise, the judge, contamination, and the three checks that void a base-vs-tuned comparison outright | nothing | seconds |
 | [`pass-at-k`](02-measure/pass-at-k) | pass@1 with its interval, pass^k, pass@k, the per-ask histogram the mean hides, and headroom = what a grouped update can learn | nothing | seconds |
 | [`reward-hacking`](02-measure/reward-hacking) | reward hacking caught before, during and after training: the within-ask scan, the judge probes, the trajectory flags, the proxy-vs-target verdict | nothing | seconds |
 | [`safety-evals`](02-measure/safety-evals) | a safety suite for a tool-using agent: prompt injection, exfiltration, secret leakage, unauthorized writes, benign controls; four trajectory markers as the judge, pass^k per attack class, a before/after that fails the fix which got safe by refusing | nothing | seconds |
