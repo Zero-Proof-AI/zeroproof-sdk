@@ -45,7 +45,9 @@ def make_fixture(root: Path, skill: str) -> None:
     """A tiny repo: traces.jsonl from the skill's own check (offline), a spec if needed."""
     check = SKILLS / skill / "check.py"
     env = {**os.environ, "WHILEAI_SKILL_FIXTURE_DIR": str(root)}
-    subprocess.run([sys.executable, str(check)], cwd=root, env=env, check=False, capture_output=True)
+    subprocess.run(
+        [sys.executable, str(check)], cwd=root, env=env, check=False, capture_output=True
+    )
     if not (root / "traces.jsonl").exists():
         rows = [
             {"prompt": f"Refund order A100{i}", "steps": [], "final_text": "Done.", "reward": i % 2}
@@ -135,7 +137,9 @@ def main() -> int:
         result.update(grade(name))
         with OUT.open("a", encoding="utf-8") as f:
             f.write(json.dumps(result) + "\n")
-        print(f"{skill}: {'PASS' if result.get('pass') else 'FAIL'} in {result['seconds']} s; {result.get('verdict', result.get('reason'))}")
+        print(
+            f"{skill}: {'PASS' if result.get('pass') else 'FAIL'} in {result['seconds']} s; {result.get('verdict', result.get('reason'))}"
+        )
         if not args.keep:
             shutil.rmtree(root, ignore_errors=True)
     return 0
