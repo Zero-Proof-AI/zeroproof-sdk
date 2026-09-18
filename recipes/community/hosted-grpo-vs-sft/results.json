@@ -1,0 +1,581 @@
+{
+ "arms": {
+  "base": {
+   "n": 76,
+   "resolved_with_lookup": 0.25,
+   "no_blind_refund": 1.0,
+   "attempted_refund": 0.25,
+   "called_lookup": 0.9868421052631579,
+   "called_any_tool": 0.9868421052631579
+  },
+  "sft": {
+   "n": 76,
+   "resolved_with_lookup": 0.14473684210526316,
+   "no_blind_refund": 1.0,
+   "attempted_refund": 0.14473684210526316,
+   "called_lookup": 0.4868421052631579,
+   "called_any_tool": 0.4868421052631579
+  },
+  "grpo": {
+   "n": 76,
+   "resolved_with_lookup": 0.3026315789473684,
+   "no_blind_refund": 1.0,
+   "attempted_refund": 0.3026315789473684,
+   "called_lookup": 1.0,
+   "called_any_tool": 1.0
+  }
+ },
+ "deltas": {
+  "sft": {
+   "ok": true,
+   "not_comparable": [],
+   "target": "marker:resolved_with_lookup",
+   "target_verdict": "no_change_detected",
+   "target_delta": -0.10526315789473684,
+   "target_ci95": [
+    -0.25,
+    0.039473684210526314
+   ],
+   "n_metrics": 6,
+   "alpha": 0.05,
+   "level": 0.95,
+   "family_error": 0.2649,
+   "n_paired_tasks": 19,
+   "n_unpaired_tasks": 0,
+   "improved": [],
+   "regressions": [],
+   "slipped": [
+    "marker:called_lookup",
+    "marker:called_any_tool"
+   ],
+   "within_noise": [],
+   "run_std": null,
+   "run_std_by_metric": {
+    "pass_at_1": null,
+    "marker:resolved_with_lookup": null,
+    "marker:no_blind_refund": null,
+    "marker:attempted_refund": null,
+    "marker:called_lookup": null,
+    "marker:called_any_tool": null
+   },
+   "run_std_source": null,
+   "noise_band": null,
+   "noise_rule": "1.96 x run_std x sqrt(1/1 + 1/1)",
+   "eval_runs": {
+    "before": 0,
+    "after": 0
+   },
+   "replicated": false,
+   "ceiling": false,
+   "detectable_effect": 0.2122,
+   "tasks_needed": null,
+   "degenerate_guards": [
+    "marker:no_blind_refund"
+   ],
+   "proxy": null,
+   "proxy_verdict": null,
+   "proxy_delta": null,
+   "proxy_ci95": null,
+   "over_optimized": false,
+   "metrics": {
+    "pass_at_1": {
+     "metric": "pass_at_1",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.25,
+     "mean_b": 0.14473684210526316,
+     "delta": -0.10526315789473684,
+     "ci95": [
+      -0.25,
+      0.039473684210526314
+     ],
+     "level": 0.95,
+     "p_value": 0.272863568215892,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:resolved_with_lookup": {
+     "metric": "marker:resolved_with_lookup",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.25,
+     "mean_b": 0.14473684210526316,
+     "delta": -0.10526315789473684,
+     "ci95": [
+      -0.25,
+      0.039473684210526314
+     ],
+     "level": 0.95,
+     "p_value": 0.2978510744627686,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:no_blind_refund": {
+     "metric": "marker:no_blind_refund",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 1.0,
+     "mean_b": 1.0,
+     "delta": 0.0,
+     "ci95": [
+      0.0,
+      0.0
+     ],
+     "level": 0.95,
+     "p_value": 1.0,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:attempted_refund": {
+     "metric": "marker:attempted_refund",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.25,
+     "mean_b": 0.14473684210526316,
+     "delta": -0.10526315789473684,
+     "ci95": [
+      -0.25,
+      0.039473684210526314
+     ],
+     "level": 0.95,
+     "p_value": 0.2783608195902049,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:called_lookup": {
+     "metric": "marker:called_lookup",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.9868421052631579,
+     "mean_b": 0.4868421052631579,
+     "delta": -0.5,
+     "ci95": [
+      -0.6973684210526315,
+      -0.3026315789473684
+     ],
+     "level": 0.95,
+     "p_value": 0.0024987506246876563,
+     "verdict": "a_better",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:called_any_tool": {
+     "metric": "marker:called_any_tool",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.9868421052631579,
+     "mean_b": 0.4868421052631579,
+     "delta": -0.5,
+     "ci95": [
+      -0.7105263157894737,
+      -0.3026315789473684
+     ],
+     "level": 0.95,
+     "p_value": 0.0009995002498750624,
+     "verdict": "a_better",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    }
+   },
+   "warnings": [
+    "must_not_regress marker:no_blind_refund is degenerate on both sides (every applicable row scored the same value): this guard cannot fail, so it catches nothing. Check that the marker fires at all.",
+    "6 metrics were each tested at 95%, so up to about a 26% chance that at least one clears zero by luck (an upper bound: it treats the metrics as independent, and markers that move together share their luck); the target is pre-specified and unaffected, so treat a single unexpected entry in improved/slipped as a lead, not a finding, and confirm it on a second eval run.",
+    "marker:called_lookup dropped -0.500 (95% -0.697..-0.303)",
+    "marker:called_any_tool dropped -0.500 (95% -0.711..-0.303)",
+    "19 paired tasks at k=4 can prove a gain of about +0.21 at 80% power (holdout_size)."
+   ],
+   "config": {
+    "before": {
+     "n_tasks": 19,
+     "k": 4,
+     "temperature": 0.8,
+     "max_tokens": 768,
+     "policy_version": "local_model[qwen3-4b-think]@c075737115fcf490",
+     "judge_version": null,
+     "prompt_hash": "c075737115fcf490",
+     "user_model": null,
+     "writer_model": "pinned",
+     "mixed": [],
+     "truncated_share": 0.0,
+     "answered_share": 1.0,
+     "unclosed_think_share": 0.0,
+     "graded_share": 1.0
+    },
+    "after": {
+     "n_tasks": 19,
+     "k": 4,
+     "temperature": 0.8,
+     "max_tokens": 768,
+     "policy_version": "local_model[refund-lookup-sft]@c075737115fcf490",
+     "judge_version": null,
+     "prompt_hash": "c075737115fcf490",
+     "user_model": null,
+     "writer_model": "pinned",
+     "mixed": [],
+     "truncated_share": 0.0,
+     "answered_share": 1.0,
+     "unclosed_think_share": 0.0,
+     "graded_share": 1.0
+    }
+   },
+   "balanced": null,
+   "by": null,
+   "groups": null,
+   "groups_down": []
+  },
+  "grpo": {
+   "ok": true,
+   "not_comparable": [],
+   "target": "marker:resolved_with_lookup",
+   "target_verdict": "no_change_detected",
+   "target_delta": 0.05263157894736842,
+   "target_ci95": [
+    -0.013157894736842105,
+    0.15789473684210525
+   ],
+   "n_metrics": 6,
+   "alpha": 0.05,
+   "level": 0.95,
+   "family_error": 0.2649,
+   "n_paired_tasks": 19,
+   "n_unpaired_tasks": 0,
+   "improved": [],
+   "regressions": [],
+   "slipped": [],
+   "within_noise": [],
+   "run_std": null,
+   "run_std_by_metric": {
+    "pass_at_1": null,
+    "marker:resolved_with_lookup": null,
+    "marker:no_blind_refund": null,
+    "marker:attempted_refund": null,
+    "marker:called_lookup": null,
+    "marker:called_any_tool": null
+   },
+   "run_std_source": null,
+   "noise_band": null,
+   "noise_rule": "1.96 x run_std x sqrt(1/1 + 1/1)",
+   "eval_runs": {
+    "before": 0,
+    "after": 0
+   },
+   "replicated": false,
+   "ceiling": false,
+   "detectable_effect": 0.2122,
+   "tasks_needed": 283,
+   "degenerate_guards": [
+    "marker:no_blind_refund"
+   ],
+   "proxy": null,
+   "proxy_verdict": null,
+   "proxy_delta": null,
+   "proxy_ci95": null,
+   "over_optimized": false,
+   "metrics": {
+    "pass_at_1": {
+     "metric": "pass_at_1",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.25,
+     "mean_b": 0.3026315789473684,
+     "delta": 0.05263157894736842,
+     "ci95": [
+      -0.02631578947368421,
+      0.14473684210526316
+     ],
+     "level": 0.95,
+     "p_value": 0.49375312343828087,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:resolved_with_lookup": {
+     "metric": "marker:resolved_with_lookup",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.25,
+     "mean_b": 0.3026315789473684,
+     "delta": 0.05263157894736842,
+     "ci95": [
+      -0.013157894736842105,
+      0.15789473684210525
+     ],
+     "level": 0.95,
+     "p_value": 0.4962518740629685,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:no_blind_refund": {
+     "metric": "marker:no_blind_refund",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 1.0,
+     "mean_b": 1.0,
+     "delta": 0.0,
+     "ci95": [
+      0.0,
+      0.0
+     ],
+     "level": 0.95,
+     "p_value": 1.0,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:attempted_refund": {
+     "metric": "marker:attempted_refund",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.25,
+     "mean_b": 0.3026315789473684,
+     "delta": 0.05263157894736842,
+     "ci95": [
+      -0.013157894736842105,
+      0.14473684210526316
+     ],
+     "level": 0.95,
+     "p_value": 0.5082458770614693,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:called_lookup": {
+     "metric": "marker:called_lookup",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.9868421052631579,
+     "mean_b": 1.0,
+     "delta": 0.013157894736842105,
+     "ci95": [
+      0.0,
+      0.039473684210526314
+     ],
+     "level": 0.95,
+     "p_value": 1.0,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    },
+    "marker:called_any_tool": {
+     "metric": "marker:called_any_tool",
+     "paired": true,
+     "n_paired": 19,
+     "n_only_a": 0,
+     "n_only_b": 0,
+     "paired_share": 1.0,
+     "n_used": 19,
+     "mean_a": 0.9868421052631579,
+     "mean_b": 1.0,
+     "delta": 0.013157894736842105,
+     "ci95": [
+      0.0,
+      0.039473684210526314
+     ],
+     "level": 0.95,
+     "p_value": 1.0,
+     "verdict": "no_difference_detected",
+     "note": "",
+     "run_std": null,
+     "noise_band": null,
+     "within_noise": false
+    }
+   },
+   "warnings": [
+    "must_not_regress marker:no_blind_refund is degenerate on both sides (every applicable row scored the same value): this guard cannot fail, so it catches nothing. Check that the marker fires at all.",
+    "19 paired tasks at k=4 can prove a gain of about +0.21 at 80% power; to prove the +0.053 seen here you need about 283 tasks (holdout_size)."
+   ],
+   "config": {
+    "before": {
+     "n_tasks": 19,
+     "k": 4,
+     "temperature": 0.8,
+     "max_tokens": 768,
+     "policy_version": "local_model[qwen3-4b-think]@c075737115fcf490",
+     "judge_version": null,
+     "prompt_hash": "c075737115fcf490",
+     "user_model": null,
+     "writer_model": "pinned",
+     "mixed": [],
+     "truncated_share": 0.0,
+     "answered_share": 1.0,
+     "unclosed_think_share": 0.0,
+     "graded_share": 1.0
+    },
+    "after": {
+     "n_tasks": 19,
+     "k": 4,
+     "temperature": 0.8,
+     "max_tokens": 768,
+     "policy_version": "local_model[refund-lookup-grpo]@c075737115fcf490",
+     "judge_version": null,
+     "prompt_hash": "c075737115fcf490",
+     "user_model": null,
+     "writer_model": "pinned",
+     "mixed": [],
+     "truncated_share": 0.0,
+     "answered_share": 1.0,
+     "unclosed_think_share": 0.0,
+     "graded_share": 1.0
+    }
+   },
+   "balanced": null,
+   "by": null,
+   "groups": null,
+   "groups_down": []
+  }
+ },
+ "runs": {
+  "sft": {
+   "runId": "run_80323eb0f1f1d19e",
+   "method": "sft",
+   "gpu": "A10G",
+   "seconds": 56.4,
+   "base": "Qwen/Qwen3-4B",
+   "epochs": 2,
+   "lora_r": 16,
+   "lr": 0.0002,
+   "train_rows": 84,
+   "train_used": 84,
+   "holdout_rows": 76,
+   "holdoutLossBefore": 3.9898,
+   "holdoutLossAfter": 1.0822,
+   "trainLoss": 1.7042,
+   "url": "https://www.zeroproofai.com/platform/training/run_80323eb0f1f1d19e"
+  },
+  "grpo": {
+   "runId": "run_7d45f7e7f724464a",
+   "method": "grpo",
+   "gpu": "L40S",
+   "seconds": 329.5,
+   "base": "Qwen/Qwen3-4B",
+   "steps": 20,
+   "num_generations": 4,
+   "beta": 0.04,
+   "lora_r": 16,
+   "lr": 5e-06,
+   "loss_type": "bnpo",
+   "max_completion_length": 160,
+   "mask_truncated": true,
+   "reward": "reference first action",
+   "gold": "judge",
+   "train_rows": 84,
+   "train_used": 6,
+   "holdout_rows": 76,
+   "holdout_used": 8,
+   "final_reward": 0.1,
+   "final_reward_std": 0.0,
+   "final_grad_norm": 0.0,
+   "monitor_alarm": {
+    "step": 10,
+    "regime": "reward_hack",
+    "top_feature": "contains:. first AND contains:it",
+    "rho_max": 0.6983
+   },
+   "url": "https://www.zeroproofai.com/platform/training/run_7d45f7e7f724464a"
+  }
+ },
+ "datasets": {
+  "train_sft": "ds_68c3bac292fe6222",
+  "train_grpo": "ds_25d05bb486e0aaae",
+  "holdout": "ds_a52518f20192429c"
+ },
+ "dataset_profile": {
+  "rows": 84,
+  "graded": 84,
+  "pass_rate": 0.143,
+  "pass": 12,
+  "fail": 72,
+  "tasks": 21,
+  "mixed_tasks": 6,
+  "mixed_fraction": 0.286,
+  "support": 0.238
+ },
+ "hf": {
+  "repo": "jaweiss2305/refund-lookup-grpo-qwen3-4b",
+  "private": true,
+  "bytes": 148076375,
+  "files": 10,
+  "tag": "zp-run_7d45f7e7f724464a",
+  "seconds": 20,
+  "url": "https://huggingface.co/jaweiss2305/refund-lookup-grpo-qwen3-4b"
+ },
+ "whileai_version": "0.75",
+ "eval": {
+  "pinned_holdout_rows": 76,
+  "pinned_tasks": 19,
+  "repeats": 4,
+  "entrypoint": "wai.local_model on the shared Qwen3-4B endpoint, thinking=False, temperature=0.8"
+ },
+ "power_warning": "push_rows: holdout has 19 tasks at k=4; proving a 5% gain at 80% power needs about 352 (holdout_size)."
+}
