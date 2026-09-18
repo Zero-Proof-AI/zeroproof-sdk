@@ -1,11 +1,14 @@
-# While Simulations
+---
+title: "While Simulations"
+description: "How the simulation engine thinks and why: the problem it solves, the situations it covers, and the rows it returns."
+---
 
 The SDK makes post-training data for an agent you already have, or one you
 can describe. You give it the agent's definition; it gives you graded
 conversations you can train on. This document is about how it thinks and
 why, not a tour of every option.
 The same engine on one page, with the estimators and the references, is
-[engine.md](engine.md).
+[engine.md](/engine).
 
 ## The problem it solves
 
@@ -194,7 +197,7 @@ One table, because these cost testers a round trip each:
 | `judge_trust(rows)` | `dict` | `ok`, `agreement.agreement`, `agreement.ci95`, `gold_kind`, `warnings` |
 
 The full field-by-field version, including which fields print and which
-do not, is in [evals.md](evals.md#7-return-shapes).
+do not, is in [evals.md](/evals#7-return-shapes).
 
 ## What it is not
 

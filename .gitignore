@@ -80,6 +80,8 @@ recipes/04-train/identity/out/
 !/scripts/golden.py
 # ...and the rename script, so an open branch can regenerate the rebrand.
 !/scripts/rebrand.py
+# ...and the API reference generator: CI runs it with --check on every PR.
+!/scripts/gen_api_docs.py
 simulate.ipynb
 test.ipynb
 quick_tests.ipynb

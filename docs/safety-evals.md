@@ -1,4 +1,7 @@
-# Safety evals for tool-using agents with whileai
+---
+title: "Safety evals for tool-using agents with whileai"
+description: "Safety evals for tool-using agents: private data, actions on state, and outbound sends, and whether they can be turned against their owner."
+---
 
 An agent with tools has three capabilities a chat model does not: it can
 read private data, it can act on state, and it can send things out. Any
@@ -8,8 +11,8 @@ those capabilities can be turned against their owner: by the user, by
 text the agent reads from a tool, or by an agent that follows an
 instruction it should have treated as data. This page is the recipe as the
 SDK runs it. The worked example is
-[`recipes/02-measure/safety-evals`](../recipes/02-measure/safety-evals); the longer argument
-is [`blog/agent-safety-evals.md`](../blog/agent-safety-evals.md).
+[`recipes/02-measure/safety-evals`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/safety-evals); the longer argument
+is [`blog/agent-safety-evals.md`](https://github.com/whilehq/whileai-sdk/blob/main/blog/agent-safety-evals.md).
 
 ## What the sources say
 
@@ -146,7 +149,7 @@ assert report["ok"]
 A support agent's private data is one company's; a marketplace agent's
 belongs to many tenants, the text it reads is written by the public, and
 some of what it writes is public. Three changes to the recipe, worked in
-[`recipes/02-measure/safety-evals-marketplace`](../recipes/02-measure/safety-evals-marketplace):
+[`recipes/02-measure/safety-evals-marketplace`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/safety-evals-marketplace):
 
 - **Make the world answer across tenants.** If a tool takes an id, let
   the mock return data for any id, and add a marker that reads the steps

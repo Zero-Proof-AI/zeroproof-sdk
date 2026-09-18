@@ -1,4 +1,7 @@
-# Reward hacking detection with whileai
+---
+title: "Reward hacking detection with whileai"
+description: "How the SDK looks for over-optimization before a run, during it, and after: the gap between training reward and the eval you care about."
+---
 
 Reinforcement learning is a strong optimizer. Point it at a reward and it
 pulls every bit of reward out of the environment, including the bits the
@@ -6,7 +9,7 @@ reward's author did not mean to pay for. rlhfbook.com ch. 14 calls the
 result over-optimization: the training reward keeps climbing while the
 evaluation you care about flattens and falls. This page is how the SDK
 looks for that gap, before a run, during it, and after. The worked
-example is [`recipes/02-measure/reward-hacking`](../recipes/02-measure/reward-hacking).
+example is [`recipes/02-measure/reward-hacking`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/reward-hacking).
 
 ## What the book says
 
