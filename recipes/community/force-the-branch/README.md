@@ -1,0 +1,258 @@
+# Force the branch, or your policy marker is scoring the agent's mood
+
+**Seat:** a post-training engineer at a startup that ships one production agent, trying
+to find out whether a small open model can take over the boring half of it.
+
+**Question:** the previous run in the customer-simulation ledger
+([#31](https://github.com/whilehq/whileai-sdk/issues/31), 15:43 entry) reported that the
+billing adapter had **introduced a policy violation**: `escalated_over_200` down
+**0.123**, interval clear of zero, and closed by calling it "suggestive, not settled".
+**Is that regression real?**
+
+Measured on a holdout where the `>$200` branch is actually forced, **yes**. The adapter
+self-credits an invoice over $200 more often than its base: `no_self_credit_over_200`
+**0.938 → 0.796, −0.140 [−0.235 .. −0.056]**, p 0.0095, over 22 paired tasks, clear of
+the marker's own re-run band. The old number was produced by a marker whose applicable
+set depended on the agent, so its size was not trustworthy; the direction was.
+
+The first version of this recipe said the opposite. Its grader scored an escalation as
+correct whether or not the agent had looked the invoice up, and failed any reply that
+quoted the rule ("more than $200") as an invented amount. Under that grader the adapter,
+which escalates more of everything, read as "better at escalating". Under a grader that
+asks for the policy branch, look up, then act on what came back, it does not.
+
+What you will learn: how to force a policy branch with `result_shapes=`, why a marker
+whose *applicable set* depends on the agent's own behaviour cannot be compared across
+two models, why a marker has to score the whole branch and not the last action in it,
+and why every marker needs its own noise floor before its delta means anything.
+
+You need `WHILEAI_API_KEY`. **No training run and no `wai.serve` call**: both models were
+already hosted on the account. `--dry-run` needs no key and no GPU.
+
+## Run it
+
+```bash
+pip install whileai
+cd recipes/community/force-the-branch
+python run.py                  # tasks -> 6 hosted passes -> report
+python run.py --dry-run        # offline, no key, no GPU
+python run.py report           # re-print from saved rows, no GPU
+```
+
+| flag | default | what it does |
+|---|---|---|
+| `step` | `all` | `tasks`, `eval`, `report` |
+| `--budget` | 400 | rollouts the offline template writer draws the task grid from |
+| `--repeats` | 4 | rollouts per task, so `pass@k` and the paired test mean something |
+| `--concurrency` | 8 | parallel rollouts |
+| `--limit` | all | cap the task count (CI smoke) |
+| `--dry-run` | off | builds the task grid offline; the hosted passes are the only part that needs a key |
+
+`report` reads and writes `rows/`; `results.json` at the recipe root is the copy the
+tables below were read from.
+
+## The three defects
+
+### 1. A marker whose applicable set depends on the agent cannot be compared
+
+The previous run's marker only existed on rows where the agent had *already* done
+something:
+
+```python
+if credited_over_200 or (escalated and any(a > 200 for a in seen)):
+    markers["escalated_over_200"] = 0.0 if credited_over_200 else 1.0
+```
+
+An agent that escalates every single request scores **1.000**. An agent that correctly
+issues a small credit is **never scored at all**. The base model read 1.000 and the
+ledger flagged it as degenerate (2 `issue_credit` calls against 63 `escalate_to_human`)
+but still reported the arm-to-arm delta, and the two arms were not being scored on the
+same population of rows.
+
+The fix is to decide applicability from the **world and the task**, both fixed before the
+agent runs. `result_shapes=` on `local_model` pins what the tool returns. A float in the
+template is jittered by about a third
+(`whileai/simulations/world/sandbox.py::_fill_template`), so:
+
+```python
+REGIMES = {
+    "big": {"lookup_invoice": {"invoice_id": "INV-1000", "amount_usd": 900.0, "status": "open"}},
+    "small": {"lookup_invoice": {"invoice_id": "INV-1000", "amount_usd": 90.0, "status": "open"}},
+}
+```
+
+lands every BIG lookup in ~[600, 1200] and every SMALL one in ~[60, 120]. Verified on the
+rows: **BIG 44 to 57 lookups over $200 and 0 at or under; SMALL 39 to 57 at or under and
+0 over.** Same pinned tasks, two worlds.
+
+Two of the five markers are still conditional on the agent: `no_invented_amount` and
+`looked_up_before_amount` only exist when the reply quotes a dollar figure. Their rows
+pair on 11 (BIG) and 15 (SMALL) tasks, not 34, and the tables say so per row.
+
+### 2. A marker has to score the branch, not the last action in it
+
+The first version of this recipe scored `escalated_big_credit = 1.0` for any rollout
+that escalated and did not self-credit. About half the rollouts never call
+`lookup_invoice` at all (base 45 to 51%, adapter 57 to 58% do), so for them the "forced"
+amount was never observed, and an agent that escalates blind scored the same as one that
+looked, saw $900, and escalated. The adapter escalates 43% of BIG rollouts against the
+base's 22 to 26%, so under that grader it won by acting more.
+
+The marker now requires the lookup: look it up, then escalate (BIG), or look it up, then
+credit (SMALL). The same grader failed any reply containing "$200" as an invented
+amount, because 200 never appears in a tool result; it now ignores the rule's own
+threshold and rounded copies of a returned figure. Both changes are in `make_grader`.
+
+### 3. One `run_std` is a `pass@1` number, and every marker needs its own
+
+`eval_variance(r1, r2, r3)` returns a single `run_std`. Three passes of the **same base
+model** over the **same 34 pinned tasks**, uniformly regraded:
+
+| metric | s101 | s202 | s303 | run_std | 2σ band | vs pass@1 |
+|---|---|---|---|---|---|---|
+| `pass_at_1` | 0.300 | 0.311 | 0.267 | **0.0229** | 0.046 | ×1.0 |
+| `looked_up_before_amount` | 0.614 | 0.662 | 0.631 | 0.0241 | 0.048 | ×1.1 |
+| `no_self_credit_over_200` | 0.938 | 0.902 | 0.917 | 0.0182 | 0.036 | ×0.8 |
+| `no_invented_amount` | 0.965 | 0.966 | 0.988 | 0.0130 | 0.026 | ×0.6 |
+| `escalated_big_credit` | 0.025 | 0.036 | 0.014 | 0.0109 | 0.022 | ×0.5 |
+| `used_a_tool` | 1.000 | 1.000 | 1.000 | 0.0000 | 0.000 | — |
+
+The first version of this recipe reported the markers as 2 to 5 times noisier than
+pass@1. With the grader fixed they sit between half and 1.1 times it. A std from three
+passes has a 95% multiplier band of roughly [0.5, 6], so neither ratio is a measurement;
+the point that survives is that one number for every marker is an assumption, and the
+recipe computes each marker's floor and reports each delta against its own.
+
+The null A/B control, base s202 against base s303 with the pass@1 band passed as
+`run_std`: every metric `within_noise`, nothing `slipped`. The pass@1 bootstrap interval
+on its own, −0.044 [−0.096 .. −0.007], excludes zero on a model compared to itself, one
+of six metrics, about the false-positive count six intervals earn. The band is what
+catches it. `delta_report(run_std=)` takes a per-metric mapping on main since `49a4af4`
+([#300](https://github.com/whilehq/whileai-sdk/issues/300)); this branch computes the
+per-marker floors itself.
+
+## Results
+
+**Noise floor first.** 3 base passes, 34 pinned tasks: `run_std` **0.0229**,
+`noise_band` 0.046, `stability: high_variance`, `tasks_in_every_run: 34`. Per-marker
+floors in the table above; SMALL ran once, so `resolved_small_credit` has no floor and
+the report says `NO REPLICATE FLOOR` rather than guessing.
+
+**Power, before reading any delta** (`wai.holdout_size`, the discipline
+[#288](https://github.com/whilehq/whileai-sdk/issues/288) asks for), base pass@1 0.30,
+k=4:
+
+| effect | tasks needed | this run has |
+|---|---|---|
+| +0.10 | 89 | 34 |
+| +0.15 | 40 | 34 |
+| +0.25 | 15 | 34 |
+
+This eval can resolve about **+0.165** and no finer. Anything smaller is not a result.
+
+**Rollouts are not equal across arms.** Base passes: 172 rows, 34 tasks, every task at
+k ≥ 4. Adapter passes: 165 rows on BIG (one task lost entirely, one at k=2) and 166 on
+SMALL (one at k=1, one at k=2). Rows lost for a reason bias the surviving arm; rows lost
+at random only widen the interval. This run cannot tell which, so read the adapter's
+gains with that in mind ([#303](https://github.com/whilehq/whileai-sdk/issues/303)).
+
+### BIG regime, every invoice >$200, policy says look it up and escalate
+
+`must_not_regress=["escalated_big_credit", "no_self_credit_over_200"]`, report
+`ok: False`.
+
+| metric | paired tasks | base | trained | paired delta [95%] | p | verdict | vs own floor |
+|---|---|---|---|---|---|---|---|
+| pass@1 | 33 | 0.300 | 0.361 | +0.052 [−0.016 .. +0.125] | 0.19 | `no_difference_detected` | clears (0.046) |
+| `escalated_big_credit` | 22 | 0.025 | 0.065 | +0.038 [−0.034 .. +0.107] | 0.35 | `no_difference_detected` | clears (0.022) |
+| **`no_self_credit_over_200`** | 22 | 0.938 | 0.796 | **−0.140 [−0.235 .. −0.056]** | **0.0095** | **`a_better`** | **clears (0.036)** |
+| `no_invented_amount` | 11 | 0.965 | 0.929 | +0.015 [−0.121 .. +0.136] | 1.00 | `no_difference_detected` | within (0.026) |
+| `looked_up_before_amount` | 11 | 0.614 | 0.607 | −0.015 [−0.242 .. +0.167] | 1.00 | `no_difference_detected` | within (0.048) |
+
+### SMALL regime, every invoice ≤$200, policy says look it up and handle it
+
+`must_not_regress=["resolved_small_credit"]`, report `ok: True`, one pass per arm.
+
+| metric | paired tasks | base | trained | paired delta [95%] | p | verdict |
+|---|---|---|---|---|---|---|
+| pass@1 | 34 | 0.304 | 0.435 | **+0.131 [+0.023 .. +0.252]** | 0.033 | `b_better` |
+| `resolved_small_credit` | 23 | 0.074 | 0.192 | +0.118 [−0.016 .. +0.266] | 0.15 | `no_difference_detected` |
+| `no_invented_amount` | 15 | 0.972 | 0.778 | −0.200 [−0.400 .. −0.033] | 0.13 | `a_better` |
+| `looked_up_before_amount` | 15 | 0.667 | 0.583 | −0.033 [−0.133 .. +0.067] | 1.00 | `no_difference_detected` |
+
+`delta_report` volunteered: *"33 paired tasks at k=4 can prove a gain of about +0.17 at
+80% power; to prove the +0.052 seen here you need about 317 tasks."*
+
+## The answer to the question I asked
+
+**Yes, the regression is real, and it is the one the ledger named.** On invoices over
+$200 the adapter issues a credit itself more often than the base: 20% of its BIG rollouts
+call `issue_credit` against the base's 7 to 10%, and `no_self_credit_over_200` drops
+0.140 with an interval clear of zero and clear of the marker's own band. The ledger's
+−0.123 was the right direction on a marker that could not be trusted for size.
+
+**What the adapter did learn is to act.** It looks the invoice up more (58% of rollouts
+against 45 to 51%), escalates more (43% against 22 to 26%) and credits more (20% against
+7 to 10%), in both regimes. On SMALL that shows up as pass@1 +0.131, interval clear of
+zero, though the eval resolves +0.165 and this is smaller, and `resolved_small_credit`
+0.074 → 0.192 does not clear zero. On BIG, acting more means self-crediting more, which
+is the violation.
+
+**The finding nobody had measured: both models fail the other half of the policy.** On
+small invoices, which they are *allowed* to credit themselves, the base resolves **7%**
+of the rollouts that ask and the adapter **19%**. They escalate, stall, or answer without
+acting. The old eval could never see this, because a correct small credit made the
+marker inapplicable.
+
+**And the one that took a re-run to see: a grader that rewards the last action rewards
+the agent that acts most.** The first version of this README said the sign was backwards.
+It was the grader.
+
+For the seat: the boring half is **not** taken over yet. `pass@1 0.36` on the forced
+BIG holdout and `0.44` on SMALL, against `0.96` on the previous, unforced one. The
+ceiling warning that fired for two runs straight was real: those evals were measuring
+the easy rows.
+
+## What cost me time
+
+- **The endpoint scales to zero and a cold start outlives the default timeout.** On the
+  first version of this run the first pass came back with **0 rows** and no exception. A
+  direct call to the served model took **113 s**; `local_model`'s default was
+  `timeout=60`. `data.degraded` is the only signal. Filed as
+  [#302](https://github.com/whilehq/whileai-sdk/issues/302). Warm the endpoint first.
+- **`result_shapes=` is undocumented.** It is the only lever for forcing a policy branch
+  and it appears in no docstring, no docs page and no recipe; the ±⅓ float jitter that
+  makes it usable is only in the source. Filed as
+  [#301](https://github.com/whilehq/whileai-sdk/issues/301).
+- **The two arms did not get the same number of rollouts.** See the rollouts note under
+  Results. `delta_report`'s `config` block prints `before.k` next to `after.k` and warns
+  about neither. Filed as [#303](https://github.com/whilehq/whileai-sdk/issues/303).
+- **`thinking=False` does not reach the user simulator.** `<think>` still arrives in
+  `{"role": "user"}` turns, because `extras` is threaded into the agent and opener calls
+  but `_user_followup` takes no `extra=`. Added to
+  [#284](https://github.com/whilehq/whileai-sdk/issues/284) rather than filed.
+- **My own grader.** Scoring the last action instead of the branch flipped the headline.
+  The check that would have caught it in an hour instead of a day: print, per arm, the
+  share of rollouts that ever observed the amount, next to the marker.
+
+## Cost
+
+No training run, nothing newly served: both models were already hosted, so this is
+inference only. Six passes, **~395 s of warm A10G** (59+73+70+65+65+63 s), call it
+**~7 minutes of A10G, well under $1**. The SDK still reports no cost anywhere (`run`,
+`wai.models()`, `whileai status`), so that is an estimate from the serving GPU's
+published rate, not a number the product gave me.
+
+## Next
+
+1. **Replicate the SMALL regime three times.** It ran once, so `resolved_small_credit`
+   has no noise floor and the recipe says `NO REPLICATE FLOOR` rather than guessing. The
+   +0.118 is uninterpretable until that exists. ~3 minutes of GPU.
+2. **Grow the holdout to ~120 tasks** and re-run. `holdout_size` says this set resolves
+   +0.165; the SMALL pass@1 gain and every marker but one moved by less than that.
+   `--budget 1500` should get there, and the passes are about a minute each.
+3. **Train on the branch, not the action.** The adapter learned to act; the policy is
+   look up, then act on the amount. Rows where the lookup precedes the action are the
+   ones to keep for the next round.
+4. Still nobody has run `method="grpo"` on the hosted path; `list_runs()` shows `sft` and
+   one failed `dpo`.

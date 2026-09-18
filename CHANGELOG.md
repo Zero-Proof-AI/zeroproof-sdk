@@ -5,6 +5,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `str(tracked.verdict())` says "beats" or "trails" only when the difference
+  interval excludes zero and the delta clears the behavior's declared
+  `noise_floor`. It said "beats" with no interval on one side and with an
+  interval that included zero, stored the noise floor and never read it, and
+  never said what the number rests on. A missing interval now reads "not a
+  result", an interval that includes zero reads "about the same", a delta
+  inside the re-run band reads "not a result", the count of other behaviors
+  that came out lower says it is on point estimates, and the line ends with
+  judge agreement and n, prefixed "unproven:" when n is under 50, agreement
+  is under 0.8 or unmeasured, or the training reward is the judge (rlhf-book
+  ch. 16: a difference inside the run-to-run spread is not a result). `Score`
+  refuses NaN and inf; `run.score()` warns on a missing or short `n`. The
+  README states the difference-interval rule the platform applies, and the
+  report-run recipe computes its offline verdict from the score table with
+  that rule instead of printing a canned one.
 - `format_cuts(wai.cuts(...))` prints the summary as the sentence the traces
   page leads with, instead of the dict a researcher was left to read. The call
   answers the right question and printing it was 3.5 KB of JSON ending in

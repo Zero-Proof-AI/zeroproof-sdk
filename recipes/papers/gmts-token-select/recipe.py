@@ -1,27 +1,34 @@
-"""Adaptive clip: the upper clip bound follows how rare a correct answer was.
+"""GMTS: rank tokens by entropy times advantage, not by entropy alone.
 
     python recipe.py                      # both arms on Modal, writes results.json
     python recipe.py --arm recipe         # one arm
-    python recipe.py --selftest           # the clip schedule and the loss, offline, no GPU
+    python recipe.py --selftest           # the ranking and the mask, offline, no GPU
 
-GRPO clips the importance ratio into ``[1 - eps_lo, 1 + eps_hi]``. DAPO's
-"clip-higher" widens the upper side to 0.28 and leaves it there, the same for
-every rollout in every group. The paper's complaint is that this treats two
-very different rollouts alike: the one correct answer in a group of eight,
-which is the only evidence the model has that the hard problem is solvable,
-gets the same room to move as the seventh correct answer on a problem the
-model already has.
+Training on only the top 20% highest-entropy tokens is a known RLVR result:
+the other 80% are mostly the model writing out what it has already decided.
+The paper's complaint is that entropy is read one answer at a time. Two tokens
+can carry the same entropy while sitting in answers the group scored very
+differently, and only one of them is attached to a gradient worth taking.
 
-So make the bound follow the group. With ``c`` correct rollouts out of ``k``
-(equation 11 of the paper):
+So rank by the size of the learning signal instead. The paper's score
+(equation 4) is
 
-    eps_hi(c) = eps_lo + (eps_hi_max - eps_lo) * (k - c) / (k - 1)
+    delta[i, t] = | E[i, t] * omega[i, t] |
 
-c = 1, a rare correct answer, gets the full ``eps_hi_max``. c = k - 1, an easy
-problem, gets almost nothing above ``eps_lo``. Both arms here share the same
-``eps_lo`` = 0.20 and the same ceiling 0.28, which are the paper's token-level
-defaults. The baseline pins the upper bound at that ceiling for everyone; the
-recipe slides it down as correct answers get common. That is the one change.
+with ``E`` the token's entropy and ``omega`` the scalar in front of it in the
+policy-gradient term: the importance ratio times the advantage, zeroed where
+the clip has made the gradient inactive. Both arms keep the top 20% of tokens
+and drop the rest. The baseline ranks that 20% by ``E`` (entropy token
+selection, ETS, the prior result); the recipe ranks it by ``delta``. That is
+the one change.
+
+This run is on-policy (``num_iterations`` 1) with no KL term (``beta`` 0), so
+the ratio is exactly 1 and nothing is clipped, and ``omega`` reduces to the
+advantage itself. That is the part of ``omega`` the paper says does the work
+-- the answer-level reward signal entropy cannot see -- so the reduction keeps
+the change and drops only the terms that are 1 here. `selection_overlap` in
+the Checks table is how much the two rankings actually disagree, measured, so
+this recipe cannot repeat adaptive-clip's round 1 and test nothing.
 
 Shape of the run:
   1. data():      GSM8K, train split for prompts, test split held out
@@ -46,24 +53,21 @@ import modal
 HERE = Path(__file__).resolve().parent
 BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 METRIC = "pass@1"
-BOOK = "ch. 6 Policy gradients"  # the clipped surrogate and what the clip range does
+BOOK = "ch. 6 Policy gradients"  # per-token aggregation, and the sequence-level advantage
 # The training reward here *is* the target: both are the same binary check
 # against the GSM8K gold, so there is no proxy to over-optimize against.
 PROXY = None
 EVAL_RUNS = 3  # re-runs of the base eval that set the noise floor (ch. 16)
 
-# The paper's token-level importance sampling defaults. EPS_LOW is the lower
-# clip bound in both arms; EPS_HIGH_MAX is the upper bound the baseline uses
-# for every rollout and the ceiling the recipe slides down from.
-EPS_LOW = 0.20
-EPS_HIGH_MAX = 0.28
+# The paper's selection fraction, the same one the entropy result uses.
+TOP_FRACTION = 0.20
 
 SYSTEM = "Solve the problem. Think briefly, then give the final number as \\boxed{answer}."
 
 
 # --------------------------------------------------------------------------
-# The clip schedule. Pure functions, no torch: `--selftest` runs them on
-# hand-written groups, and the Modal container imports this same file.
+# The ranking and the mask. Pure Python, no torch: `--selftest` runs them on
+# hand-written batches, and the Modal container imports this same file.
 # --------------------------------------------------------------------------
 
 
@@ -91,59 +95,74 @@ def outcome_of(text: str, gold: str) -> float:
     return 1.0 if MathEqual()(row).get("reward") == 1 else 0.0
 
 
-def epsilon_high_for_group(
-    correct: int, k: int, eps_low: float = EPS_LOW, eps_high_max: float = EPS_HIGH_MAX
-) -> float:
-    """THE ONE CHANGE, equation 11: the group's upper clip bound.
+def token_scores(entropy: list[list[float]], omega: list[float], ranking: str) -> list[list[float]]:
+    """THE ONE CHANGE, equation 4: the score the top-20% is taken by.
 
-    `correct` is how many of the group's `k` rollouts got the answer right.
-    One correct out of k returns `eps_high_max`; k - 1 correct returns a hair
-    over `eps_low`. A group of one has no group to be relative to, so it keeps
-    the ceiling.
+    `entropy` is one row per rollout, one value per completion token. `omega`
+    is one scalar per rollout -- the advantage, since the ratio is 1 and the
+    clip is inactive on an on-policy step with no KL term.
 
-    The formula is written for a group that actually splits, `1 <= c <= k`.
-    Fed c = 0 it returns `eps_low + (eps_high_max - eps_low) * k / (k - 1)`,
-    which is above the ceiling it is supposed to stop at (0.2914 against 0.28
-    at k = 8). An all-wrong group has a zero advantage and contributes no
-    gradient either way, so the count is clamped into [1, k] and c = 0 lands
-    on the ceiling rather than over it.
+    `ranking="entropy"` is the baseline, ETS: the score is the entropy and the
+    answer the token sits in does not enter. `ranking="gmts"` multiplies by
+    `omega`, so tokens in answers the group scored far from its mean outrank
+    equally uncertain tokens in answers it scored near the mean.
+
+    Note what this does *within* one rollout: `omega` is constant along the
+    row, so the two rankings order a single answer's tokens identically. The
+    whole difference is across answers, which is the difference the paper is
+    about, and it only survives if the loss normalizes over the batch rather
+    than per sequence -- see the `loss_type` note in `run_arm`.
     """
-    if k <= 1:
-        return eps_high_max
-    correct = max(1, min(k, correct))
-    return eps_low + (eps_high_max - eps_low) * (k - correct) / (k - 1)
+    if ranking == "entropy":
+        return [list(row) for row in entropy]
+    if ranking != "gmts":
+        raise ValueError(f"unknown ranking {ranking!r}")
+    return [[abs(e * w) for e in row] for row, w in zip(entropy, omega)]
 
 
-def epsilon_high_per_rollout(
-    advantages: list[float],
-    k: int,
-    eps_low: float = EPS_LOW,
-    eps_high_max: float = EPS_HIGH_MAX,
-) -> list[float]:
-    """One upper bound per rollout, read off its own group's correct count.
+def select_top_fraction(
+    scores: list[list[float]], mask: list[list[int]], fraction: float = TOP_FRACTION
+) -> list[list[int]]:
+    """Keep the highest-scoring `fraction` of the batch's live tokens.
 
-    The advantages arrive `k` per prompt and contiguous, before TRL shuffles
-    the generation batch. The reward here is binary, so a group's correct
-    rollouts are exactly the ones whose advantage came out positive: with
-    rewards in {0, 1} the advantage is `r - c/k`, which is positive for every
-    correct rollout and negative for every wrong one. Counting signs saves
-    carrying the rewards through as a second tensor.
+    The threshold is taken over every live token in the batch at once, not per
+    row. A per-row threshold would hand every answer the same number of slots
+    and throw away exactly the cross-answer comparison the recipe is testing.
 
-    A unanimous group (all right or all wrong) has every advantage at zero, so
-    it counts as zero correct and gets the ceiling. That bound never applies to
-    anything: a zero advantage contributes no gradient whichever way it clips.
+    `mask` is TRL's completion mask: 1 on a real token, 0 on padding. Padding
+    never scores. Ties are broken by keeping the earlier token, which matters
+    only when a batch has many identical scores (all-zero omega rows under
+    GMTS, which is every unanimous group).
     """
-    out: list[float] = []
-    for start in range(0, len(advantages), k):
-        block = advantages[start : start + k]
-        correct = sum(1 for a in block if a > 0)
-        out.extend([epsilon_high_for_group(correct, k, eps_low, eps_high_max)] * len(block))
+    flat = [
+        (scores[i][t], i, t)
+        for i in range(len(scores))
+        for t in range(len(scores[i]))
+        if mask[i][t]
+    ]
+    keep_n = int(len(flat) * fraction)
+    chosen = sorted(flat, key=lambda s: (-s[0], s[1], s[2]))[:keep_n]
+    out = [[0] * len(row) for row in scores]
+    for _, i, t in chosen:
+        out[i][t] = 1
     return out
+
+
+def mask_overlap(a: list[list[int]], b: list[list[int]]) -> float:
+    """Share of one mask's kept tokens that the other keeps too. 1.0 means the
+    two rankings chose the same tokens and the arms cannot differ; this number
+    goes in the Checks table so "the change was reachable" is measured."""
+    kept_a = sum(sum(row) for row in a)
+    if not kept_a:
+        return 1.0
+    both = sum(x * y for ra, rb in zip(a, b) for x, y in zip(ra, rb))
+    return both / kept_a
 
 
 def make_reward(recorder: list[dict]):
     """Binary outcome, a program against the public GSM8K gold. Both arms use
-    this untouched: the paper changes the clip, not the reward.
+    this untouched: the paper changes which tokens are trained on, not what
+    counts as right.
 
     `recorder` is refilled with the batch it just graded, so after training
     `hack_scan` can be run on the last one (rlhf-book ch. 14) without keeping
@@ -197,79 +216,139 @@ def graded_rows(holdout: list[dict], replies: list[list[str]]) -> list[dict]:
     return rows
 
 
-def adaptive_clip_trainer(base_cls):
+def gmts_trainer(base_cls):
     """Build the trainer subclass. Takes `GRPOTrainer` as an argument so this
     module imports without torch, which is what lets `--selftest` run locally.
     """
 
     import torch
 
-    class AdaptiveClipTrainer(base_cls):  # type: ignore[valid-type,misc]
-        """GRPOTrainer with the group-adaptive upper clip bound.
+    class TokenSelectTrainer(base_cls):  # type: ignore[valid-type,misc]
+        """GRPOTrainer that trains on a ranked 20% of the completion tokens.
 
-        Two small overrides and no copy of the loss body, so this rides along
-        with whatever else TRL's GRPO loss does:
+        One override and no copy of the loss body. TRL's `_compute_loss` reads
+        `inputs["completion_mask"]` on its first line and uses that one tensor
+        for the loss, its normalizer and every metric it logs. So the selection
+        goes in by narrowing that mask before the parent runs: an unselected
+        token is padding as far as the loss is concerned, and TRL's own
+        `completion_mask.sum()` normalizer counts only what survived.
 
-        * `_generate_and_score_completions` attaches one `eps_hi` per rollout
-          while the batch is still grouped by prompt. TRL's `shuffle_tensor_dict`
-          and `split_tensor_dict` index every value in that dict along dim 0
-          together, so the bound stays glued to its rollout through the shuffle
-          and the gradient-accumulation split.
-        * `_compute_loss` swaps `self.epsilon_high` for that tensor while the
-          parent runs. The parent's `torch.clamp(coef_1, 1 - self.epsilon_low,
-          1 + self.epsilon_high)` then broadcasts a (batch, 1) bound over the
-          (batch, tokens) ratio, and the clip-fraction metric TRL logs a few
-          lines later broadcasts the same way, so `clip_ratio` stays honest.
+        The score needs the current policy's entropy, which the parent does not
+        expose, so this takes one extra no-grad forward pass per loss call. That
+        pass is not cheap and it is not "generation dominates": entropy needs the
+        whole next-token distribution, so it materializes a
+        `(rows, tokens, vocab)` float32 tensor for a `log_softmax`, where TRL's
+        own scoring pass gathers one logprob per position and never builds it.
+        Measured at 8 rollouts x 256 tokens, the step runs around 20 seconds and
+        this pass is the bulk of it. The trade bought here is an untouched loss
+        body; a bf16 or fused entropy is the first thing to change at any size.
 
-        `adaptive=False` is the baseline: the class is the same, the flag is
-        the difference.
+        `ranking` is the arm: "entropy" is the baseline, "gmts" is the recipe.
         """
 
-        def __init__(self, *args, adaptive: bool = True, eps_high_max: float = EPS_HIGH_MAX, **kw):
+        def __init__(self, *args, ranking: str = "gmts", fraction: float = TOP_FRACTION, **kw):
             super().__init__(*args, **kw)
-            self.adaptive = adaptive
-            self.eps_high_max = eps_high_max
-            for attr in ("epsilon_low", "epsilon_high", "num_generations"):
-                if not hasattr(self, attr):
-                    raise RuntimeError(
-                        f"this TRL ({version('trl')}) has no GRPOTrainer.{attr}; the recipe is "
-                        "pinned to trl==0.19.1, where the clip bounds are plain attributes"
-                    )
-            if adaptive and getattr(self, "use_liger_loss", False):
+            if ranking not in ("entropy", "gmts"):
+                raise ValueError(f"unknown ranking {ranking!r}")
+            self.ranking = ranking
+            self.fraction = fraction
+            self.overlaps: list[float] = []
+            self.kept_fractions: list[float] = []
+            if getattr(self, "use_liger_loss", False):
                 raise RuntimeError(
-                    "use_liger_loss reads epsilon_high once at init, so the adaptive bound "
-                    "would be silently ignored; run this recipe without Liger"
+                    "use_liger_loss does not read inputs['completion_mask'] the same way, so "
+                    "the selection would be silently ignored; run this recipe without Liger"
+                )
+            if self.loss_type == "grpo":
+                raise RuntimeError(
+                    "loss_type 'grpo' normalizes each sequence by its own kept-token count, "
+                    "which cancels the cross-answer part of the selection this recipe tests; "
+                    "use 'bnpo' (TRL's default) or 'dr_grpo'"
                 )
 
-        def _generate_and_score_completions(self, inputs):
-            out = super()._generate_and_score_completions(inputs)
-            advantages = out.get("advantages")
-            if not self.adaptive or advantages is None:
-                return out
-            eps = epsilon_high_per_rollout(
-                advantages.tolist(), self.num_generations, self.epsilon_low, self.eps_high_max
-            )
-            out["gapo_epsilon_high"] = torch.tensor(
-                eps, dtype=torch.float32, device=advantages.device
-            )
-            return out
+        def _entropy(self, model, input_ids, attention_mask, logits_to_keep, chunk=2):
+            """Per-token Shannon entropy of the policy's next-token distribution,
+            on the same shifted, temperature-scaled logits TRL scores with.
+
+            Chunked because the logits are (rows, tokens, 151936) and only the
+            (rows, tokens) entropy is kept."""
+            rows = []
+            for i in range(0, input_ids.size(0), chunk):
+                logits = model(
+                    input_ids=input_ids[i : i + chunk],
+                    attention_mask=attention_mask[i : i + chunk],
+                    logits_to_keep=logits_to_keep + 1,
+                ).logits[:, :-1, :]
+                logits = logits.float() / self.temperature
+                logps = torch.log_softmax(logits, dim=-1)
+                rows.append(-(logps.exp() * logps).sum(-1))
+                del logits, logps
+            return torch.cat(rows, dim=0)
 
         def _compute_loss(self, model, inputs):
-            eps = inputs.get("gapo_epsilon_high")
-            if eps is None:
-                return super()._compute_loss(model, inputs)
-            saved_high, saved_low = self.epsilon_high, self.epsilon_low
-            # Both bounds go in as (batch, 1) tensors. Handing torch.clamp one
-            # tensor bound and one float would work too, but matching shapes
-            # keeps it on the unambiguous Tensor overload.
-            self.epsilon_high = eps.unsqueeze(1)
-            self.epsilon_low = torch.full_like(self.epsilon_high, float(saved_low))
-            try:
-                return super()._compute_loss(model, inputs)
-            finally:
-                self.epsilon_high, self.epsilon_low = saved_high, saved_low
+            prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
+            completion_ids = inputs["completion_ids"]
+            completion_mask = inputs["completion_mask"]
+            advantages = inputs["advantages"]
 
-    return AdaptiveClipTrainer
+            with torch.no_grad():
+                entropy = self._entropy(
+                    model,
+                    torch.cat([prompt_ids, completion_ids], dim=1),
+                    torch.cat([prompt_mask, completion_mask], dim=1),
+                    completion_ids.size(1),
+                )
+                # omega: the scalar in front of the entropy in the policy-
+                # gradient term. old_per_token_logps is None on an on-policy
+                # step, where the ratio is exactly 1 by construction.
+                old = inputs.get("old_per_token_logps")
+                if old is None:
+                    ratio = torch.ones_like(entropy)
+                else:
+                    new = self._get_per_token_logps(
+                        model,
+                        torch.cat([prompt_ids, completion_ids], dim=1),
+                        torch.cat([prompt_mask, completion_mask], dim=1),
+                        completion_ids.size(1),
+                    )
+                    ratio = torch.exp(new - old)
+                    # Where the clip has bitten, the gradient is inactive and
+                    # the token is worth nothing however uncertain it is.
+                    inactive = ((ratio < 1 - self.epsilon_low) & (advantages.unsqueeze(1) < 0)) | (
+                        (ratio > 1 + self.epsilon_high) & (advantages.unsqueeze(1) > 0)
+                    )
+                    ratio = ratio.masked_fill(inactive, 0.0)
+                omega = ratio * advantages.unsqueeze(1)
+
+                scores = entropy if self.ranking == "entropy" else (entropy * omega).abs()
+                keep = self._top_fraction(scores, completion_mask)
+                if self.ranking == "entropy":
+                    other = self._top_fraction((entropy * omega).abs(), completion_mask)
+                else:
+                    other = self._top_fraction(entropy, completion_mask)
+                live = completion_mask.sum().clamp(min=1)
+                self.overlaps.append(float((keep * other).sum() / keep.sum().clamp(min=1)))
+                self.kept_fractions.append(float(keep.sum() / live))
+
+            inputs = {**inputs, "completion_mask": completion_mask * keep}
+            return super()._compute_loss(model, inputs)
+
+        def _top_fraction(self, scores, completion_mask):
+            """The batch-wide top `fraction` of live tokens, as a 0/1 tensor
+            the same shape as the completion mask. The threshold is over the
+            whole batch on purpose: see `select_top_fraction`."""
+            live = completion_mask.bool()
+            n_live = int(live.sum())
+            keep_n = int(n_live * self.fraction)
+            out = torch.zeros_like(completion_mask)
+            if keep_n <= 0:
+                return out
+            flat = scores.masked_fill(~live, float("-inf")).flatten()
+            idx = torch.topk(flat, keep_n).indices
+            out.view(-1)[idx] = 1
+            return out
+
+    return TokenSelectTrainer
 
 
 # --------------------------------------------------------------------------
@@ -279,7 +358,7 @@ def adaptive_clip_trainer(base_cls):
 DEFAULT_GPU = os.environ.get("WAI_RECIPE_GPU", "L40S")
 VOLUME_ROOT = "/vol"
 
-app = modal.App("whileai-recipe-adaptive-clip")
+app = modal.App("whileai-recipe-gmts-token-select")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -347,7 +426,7 @@ def _sample(model, tokenizer, questions, *, n, max_new_tokens, batch=8):
 )
 def run_arm(
     arm: str,
-    adaptive: bool,
+    ranking: str,
     train_tasks: list[dict],
     holdout: list[dict],
     run_name: str,
@@ -356,12 +435,11 @@ def run_arm(
     num_generations: int = 8,
     prompts_per_step: int = 6,
     learning_rate: float = 1e-4,
-    eps_high_max: float = EPS_HIGH_MAX,
+    fraction: float = TOP_FRACTION,
     max_completion_length: int = 256,
     lora_rank: int = 32,
     eval_samples: int = 4,
     eval_base: bool = False,
-    num_iterations: int = 1,
 ) -> dict:
     """One arm: eval the base model (optionally), train, eval again."""
     import time
@@ -374,9 +452,8 @@ def run_arm(
 
     sys.path.insert(0, "/root")
     from recipe_mod import (
-        EPS_LOW,
         EVAL_RUNS,
-        adaptive_clip_trainer,
+        gmts_trainer,
         graded_rows,
         make_reward,
         mean_length,
@@ -395,15 +472,15 @@ def run_arm(
 
     config = {
         "arm": arm,
-        "adaptive_clip": adaptive,
+        "ranking": ranking,
+        "top_fraction": fraction,
         "base_model": base_model,
         "steps": steps,
         "num_generations": num_generations,
         "prompts_per_step": prompts_per_step,
         "learning_rate": learning_rate,
-        "epsilon_low": EPS_LOW,
-        "epsilon_high_max": eps_high_max,
-        "num_iterations": num_iterations,
+        "loss_type": "bnpo",
+        "num_iterations": 1,
         "beta": 0.0,
         "lora_rank": lora_rank,
         "max_completion_length": max_completion_length,
@@ -448,19 +525,21 @@ def run_arm(
         per_device_train_batch_size=num_generations,
         gradient_accumulation_steps=prompts_per_step,
         learning_rate=learning_rate,
-        # How many policy updates TRL takes per batch of rollouts. At 1 the
-        # run is fully on-policy: the importance ratio is exactly 1 on the
-        # only update, so no bound above 1 is ever reached and a per-group
-        # upper bound cannot change a single gradient. Round 1 measured that
-        # the hard way -- clip_ratio/high_mean was 0.0 in all 80 logged steps.
-        num_iterations=num_iterations,
-        # No KL term, so the clip is the only trust region in the run and the
-        # arms differ in the thing the paper is about and nothing else.
+        # On-policy: one update per batch of rollouts, so the importance ratio
+        # is exactly 1 and omega is the advantage alone. The recipe's change
+        # does not need off-policy steps to bind -- unlike a clip bound, the
+        # advantage varies across answers on every step.
+        num_iterations=1,
+        # No KL term, so omega has no reference-policy correction either and
+        # the arms differ in the ranking and nothing else.
         beta=0.0,
-        epsilon=EPS_LOW,
-        # The baseline's fixed upper bound, and the recipe's ceiling. The
-        # recipe arm overwrites it per group inside the trainer subclass.
-        epsilon_high=eps_high_max,
+        # TRL's default, and load-bearing here: bnpo normalizes by the batch's
+        # kept-token count, so giving a high-advantage answer more of the 20%
+        # gives it more of the gradient. loss_type "grpo" would divide each
+        # sequence by its own kept count and undo exactly that (rlhf-book
+        # ch. 6 on per-sequence against per-token aggregation). The trainer
+        # subclass refuses "grpo" rather than quietly testing nothing.
+        loss_type="bnpo",
         max_completion_length=max_completion_length,
         max_prompt_length=512,
         temperature=0.9,
@@ -494,19 +573,19 @@ def run_arm(
     # GRPOConfig.seed, so the adapter's init is drawn from whatever RNG state
     # the process is in. The first arm runs the base evals first and advances
     # it; the second does not. Seed here so both arms draw the same A matrix.
-    # Rounds 1 to 3 in the README predate this line.
+    # Rounds 1 and 2 in the README predate this line.
     from transformers import set_seed
 
     set_seed(17)
-    trainer = adaptive_clip_trainer(GRPOTrainer)(
+    trainer = gmts_trainer(GRPOTrainer)(
         model=model,
         reward_funcs=[make_reward(last_batch)],
         args=grpo,
         train_dataset=dataset,
         processing_class=tokenizer,
         peft_config=lora,
-        adaptive=adaptive,
-        eps_high_max=eps_high_max,
+        ranking=ranking,
+        fraction=fraction,
     )
     if run is not None:
         trainer.add_callback(wai.TrainerCallback(run, finish=False))
@@ -516,6 +595,13 @@ def run_arm(
         if run is not None:
             run.fail(f"{type(exc).__name__}: {exc}")
         raise
+
+    # How far apart the two rankings actually chose. 1.0 would mean this arm
+    # trained on the same tokens the other arm would have picked, and the
+    # recipe tested nothing.
+    overlap = statistics.fmean(trainer.overlaps) if trainer.overlaps else 1.0
+    kept = statistics.fmean(trainer.kept_fractions) if trainer.kept_fractions else 0.0
+    print(f"{arm}: selection overlap with the other ranking {overlap:.3f}, kept {kept:.3f}")
 
     replies = _sample(
         trainer.model, tokenizer, questions, n=eval_samples, max_new_tokens=max_completion_length
@@ -540,8 +626,9 @@ def run_arm(
     gpu_minutes = (time.time() - started) / 60.0
     summary = {
         "arm": arm,
-        "adaptive_clip": adaptive,
+        "ranking": ranking,
         "pass_at_1": after.pass_at_1,
+        "selection_overlap": overlap,
         "gpu_minutes": gpu_minutes,
         "steps": steps,
     }
@@ -556,6 +643,8 @@ def run_arm(
         "steps": steps,
         "length_after": mean_length(after_rows),
         "hack_scan_top": hack_scan_top,
+        "selection_overlap": overlap,
+        "kept_fraction": kept,
         "run_url": summary.get("run_url", ""),
     }
 
@@ -595,77 +684,104 @@ def summarize(rows: list[dict]) -> dict:
 
 
 def selftest() -> None:
-    """The clip schedule on hand-written groups, and the loss it feeds, on the
-    CPU. No GPU, no key, no model download."""
-    k = 8
+    """The ranking and the mask on a hand-written batch, on the CPU. No GPU,
+    no key, no model download."""
+    # Two groups of four, laid out the way TRL hands them over. Group A is
+    # hard (one correct), group B is easy (three correct). Advantages are
+    # r - mean(r), which is what omega is on an on-policy step.
+    omega = [0.75, -0.25, -0.25, -0.25, 0.25, 0.25, 0.25, -0.75]
+    # Every rollout carries the same four entropies, so entropy alone cannot
+    # tell the rollouts apart and any difference is the omega.
+    entropy = [[0.1, 0.9, 0.4, 0.6] for _ in omega]
+    mask = [[1, 1, 1, 1] for _ in omega]
 
-    # Equation 11 at the ends and in the middle.
-    assert epsilon_high_for_group(1, k) == EPS_HIGH_MAX
-    assert abs(epsilon_high_for_group(k, k) - EPS_LOW) < 1e-12
-    assert epsilon_high_for_group(0, k) == EPS_HIGH_MAX
-    schedule = [round(epsilon_high_for_group(c, k), 4) for c in range(1, k + 1)]
-    assert schedule == sorted(schedule, reverse=True), "rarer correct -> more headroom"
-    print(f"eps_hi by correct-in-group (k={k}, eps_lo={EPS_LOW}, ceiling={EPS_HIGH_MAX}):")
-    for c, e in zip(range(1, k + 1), schedule):
-        print(f"  {c} of {k} correct -> {e}")
+    ets = token_scores(entropy, omega, "entropy")
+    gmts = token_scores(entropy, omega, "gmts")
+    assert ets == entropy, "the baseline ranks by entropy and nothing else"
+    assert gmts[0] == [abs(e * 0.75) for e in entropy[0]]
 
-    # Two groups of four laid out the way TRL hands them over: one hard (one
-    # correct), one easy (three correct). Advantages are r - mean(r).
-    hard = [1 - 0.25, -0.25, -0.25, -0.25]
-    easy = [1 - 0.75, 1 - 0.75, 1 - 0.75, -0.75]
-    eps = epsilon_high_per_rollout(hard + easy, 4)
-    assert eps[:4] == [epsilon_high_for_group(1, 4)] * 4
-    assert eps[4:] == [epsilon_high_for_group(3, 4)] * 4
-    print(f"hard group (1 of 4 right) -> {eps[0]:.4f}; easy group (3 of 4) -> {eps[4]:.4f}")
+    keep_ets = select_top_fraction(ets, mask, 0.25)
+    keep_gmts = select_top_fraction(gmts, mask, 0.25)
+    n = sum(sum(r) for r in keep_ets)
+    assert n == sum(sum(r) for r in keep_gmts) == 8, "both arms keep the same count"
 
-    # A unanimous group is all zeros, so it counts as zero correct and takes
-    # the ceiling. The bound is moot: a zero advantage has no gradient.
-    assert epsilon_high_per_rollout([0.0] * 4, 4) == [EPS_HIGH_MAX] * 4
+    # Every row here carries the same four entropies, so the baseline cannot
+    # tell the rollouts apart at all: it spends its 8 slots on the one
+    # highest-entropy column of all 8 rows, one slot each, informative answer
+    # or not. The recipe concentrates them where |omega| is largest:
+    # rollout 0 (the lone correct answer on the hard problem, omega
+    # 0.75) and rollout 7 (the lone wrong answer on the easy one, omega -0.75)
+    # are the informative ones, and they take 6 of the 8 slots between them.
+    # They do not take all 8: a 0.225 token in a low-|omega| row still outranks
+    # the 0.075 one in a high-|omega| row, which is the point of ranking by the
+    # product rather than by the answer.
+    per_row_gmts = [sum(r) for r in keep_gmts]
+    assert per_row_gmts[0] == per_row_gmts[7] == 3, per_row_gmts
+    assert per_row_gmts[0] + per_row_gmts[7] == 6, per_row_gmts
+    assert max(per_row_gmts[1:7]) <= 1, per_row_gmts
+    overlap = mask_overlap(keep_gmts, keep_ets)
+    print(f"tokens per rollout, GMTS: {per_row_gmts}")
+    print(f"tokens per rollout, ETS:  {[sum(r) for r in keep_ets]}")
+    print(f"overlap between the two rankings: {overlap:.3f}")
+    assert overlap < 1.0, "if the rankings agreed everywhere the recipe tests nothing"
+
+    # A unanimous group has every advantage at zero, so GMTS scores all of its
+    # tokens zero and never spends a slot on them. Those tokens have no
+    # gradient either way: the advantage in front of the loss is zero.
+    flat_omega = [0.0] * 4
+    flat_scores = token_scores([[0.5] * 4] * 4, flat_omega, "gmts")
+    assert flat_scores == [[0.0] * 4] * 4
+
+    # Padding never scores, whatever its entropy.
+    padded_mask = [[1, 1, 0, 0] for _ in omega]
+    keep_pad = select_top_fraction(ets, padded_mask, 0.5)
+    assert all(row[2] == 0 and row[3] == 0 for row in keep_pad)
+    assert sum(sum(r) for r in keep_pad) == 8
+    print("padding is never selected; masked-out columns stay 0")
 
     # The grader is a program, not a judge.
     assert outcome_of("so the answer is \\boxed{18}", "18") == 1.0
     assert outcome_of("the answer is 5", "18") == 0.0
     print("grader: MathEqual reads \\boxed{} and the last number")
 
-    _selftest_loss()
+    _selftest_mask()
     print("selftest ok")
 
 
-def _selftest_loss() -> None:
-    """The bound really does reach the loss: run TRL's own `_compute_loss`
-    body on a CPU tensor and check that a wider bound clips less.
+def _selftest_mask() -> None:
+    """The selection really does reach the loss: run TRL's own normalizer on a
+    CPU tensor and check that narrowing `completion_mask` both drops the
+    unselected tokens' loss and shrinks the divisor.
 
-    This is the line the recipe cannot check by reading: TRL calls
-    `torch.clamp(coef_1, 1 - self.epsilon_low, 1 + self.epsilon_high)`, and the
-    whole change rests on those bounds accepting a (batch, 1) tensor and
-    broadcasting over the (batch, tokens) ratio.
+    This is the line the recipe cannot check by reading. TRL's bnpo branch is
+    `(per_token_loss * completion_mask).sum() / completion_mask.sum()`, and the
+    whole change rests on that mask being the only thing that decides which
+    tokens count.
     """
     try:
         import torch
     except ImportError:
-        print("torch not installed locally: skipping the clamp check")
+        print("torch not installed locally: skipping the mask check")
         return
 
-    ratio = torch.tensor([[1.5, 1.5], [1.5, 1.5]])
-    advantages = torch.tensor([0.75, 0.25])
-    fixed_high = torch.full((2, 1), EPS_HIGH_MAX)
-    # Group A had one correct of four, group B had three of four.
-    adaptive_high = torch.tensor([[epsilon_high_for_group(1, 4)], [epsilon_high_for_group(3, 4)]])
-    low = torch.full((2, 1), EPS_LOW)
+    per_token_loss = torch.tensor([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
+    full = torch.ones(2, 4)
+    # Keep the two highest-loss tokens, the way a ranking would.
+    keep = torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]])
 
-    def surrogate(high: torch.Tensor) -> torch.Tensor:
-        clipped = torch.clamp(ratio, 1 - low, 1 + high)
-        return -torch.min(ratio * advantages.unsqueeze(1), clipped * advantages.unsqueeze(1))
+    def bnpo(mask):
+        return (per_token_loss * mask).sum() / mask.sum().clamp(min=1.0)
 
-    fixed, adaptive = surrogate(fixed_high), surrogate(adaptive_high)
-    # The ratio is above both ceilings and the advantage is positive, so the
-    # clipped branch wins and the loss is exactly -(1 + eps_hi) * advantage.
-    assert torch.allclose(fixed[0], -(1 + EPS_HIGH_MAX) * advantages[0]), fixed
-    assert torch.allclose(adaptive[0], fixed[0]), "rare-correct group keeps the ceiling"
-    assert adaptive[1].mean() > fixed[1].mean(), "common-correct group should be reined in"
+    assert torch.allclose(bnpo(full), torch.tensor(4.5))
+    assert torch.allclose(bnpo(keep), torch.tensor(6.0))
+    # And the cross-answer part: moving one slot from row 0 to row 1 moves
+    # gradient mass between answers, which per-sequence normalization would not.
+    row0 = torch.tensor([[0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0]])
+    row1 = torch.tensor([[0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0]])
+    assert bnpo(row1) > bnpo(row0), "bnpo lets the arm that gets more slots weigh more"
     print(
-        f"clamp with a (batch, 1) bound: rare-correct loss {adaptive[0, 0]:+.4f} "
-        f"(unchanged), common-correct loss {adaptive[1, 0]:+.4f} vs {fixed[1, 0]:+.4f} fixed"
+        f"bnpo over the kept mask: all tokens {bnpo(full):.2f}, top-2 {bnpo(keep):.2f}; "
+        "the divisor follows the selection"
     )
 
 
@@ -677,18 +793,25 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n-train", type=int, default=512)
     ap.add_argument("--n-holdout", type=int, default=120)
-    ap.add_argument(
-        "--generations", type=int, default=8, help="rollouts per prompt, the k in eq 11"
-    )
+    ap.add_argument("--generations", type=int, default=8, help="rollouts per prompt")
     ap.add_argument("--prompts-per-step", type=int, default=6)
-    ap.add_argument("--eps-high-max", type=float, default=EPS_HIGH_MAX)
     ap.add_argument(
-        "--num-iterations",
-        type=int,
-        default=2,
-        help="policy updates per batch of rollouts; at 1 the run is on-policy and no clip binds",
+        "--fraction",
+        type=float,
+        default=TOP_FRACTION,
+        help="share of the batch's tokens both arms keep; the paper's is 0.20",
     )
-    ap.add_argument("--selftest", action="store_true", help="the clip schedule, offline")
+    ap.add_argument(
+        "--lr",
+        type=float,
+        default=1e-4,
+        help=(
+            "learning rate, both arms. The recipe's selection concentrates the kept 20% on "
+            "high-|advantage| answers, which raises the gradient norm about 5x against the "
+            "baseline's; at 1e-4 that is past this setup's stability point. See Climb round 2"
+        ),
+    )
+    ap.add_argument("--selftest", action="store_true", help="the ranking and the mask, offline")
     args = ap.parse_args()
 
     if args.selftest:
@@ -704,7 +827,7 @@ def main() -> None:
     train_tasks, decon = wai.decontaminate(train_tasks, against=holdout)
     print(f"decontaminate: {decon['n_contaminated']} of {decon['n']} train rows dropped")
     arms = ["baseline", "recipe"] if args.arm == "both" else [args.arm]
-    adaptive = {"baseline": False, "recipe": True}
+    ranking = {"baseline": "entropy", "recipe": "gmts"}
 
     # Start from what is already on disk, so `--arm recipe` refreshes one arm
     # instead of wiping the other one and the delta. Only a both-arm run moves
@@ -713,8 +836,8 @@ def main() -> None:
     results.update(
         {
             "recipe": HERE.name,
-            "title": "Adaptive clip: the upper bound follows how rare a correct answer was",
-            "paper": "https://arxiv.org/abs/2609.00444",
+            "title": "GMTS: rank tokens by entropy times advantage, not by entropy alone",
+            "paper": "https://arxiv.org/abs/2608.30632",
             "book": BOOK,
             "base_model": BASE_MODEL,
             "metric": METRIC,
@@ -729,6 +852,7 @@ def main() -> None:
     checks["decontaminated_dropped"] = int(decon.get("n_contaminated", 0))
     checks["seed"] = args.seed
     checks.setdefault("length_after", {})
+    checks.setdefault("selection_overlap", {})
     arm_rows: dict[str, list[dict]] = {}
     run_std = 0.0
     usd_per_hour = {"A10G": 1.10, "L40S": 2.00, "H100": 4.00}.get(DEFAULT_GPU, 2.00)
@@ -739,17 +863,17 @@ def main() -> None:
         for i, arm in enumerate(arms):
             out = run_arm.remote(
                 arm,
-                adaptive[arm],
+                ranking[arm],
                 train_tasks,
                 holdout,
-                f"adaptive-clip-{arm}-{date.today().isoformat()}",
+                f"gmts-token-select-{arm}-{date.today().isoformat()}",
                 steps=args.steps,
                 num_generations=args.generations,
                 prompts_per_step=args.prompts_per_step,
-                eps_high_max=args.eps_high_max,
+                fraction=args.fraction,
+                learning_rate=args.lr,
                 eval_samples=args.k,
                 eval_base=(i == 0),
-                num_iterations=args.num_iterations,
             )
             gpu_minutes += out["gpu_minutes"]
             run_url = out["run_url"] or run_url
@@ -774,6 +898,7 @@ def main() -> None:
             }
             checks["length_after"][arm] = out["length_after"]
             checks["hack_scan_top"] = out["hack_scan_top"]
+            checks["selection_overlap"][arm] = round(out["selection_overlap"], 3)
 
     if "baseline" in arm_rows and "recipe" in arm_rows:
         # run_std makes "moved" mean bigger than the eval's own re-run noise,

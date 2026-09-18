@@ -4,7 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/whileai)](https://pypi.org/project/whileai/)
 [![Python](https://img.shields.io/pypi/pyversions/whileai)](https://pypi.org/project/whileai/)
 [![Downloads](https://img.shields.io/pypi/dm/whileai)](https://pypistats.org/packages/whileai)
-[![Coverage gate](https://img.shields.io/badge/coverage-%E2%89%A5%2088%25%20gated-brightgreen)](.github/workflows/ci.yml)
+[![Coverage gate](https://img.shields.io/badge/coverage-%E2%89%A5%2090%25%20gated-brightgreen)](.github/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Post-training data and evaluation for tool-using language-model agents.
@@ -216,7 +216,7 @@ uv run mypy
 ```
 
 CI runs the suite on Python 3.10 through 3.13, lint and types, line
-coverage gated at 88%, every recipe's `smoke.sh`, a plain-pip install of
+coverage gated at 90%, every recipe's `smoke.sh`, a plain-pip install of
 the built wheel into a clean venv, and the version gate. Contributions:
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
