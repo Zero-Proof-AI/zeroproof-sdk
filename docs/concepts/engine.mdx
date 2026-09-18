@@ -12,8 +12,8 @@ checked judge. The one-page PDF is at
 
 <Steps>
   <Step title="Axes">
-    What varies: tool, policy clause, world state, fault, persona, history.
-    A situation is a point in that space.
+    What varies: tool, policy clause, user stance, world state, tool
+    condition, history. A situation is a point in that space.
   </Step>
   <Step title="Cover">
     Every pair of axis values appears together at least once (a pairwise
@@ -30,8 +30,9 @@ checked judge. The one-page PDF is at
     customer: refused.
   </Step>
   <Step title="Rollout">
-    N tasks × n phrasings × k samples. Every row keeps the policy version,
-    temperature and per-token logprobs.
+    N tasks × n phrasings × k samples. Every row keeps the policy version.
+    Pass `logprobs=True` on a model backend and the row also keeps the
+    sampling settings and each turn's summed log-probability.
   </Step>
   <Step title="Grade">
     Conduct rules first, then the judge. The judge is scored against gold
@@ -64,8 +65,9 @@ this page exists to make that number mean something.
 ## Questions
 
 **Importance sampling?** No. We are covering the failure space, not
-estimating production. Each row carries logprobs, policy version and
-temperature, so an off-policy trainer can form the ratio itself [10, 11].
+estimating production. A row carries the policy version, and with
+`logprobs=True` the log-probabilities an off-policy trainer needs to form
+the ratio itself [10, 11].
 
 **SFT or RL?** Both, from the same graded rows. Reward=1 rows for SFT,
 pairs for DPO, groups for GRPO, everything for a reward model.

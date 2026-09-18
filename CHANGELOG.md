@@ -5,6 +5,18 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Docs audit, three pages against 0.82. `concepts/engine.mdx` named
+  `persona` as a coverage axis and left out `stance`; the six are `tool`,
+  `rule`, `stance`, `world_state`, `tool_condition` and `history`
+  (`COVERAGE_AXES`). The same page twice said every row keeps temperature
+  and per-token logprobs, which needs `logprobs=True` on a model backend.
+  `concepts/faq.mdx` promised endpoints for Llama and Nemotron, but an
+  adapter is servable only on `SERVED_BASES` (`Qwen/Qwen3-4B`,
+  `microsoft/phi-4`), and said the SDK drafts the policy from your
+  sentence, when the sentence is the policy and `draft_tools` drafts the
+  tools. `character-training.md` was accurate; its two quoted outputs
+  re-run byte-identical and its dataset splits still measure 60/144/35.
+
 ## 0.82 (2026-09-18)
 
 - Releases are cut by one command, `gh workflow run release.yml`, which
