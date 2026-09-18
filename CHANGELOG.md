@@ -3,6 +3,13 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- README: While wordmark (light and dark) and brand-colored badges, `uv add`
+  first, an evals-and-harness entry point for teams that do not train, 30%
+  fewer words. Author is Jacob Weiss in the cite block, `CITATION.cff` and
+  `pyproject.toml`.
+
 ## 0.66 (2026-09-18)
 
 - `str(tracked.verdict())` says "beats" or "trails" only when the difference
