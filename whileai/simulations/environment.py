@@ -6,7 +6,7 @@ training, so what it needs from us is not rows but the three things a
 row came from: the task set, the world that answers tool calls, and the
 reward that grades the finished trajectory
 (rlhfbook.com/c/11-policy-gradients.html on on-policy sampling,
-rlhfbook.com/c/14-reasoning.html on multi-turn tool use with a single
+rlhfbook.com/c/07-reasoning on multi-turn tool use with a single
 end-of-trajectory reward). ``export_environment`` writes those three as an installable
 ``verifiers`` package, the shape Prime Intellect and TRL consume::
 
@@ -213,7 +213,7 @@ def build_tasks(
     When a prompt has two or more graded rollouts its solve rate is known
     (partial credit counts as it is) and, with ``band``, prompts the policy
     always or never solved are dropped: they carry no advantage
-    (rlhfbook.com/c/14-reasoning.html, difficulty filtering at 20 to 80
+    (rlhfbook.com/c/07-reasoning, difficulty filtering at 20 to 80
     percent; DAPO's dynamic sampling drops accuracy 0 and 1,
     arXiv:2503.14476). Ungraded prompts and single
     rollouts are kept as they are. ``holdout`` is a fraction, split by

@@ -46,7 +46,7 @@ from .quality import _IDISH, _QUESTION_END, _STRONG_ACTION, load_jsonl, write_js
 from .stats import task_key
 
 # DEFAULT_BAND = DIFFICULTY_BAND (0.2, 0.8): keep asks the policy passes
-# between 20% and 80% of the time (rlhfbook.com/c/14-reasoning.html, difficulty filtering
+# between 20% and 80% of the time (rlhfbook.com/c/07-reasoning, difficulty filtering
 # from N=16 samples; DAPO arXiv:2503.14476 drops accuracy 0 and 1 groups;
 # Seed-Thinking, ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a
 # form of it). A reported practice with no published ablation on the
@@ -1044,7 +1044,7 @@ def select_for_rl(
                 f"Difficulty was measured from {median_n:g} rollouts per task, so a task's "
                 f"band assignment can be off by about ±{statistics.median(halves):.1f}. "
                 f"Use repeats={DIFFICULTY_BAND_ROLLOUTS} for a firmer band (the count the "
-                "20-80 band is measured from, rlhfbook.com/c/14-reasoning.html)."
+                "20-80 band is measured from, rlhfbook.com/c/07-reasoning)."
             )
     if report["eval_sourced"]:
         report["hygiene_warnings"].append(

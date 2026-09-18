@@ -48,7 +48,7 @@ DEFAULT_CONCURRENCY = 32
 
 # PASS_THRESHOLD = 0.5: a reward under this is a failure. The outcome
 # label is binary, r in {0, 1} (rlhfbook.com/c/07-reward-models.html,
-# outcome reward models; rlhfbook.com/c/14-reasoning.html, verifiable
+# outcome reward models; rlhfbook.com/c/07-reasoning, verifiable
 # rewards gate on all assertions passing), so 0.5 is its midpoint and a
 # partial rubric score (or the conduct advisory 0.5 for a truncated reply)
 # rounds to the nearer verdict. No source names another cut. The run loop's
@@ -146,7 +146,7 @@ DEFAULT_PROBE = 2
 DEFAULT_FAULT_RATE = 0.5
 
 # RL_FAULT_RATE = 0.8: the same share under mode="rl". RL raises it because
-# the faulted cells are where a base fails (rlhfbook.com/c/14-reasoning.html,
+# the faulted cells are where a base fails (rlhfbook.com/c/07-reasoning,
 # difficulty filtering) and PALADIN trains on an 80/20 composition of
 # recovery-bearing to clean traces (arXiv 2509.25238, appendix I.4: a
 # dataset mix, not a keep rate), which is the shape 0.8 gives the tagged
@@ -421,7 +421,7 @@ ROLLOUTS_PER_TASK = 4
 # ---------------------------------------------------------------------
 #
 # DIFFICULTY_BAND = (0.2, 0.8): keep tasks the current policy passes between
-# 20% and 80% of the time. rlhfbook.com/c/14-reasoning.html ("Common
+# 20% and 80% of the time. rlhfbook.com/c/07-reasoning ("Common
 # Practices in Training Reasoning Models"): difficulty filtering restricts
 # RL prompts to those
 # the starting model solves 20-80% of the time, measured from N=16
@@ -430,7 +430,7 @@ ROLLOUTS_PER_TASK = 4
 # reported practice, not an ablation, so every selector takes ``band=``.
 DIFFICULTY_BAND: tuple[float, float] = (0.2, 0.8)
 # DIFFICULTY_BAND_ROLLOUTS = 16: rollouts per task the band is measured
-# from in the sources above (rlhfbook.com/c/14-reasoning.html N=16; DAPO
+# from in the sources above (rlhfbook.com/c/07-reasoning N=16; DAPO
 # G=16). Below it
 # a task's band assignment carries a Wilson half-width near 0.3 at k=8.
 DIFFICULTY_BAND_ROLLOUTS = 16
@@ -1350,7 +1350,7 @@ class RunKnobs:
     # (n + 2a), for the group hazard and the mixed rate; a = 1 is the
     # uniform prior on a rate, one pseudo-observation each way. Why
     # unanimous groups are stopped at all: they carry no gradient (DAPO,
-    # arXiv 2503.14476; rlhfbook.com/c/14-reasoning.html). No paper states a prior for
+    # arXiv 2503.14476; rlhfbook.com/c/07-reasoning). No paper states a prior for
     # the decision; this is the engine's own, untested against a = 0.5.
     smoothing_alpha: float = knob(1.0, lo=0.0)
 

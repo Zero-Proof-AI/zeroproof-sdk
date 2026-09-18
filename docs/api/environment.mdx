@@ -32,7 +32,7 @@ One task per distinct prompt, split into train and holdout.
 When a prompt has two or more graded rollouts its solve rate is known
 (partial credit counts as it is) and, with `band`, prompts the policy
 always or never solved are dropped: they carry no advantage
-(rlhfbook.com/c/14-reasoning.html, difficulty filtering at 20 to 80
+(rlhfbook.com/c/07-reasoning, difficulty filtering at 20 to 80
 percent; DAPO's dynamic sampling drops accuracy 0 and 1,
 arXiv:2503.14476). Ungraded prompts and single
 rollouts are kept as they are. `holdout` is a fraction, split by
