@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .data import SimulationData
+from .defaults import DEFAULT_BUDGET
 from .generate.scenarios import SEARCH_ARMS, reallocate_search_arms
 from .run.config import HUNG_SLOT_S as _HUNG_SLOT_S  # noqa: F401
 from .run.config import SATURATION_CAP as _SATURATION_CAP  # noqa: F401
@@ -63,7 +64,7 @@ def simulate(
     spec: Any = None,
     tools: list[dict] | None = None,
     system_prompt: str | None = None,
-    budget: int | None = 1000,
+    budget: int | None = DEFAULT_BUDGET,
     time_budget: float | None = None,
     until: str = "compute",
     mode: str = "explore",

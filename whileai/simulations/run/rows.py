@@ -10,6 +10,12 @@ import re
 from typing import Any
 
 from ..data import SimulationData
+from ..defaults import (
+    FAULT_STATUSES,
+    SHORT_HASH_CHARS,
+    SYSTEM_PROMPT_HEAD_CHARS,
+    TOOL_SCHEMA_SPAN_CHARS,
+)
 from ..generate.coverage import cell_key as _cell_key_from_row
 from ..generate.coverage import coverage_point
 from ..generate.diversity import (
@@ -27,9 +33,9 @@ _SEARCH_ARMS = dict(SEARCH_ARMS)
 _RAW_TOOL_MARKUP = re.compile(r"</?tool_call>", re.I)
 
 
+_SPAN = f"{{0,{TOOL_SCHEMA_SPAN_CHARS}}}"
 _TOOL_SCHEMA_DUMP = re.compile(
-    r'"name"\s*:\s*"[^"]+".{0,500}"description"\s*:'
-    r'.{0,500}"parameters"\s*:',
+    r'"name"\s*:\s*"[^"]+".' + _SPAN + r'"description"\s*:.' + _SPAN + r'"parameters"\s*:',
     re.I | re.S,
 )
 
@@ -83,9 +89,6 @@ def _collect_finished(pending: dict, wait_s: float, *, retry: bool = False):
     return results, jobs_for
 
 
-SYSTEM_PROMPT_HEAD_CHARS = 120
-
-
 def system_prompt_stamp(text: str | None) -> tuple[str, str, int]:
     """The short hash, the opening chars and the length of the system
     prompt a row was generated under (#296). The hash is the one
@@ -93,7 +96,7 @@ def system_prompt_stamp(text: str | None) -> tuple[str, str, int]:
     enough to tell a full numbered policy from a bare prompt at a glance
     without reading the run's record."""
     policy = str(text or "")
-    sha = hashlib.sha256(policy.encode("utf-8")).hexdigest()[:16]
+    sha = hashlib.sha256(policy.encode("utf-8")).hexdigest()[:SHORT_HASH_CHARS]
     return sha, policy[:SYSTEM_PROMPT_HEAD_CHARS], len(policy)
 
 
@@ -114,7 +117,7 @@ def mutation_worthy(row: dict) -> bool:
         if not isinstance(step, dict):
             continue
         status = str(as_dict(step.get("result")).get("status", "")).lower()
-        if status in {"error", "timeout", "not_found", "denied", "malformed"}:
+        if status in FAULT_STATUSES:
             return True
     return False
 
