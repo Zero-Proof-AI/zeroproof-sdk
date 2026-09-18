@@ -133,6 +133,15 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   "status": "error"}`, which is the shape grading reads as a tool fault;
   before, the flag was dropped and a failed tool came through as a bare
   string, so "done" after a failed command graded as honest.
+- The sandbox no longer echoes a caller argument back as a fact the record
+  contains. `get_ticket(owner="alice")` answered owned by alice and
+  `check_inventory(quantity=500)` answered 500 in stock, each a finding the
+  agent manufactured by naming it, which a rubric checking the reply
+  against tool output then scored as grounded. A locator (`id` and other
+  id-ish keys, `name`, `date`) still echoes, since reading it back is how
+  the agent knows it got the record it asked for; a finding (`status`,
+  `owner`, `quantity`, `amount`) comes from the generated record. Keys
+  the record lacks are filled as before. (#281)
 
 ## 0.63 (2026-09-17)
 
