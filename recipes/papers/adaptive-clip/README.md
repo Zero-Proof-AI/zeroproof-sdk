@@ -25,27 +25,35 @@ python recipe.py --arm recipe --eps-high-max 0.36
 
 ## Result
 
-Run today, both arms, on one L40S. Round 2 is the headline: round 1 ran the
+Run today, both arms, on one L40S, at the settings of round 2. Round 1 ran the
 clip where it cannot bind, so it could not have tested the paper. See Climb.
 
 | Arm | pass@1 | 95% CI | pass@k | Steps | GPU min |
 |---|---|---|---|---|---|
 | Base, no training | 0.34 | [0.28, 0.41] | 0.58 | 0 | 0 |
-| Baseline (fixed upper bound 0.28) | 0.57 | [0.50, 0.64] | 0.80 | 40 | 20.5 |
-| Recipe (bound slides with the group) | 0.51 | [0.44, 0.58] | 0.77 | 40 | 12.1 |
+| Baseline (fixed upper bound 0.28) | 0.47 | [0.40, 0.54] | 0.70 | 40 | 12.8 |
+| Recipe (bound slides with the group) | 0.52 | [0.45, 0.59] | 0.74 | 40 | 7.6 |
 
-Recipe vs baseline: **-0.065 [-0.117, -0.013]** over 120 paired tasks.
-Verdict: **flat**. The interval excludes zero, but on the wrong side of it —
-`delta_report` calls this `moved_the_wrong_way`, and this repo reserves "moved"
-for a gain. Read it as: at this size, sliding the bound did not help, and the
-run that did it came back 6.5 points lower.
+Recipe vs baseline: **+0.050 [0.000, 0.100]** over 120 paired tasks.
+Verdict: **flat**. The interval reaches zero, so this is not a gain you can
+bank. Read it as: at this size, sliding the bound still cannot be shown to do
+anything.
 
-Do not read that 6.5 as the paper being wrong. The clip fired on roughly 0.03%
-of tokens even in round 2 (`clip_ratio/high_mean` between 0 and 0.0003), and
-two arms at one training seed cannot separate a 6.5-point gap from ordinary
-training variance — the run_std in the Checks table is the *eval's* noise, not
-the trainer's. What this recipe can say is that GRPO itself worked: both arms
-took the base from 0.34 to above 0.50.
+**Read the Climb table before you read this one.** The previous run of this
+exact configuration reported -0.065 [-0.117, -0.013] — the recipe 6.5 points
+*worse*, with an interval that excluded zero. Today the same code, the same
+seeds, the same data and the same knobs returned +0.050. The delta moved 11.5
+points and changed sign between two runs of the same experiment.
+
+That is the finding. The eval's own noise floor is 0.024 (Checks table), which
+is nowhere near big enough to explain an 11.5-point swing, so what moved is the
+*training*, not the measurement. Two arms at one training seed cannot separate
+a five-point clip effect from run-to-run training variance, and this recipe now
+has the direct evidence rather than the suspicion.
+
+What survives both runs is that GRPO itself worked: the base goes from 0.34 to
+somewhere in 0.47-0.57 in 40 steps, whichever arm you look at, and that is much
+larger than anything the clip schedule has been shown to do here.
 
 The selftest also turned up one thing worth knowing before you read the paper's
 equation 11 literally: at `c = 0` it returns 0.2914, above the 0.28 ceiling it
@@ -57,16 +65,16 @@ ceiling instead of over it.
 ## Checks
 
 Nothing in this table is ticked by hand: every cell is written by `recipe.py`
-into `results.json`. These are the round 2 numbers.
+into `results.json`. These are today's numbers.
 
 | Check | Book | Result |
 |---|---|---|
-| Eval noise: the base evaluated 3 times, `eval_variance` run_std | ch. 16 | **run_std 0.0032**, so a delta under 0.0064 is noise. This measures re-running the eval, not re-running the training |
+| Eval noise: the base evaluated 3 times, `eval_variance` run_std | ch. 16 | **run_std 0.0087**, so a delta under **0.024** is noise. This measures re-running the eval, not re-running the training — and the training is where this recipe's variance turned out to live |
 | Holdout is clean: `decontaminate(train, against=holdout)` | ch. 16 | **0 of 512 train rows dropped**, as expected for disjoint GSM8K splits — measured, not assumed |
 | Reward is a program, not a judge | ch. 7, 13 | `MathEqual` against the public GSM8K gold number. No judge, no model in the loop |
 | Proxy vs target: `delta_report(proxy=)` | ch. 14 | `proxy=None`: the training reward *is* the target metric, the same binary check, so there is no proxy to over-optimize |
-| Length: mean completion length before -> after, per arm | ch. 14 | **715 chars base -> 589 baseline, 608 recipe.** Both arms got shorter and more right, so the gain is not length gaming |
-| Hack scan on the last training batch: `hack_scan` | ch. 14 | top feature `contains:days AND contains:\\` — GSM8K word-problem vocabulary, not a reward surface. Nothing is endorsed, so this is the scan reporting it found nothing |
+| Length: mean completion length before -> after, per arm | ch. 14 | **725 chars base -> 413 baseline, 542 recipe.** Both arms got shorter and more right, so neither is winning on length |
+| Hack scan on the last training batch: `hack_scan` | ch. 14 | top feature `n:digits` (baseline batch: `contains:week`) — GSM8K arithmetic surface, not a reward surface. Nothing is endorsed, so this is the scan reporting it found nothing |
 | Pinned: seed, torch, transformers, trl, peft | app. C | seed 17 in the trainer, `--seed 0` for the data split; torch 2.7.1, transformers 4.54.0, trl 0.19.1, peft 0.16.0 |
 
 The two arms share the seed, the data, the holdout, the reward and every
@@ -78,6 +86,7 @@ trainer knob except the clip bound, so the delta has one cause available to it.
 |---|---|---|---|
 | 1 | as the paper: eps 0.20 / 0.28, k = 8, 40 steps, lr 1e-4, LoRA r=32, 1 policy update per batch | baseline 0.61, recipe 0.59 | -0.013 [-0.054, +0.031], flat |
 | 2 | same, but 2 policy updates per batch (`--num-iterations 2`) so the clip can bind at all | baseline 0.57, recipe 0.51 | -0.065 [-0.117, -0.013], flat (wrong way) |
+| 3 | **nothing.** Round 2 re-run unchanged, to check the number before climbing off it | baseline 0.47, recipe 0.52 | +0.050 [0.000, 0.100], flat |
 
 **Round 1 could not have tested the paper, and the trainer's own logs say so.**
 TRL takes one policy update per batch of rollouts by default. On that update
@@ -91,10 +100,19 @@ nondeterminism between two arms running the same arithmetic.
 
 Round 2 takes the chapter's "1-4 gradient steps per batch" at 2, which is the
 smallest change that lets the second update be off-policy. The clip does then
-fire — and barely: 0.0003 of tokens at its highest. A bound that touches 0.03%
-of tokens is not a place where a per-group schedule can show itself, which is
-the honest summary of this recipe at this budget. Round 3 is more updates per
-batch (4) or a bigger batch, not a different `eps_hi_max`.
+fire. How hard it fires is itself unstable between runs: round 2 logged
+`clip_ratio/high_mean` between 0 and 0.0003, round 3 logged a mean of 0.0021
+and a peak of 0.0125 on the same settings. Both rounds clip on exactly 40 of
+80 logged steps, which is the setup working as intended — with two updates per
+batch the first is on-policy and cannot clip, the second can.
+
+**Round 3 changed nothing on purpose.** The rule for this directory is to
+re-run the recipe as written and check the number before climbing off it, and
+that is what caught the problem: the delta moved 11.5 points and changed sign.
+So the next knob is not a knob. Before `eps_hi_max` or more updates per batch
+is worth a GPU minute, this recipe needs several training seeds per arm and a
+delta reported across them, because at one seed per arm its error bars are
+roughly five times what it is trying to measure.
 
 ## Learned
 
@@ -102,6 +120,7 @@ batch (4) or a bigger batch, not a different `eps_hi_max`.
 - Reading the group's correct count off the sign of the advantage only works because this reward is binary: with rewards in {0, 1} the advantage is `r - c/k`, positive for exactly the correct rollouts. A shaped reward would break that and need the counts carried separately.
 - Holding the ceiling equal across the arms is the honest comparison but it is also the conservative one: it makes the recipe a strictly tighter clip than the baseline. The paper compares against a fixed bound too, on a much bigger batch (256 prompts against 6 here), so a flat result could mean the batch rather than the idea.
 - **Check that your change is reachable before you spend a GPU hour on it.** The per-group bound was implemented correctly, tested on the CPU against real TRL, and verified to arrive at the loss intact — and still could not move a gradient, because nothing in an on-policy run ever asks what the upper bound is. One line of the trainer's own logging (`clip_ratio/high_mean`) would have said so before the run. It is now in the Checks a reader can see.
-- **GRPO was the intervention that mattered here.** Both arms moved the base from 0.34 to 0.51-0.57 on GSM8K in 40 steps, which dwarfs everything the paper's change could have done at this scale. Two-thirds of groups were flat (`frac_reward_zero_std` around 0.5-0.67), so most of that came from a third of the rollouts.
+- **GRPO was the intervention that mattered here.** Both arms moved the base from 0.34 to 0.47-0.57 on GSM8K in 40 steps, which dwarfs everything the paper's change could have done at this scale. A third of groups were flat on average today (`frac_reward_zero_std` mean 0.30, peaking at 0.67), so most of that came from the rollouts that split.
+- **A two-arm delta at one training seed per arm is not a measurement, and this is what that looks like.** Re-running this recipe unchanged moved the delta from -0.065 [-0.117, -0.013] to +0.050 [0.000, 0.100]: 11.5 points, sign flipped, and the first run's interval excluded zero on the wrong side. Nothing in the recipe changed; the only differences were whileai 0.53 -> 0.64 and ordinary nondeterminism in generation and kernel scheduling. The eval-noise floor this directory enforces (0.024 here) is the noise of *re-running the eval on a fixed model*, and it says nothing about the noise of re-running the training. Where a recipe's whole claim is a delta between two trained models, that second source is the one that decides whether there is a result, and it needs several training seeds per arm to see at all. Read every one-seed delta in this directory — including the ones with tight intervals — with that in mind.
 
-Verified 2026-09-17, whileai 0.53, TRL 0.19.1 + PEFT 0.16.0 on torch 2.7.1. 32.6 GPU minutes, $1.09 on one L40S (round 1: 43.1 minutes, $1.44). Run page: https://www.zeroproofai.com/platform/training/run_b546f2c31dcbcf4e
+Verified 2026-09-18, whileai 0.64, TRL 0.19.1 + PEFT 0.16.0 on torch 2.7.1. 20.4 GPU minutes, $0.68 on one L40S (round 2: 32.6 minutes, $1.09; round 1: 43.1 minutes, $1.44). Run page: https://www.zeroproofai.com/platform/training/run_000dac972e53b532

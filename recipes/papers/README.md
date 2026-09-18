@@ -13,7 +13,7 @@ what it claims, the steps, one command, what happened.
 <!-- table:start -->
 | Recipe | Paper | Base | Metric | Baseline -> Recipe | Verified |
 |---|---|---|---|---|---|
-| [adaptive-clip](adaptive-clip) | [2609.00444](https://arxiv.org/abs/2609.00444) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.57 -> 0.51 (-0.06 [-0.12, -0.01], flat) | 2026-09-17 |
+| [adaptive-clip](adaptive-clip) | [2609.00444](https://arxiv.org/abs/2609.00444) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.47 -> 0.52 (+0.05 [+0.00, +0.10], flat) | 2026-09-18 |
 | [endpoint-sft](endpoint-sft) | [2609.07103](https://arxiv.org/abs/2609.07103) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.29 -> 0.28 (-0.01 [-0.07, +0.05], flat) | 2026-09-17 |
 | [filter-metric](filter-metric) | [2609.13866](https://arxiv.org/abs/2609.13866) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.39 -> 0.46 (+0.07 [+0.02, +0.11], moved) | 2026-09-17 |
 <!-- table:end -->
