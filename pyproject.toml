@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whileai"
-version = "0.63"
+version = "0.64"
 description = "While Python SDK: trace ingestion and verification client, plus agent simulations grounded in your tools and system prompt."
 readme = "README.md"
 license = {text = "Apache-2.0"}
