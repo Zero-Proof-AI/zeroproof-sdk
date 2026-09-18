@@ -1,7 +1,8 @@
 # Report a run so a person can decide
 
-**What you learn**: the four objects the platform tracks (agent, behavior,
-run, live traffic), and why a version is scored on every behavior.
+**What you learn**: the typed objects the platform tracks (a tracked agent
+with its harness, behaviors, runs, live traffic), why a harness is versioned
+by its fingerprint, and why a version is scored on every behavior.
 
 **Needs**: `WHILEAI_API_KEY` for the real thing; nothing for the smoke run.
 

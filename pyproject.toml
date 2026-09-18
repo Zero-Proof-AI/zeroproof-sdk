@@ -9,7 +9,7 @@ description = "While Python SDK: trace ingestion and verification client, plus a
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
-dependencies = ["requests>=2.25.0"]
+dependencies = ["requests>=2.25.0", "pydantic>=2.0"]
 authors = [{name = "While"}]
 keywords = [
     "zp", "zeroproof", "while", "evals", "agent-evals",

@@ -13,7 +13,7 @@ import json
 import math
 from datetime import date, timedelta
 
-from whileai.platform import Agent
+from whileai.platform import Behavior, Frontier, Harness, Judge, track
 
 SCORES = {
     "base": {
@@ -63,6 +63,7 @@ BEHAVIORS = {
 
 def printing_transport(method: str, path: str, body=None):
     """The offline transport: print the call, answer like the API."""
+    body_id = path.split("/")[2] if path.startswith("/agents/") else "agent"
     shown = json.dumps(body)[:90] if body is not None else ""
     print(f"{method:5} {path} {shown}")
     if path == "/runs":
@@ -71,6 +72,7 @@ def printing_transport(method: str, path: str, body=None):
         return {"evals": body}
     if "/dashboard" in path:
         return {
+            "agent": {"id": body_id, "name": body_id},
             "behavior": {"name": "refunds"},
             "verdict": {
                 "candidate": "v4",
@@ -91,26 +93,32 @@ def main() -> None:
     ap.add_argument("--offline", action="store_true", help="print the calls, touch nothing")
     args = ap.parse_args()
 
-    agent = Agent(
+    agent = track(
         args.agent,
         model="Qwen/Qwen3-4B",
-        harness={"label": "h2", "tools": ["lookup_order", "issue_refund", "handoff"]},
-        frontier={"name": "Sonnet 5", "score": 81, "cost_per_1k": 18.0, "p50_s": 2.1},
+        harness=Harness(
+            label="h2",
+            instructions="You handle refund emails for a store. Be brief and follow policy.",
+            tools=["lookup_order", "issue_refund", "handoff"],
+        ),
+        frontier=Frontier(name="Sonnet 5", score=81, cost_per_1k=18.0, p50_s=2.1),
         transport=printing_transport if args.offline else None,
     )
     agent.behavior(
-        "refunds",
-        test_version="v2",
-        n=240,
-        judge={"name": "phi-4 vs spec", "agreement": 0.86, "human_n": 60, "length_bias": 0.08},
-        noise_floor=2.4,
-        contamination=0,
-        reward_is_judge=False,
-        description=BEHAVIORS["refunds"],
+        Behavior(
+            name="refunds",
+            test_version="v2",
+            n=240,
+            judge=Judge(name="phi-4 vs spec", agreement=0.86, human_n=60, length_bias=0.08),
+            noise_floor=2.4,
+            contamination=0,
+            reward_is_judge=False,
+            description=BEHAVIORS["refunds"],
+        )
     )
     for name, desc in BEHAVIORS.items():
         if name != "refunds":
-            agent.behavior(name, test_version="v1", n=120, description=desc)
+            agent.behavior(Behavior(name=name, test_version="v1", n=120, description=desc))
 
     for version, by_behavior in SCORES.items():
         trained = version != "base"
