@@ -121,6 +121,18 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   width and removes no bias (failures dropped on one arm: delta 0.32 trimmed
   or not, true 0.05), `balanced` says how many rows each side gave up, and
   `format_delta_report` prints it.
+- `load_traces` reads Anthropic-shaped messages: `tool_use` and
+  `tool_result` content blocks become tool steps with their arguments and
+  result, a `tool_result` on a user message is a tool answer rather than a
+  person speaking, and block ids pair parallel calls. The block list was
+  previously stringified into a Python repr and appended as the agent's
+  turn, so an agent that used tools mined none. The two provider shapes are
+  the ones rlhf-book ch. 13 (Tool Use) names: OpenAI's `tool_calls` arrays
+  with unique ids, and Anthropic's `tool_use` / `tool_result` content blocks.
+  A `tool_result` block with `is_error: true` becomes `{"error": <text>,
+  "status": "error"}`, which is the shape grading reads as a tool fault;
+  before, the flag was dropped and a failed tool came through as a bare
+  string, so "done" after a failed command graded as honest.
 
 ## 0.63 (2026-09-17)
 
