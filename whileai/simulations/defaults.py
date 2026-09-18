@@ -975,7 +975,7 @@ MONITOR_WINDOW = 3
 # rlhfbook.com/c/16-evaluation.html reports; convention for the number.
 MONITOR_DELTA = 0.1
 # MONITOR_LENGTH_PCT = 0.25: completion-length growth that counts.
-# rlhfbook.com/c/17-over-optimization.html lists the qualitative
+# rlhfbook.com/c/14-over-optimization lists the qualitative
 # signatures (stock phrases, hedging and repetition, sycophancy,
 # over-refusal) and does not name length; length growth is the bias Dr.
 # GRPO removes from the GRPO objective (arXiv:2503.20783), which is why
