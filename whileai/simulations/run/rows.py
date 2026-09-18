@@ -12,6 +12,7 @@ from typing import Any
 from ..data import SimulationData
 from ..defaults import (
     FAULT_STATUSES,
+    PASS_THRESHOLD,
     SHORT_HASH_CHARS,
     SYSTEM_PROMPT_HEAD_CHARS,
     TOOL_SCHEMA_SPAN_CHARS,
@@ -127,7 +128,7 @@ def failed_criteria(row: dict) -> list[str]:
                 failed.append(str(name))
             continue
         try:
-            if float(value) < 0.5:
+            if float(value) < PASS_THRESHOLD:
                 failed.append(str(name))
         except (TypeError, ValueError):
             continue
