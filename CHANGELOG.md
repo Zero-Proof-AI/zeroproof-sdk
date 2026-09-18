@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.66 (2026-09-18)
 
 - `str(tracked.verdict())` says "beats" or "trails" only when the difference
   interval excludes zero and the delta clears the behavior's declared
