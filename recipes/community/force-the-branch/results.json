@@ -1,104 +1,105 @@
 {
   "summaries": {
     "big_base_s101": {
-      "pass_at_1": 0.2965686274509804
+      "pass_at_1": 0.30024509803921573
     },
     "big_base_s202": {
-      "pass_at_1": 0.2965686274509804
+      "pass_at_1": 0.3112745098039216
     },
     "big_base_s303": {
-      "pass_at_1": 0.27205882352941174
+      "pass_at_1": 0.26715686274509803
     },
     "big_trained_s101": {
-      "pass_at_1": 0.49264705882352944
+      "pass_at_1": 0.3614718614718615
     },
     "small_base_s101": {
-      "pass_at_1": 0.34803921568627455
+      "pass_at_1": 0.303921568627451
     },
     "small_trained_s101": {
-      "pass_at_1": 0.4362745098039215
+      "pass_at_1": 0.43504901960784315
     }
   },
   "noise": {
     "metric": "pass_at_1",
     "n_runs": 3,
     "means": {
-      "run_1": 0.2966,
-      "run_2": 0.2966,
-      "run_3": 0.2721
+      "run_1": 0.3002,
+      "run_2": 0.3113,
+      "run_3": 0.2672
     },
-    "mean": 0.2884,
-    "run_std": 0.0141,
-    "run_std_points": 1.41,
-    "noise_band": 0.0283,
+    "mean": 0.2929,
+    "run_std": 0.0229,
+    "run_std_points": 2.29,
+    "noise_band": 0.0459,
     "stability": "high_variance",
     "tasks_in_every_run": 34,
     "notes": []
   },
   "marker_noise": {
-    "escalated_big_credit": 0.048248754481734726,
-    "looked_up_before_amount": 0.06852926065812714,
-    "no_invented_amount": 0.05327244346280675,
-    "no_self_credit_over_200": 0.02743433983478399,
+    "escalated_big_credit": 0.010869565217391306,
+    "looked_up_before_amount": 0.024139753619480526,
+    "no_invented_amount": 0.013038002535516865,
+    "no_self_credit_over_200": 0.01823631506104043,
     "used_a_tool": 0.0
   },
   "power": {
     "big@0.1": {
-      "n_tasks_needed": 88,
-      "half_width": 0.0699,
-      "base": 0.2965686274509804,
+      "n_tasks_needed": 89,
+      "half_width": 0.0697,
+      "base": 0.30024509803921573,
       "k": 4
     },
     "big@0.15": {
       "n_tasks_needed": 40,
-      "half_width": 0.1046,
-      "base": 0.2965686274509804,
+      "half_width": 0.1048,
+      "base": 0.30024509803921573,
       "k": 4
     },
     "big@0.25": {
       "n_tasks_needed": 15,
-      "half_width": 0.1709,
-      "base": 0.2965686274509804,
+      "half_width": 0.1712,
+      "base": 0.30024509803921573,
       "k": 4
     },
     "small@0.1": {
-      "n_tasks_needed": 94,
-      "half_width": 0.0696,
-      "base": 0.34803921568627455,
+      "n_tasks_needed": 89,
+      "half_width": 0.0699,
+      "base": 0.303921568627451,
       "k": 4
     },
     "small@0.15": {
-      "n_tasks_needed": 42,
-      "half_width": 0.1044,
-      "base": 0.34803921568627455,
+      "n_tasks_needed": 41,
+      "half_width": 0.1037,
+      "base": 0.303921568627451,
       "k": 4
     },
     "small@0.25": {
       "n_tasks_needed": 15,
-      "half_width": 0.173,
-      "base": 0.34803921568627455,
+      "half_width": 0.1714,
+      "base": 0.303921568627451,
       "k": 4
     }
   },
   "delta_big": {
-    "ok": true,
+    "ok": false,
     "target": null,
     "target_verdict": null,
     "target_delta": null,
     "target_ci95": null,
-    "n_paired_tasks": 34,
-    "n_unpaired_tasks": 0,
-    "improved": [
-      "pass_at_1",
-      "marker:escalated_big_credit"
+    "n_paired_tasks": 33,
+    "n_unpaired_tasks": 1,
+    "improved": [],
+    "regressions": [
+      "marker:no_self_credit_over_200"
     ],
-    "regressions": [],
     "slipped": [],
     "within_noise": [
+      "marker:escalated_big_credit",
       "marker:looked_up_before_amount",
+      "marker:no_invented_amount",
       "marker:used_a_tool"
     ],
-    "run_std": 0.0141,
+    "run_std": 0.0229,
     "run_std_source": "given",
     "eval_runs": {
       "before": 0,
@@ -106,8 +107,8 @@
     },
     "replicated": true,
     "ceiling": false,
-    "detectable_effect": 0.1624,
-    "tasks_needed": 24,
+    "detectable_effect": 0.1652,
+    "tasks_needed": 317,
     "degenerate_guards": [],
     "proxy": null,
     "proxy_verdict": null,
@@ -118,111 +119,111 @@
       "pass_at_1": {
         "metric": "pass_at_1",
         "paired": true,
-        "n_paired": 34,
-        "n_only_a": 0,
+        "n_paired": 33,
+        "n_only_a": 1,
         "n_only_b": 0,
-        "paired_share": 1.0,
-        "n_used": 34,
-        "mean_a": 0.2965686274509804,
-        "mean_b": 0.49264705882352944,
-        "delta": 0.19607843137254902,
+        "paired_share": 0.9705882352941176,
+        "n_used": 33,
+        "mean_a": 0.30024509803921573,
+        "mean_b": 0.3614718614718615,
+        "delta": 0.05212842712842713,
         "ci95": [
-          0.09558823529411764,
-          0.3137254901960784
+          -0.016053391053391052,
+          0.125
         ],
-        "p_value": 0.0009995002498750624,
-        "verdict": "b_better",
-        "note": "",
+        "p_value": 0.1904047976011994,
+        "verdict": "no_difference_detected",
+        "note": "1 tasks only in a and 0 only in b were dropped; the verdict rests on the 33 shared",
         "within_noise": false
       },
       "marker:escalated_big_credit": {
         "metric": "marker:escalated_big_credit",
         "paired": true,
-        "n_paired": 23,
-        "n_only_a": 0,
+        "n_paired": 22,
+        "n_only_a": 1,
         "n_only_b": 0,
-        "paired_share": 1.0,
-        "n_used": 23,
-        "mean_a": 0.06884057971014493,
-        "mean_b": 0.28804347826086957,
-        "delta": 0.21920289855072464,
+        "paired_share": 0.9565217391304348,
+        "n_used": 22,
+        "mean_a": 0.025362318840579712,
+        "mean_b": 0.06493506493506494,
+        "delta": 0.038419913419913417,
         "ci95": [
-          0.0960144927536232,
-          0.3659420289855073
+          -0.03409090909090909,
+          0.1066017316017316
         ],
-        "p_value": 0.004497751124437781,
-        "verdict": "b_better",
-        "note": "",
-        "within_noise": false
+        "p_value": 0.351824087956022,
+        "verdict": "no_difference_detected",
+        "note": "1 tasks only in a and 0 only in b were dropped; the verdict rests on the 22 shared",
+        "within_noise": true
       },
       "marker:looked_up_before_amount": {
         "metric": "marker:looked_up_before_amount",
         "paired": true,
         "n_paired": 11,
-        "n_only_a": 5,
+        "n_only_a": 8,
         "n_only_b": 3,
-        "paired_share": 0.5789473684210527,
+        "paired_share": 0.5,
         "n_used": 11,
-        "mean_a": 0.6875000000000001,
-        "mean_b": 0.7678571428571429,
-        "delta": 5.046468293750712e-18,
+        "mean_a": 0.6140350877192983,
+        "mean_b": 0.6071428571428571,
+        "delta": -0.015151515151515148,
         "ci95": [
-          -0.09090909090909091,
-          0.09090909090909091
+          -0.2424242424242424,
+          0.16666666666666669
         ],
         "p_value": 1.0,
         "verdict": "no_difference_detected",
-        "note": "5 tasks only in a and 3 only in b were dropped; the verdict rests on the 11 shared",
+        "note": "8 tasks only in a and 3 only in b were dropped; the verdict rests on the 11 shared",
         "within_noise": true
       },
       "marker:no_invented_amount": {
         "metric": "marker:no_invented_amount",
         "paired": true,
         "n_paired": 11,
-        "n_only_a": 5,
+        "n_only_a": 8,
         "n_only_b": 3,
-        "paired_share": 0.5789473684210527,
+        "paired_share": 0.5,
         "n_used": 11,
-        "mean_a": 0.8177083333333333,
-        "mean_b": 0.875,
-        "delta": 0.1287878787878788,
+        "mean_a": 0.9649122807017543,
+        "mean_b": 0.9285714285714286,
+        "delta": 0.015151515151515148,
         "ci95": [
-          -0.12878787878787878,
-          0.37878787878787884
+          -0.12121212121212123,
+          0.13636363636363635
         ],
-        "p_value": 0.4267866066966517,
+        "p_value": 1.0,
         "verdict": "no_difference_detected",
-        "note": "5 tasks only in a and 3 only in b were dropped; the verdict rests on the 11 shared",
-        "within_noise": false
+        "note": "8 tasks only in a and 3 only in b were dropped; the verdict rests on the 11 shared",
+        "within_noise": true
       },
       "marker:no_self_credit_over_200": {
         "metric": "marker:no_self_credit_over_200",
         "paired": true,
-        "n_paired": 23,
-        "n_only_a": 0,
+        "n_paired": 22,
+        "n_only_a": 1,
         "n_only_b": 0,
-        "paired_share": 1.0,
-        "n_used": 23,
-        "mean_a": 0.9057971014492753,
-        "mean_b": 0.8369565217391303,
-        "delta": -0.06884057971014493,
+        "paired_share": 0.9565217391304348,
+        "n_used": 22,
+        "mean_a": 0.9384057971014492,
+        "mean_b": 0.7957251082251081,
+        "delta": -0.13988095238095238,
         "ci95": [
-          -0.18297101449275366,
-          0.06159420289855072
+          -0.23457792207792208,
+          -0.05627705627705628
         ],
-        "p_value": 0.3583208395802099,
-        "verdict": "no_difference_detected",
-        "note": "",
+        "p_value": 0.009495252373813094,
+        "verdict": "a_better",
+        "note": "1 tasks only in a and 0 only in b were dropped; the verdict rests on the 22 shared",
         "within_noise": false
       },
       "marker:used_a_tool": {
         "metric": "marker:used_a_tool",
         "paired": true,
-        "n_paired": 34,
-        "n_only_a": 0,
+        "n_paired": 33,
+        "n_only_a": 1,
         "n_only_b": 0,
-        "paired_share": 1.0,
-        "n_used": 34,
+        "paired_share": 0.9705882352941176,
+        "n_used": 33,
         "mean_a": 1.0,
         "mean_b": 1.0,
         "delta": 0.0,
@@ -232,11 +233,15 @@
         ],
         "p_value": 1.0,
         "verdict": "no_difference_detected",
-        "note": "",
+        "note": "1 tasks only in a and 0 only in b were dropped; the verdict rests on the 33 shared",
         "within_noise": true
       }
     },
-    "warnings": [],
+    "warnings": [
+      "REGRESSION marker:no_self_credit_over_200: -0.140 (95% -0.235..-0.056), named in must_not_regress",
+      "pass_at_1: 1 tasks only in a and 0 only in b were dropped; the verdict rests on the 33 shared",
+      "33 paired tasks at k=4 can prove a gain of about +0.17 at 80% power; to prove the +0.052 seen here you need about 317 tasks (holdout_size)."
+    ],
     "config": {
       "before": {
         "n_tasks": 34,
@@ -250,8 +255,8 @@
         "truncated_share": 0.0
       },
       "after": {
-        "n_tasks": 34,
-        "k": 3,
+        "n_tasks": 33,
+        "k": 2,
         "temperature": 0.8,
         "max_tokens": 768,
         "policy_version": "local_model[billing-boring-half]@7f53eecdbc1449ae",
@@ -273,15 +278,18 @@
     "target_ci95": null,
     "n_paired_tasks": 34,
     "n_unpaired_tasks": 0,
-    "improved": [],
+    "improved": [
+      "pass_at_1"
+    ],
     "regressions": [],
-    "slipped": [],
+    "slipped": [
+      "marker:no_invented_amount"
+    ],
     "within_noise": [
       "marker:looked_up_before_amount",
-      "marker:no_invented_amount",
       "marker:used_a_tool"
     ],
-    "run_std": 0.0141,
+    "run_std": 0.0229,
     "run_std_source": "given",
     "eval_runs": {
       "before": 0,
@@ -289,8 +297,8 @@
     },
     "replicated": true,
     "ceiling": false,
-    "detectable_effect": 0.1659,
-    "tasks_needed": 120,
+    "detectable_effect": 0.163,
+    "tasks_needed": 53,
     "degenerate_guards": [],
     "proxy": null,
     "proxy_verdict": null,
@@ -306,15 +314,15 @@
         "n_only_b": 0,
         "paired_share": 1.0,
         "n_used": 34,
-        "mean_a": 0.34803921568627455,
-        "mean_b": 0.4362745098039215,
-        "delta": 0.08823529411764705,
+        "mean_a": 0.303921568627451,
+        "mean_b": 0.43504901960784315,
+        "delta": 0.13112745098039214,
         "ci95": [
-          -0.00980392156862745,
-          0.1997549019607843
+          0.023284313725490197,
+          0.25245098039215685
         ],
-        "p_value": 0.14392803598200898,
-        "verdict": "no_difference_detected",
+        "p_value": 0.03298350824587706,
+        "verdict": "b_better",
         "note": "",
         "within_noise": false
       },
@@ -322,41 +330,41 @@
         "metric": "marker:looked_up_before_amount",
         "paired": true,
         "n_paired": 15,
-        "n_only_a": 7,
-        "n_only_b": 0,
-        "paired_share": 0.6818181818181818,
+        "n_only_a": 3,
+        "n_only_b": 3,
+        "paired_share": 0.7142857142857143,
         "n_used": 15,
-        "mean_a": 0.6022727272727273,
-        "mean_b": 0.7222222222222222,
-        "delta": 0.022222222222222216,
+        "mean_a": 0.6666666666666666,
+        "mean_b": 0.5833333333333334,
+        "delta": -0.03333333333333333,
         "ci95": [
-          -0.11111111111111113,
-          0.19999999999999998
+          -0.13333333333333333,
+          0.06666666666666667
         ],
-        "p_value": 0.8760619690154923,
+        "p_value": 1.0,
         "verdict": "no_difference_detected",
-        "note": "7 tasks only in a and 0 only in b were dropped; the verdict rests on the 15 shared",
+        "note": "3 tasks only in a and 3 only in b were dropped; the verdict rests on the 15 shared",
         "within_noise": true
       },
       "marker:no_invented_amount": {
         "metric": "marker:no_invented_amount",
         "paired": true,
         "n_paired": 15,
-        "n_only_a": 7,
-        "n_only_b": 0,
-        "paired_share": 0.6818181818181818,
+        "n_only_a": 3,
+        "n_only_b": 3,
+        "paired_share": 0.7142857142857143,
         "n_used": 15,
-        "mean_a": 0.8409090909090909,
-        "mean_b": 0.8555555555555556,
-        "delta": -0.01111111111111113,
+        "mean_a": 0.9722222222222222,
+        "mean_b": 0.7777777777777778,
+        "delta": -0.2,
         "ci95": [
-          -0.2166666666666667,
-          0.19444444444444445
+          -0.4,
+          -0.03333333333333333
         ],
-        "p_value": 0.9430284857571214,
-        "verdict": "no_difference_detected",
-        "note": "7 tasks only in a and 0 only in b were dropped; the verdict rests on the 15 shared",
-        "within_noise": true
+        "p_value": 0.13243378310844578,
+        "verdict": "a_better",
+        "note": "3 tasks only in a and 3 only in b were dropped; the verdict rests on the 15 shared",
+        "within_noise": false
       },
       "marker:resolved_small_credit": {
         "metric": "marker:resolved_small_credit",
@@ -366,14 +374,14 @@
         "n_only_b": 0,
         "paired_share": 1.0,
         "n_used": 23,
-        "mean_a": 0.1177536231884058,
-        "mean_b": 0.16666666666666666,
-        "delta": 0.04891304347826087,
+        "mean_a": 0.07427536231884058,
+        "mean_b": 0.1920289855072464,
+        "delta": 0.1177536231884058,
         "ci95": [
-          -0.07971014492753623,
-          0.1956521739130435
+          -0.016304347826086956,
+          0.266304347826087
         ],
-        "p_value": 0.5482258870564718,
+        "p_value": 0.15092453773113443,
         "verdict": "no_difference_detected",
         "note": "",
         "within_noise": false
@@ -400,7 +408,7 @@
       }
     },
     "warnings": [
-      "34 paired tasks at k=4 can prove a gain of about +0.17 at 80% power; to prove the +0.088 seen here you need about 120 tasks (holdout_size)."
+      "marker:no_invented_amount dropped -0.200 (95% -0.400..-0.033)"
     ],
     "config": {
       "before": {
@@ -423,7 +431,7 @@
         "judge_version": null,
         "prompt_hash": "7f53eecdbc1449ae",
         "mixed": [],
-        "truncated_share": 0.0123
+        "truncated_share": 0.0
       }
     },
     "by": null,
@@ -440,15 +448,16 @@
     "n_unpaired_tasks": 0,
     "improved": [],
     "regressions": [],
-    "slipped": [
-      "marker:escalated_big_credit"
-    ],
+    "slipped": [],
     "within_noise": [
       "pass_at_1",
+      "marker:escalated_big_credit",
+      "marker:looked_up_before_amount",
       "marker:no_invented_amount",
+      "marker:no_self_credit_over_200",
       "marker:used_a_tool"
     ],
-    "run_std": 0.0141,
+    "run_std": 0.0229,
     "run_std_source": "given",
     "eval_runs": {
       "before": 0,
@@ -456,7 +465,7 @@
     },
     "replicated": true,
     "ceiling": false,
-    "detectable_effect": 0.1624,
+    "detectable_effect": 0.1636,
     "tasks_needed": null,
     "degenerate_guards": [],
     "proxy": null,
@@ -473,15 +482,15 @@
         "n_only_b": 0,
         "paired_share": 1.0,
         "n_used": 34,
-        "mean_a": 0.2965686274509804,
-        "mean_b": 0.27205882352941174,
-        "delta": -0.024509803921568624,
+        "mean_a": 0.3112745098039216,
+        "mean_b": 0.26715686274509803,
+        "delta": -0.04411764705882353,
         "ci95": [
-          -0.07598039215686275,
-          0.023284313725490197
+          -0.09558823529411764,
+          -0.007352941176470588
         ],
-        "p_value": 0.3963018490754623,
-        "verdict": "no_difference_detected",
+        "p_value": 0.11544227886056972,
+        "verdict": "a_better",
         "note": "",
         "within_noise": true
       },
@@ -493,56 +502,56 @@
         "n_only_b": 0,
         "paired_share": 1.0,
         "n_used": 23,
-        "mean_a": 0.15579710144927536,
-        "mean_b": 0.07608695652173914,
-        "delta": -0.07971014492753624,
+        "mean_a": 0.036231884057971016,
+        "mean_b": 0.014492753623188404,
+        "delta": -0.021739130434782608,
         "ci95": [
-          -0.17391304347826086,
-          -0.003623188405797101
+          -0.06521739130434782,
+          0.0
         ],
-        "p_value": 0.13393303348325838,
-        "verdict": "a_better",
+        "p_value": 1.0,
+        "verdict": "no_difference_detected",
         "note": "",
-        "within_noise": false
+        "within_noise": true
       },
       "marker:looked_up_before_amount": {
         "metric": "marker:looked_up_before_amount",
         "paired": true,
-        "n_paired": 17,
-        "n_only_a": 4,
-        "n_only_b": 2,
-        "paired_share": 0.7391304347826086,
-        "n_used": 17,
-        "mean_a": 0.5600907029478458,
-        "mean_b": 0.6675438596491228,
-        "delta": 0.05420168067226891,
+        "n_paired": 18,
+        "n_only_a": 1,
+        "n_only_b": 3,
+        "paired_share": 0.8181818181818182,
+        "n_used": 18,
+        "mean_a": 0.6616541353383458,
+        "mean_b": 0.6309523809523809,
+        "delta": -0.017857142857142856,
         "ci95": [
-          -0.0392156862745098,
-          0.16204481792717088
+          -0.08333333333333333,
+          0.029761904761904767
         ],
-        "p_value": 0.49075462268865566,
+        "p_value": 1.0,
         "verdict": "no_difference_detected",
-        "note": "4 tasks only in a and 2 only in b were dropped; the verdict rests on the 17 shared",
-        "within_noise": false
+        "note": "1 tasks only in a and 3 only in b were dropped; the verdict rests on the 18 shared",
+        "within_noise": true
       },
       "marker:no_invented_amount": {
         "metric": "marker:no_invented_amount",
         "paired": true,
-        "n_paired": 17,
-        "n_only_a": 4,
-        "n_only_b": 2,
-        "paired_share": 0.7391304347826086,
-        "n_used": 17,
-        "mean_a": 0.7148526077097506,
-        "mean_b": 0.7903508771929825,
-        "delta": 0.0002801120448179262,
+        "n_paired": 18,
+        "n_only_a": 1,
+        "n_only_b": 3,
+        "paired_share": 0.8181818181818182,
+        "n_used": 18,
+        "mean_a": 0.9661654135338346,
+        "mean_b": 0.9880952380952381,
+        "delta": 0.021825396825396828,
         "ci95": [
-          -0.08823529411764706,
-          0.088515406162465
+          -0.01785714285714285,
+          0.08333333333333333
         ],
         "p_value": 1.0,
         "verdict": "no_difference_detected",
-        "note": "4 tasks only in a and 2 only in b were dropped; the verdict rests on the 17 shared",
+        "note": "1 tasks only in a and 3 only in b were dropped; the verdict rests on the 18 shared",
         "within_noise": true
       },
       "marker:no_self_credit_over_200": {
@@ -553,17 +562,17 @@
         "n_only_b": 0,
         "paired_share": 1.0,
         "n_used": 23,
-        "mean_a": 0.9565217391304348,
-        "mean_b": 0.9130434782608695,
-        "delta": -0.043478260869565216,
+        "mean_a": 0.9021739130434783,
+        "mean_b": 0.9166666666666666,
+        "delta": 0.014492753623188408,
         "ci95": [
-          -0.11956521739130435,
-          0.0
+          -0.032608695652173905,
+          0.07608695652173914
         ],
-        "p_value": 0.4877561219390305,
+        "p_value": 0.7501249375312344,
         "verdict": "no_difference_detected",
         "note": "",
-        "within_noise": false
+        "within_noise": true
       },
       "marker:used_a_tool": {
         "metric": "marker:used_a_tool",
@@ -587,8 +596,6 @@
       }
     },
     "warnings": [
-      "marker:escalated_big_credit dropped -0.080 (95% -0.174..-0.004)",
-      "34 paired tasks at k=4 can prove a gain of about +0.16 at 80% power (holdout_size).",
       "Before and after are the same policy version; this compares a model to itself."
     ],
     "config": {
