@@ -3,6 +3,15 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.69 (2026-09-18)
+
+- `uv run pytest` runs one worker per core (pytest-xdist in the dev extra,
+  `-n auto` as the pytest default; `-n0` for a serial run or `--pdb`). The
+  suite went from about three minutes to under a minute on four cores, and
+  CI wall clock from about three minutes to under two. One timing-dependent
+  test (the rl idle-on-judge note) now waits for every probe rollout and
+  holds the judge for a multiple of elapsed time, so it holds under load.
+
 ## 0.68 (2026-09-18)
 
 - README prose rewritten in plain voice: what each call does and why, in
