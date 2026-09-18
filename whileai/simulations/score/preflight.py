@@ -332,6 +332,8 @@ def dataset_report(
     # Difficulty mix. behavior_tier maps a missing stance to "ordinary", which
     # is right for sampling and wrong for a report: an unlabelled cell would
     # count as evidence the easy tier was covered. Count it separately.
+    # Same direction as the run's search["tier_mix"] (hard_share, from #320,
+    # which merges first): counts here, shares there.
     tiers: Counter[str] = Counter()
     tier_labeled: dict[str, list[int]] = {}
     for r in rows:
@@ -355,7 +357,7 @@ def dataset_report(
         "distinct_behaviors": len(behaviors),
         "cells_touched": len(cells),
         "failure_classes": dict(classes.most_common()),
-        "tier_mix": dict(tiers.most_common()),
+        "tier_counts": dict(tiers.most_common()),
         "hard_share": hard_share,
         "tier_fail_rate": {
             t: round(1 - sum(v) / len(v), 3) for t, v in sorted(tier_labeled.items()) if v
@@ -372,15 +374,17 @@ def dataset_report(
         report["warnings"].append(
             f"easy set: {hard_share:.0%} of rows are boundary, ambiguous or adversarial. "
             "An ordinary ask is the one a base already passes, so a set like this reports "
-            "a null whatever the policy does. Lower the share: "
-            "simulate(..., ordinary_share=0.3) draws 70% from the hard tiers; "
+            "a null whatever the policy does. Raise the share: "
+            "simulate(..., hard_share=0.7) asks for 70% from the hard tiers (rows the "
+            "mixer never sees keep the drawn share below the ask); "
             "dimensions={'stance': ['boundary', 'ambiguous', 'adversarial']} pins the axis "
             "to hard tiers only (rlhf-book ch. 7 on difficulty filtering)."
         )
     if tiers.get("unlabelled") and tiers["unlabelled"] / max(1, len(rows)) > 0.1:
         report["warnings"].append(
-            f"{tiers['unlabelled']} rows carry no stance, so their difficulty is unknown "
-            "rather than ordinary."
+            f"{tiers['unlabelled']} rows carry no stance, so their difficulty is unknown, "
+            "not ordinary. Label it with dimensions={'stance': [...]} on the run, or "
+            "read hard_share as a floor."
         )
     if tools is not None:
         pre = preflight(tools, system_prompt)

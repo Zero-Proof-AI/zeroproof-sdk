@@ -19,7 +19,7 @@ def _row(stance: str | None, reward: int | None = 1, prompt: str = "") -> dict:
     }
 
 
-def test_tier_mix_counts_every_tier_and_keeps_unlabelled_apart() -> None:
+def test_tier_counts_every_tier_and_keeps_unlabelled_apart() -> None:
     rows = (
         [_row("ordinary") for _ in range(5)]
         + [_row("boundary") for _ in range(3)]
@@ -28,7 +28,7 @@ def test_tier_mix_counts_every_tier_and_keeps_unlabelled_apart() -> None:
         + [_row(None) for _ in range(2)]  # no stance: not evidence of an easy set
     )
     report = dataset_report(rows)
-    assert report["tier_mix"] == {
+    assert report["tier_counts"] == {
         "ordinary": 5,
         "boundary": 3,
         "adversarial": 2,
@@ -59,7 +59,8 @@ def test_easy_set_warning_names_the_share_dial_and_the_pin() -> None:
     report = dataset_report(rows)
     (warning,) = report["warnings"]
     assert warning.startswith("easy set: 20% of rows")
-    assert "ordinary_share=0.3" in warning
+    assert "hard_share=0.7" in warning and "asks for 70%" in warning
+    assert "draws 70%" not in warning
     assert "dimensions={'stance'" in warning
     text = format_dataset_report(report)
     assert "Hard tiers:" in text and "20%" in text
@@ -84,5 +85,6 @@ def test_unlabelled_rows_get_their_own_warning_past_ten_percent() -> None:
     three_blank = mostly_hard + [_row(None, prompt=f"n{i}") for i in range(3)]
     (warning,) = dataset_report(three_blank)["warnings"]
     assert warning.startswith("3 rows carry no stance")
+    assert "dimensions={'stance'" in warning
     one_blank = [*mostly_hard, _row(None, prompt="n0")]
     assert dataset_report(one_blank)["warnings"] == []

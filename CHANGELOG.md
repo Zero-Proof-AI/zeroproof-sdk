@@ -5,10 +5,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
-- `dataset_report` reports the difficulty mix: `tier_mix`, `hard_share` and
+- `dataset_report` reports the difficulty mix: `tier_counts`, `hard_share`
+  (the same direction as the run's `search["tier_mix"]`) and
   `tier_fail_rate` per tier, and `warnings` (always a list, beside the tool
   check's `preflight_warnings`) says when fewer than 30% of rows are
-  boundary, ambiguous or adversarial, naming `ordinary_share=` as the dial
+  boundary, ambiguous or adversarial, naming `hard_share=` as the dial
   and `dimensions={"stance": [...]}` as the pin. An ordinary ask is the one a
   base already passes, so an easy set reports a null whatever the policy
   does. On a 1,048-row set the hard tiers failed at 0.589 (boundary) and
