@@ -3,6 +3,16 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## 0.81 (2026-09-18)
+
+- `export_environment(reward=<verifier>)` finds the name your module bound
+  the verifier to, so a `@wai.verifier` or `All([...])` in your own file
+  works as an object (#374). `delta_report` no longer calls two offline
+  arms (seed, template, replay) not comparable; `simulate(seeds=, runs=N)`
+  replays the drawn task set instead of raising; an agent that returns an
+  empty reply on every rollout stops with `stopped_because="empty_replies"`
+  and a warning that names the fix (#375).
+
 ## 0.80 (2026-09-18)
 
 - The reasoning cites in `whileai/simulations/` (`defaults.py`,
