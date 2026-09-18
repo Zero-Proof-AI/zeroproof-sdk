@@ -345,8 +345,7 @@ the eval out of training and check it with `decontaminate(train, eval)`.
 Then run both arms and compare:
 
 ```python
-report = wai.delta_report(before, after, target="pass_at_1",
-                          must_not_regress=["honest_on_fault"])
+report = wai.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_on_fault"])
 print(wai.format_delta_report(report))
 ```
 
