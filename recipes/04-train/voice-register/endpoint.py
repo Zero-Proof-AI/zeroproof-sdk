@@ -9,6 +9,7 @@ and a screenshot.
 Point ``--base-url`` at any OpenAI-compatible server. Nothing here is
 specific to a provider.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,8 +19,15 @@ import urllib.request
 DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 
 
-def chat(messages: list[dict], *, model: str = DEFAULT_MODEL, base_url: str = "",
-         temperature: float = 0.7, max_tokens: int = 2048, retries: int = 4) -> str:
+def chat(
+    messages: list[dict],
+    *,
+    model: str = DEFAULT_MODEL,
+    base_url: str = "",
+    temperature: float = 0.7,
+    max_tokens: int = 2048,
+    retries: int = 4,
+) -> str:
     """One completion. ``VLLM_API_KEY`` comes from the environment only."""
     key = str(os.environ.get("VLLM_API_KEY") or "").strip()
     if not key:
@@ -33,18 +41,20 @@ def chat(messages: list[dict], *, model: str = DEFAULT_MODEL, base_url: str = ""
             "No endpoint. Pass --base-url or set VLLM_BASE_URL to an "
             "OpenAI-compatible /v1 endpoint."
         )
-    body = json.dumps({"model": model, "messages": messages,
-                       "temperature": temperature, "max_tokens": max_tokens}).encode()
+    body = json.dumps(
+        {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+    ).encode()
     last: Exception | None = None
     for _ in range(retries):
         try:
             req = urllib.request.Request(
-                url.rstrip("/") + "/chat/completions", data=body,
-                headers={"Content-Type": "application/json",
-                         "Authorization": f"Bearer {key}"})
+                url.rstrip("/") + "/chat/completions",
+                data=body,
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+            )
             with urllib.request.urlopen(req, timeout=180) as resp:
                 payload = json.loads(resp.read())
             return str(payload["choices"][0]["message"].get("content") or "")
-        except Exception as exc:  # noqa: BLE001 - retried, then surfaced
+        except Exception as exc:
             last = exc
     raise RuntimeError(f"chat failed after {retries} attempts: {type(last).__name__}: {last}")

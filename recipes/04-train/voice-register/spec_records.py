@@ -10,6 +10,7 @@ That keeps the property the voice lane actually needs, which is that the
 answer is decidable and the identifiers it must name are known in advance. It
 does not claim the records are real, and the card says so.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,7 +19,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import endpoint as RA  # noqa: E402
+import endpoint as RA
 
 RECORD_SYSTEM = (
     "You invent ONE realistic record for a system, given the tools that operate on it. "
@@ -43,13 +44,13 @@ def _balanced(text: str) -> str | None:
         elif text[i] == "}":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return text[start : i + 1]
     return None
 
 
 def _first_id(rec: dict) -> str | None:
     """The opaque code a question will have to name."""
-    for k, v in rec.items():
+    for v in rec.values():
         if isinstance(v, str) and _ID.match(v.strip()):
             return v.strip()
     for k, v in rec.items():
@@ -68,13 +69,19 @@ def build_records(spec: dict, n: int, seed: int = 0, workers: int = 10) -> list[
     def one(i: int) -> dict | None:
         try:
             out = RA.chat(
-                [{"role": "system", "content": RECORD_SYSTEM},
-                 {"role": "user", "content":
-                  f"System policy:\n{str(spec.get('policy'))[:900]}\n\n"
-                  f"Tools that read or change this record: {', '.join(names[:8])}\n"
-                  f"Tool schemas:\n{brief}\n\n"
-                  f"Invent record number {i + 1}. JSON only."}],
-                temperature=1.0, max_tokens=420)
+                [
+                    {"role": "system", "content": RECORD_SYSTEM},
+                    {
+                        "role": "user",
+                        "content": f"System policy:\n{str(spec.get('policy'))[:900]}\n\n"
+                        f"Tools that read or change this record: {', '.join(names[:8])}\n"
+                        f"Tool schemas:\n{brief}\n\n"
+                        f"Invent record number {i + 1}. JSON only.",
+                    },
+                ],
+                temperature=1.0,
+                max_tokens=420,
+            )
         except Exception:
             return None
         # A greedy {...} match swallows prose between two objects and parses
