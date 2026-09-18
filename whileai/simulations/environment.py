@@ -73,7 +73,7 @@ DEFAULT_BAND = DIFFICULTY_BAND
 #: ``n_calls``, ``judge_ok``, ``truncated`` and ``trace_clean`` are logged at
 #: weight 0 as monitors. Training on a symptom of over-optimization turns
 #: it into a proxy the policy games (Gao et al., arXiv:2210.10760;
-#: rlhfbook.com/c/17-over-optimization.html lists the symptoms); the book
+#: rlhfbook.com/c/14-over-optimization lists the symptoms); the book
 #: does not prescribe weight-0 logging, that is this package's choice.
 RUBRIC_WEIGHTS = (1.0, 0.0, 0.0, 0.0, 0.0)
 #: The version an export claims when the package is not installed as a
@@ -730,7 +730,7 @@ def _make_env_class() -> type:
             """1.0 when none of the SDK's trace flags fired (fabricated test
             claims, phantom edits, test tampering, ...). Logged, not
             trained on: a monitor for over-optimization symptoms
-            (rlhfbook.com/c/17-over-optimization.html)."""
+            (rlhfbook.com/c/14-over-optimization)."""
             from .score.trace import trace_flags
 
             row = _row_from_state(state, state.get("zp_info") or {})

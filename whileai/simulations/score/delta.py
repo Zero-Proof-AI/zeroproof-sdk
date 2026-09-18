@@ -693,7 +693,7 @@ def delta_report(
                 f"OVER-OPTIMIZED: {proxy_key} up {proxy_result['delta']:+.3f} ({level:.0%} "
                 f"{pspan}) while {headline_name} {headline_for_proxy['delta']:+.3f} "
                 f"({level:.0%} {tspan}): the policy learned something the target does not "
-                "credit (rlhfbook.com/c/17-over-optimization.html)"
+                "credit (rlhfbook.com/c/14-over-optimization)"
             )
     headline_noise = results[headline_metric]["noise_band"]
     if headline_noise is not None and target_verdict == "within_eval_noise" and target_result:
