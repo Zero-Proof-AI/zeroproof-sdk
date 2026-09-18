@@ -10,6 +10,18 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   was written; and says when no real ids were read off the tool descriptions,
   since placeholder asks then stop at "which order?" and the run is hollow.
 
+## Unreleased
+
+- A row records the deploy prompt it was generated under. `policy_version`
+  already hashed the prompt but concatenated it with the model tag, so it read
+  as a model id and nobody looking for the prompt found it. Rows now carry
+  `deploy_prompt_sha` (two rows share a prompt iff they share this),
+  `deploy_prompt_chars` and `deploy_prompt_preview`, and `search`
+  `["deploy_prompt"]` carries the text in full once per run. A base rate is not
+  a property of the model alone: measured on one agent, a grounding criterion
+  failed 23.6% under a bare deploy prompt and about 10% with the agent's own
+  policy in the prompt.
+
 ## 0.61 (2026-09-17)
 
 - `whileai init-evals` writes the eval harness, instead of a coding agent

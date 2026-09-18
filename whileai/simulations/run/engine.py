@@ -642,6 +642,25 @@ class Run:
             f"{c.model_version_tag}@"
             f"{hashlib.sha256(str(self.gen_policy or '').encode('utf-8')).hexdigest()[:16]}"
         )
+        # The deploy prompt, recorded so a stored row can be audited on its own.
+        #
+        # `policy_version` already hashes the prompt, but it concatenates the
+        # MODEL TAG with that hash, so it reads as a model id and nobody
+        # looking for the prompt finds it. These three fields keep the prompt
+        # identity separate from the model identity:
+        #   sha     two rows share a prompt iff they share this
+        #   chars   a bare prompt and a 1,000-word policy are not the same run
+        #   preview which prompt it was, without storing it on every row
+        #
+        # A base rate is not a property of the model alone. Measured on one
+        # agent, a grounding criterion failed 23.6% under a bare deploy prompt
+        # and about 10% with the agent's own policy in the prompt: 14 points
+        # from the prompt regime. A base number read off stored rows with no
+        # record of the regime cannot be compared against another cell's.
+        prompt_text = str(self.gen_policy or "")
+        self.deploy_prompt_sha = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()[:16]
+        self.deploy_prompt_chars = len(prompt_text)
+        self.deploy_prompt_preview = " ".join(prompt_text.split())[:160]
         if c.execute is not None:
             runner_kw["execute"] = c.execute
         if c.backend:
@@ -994,6 +1013,9 @@ class Run:
         # async RL, ch. 9): a later update needs the sampler's version and
         # temperature on the row, not in a notebook.
         t["policy_version"] = self.policy_version
+        t["deploy_prompt_sha"] = self.deploy_prompt_sha
+        t["deploy_prompt_chars"] = self.deploy_prompt_chars
+        t["deploy_prompt_preview"] = self.deploy_prompt_preview
         t["sampling"] = dict(self.sampling) if self.sampling is not None else None
         # Token usage rolls up the same way, so a row says what it cost and a
         # trace built from it can carry gen_ai.usage.* on every model turn.
@@ -3113,6 +3135,15 @@ class Run:
         state_record["allocation_gain"] = ALLOC_GAIN
         # region_progress is attached at the very end of simulate(), so
         # it measures the rows that ship: graded, leak-pruned.
+        # The prompt in full, once per run. The per-row fields identify a
+        # regime; this one reproduces it. A dataset outlives the script that
+        # made it, so "which prompt produced this base rate" has to be
+        # answerable from the artifacts alone (#296).
+        data.search["deploy_prompt"] = {
+            "sha": self.deploy_prompt_sha,
+            "chars": self.deploy_prompt_chars,
+            "text": str(self.gen_policy or ""),
+        }
         data.search["behavior_state"] = state_record
         kept_rows, leak = drop_leaky_rows(
             data.trajectories, self.trace_rows, embedder=self.resolved_embedder

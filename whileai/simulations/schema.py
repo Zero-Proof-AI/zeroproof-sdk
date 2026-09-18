@@ -117,6 +117,11 @@ _CONSUMED = frozenset(
         "rollout_index",
         "model_version",
         "policy_version",
+        # Prompt identity, kept separate from model identity: policy_version
+        # conflates the two and reads as a model id (#296).
+        "deploy_prompt_sha",
+        "deploy_prompt_chars",
+        "deploy_prompt_preview",
         "markers",
         "calibration",
         "tool_trace",

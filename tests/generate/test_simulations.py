@@ -24,6 +24,12 @@ _CARRIED = {
     "selection_reason",
 }
 _PUBLIC = {
+    # Prompt identity, separate from model identity (#296): a base rate is not
+    # a property of the model alone, so an exported row says which prompt
+    # regime produced it.
+    "deploy_prompt_sha",
+    "deploy_prompt_chars",
+    "deploy_prompt_preview",
     *_CARRIED,
     "grader_reason",
     "judge_name",
