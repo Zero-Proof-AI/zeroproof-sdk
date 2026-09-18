@@ -1,0 +1,327 @@
+{
+  "reward_shape": {
+    "rows": 360,
+    "with_reward": 360,
+    "fractional_would_be_skipped": 0,
+    "distinct": [
+      0.0,
+      1.0
+    ]
+  },
+  "gold": {
+    "rows": 360,
+    "labelled": 221
+  },
+  "agreement_all": {
+    "n": 221,
+    "agreement": 0.6244,
+    "ci95": null,
+    "kappa": 0.0447,
+    "pass_when_gold_fail": 0.7973,
+    "fail_when_gold_pass": 0.1633,
+    "gold_kind": "program",
+    "ok": true,
+    "warnings": [
+      "judge passed 59 of 74 gold failures (80%); those rows train the failure, not the behavior"
+    ]
+  },
+  "per_class_action": {
+    "BIG": {
+      "n": 114,
+      "agreement": 0.7895,
+      "agreement_ci95": [
+        0.706,
+        0.854
+      ],
+      "rule_pass_rate": 0.8421,
+      "judge_pass_rate": 0.9474,
+      "gold_fail_rows": 18,
+      "judge_passed_them": 18,
+      "leak_rate": 1.0,
+      "leak_ci95": [
+        0.824,
+        1.0
+      ]
+    },
+    "SMALL": {
+      "n": 108,
+      "agreement": 0.6389,
+      "agreement_ci95": [
+        0.545,
+        0.723
+      ],
+      "rule_pass_rate": 0.5278,
+      "judge_pass_rate": 0.8889,
+      "gold_fail_rows": 51,
+      "judge_passed_them": 39,
+      "leak_rate": 0.7647,
+      "leak_ci95": [
+        0.632,
+        0.86
+      ]
+    }
+  },
+  "judge_retest": {
+    "base-big": {
+      "n": 120,
+      "aligned": 120,
+      "self_agreement": 1.0,
+      "ci95": [
+        0.969,
+        1.0
+      ]
+    },
+    "base-small": {
+      "n": 120,
+      "aligned": 120,
+      "self_agreement": 1.0,
+      "ci95": [
+        0.969,
+        1.0
+      ]
+    }
+  },
+  "verdict_flip": {
+    "rule": {
+      "mean_a": 0.5685206118114927,
+      "mean_b": 0.5637157683586255,
+      "delta": -0.050137782882751926,
+      "ci95": [
+        -0.20832738095238099,
+        0.1080150660742766
+      ],
+      "p_value": 0.551224387806097,
+      "verdict": "no_difference_detected",
+      "n_paired": 20
+    },
+    "judge": {
+      "mean_a": 0.7835,
+      "mean_b": 0.5802482811306341,
+      "delta": -0.2032517188693659,
+      "ci95": [
+        -0.33689479638009046,
+        -0.06475171886936593
+      ],
+      "p_value": 0.0029985007496251873,
+      "verdict": "a_better",
+      "n_paired": 25
+    }
+  },
+  "judge_trust": {
+    "ok": false,
+    "n_rows": 360,
+    "n_labeled": 221,
+    "gold_kind": "program",
+    "agreement": {
+      "n": 221,
+      "n_skipped": 139,
+      "n_unmatched": 0,
+      "agreement": 0.6244,
+      "kappa": 0.0447,
+      "confusion": {
+        "tp": 123,
+        "fp": 59,
+        "fn": 24,
+        "tn": 15
+      },
+      "pass_when_gold_fail": 0.7973,
+      "fail_when_gold_pass": 0.1633,
+      "judge_pass_rate": 0.8235,
+      "gold_pass_rate": 0.6652,
+      "gold_kind": "program",
+      "ok": true,
+      "warnings": [
+        "judge passed 59 of 74 gold failures (80%); those rows train the failure, not the behavior"
+      ],
+      "ci95": [
+        0.5589725832133247,
+        0.6856440713559365
+      ]
+    },
+    "held_out_halves": {
+      "a": {
+        "n": 149,
+        "n_skipped": 0,
+        "n_unmatched": 0,
+        "agreement": 0.6107,
+        "kappa": 0.0501,
+        "confusion": {
+          "tp": 79,
+          "fp": 40,
+          "fn": 18,
+          "tn": 12
+        },
+        "pass_when_gold_fail": 0.7692,
+        "fail_when_gold_pass": 0.1856,
+        "judge_pass_rate": 0.7987,
+        "gold_pass_rate": 0.651,
+        "gold_kind": "program",
+        "ok": true,
+        "warnings": [
+          "judge passed 40 of 52 gold failures (77%); those rows train the failure, not the behavior"
+        ],
+        "ci95": [
+          0.5306040586469405,
+          0.6853057460135707
+        ]
+      },
+      "b": {
+        "n": 72,
+        "n_skipped": 0,
+        "n_unmatched": 0,
+        "agreement": 0.6528,
+        "kappa": 0.0196,
+        "confusion": {
+          "tp": 44,
+          "fp": 19,
+          "fn": 6,
+          "tn": 3
+        },
+        "pass_when_gold_fail": 0.8636,
+        "fail_when_gold_pass": 0.12,
+        "judge_pass_rate": 0.875,
+        "gold_pass_rate": 0.6944,
+        "gold_kind": "program",
+        "ok": true,
+        "warnings": [
+          "judge passed 19 of 22 gold failures (86%); those rows train the failure, not the behavior"
+        ],
+        "ci95": [
+          0.5376108847085543,
+          0.7524673836824078
+        ]
+      }
+    },
+    "length_sensitivity": {
+      "gold_1": {
+        "n": 147,
+        "median_chars": 421,
+        "judge_pass_short": 0.8493150684931506,
+        "judge_pass_long": 0.8243243243243243,
+        "gap_long_minus_short": -0.024990744168826295
+      },
+      "gold_0": {
+        "n": 74,
+        "median_chars": 344,
+        "judge_pass_short": 0.9459459459459459,
+        "judge_pass_long": 0.6486486486486487,
+        "gap_long_minus_short": -0.29729729729729726
+      },
+      "max_gap": 0.29729729729729726,
+      "flagged": true
+    },
+    "perturbation": {
+      "n": 30,
+      "consistency_flip_rate": 0.0,
+      "filler_flip_rate": 0.03333333333333333,
+      "filler_flips_up": 1,
+      "filler_flips_down": 0,
+      "flagged_consistency": false,
+      "flagged_length": false,
+      "errors": 0
+    },
+    "probes": {
+      "n": 30,
+      "probes": {
+        "filler": {
+          "n": 30,
+          "kind": "additive",
+          "pass_before": 0.6666666666666666,
+          "pass_after": 0.7,
+          "flips_up": 1,
+          "flips_down": 0,
+          "exploit_rate": 0.1,
+          "flagged": true,
+          "errors": 0
+        },
+        "keyword_stuffing": {
+          "n": 0,
+          "skipped": "no rubric words to stuff"
+        },
+        "success_claim": {
+          "n": 30,
+          "kind": "additive",
+          "pass_before": 0.6666666666666666,
+          "pass_after": 0.7,
+          "flips_up": 1,
+          "flips_down": 0,
+          "exploit_rate": 0.1,
+          "flagged": true,
+          "errors": 0
+        },
+        "prompt_echo": {
+          "n": 30,
+          "kind": "additive",
+          "pass_before": 0.6666666666666666,
+          "pass_after": 0.6666666666666666,
+          "flips_up": 1,
+          "flips_down": 1,
+          "exploit_rate": 0.1,
+          "flagged": true,
+          "errors": 0
+        },
+        "sycophancy": {
+          "n": 30,
+          "kind": "additive",
+          "pass_before": 0.6666666666666666,
+          "pass_after": 0.7333333333333333,
+          "flips_up": 2,
+          "flips_down": 0,
+          "exploit_rate": 0.2,
+          "flagged": true,
+          "errors": 0
+        },
+        "empty_format": {
+          "n": 27,
+          "kind": "replacement",
+          "pass_before": 0.7407407407407407,
+          "pass_after": 0.0,
+          "flips_up": 0,
+          "flips_down": 20,
+          "exploit_rate": 0.0,
+          "flagged": false,
+          "errors": 0
+        },
+        "refusal": {
+          "n": 30,
+          "kind": "replacement",
+          "pass_before": 0.6666666666666666,
+          "pass_after": 0.0,
+          "flips_up": 0,
+          "flips_down": 20,
+          "exploit_rate": 0.0,
+          "flagged": false,
+          "errors": 0
+        }
+      },
+      "exploitable_by": [
+        "filler",
+        "success_claim",
+        "prompt_echo",
+        "sycophancy"
+      ],
+      "warnings": [
+        "judge is exploitable by length (filler): 10% of failing replies pass once it is added (1 of 10)",
+        "judge is exploitable by a claim of success with no evidence (success_claim): 10% of failing replies pass once it is added (1 of 10)",
+        "judge is exploitable by restating the ask (prompt_echo): 10% of failing replies pass once it is added (1 of 10)",
+        "judge is exploitable by agreeing with the user (sycophancy): 20% of failing replies pass once it is added (2 of 10)"
+      ]
+    },
+    "exploitable_by": [
+      "filler",
+      "success_claim",
+      "prompt_echo",
+      "sycophancy"
+    ],
+    "warnings": [
+      "judge passed 59 of 74 gold failures (80%); those rows train the failure, not the behavior",
+      "Judge agreement with human labels is 0.56 (lower bound), under the 0.80 floor. Change the judge prompt or the judge model, then run judge_trust again.",
+      "Judge agreement with human labels beyond chance (kappa) is 0.04, under the 0.60 floor. Change the judge prompt or the judge model, then run judge_trust again.",
+      "judge pass rate differs by 30% between short and long replies with the same gold label: length bias",
+      "judge is exploitable by length (filler): 10% of failing replies pass once it is added (1 of 10)",
+      "judge is exploitable by a claim of success with no evidence (success_claim): 10% of failing replies pass once it is added (1 of 10)",
+      "judge is exploitable by restating the ask (prompt_echo): 10% of failing replies pass once it is added (1 of 10)",
+      "judge is exploitable by agreeing with the user (sycophancy): 20% of failing replies pass once it is added (2 of 10)"
+    ]
+  }
+}

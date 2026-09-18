@@ -51,6 +51,7 @@ CLI_EXAMPLES = [
     "04-train/resist-planted-instruction/analyse.py",
     "01-simulate/verifiers/run.py",
     "community/same-entrypoint-before-after/run.py",
+    "community/can-the-judge-be-trusted/run.py",
 ]
 
 # Need the ``modal`` client, which is not a dev dependency. Compiled, not run.
