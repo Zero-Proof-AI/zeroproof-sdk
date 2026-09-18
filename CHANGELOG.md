@@ -99,6 +99,28 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   clears zero by luck (an upper bound; it treats the metrics as independent).
   The pre-specified target is unaffected. `format_delta_report` prints the family
   error and each side's graded share with the selection bound.
+- A run says what it asked for against what came back. `data.report()`
+  carries `rollouts_requested`, `rollouts_completed`, `rollouts_lost` with a
+  `rollouts_lost_by` breakdown (`agent_error`, `empty_reply`, `tool_markup`)
+  and `rollouts_over_cap` (finished after the row budget was full, not
+  lost); any loss puts `rollouts_lost` in `data.degraded` and one line in
+  `data.warnings` with the fix per reason (warm the endpoint or raise
+  `timeout=`, raise `agent_max_tokens=`, fix the tool-call format). A paired
+  eval asked for 34 tasks x 4 and got 163 rows with `degraded=[]`, because
+  the missing rollouts came back empty rather than raising (#303).
+  `report()["agent_errors"]` is gone; the count stays in
+  `data.search["agent_errors"]` and `rollouts_lost_by["agent_error"]`.
+  `delta_report` warns, next to the sizing line, when the two sides sit at
+  different k, naming both and how many paired tasks are short. Unequal k is
+  a precision issue, not a bias: rows lost at random leave the paired delta
+  unbiased and widen its interval (simulated: about 10% at k=4 against k=2
+  on half the tasks); rows lost for a reason bias it, and only re-running the
+  short arm on its short tasks fixes that. `balance_rollouts=True` (off by
+  default) trims every paired task to the rows both sides have (drawn by
+  `seed`) so pass^k and pass@k share one k; it costs another 10% of interval
+  width and removes no bias (failures dropped on one arm: delta 0.32 trimmed
+  or not, true 0.05), `balanced` says how many rows each side gave up, and
+  `format_delta_report` prints it.
 
 ## 0.63 (2026-09-17)
 
