@@ -478,6 +478,127 @@ def trace_fault(trajectory: dict) -> str:
     return NO_FAULT
 
 
+#: A tool is dead when the Wilson 95% upper bound on its success rate is
+#: under DEAD_TOOL_R_MIN. Below three in ten a tool cannot carry a
+#: behaviour: the agent that calls it meets a miss on most turns, reports
+#: the miss, and the rubric grades the report instead of the behaviour.
+#: The bound, not the point rate, is the test, so a short run cannot
+#: accuse a tool on a handful of misses and a long run cannot excuse one
+#: on a handful of hits (4 of 612 succeeded in #287). Fewer than
+#: DEAD_TOOL_MIN_CALLS answered calls is no evidence at all.
+DEAD_TOOL_R_MIN = 0.30
+DEAD_TOOL_MIN_CALLS = 3
+
+
+def _planned_for(row: dict, tool: str) -> bool:
+    plan = row.get("faults")
+    return isinstance(plan, dict) and bool(plan.get(tool) or plan.get("*"))
+
+
+def tool_outcomes(rows) -> dict[str, dict[str, int]]:
+    """Calls and successes per tool, over every recorded step.
+
+    ``n`` is the calls that carry a result, ``ok`` the ones that were not
+    a fault, ``fault_n`` the rest (the same rule ``trace_mining`` counts
+    with, so the two tables agree). ``injected`` is the faults on rows
+    whose ``faults`` plan named the tool: the world was told to fail
+    those, so they are not evidence against it. A step with no recorded
+    result is not evidence either way and is left out, so an offline row
+    list cannot accuse a tool it never saw answer.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        for step in row.get("steps") or []:
+            if not isinstance(step, dict) or not step.get("tool"):
+                continue
+            result = step.get("result")
+            if result is None:
+                continue
+            tool = str(step["tool"])
+            slot = out.setdefault(tool, {"n": 0, "ok": 0, "fault_n": 0, "injected": 0})
+            slot["n"] += 1
+            if _fault_from_result(result):
+                slot["fault_n"] += 1
+                if _planned_for(row, tool):
+                    slot["injected"] += 1
+            else:
+                slot["ok"] += 1
+    return out
+
+
+def dead_tools(outcomes: dict[str, dict[str, int]]) -> list[str]:
+    """Tools whose success rate is shown to be under ``DEAD_TOOL_R_MIN``.
+
+    One rule: the Wilson 95% upper bound on ``ok / evidence`` is below
+    0.30, with ``evidence`` the answered calls less the faults the run
+    scheduled itself, and at least ``DEAD_TOOL_MIN_CALLS`` of them. The
+    bound is ``(p + z²/2n + z·sqrt(p(1-p)/n + z²/4n²)) / (1 + z²/n)`` at
+    z = 1.96, and it puts the arithmetic where a point rate hides it:
+
+    - 0 of 3: upper 0.56, not dead (three misses prove nothing).
+    - 2 of 5: upper 0.77, not dead (a tool that works sometimes).
+    - 0 of 8: upper 0.32, not dead; 0 of 9: upper 0.30, dead. Nine
+      straight misses is the first zero that counts.
+    - 1 of 21: upper 0.23, dead.
+    - 4 of 612: upper 0.02, dead (the lane that opened #287).
+
+    The earlier pair of rules ("0 of 3+", "under 5% of 10+") got both
+    ends wrong: 1/n < 0.05 first holds at n = 21, so between 10 and 20
+    calls the rate rule was the never rule, and "0 of 3" called a tool
+    with a true 30% success rate dead 34% of the time (0.7³).
+    """
+    from .stats import wilson_interval
+
+    dead: list[str] = []
+    for name, slot in outcomes.items():
+        evidence = int(slot.get("n", 0)) - int(slot.get("injected", 0))
+        ok = int(slot.get("ok", 0))
+        if evidence < DEAD_TOOL_MIN_CALLS:
+            continue
+        bound = wilson_interval(min(ok, evidence), evidence)
+        if bound is not None and bound[1] < DEAD_TOOL_R_MIN:
+            dead.append(name)
+    return sorted(dead)
+
+
+def dead_tools_note(
+    outcomes: dict[str, dict[str, int]], dead: list[str], *, execute: bool | None = None
+) -> str:
+    """One sentence naming the tools that never work and the fix.
+
+    A tool the agent's schema declares but the world cannot answer fails
+    exactly like a world fault: the agent reports the miss honestly, a
+    candour rubric rewards the row, and the behaviour under test never
+    happens (#287). ``execute`` is whether the caller's own ``execute=``
+    world answered the calls (the engine reads it off the run) and picks
+    the one fix that applies. Over a bare row list nothing says who
+    answered, so the note names the miss and asks for a world that can.
+    """
+    if not dead:
+        return ""
+    shown = ", ".join(
+        f"{name} ({outcomes[name]['ok']} of "
+        f"{outcomes[name]['n'] - outcomes[name].get('injected', 0)} calls succeeded)"
+        for name in dead
+    )
+    if execute:
+        fix = "Add a branch for each in execute=, or remove it from the tool schema."
+    elif execute is False:
+        fix = (
+            "The mock world answered every call with a miss; put the ids it has in "
+            "the tool descriptions or in seeds=, or answer the calls with execute=."
+        )
+    else:
+        fix = "Give each a world that answers it, or remove it from the tool schema."
+    return (
+        f"{len(dead)} tool{'s' if len(dead) > 1 else ''} never worked: {shown}. "
+        "The agent reports each miss and an honesty rubric rewards it, so the "
+        f"behaviour behind the tool is never tested. {fix}"
+    )
+
+
 def _verdict(reward: float, reason: str, fault_detected: bool = False) -> dict:
     out = {"reward": reward, "reason": reason}
     if fault_detected:

@@ -100,6 +100,7 @@ def simulate(
     temperature: float | None = None,
     timeout: float | None = None,
     logprobs: bool | None = None,
+    hard_share: float | None = None,
     **passed: Any,
 ) -> SimulationData:
     """Inspect an agent, generate situations, and roll them out.
@@ -147,6 +148,11 @@ def simulate(
     space, and drops any generated row that near-copies a source trace,
     so held-out traces stay out of training. Without it the grid comes
     from the agent's tools and policy alone (cold start).
+
+    ``hard_share=`` is the difficulty dial: the fraction of situations drawn
+    from the ambiguous, boundary and adversarial tiers (default 0.40), where
+    a base fails most often. ``search["tier_mix"]`` reports the share asked
+    for and the share drawn; ``dimensions={"stance": [...]}`` pins the axis.
 
     ``execute=`` is the caller's world: a function ``(tool, arguments) ->
     result`` that answers every tool call for real, against their repo,
@@ -272,6 +278,7 @@ def simulate(
         ("temperature", temperature),
         ("timeout", timeout),
         ("logprobs", logprobs),
+        ("hard_share", hard_share),
     ):
         if _val is not None:
             passed[_name] = _val

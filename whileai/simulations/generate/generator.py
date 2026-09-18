@@ -14,6 +14,7 @@ from .agents import CONTEXT_TOKENS, complete, default_simulator_spec, parse_back
 from .diversity import (
     DEFAULT_TEXTURE_RATE,
     behavior_tier,
+    clamp_share,
     conversation_features,
     mix_items_by_tier,
     sample_cell_tags,
@@ -1375,10 +1376,13 @@ class ModelSimulator:
         mode: str | None = None,
         prefer_success: bool | None = None,
         steering_weight: float | None = None,
+        hard_share: float | None = None,
     ):
         self.texture_rate = (
             DEFAULT_TEXTURE_RATE if texture_rate is None else max(0.0, float(texture_rate))
         )
+        # The run's difficulty dial, from RunConfig; every mixer call here uses it.
+        self.hard_share = clamp_share(hard_share)
         self.backend_spec = backend_spec or default_simulator_spec()
         self.tools = tuple(tools)
         self.policy = writer_policy_digest(policy)
@@ -1476,6 +1480,7 @@ class ModelSimulator:
                         unused,
                         n_cells,
                         lambda region: behavior_tier(region.get("assignment") or {}),
+                        hard_share=self.hard_share,
                     )
                     chunk = self._steer_toward_gaps(chunk, round_index, n_cells)
                     for region in chunk:
@@ -1494,7 +1499,10 @@ class ModelSimulator:
             chunk = [ranked[(start + offset) % len(ranked)] for offset in range(n_cells)]
             return self._steer_toward_gaps(
                 mix_items_by_tier(
-                    chunk, n_cells, lambda region: behavior_tier(region.get("assignment") or {})
+                    chunk,
+                    n_cells,
+                    lambda region: behavior_tier(region.get("assignment") or {}),
+                    hard_share=self.hard_share,
                 ),
                 round_index,
                 n_cells,
@@ -1513,6 +1521,7 @@ class ModelSimulator:
             [region for _, region in keyed],
             n_cells,
             lambda region: behavior_tier(region.get("assignment") or {}),
+            hard_share=self.hard_share,
         )
         return self._steer_toward_gaps(picked, round_index, n_cells)
 
@@ -1569,6 +1578,7 @@ class ModelSimulator:
             [alt] + [r for r in sampled if r.get("id") != alt.get("id")],
             min(n_cells, max(len(sampled), 1)),
             lambda region: behavior_tier(region.get("assignment") or {}),
+            hard_share=self.hard_share,
         )
 
     def set_search_context(
@@ -1635,6 +1645,7 @@ region_id exactly and placing the human's words in message."""
             list(sampled),
             len(sampled),
             lambda region: behavior_tier(region.get("assignment") or {}),
+            hard_share=self.hard_share,
         )
         tool_cards = _tool_briefs(self.tools)
         targets = []
@@ -1693,6 +1704,7 @@ region_id exactly and placing the human's words in message."""
             ],
             max(_EXTRAS_PER_CALL, n_extra),
             lambda row: behavior_tier(row.get("assignment") or {}),
+            hard_share=self.hard_share,
         )
         for extra_i, extra in enumerate(extra_plan[:n_extra]):
             extra_asg = dict(extra.get("assignment") or {})
@@ -1982,13 +1994,15 @@ def make_default_generator(
     arm_weights: dict | None = None,
     simulator: Any = None,
     kind: str | None = None,
+    hard_share: float | None = None,
     **template_kwargs,
 ):
     """Model-written messages when a simulator is on; templates only offline.
 
     Pass ``simulator=False`` to skip the model arm (templates and probes).
     When the model is on and a round fails, that arm is skipped. Templates
-    are not used as a fallback.
+    are not used as a fallback. ``hard_share`` is the run's difficulty dial
+    and reaches both arms.
     """
     cells = max(
         _MIN_CELLS_PER_CALL,
@@ -2024,6 +2038,7 @@ def make_default_generator(
         dimensions=dimensions,
         mode=mode,
         prefer_success=prefer_success,
+        hard_share=hard_share,
         **template_kwargs,
     )
     model = None
@@ -2056,6 +2071,7 @@ def make_default_generator(
             mode=mode,
             prefer_success=prefer_success,
             steering_weight=steering_weight,
+            hard_share=hard_share,
         )
 
     def _ingest_templates(

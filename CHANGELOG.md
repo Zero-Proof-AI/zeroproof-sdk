@@ -20,6 +20,77 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   rather than `ordinary`. `behavior_tier` maps a missing stance to ordinary,
   which is right for sampling and wrong for a report, where it would count as
   evidence the easy tier was covered. On that set it moved 180 rows.
+- `simulate(hard_share=)` sets the difficulty mixture: the fraction of
+  situations drawn from the ambiguous, boundary and adversarial tiers,
+  default 0.40, and the mixer honours it. `mix_items_by_tier` computed
+  `max((n + 1) // 2, round(n * ordinary_share))`, a hard 50% floor: asking
+  for 50%, 70% or 80% hard all returned exactly 50% at n=20 and n=100, so
+  the parameter moved the mix in one direction only, and no caller passed
+  it. Difficulty is what a run can teach (rlhf-book ch. 7), and selection
+  keeps only passing rows, so prompts the base already handles carry
+  nothing to imitate (ch. 9). Measured on one agent over 289 base rollouts
+  in two runs, base pass rate was 0.685 on ordinary against 0.577 on
+  boundary and 0.590 on ambiguous, with the default drawing about 31% hard.
+  The share travels through `RunConfig` to both writers as a plain
+  argument, so a hosted writer on a worker thread mixes at the share asked.
+- The hard tiers round-robin instead of draining in a fixed order. Asking for
+  75% hard returned ambiguous 60 / boundary 14 / adversarial 1, so a caller
+  buying a harder set got one hard tier rather than a hard mix; it now returns
+  25 / 25 / 25.
+- Every run records `search["tier_mix"]`: `hard_share_requested`,
+  `hard_share_realized`, per-tier `counts` and `rows`. Rows the mixer never
+  sees (open asks, arm quotas, seeds, cells with no stance) count as
+  ordinary, so a small run lands below the share it asked for; when
+  `hard_share=` was set and the gap is over ten points, the run says so in
+  `data.warnings` and names `dimensions={"stance": [...]}` as the way to
+  pin it.
+- `tools_from_traces`, `opening_share`, `infer_harness` and `marker_names`
+  are exported from `whileai.simulations`. All four were public in their own
+  modules and reachable only through a private path. `tools_from_traces`
+  rebuilds the tool surface from the calls a trace set contains, which is
+  what a caller who brings traces and no harness needs, and what
+  `simulate_from_traces` already does internally.
+- A declared tool the world never answers is named, with the fix. A tool in
+  the agent's schema with no branch in the caller's `execute=` fails exactly
+  like a world fault, the agent reports the miss, and an honesty rubric
+  rewards the row; one lane ran 612 calls to `run_query` with 4 successes
+  through 978 rows, a probe, a holdout and a published card before anyone
+  noticed (#287). Every run now records calls and successes per tool in
+  `data.coverage["tools"]` (same fault rule as `trace_mining`'s `fault_n`, so
+  the two tables agree), lists the tools that never work in
+  `data.coverage["dead_tools"]`, adds `dead_tools` to `data.degraded`, and
+  puts the names and the fix in `data.warnings` and `data.report()`: a
+  branch for the tool in `execute=` when your world answered, the ids the
+  mock world has in the tool descriptions or `seeds=` when it did. One
+  rule decides dead: the Wilson 95% upper bound on the tool's success rate
+  is under 0.30 (below that a tool cannot carry a behaviour), on at least
+  3 answered calls. 0 of 9, 1 of 21 and 4 of 612 are dead; 0 of 3 and 2 of
+  5 are not. A point-rate pair of rules ("0 of 3+", "under 5% of 10+")
+  would have called a tool with a real 30% success rate dead a third of
+  the time after three misses, and could not flag any 1-success tool
+  before its 21st call. `coverage_warnings` (so `evaluate` and
+  `run_judge`) says the same over a row list. Faults the run scheduled
+  itself are taken off the count, and a step with no recorded result is
+  not evidence, so an offline run never accuses a tool it never saw answer.
+- `decontaminate(embedder=, similarity=0.85)` adds a semantic pass on top of
+  the 8-gram rule. Word overlap does not see a paraphrase: a holdout
+  written by re-running the generator on the same briefs was 70% within
+  0.85 cosine of the training batch, and the 8-gram rule flagged 4 of its
+  101 prompts where the semantic pass flagged 16. `embedder` is any
+  callable from a list of texts to one vector per text (a
+  sentence-transformers one-liner is in the docstring), so nothing new is
+  imported and the default stays lexical. The report counts each rule on
+  its own (`n_same_task`, `n_exact`, `n_near`, `n_semantic`) and a row
+  once, and `notes` says a semantic flag means the prompts read alike, not
+  that they are the same task. Rows that share a `scenario_id` or
+  `task_id` with an eval row are now dropped as `same_task` whatever the
+  wording, and the semantic pass only looks across different task ids.
+  0.85 is a number for one embedder, so when the eval rows carry task ids
+  the pass calibrates: the 99th percentile of similarity over eval-prompt
+  pairs with different task ids is how alike distinct tasks read to this
+  embedder, `notes` says it, and says when `similarity=` is at or below
+  it (a threshold there flags tasks that merely share a domain; raise it
+  above the number to flag paraphrases only). (#286)
 
 ## 0.62 (2026-09-17)
 

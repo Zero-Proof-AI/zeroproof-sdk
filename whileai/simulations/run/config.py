@@ -53,6 +53,7 @@ _ALIAS_NAMES = {
 }
 _MOVED_NAMES = {
     "concurrency",
+    "hard_share",
     "dimensions",
     "arm_weights",
     "simulator",
@@ -348,6 +349,10 @@ class RunConfig:
     rubric: str | None
     # engine knobs
     concurrency: int
+    # the difficulty dial: share of situations drawn from the hard tiers
+    # (ambiguous, boundary, adversarial); None when the caller left it at
+    # the default. Travels to the writer and mixer as a plain argument.
+    hard_share: float | None
     dimensions: Any
     # how the situation search splits across arms: structured, llm_guided,
     # open_ended, behavior_targeted, failure_mutation. None uses SEARCH_ARMS.
@@ -483,6 +488,17 @@ def resolve_run_config(
         if sum(arm_weights.values()) <= 0:
             raise ValueError("arm_weights= must have a positive total")
     simulator = writer_spec_for(agent, cfg.pop("simulator", None))
+    hard_share = cfg.pop("hard_share", None)
+    if hard_share is not None:
+        try:
+            hard_share = float(hard_share)
+        except (TypeError, ValueError):
+            raise ValueError("hard_share= is a fraction between 0 and 1") from None
+        if not 0.0 <= hard_share <= 1.0:
+            raise ValueError(
+                f"hard_share={hard_share} is outside 0..1; it is the share of "
+                "situations drawn from the hard tiers, not a count"
+            )
     user_model = cfg.pop("user_model", None)
     if user_model is not None:
         if not isinstance(user_model, str):
@@ -677,6 +693,7 @@ def resolve_run_config(
         llm_spec=llm_spec,
         rubric=(str(rubric).strip() or None) if rubric else spec_rubric(spec),
         concurrency=concurrency,
+        hard_share=hard_share,
         dimensions=dimensions,
         arm_weights=arm_weights,
         simulator=simulator,

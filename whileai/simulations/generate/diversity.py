@@ -14,6 +14,7 @@ _VAGUENESS = ("specific", "vague", "underspecified")
 _WEIRD = ("incomplete", "specific", "rambling")
 # Generic search tiers. Domain comes from tools+policy, not these names.
 _TIERS = ("ordinary", "ambiguous", "boundary", "adversarial")
+_HARD_TIERS = ("ambiguous", "boundary", "adversarial")
 _TIER_ALIASES = {
     "ordinary": "ordinary",
     "vague": "ambiguous",
@@ -34,6 +35,17 @@ _TIER_ALIASES = {
 # Ordinary majority; other tiers stay in the bag so a short run still hits them.
 _TIER_BAG = ("ordinary",) * 6 + ("ambiguous",) + ("boundary",) + ("adversarial",) * 2
 ORDINARY_SHARE = 0.60
+#: ``simulate(hard_share=)`` default: the fraction of situations drawn from
+#: the ambiguous, boundary and adversarial tiers (rlhf-book ch. 7: what a
+#: run can teach is set by where its prompts sit on the difficulty axis).
+HARD_SHARE = round(1.0 - ORDINARY_SHARE, 2)
+
+
+def clamp_share(share: float | None, default: float = HARD_SHARE) -> float:
+    """A fraction in 0..1; ``None`` means the default."""
+    return default if share is None else max(0.0, min(1.0, float(share)))
+
+
 # Human texture: how the message is typed, independent of what it asks.
 _TEXTURES = ("lowercase", "abbreviations", "typo", "no_punctuation", "run_on", "clipped")
 _TONES = ("impatient", "frustrated", "chatty", "polite", "curt", "sarcastic")
@@ -360,16 +372,17 @@ def conversation_features(
     return out
 
 
-def mix_items_by_tier(
-    items: list, n: int, tier_of, *, ordinary_share: float = ORDINARY_SHARE
-) -> list:
-    """Breadth-first across tiers, then fill ordinary-majority.
+def mix_items_by_tier(items: list, n: int, tier_of, *, hard_share: float | None = None) -> list:
+    """Breadth-first across tiers, then fill to ``hard_share``.
 
     First items hit ordinary plus a hard case. A 24-cell or 100-row slice
-    is not one tier. Unknown tiers count as ordinary.
+    is not one tier. Unknown tiers count as ordinary. ``hard_share`` is the
+    fraction drawn from the hard tiers, round-robin across them; the
+    default is ``HARD_SHARE``.
     """
     if not items or n <= 0:
         return []
+    hard_share = clamp_share(hard_share)
     n = min(int(n), len(items))
     buckets: dict[str, list] = {tier: [] for tier in _TIERS}
     for item in items:
@@ -402,16 +415,25 @@ def mix_items_by_tier(
             if tier not in have:
                 take(tier)
 
-    target_ordinary = max((n + 1) // 2, round(n * ordinary_share))
+    # No floor: the old `max((n + 1) // 2, ...)` pinned ordinary at 50% for
+    # any hard share over it, so the dial only turned one way.
+    target_ordinary = n - min(n, max(0, round(n * hard_share)))
+    hard_cursor = 0
     while len(picked) < n:
         ordinary_count = sum(1 for item in picked if tier_of(item) == "ordinary")
         if ordinary_count < target_ordinary and take("ordinary"):
             continue
+        # Round-robin the hard tiers: draining "ambiguous" first turned a
+        # 25% ordinary ask into one hard tier instead of a hard mix.
         progressed = False
-        for tier in ("ambiguous", "boundary", "adversarial", "ordinary"):
+        for offset in range(len(_HARD_TIERS)):
+            tier = _HARD_TIERS[(hard_cursor + offset) % len(_HARD_TIERS)]
             if take(tier):
+                hard_cursor = (hard_cursor + offset + 1) % len(_HARD_TIERS)
                 progressed = True
                 break
+        if not progressed and take("ordinary"):
+            progressed = True
         if not progressed:
             break
     return picked
