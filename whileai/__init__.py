@@ -17,6 +17,7 @@ from .ingest import (
     ingest_traces,
     list_traces,
     otel_env,
+    send_runs,
     send_traces,
 )
 
@@ -40,6 +41,7 @@ __all__ = [
     "logout",
     "otel_env",
     "resolve_api_key",
+    "send_runs",
     "send_traces",
     "signup",
 ]

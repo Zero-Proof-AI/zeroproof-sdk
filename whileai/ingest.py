@@ -24,11 +24,22 @@ Two ways in, both dependency-light:
        from whileai.ingest import ingest_traces
        print(ingest_traces("zp_...", "traces.json")["datasetId"])
 
+3. Rows you already scored. Most harnesses are not OTel-instrumented: they
+   call a model k times a prompt, score each answer, and hold a list. Send
+   that list; the envelope is written for you.
+
+       from whileai.ingest import send_runs
+       send_runs(rows, agent="refund-triage")
+
 Auth is the X-Api-Key header, because exporters cannot carry a Clerk JWT.
 """
 
 import gzip
+import hashlib
 import json
+import os
+import time
+from collections.abc import Iterable, Mapping
 
 import requests
 
@@ -162,6 +173,154 @@ def ingest_traces(
         body = json.dumps(batch).encode("utf-8")
 
     return send_traces(api_key, body, base_url=base_url)
+
+
+# The row keys a scored run arrives under. `pull()` hands back
+# scenario_id/prompt/final_text/reward, so what comes off the platform goes
+# straight back in; the rest are what harnesses in the wild call the same
+# field. `info` is read as a fallback because that is where `pull()` keeps
+# the model and the duration.
+_PROMPT_KEYS = ("prompt", "input", "question")
+_COMPLETION_KEYS = ("final_text", "completion", "output", "response", "answer")
+_REWARD_KEYS = ("reward", "score")
+_SCENARIO_KEYS = ("scenario_id", "scenario", "case", "task_id")
+_MODEL_KEYS = ("model", "model_version")
+
+
+def _attr(key: str, value: object) -> dict:
+    if isinstance(value, bool):
+        return {"key": key, "value": {"boolValue": value}}
+    if isinstance(value, (int, float)):
+        return {"key": key, "value": {"doubleValue": float(value)}}
+    return {"key": key, "value": {"stringValue": str(value)}}
+
+
+def _field(row: Mapping, info: Mapping, keys: tuple[str, ...]) -> object:
+    for source in (row, info):
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def send_runs(
+    rows: Iterable[Mapping],
+    *,
+    agent: str,
+    api_key: str | None = None,
+    dataset: str | None = None,
+    pass_at: float = 1.0,
+    model: str | None = None,
+    base_url: str | None = None,
+    timeout: int = 60,
+) -> dict:
+    """
+    Send scored runs — the rows your eval loop already has — as traces.
+
+    The inverse of ``rows_from_otel``: you hand over
+    ``{scenario_id, prompt, final_text, reward}`` and the OTLP envelope is
+    written for you, so an agent that emits no OpenTelemetry still lands on
+    the traces page.
+
+        whileai.send_runs(rows, agent="refund-triage")
+        wai.cuts("refund-triage")   # what is worth training on
+
+    Runs of one prompt must share a ``scenario_id`` to be grouped, and a
+    grouped prompt the agent passes some of the time is what training data
+    is made of. Rows without one are grouped by their prompt text. ``reward``
+    is scored against ``pass_at`` (1.0 by default: a reward of 1 is a pass);
+    rows without a reward land ungraded, which is honest and cuts nothing.
+    One span per run — tool steps are not sent.
+    """
+    from .auth import resolve_api_key
+
+    key = resolve_api_key(api_key)
+    if not key:
+        raise WhileIngestError(
+            "no API key: pass api_key=, set WHILEAI_API_KEY, or run `whileai login`"
+        )
+    name = str(agent or "").strip()
+    if not name:
+        raise WhileIngestError("agent= is required: it is how the traces page finds these runs")
+    runs = list(rows or [])
+    if not runs:
+        raise WhileIngestError("no rows to send")
+
+    now = time.time_ns()
+    spans = []
+    for i, row in enumerate(runs):
+        if not isinstance(row, Mapping):
+            raise WhileIngestError(
+                f"row {i} is a {type(row).__name__}, not a dict of "
+                "{scenario_id, prompt, final_text, reward}"
+            )
+        info = row.get("info") if isinstance(row.get("info"), Mapping) else {}
+        prompt = _field(row, info, _PROMPT_KEYS)
+        if prompt is None:
+            raise WhileIngestError(
+                f"row {i} has no prompt (keys: {', '.join(map(str, row)) or 'none'})"
+            )
+        scenario = _field(row, info, _SCENARIO_KEYS)
+        if scenario is None:
+            scenario = "p-" + hashlib.sha1(str(prompt).encode("utf-8")).hexdigest()[:12]
+        attributes = [
+            _attr("gen_ai.agent.name", name),
+            _attr("test.case.name", scenario),
+            _attr("gen_ai.prompt", prompt),
+        ]
+        completion = _field(row, info, _COMPLETION_KEYS)
+        if completion is not None:
+            attributes.append(_attr("gen_ai.completion", completion))
+        used = _field(row, info, _MODEL_KEYS) or model
+        if used:
+            attributes.append(_attr("gen_ai.request.model", used))
+        reward = _field(row, info, _REWARD_KEYS)
+        if reward is not None:
+            try:
+                score = float(reward)
+            except (TypeError, ValueError) as exc:
+                raise WhileIngestError(
+                    f"row {i} has a reward that is not a number: {reward!r}"
+                ) from exc
+            # Without the bar a score is stored but never judged, so no prompt
+            # is ever worth training on and every cut comes back empty.
+            attributes.append(_attr("zeroproof.score", score))
+            attributes.append(_attr("zeroproof.score.pass_at", float(pass_at)))
+        # Milliseconds apart, oldest first, so the runs table keeps the order
+        # the loop produced them in.
+        start = now - (len(runs) - i) * 1_000_000
+        held = _field(row, info, ("duration_ms",)) or 0
+        spans.append(
+            {
+                "traceId": os.urandom(16).hex(),
+                "spanId": os.urandom(8).hex(),
+                "name": "agent.run",
+                "kind": 1,
+                "startTimeUnixNano": str(start),
+                "endTimeUnixNano": str(start + int(float(held) * 1_000_000)),
+                "attributes": attributes,
+            }
+        )
+
+    tag = str(dataset or name)
+    batch = {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [
+                        _attr("service.name", name),
+                        *[_attr(k, tag) for k in _DATASET_KEYS],
+                    ]
+                },
+                "scopeSpans": [{"scope": {"name": "whileai.send_runs"}, "spans": spans}],
+            }
+        ]
+    }
+    body = json.dumps(batch).encode("utf-8")
+    if len(body) > 1_000_000:
+        body = gzip.compress(body)
+    return send_traces(key, body, base_url=base_url, timeout=timeout)
 
 
 def list_traces(api_key: str | None = None, base_url: str | None = None, timeout: int = 30) -> dict:
