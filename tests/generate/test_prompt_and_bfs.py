@@ -614,13 +614,17 @@ def test_want_followup_until_budget_user_turns():
     assert _want_followup("hi", 3, user_turns=2, budget=6, agent_text=asked)
     assert not _want_followup("hi", 5, user_turns=3, budget=6, agent_text=asked)
     assert not _want_followup("hi", 7, user_turns=4, budget=8, agent_text=asked)
-    # After a completed action about half of humans react (budget >= 4).
+    # After a completed action the thread continues with p = 1 - 1/cap, so at
+    # budget 6 (cap 3) about two thirds react rather than the old fixed half.
+    # The old coin flip pinned mean depth near 1.5 whatever avg_turns said,
+    # which made three-turn behaviours like confirm-before-acting
+    # ungeneratable.
     completed = "Done, I opened the return for order 4821."
     hits = sum(
         _want_followup(f"msg-{i}", 1, user_turns=1, budget=6, agent_text=completed)
         for i in range(40)
     )
-    assert 8 <= hits <= 32
+    assert 18 <= hits <= 38
     assert not _want_followup("msg", 1, user_turns=1, budget=2, agent_text=completed)
 
 
@@ -1774,3 +1778,59 @@ def test_user_simulator_hints_come_from_this_agents_tools():
     bare = user_sim_system(None)
     assert "(whatever this thread is actually about)" in bare
     assert "repo" not in bare
+
+
+def test_followup_depth_tracks_avg_turns():
+    """A reply that is not a question, a refusal or a recognised success used
+    to end the thread, so the mean sat near 1.5 whatever avg_turns said (1.54
+    at 6, 1.52 at 10 on the same spec). Confirm-before-acting needs three user
+    turns to happen at all, so that silently made the behaviour ungeneratable."""
+    import statistics
+
+    from whileai.simulations.generate.agents import _want_followup
+
+    def depth(budget: int) -> float:
+        lens = []
+        for i in range(2000):
+            n = 1
+            while (
+                _want_followup(f"m{i}", n, user_turns=n, budget=budget, agent_text="4821 orders.")
+                and n < 50
+            ):
+                n += 1
+            lens.append(n)
+        return statistics.mean(lens)
+
+    shallow, deep = depth(6), depth(16)
+    assert deep > shallow + 2, (shallow, deep)
+    assert 1.5 < shallow < 3.0 and 4.0 < deep < 7.0, (shallow, deep)
+    # the cap is still honoured
+    assert not _want_followup("m", 9, user_turns=9, budget=6, agent_text="ok")
+
+
+def test_followup_depth_does_not_depend_on_success_phrasing():
+    """Depth used to turn on whether the agent's reply matched a success
+    regex, so "Done, I cancelled it" and "Your reservation has been
+    cancelled" gave mean depth 1.91 and 1.00 for the same event. That made
+    depth a property of each spec's wording rather than of avg_turns, and a
+    per-cell confound in any grid that compares specs."""
+    import statistics
+
+    from whileai.simulations.generate.agents import _want_followup
+
+    def depth(text: str) -> float:
+        lens = []
+        for i in range(1500):
+            n = 1
+            while _want_followup(f"m{i}", n, user_turns=n, budget=12, agent_text=text) and n < 50:
+                n += 1
+            lens.append(n)
+        return statistics.mean(lens)
+
+    active = depth("Done, I cancelled reservation 4821.")
+    passive = depth("Your reservation has been cancelled.")
+    plain = depth("There are 4821 orders in the last quarter.")
+    assert abs(active - passive) < 0.3, (active, passive)
+    assert abs(active - plain) < 0.3, (active, plain)
+    # a question still earns an answer, which is the one phrasing that should matter
+    assert depth("Do you want me to cancel it?") > active

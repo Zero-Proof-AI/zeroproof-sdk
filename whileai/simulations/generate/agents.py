@@ -897,9 +897,21 @@ def _want_followup(
 
     A question or refusal earns an answer while the turn budget has
     room: the depth cap is ``budget // 2`` user turns (avg_turns=12
-    allows 6, avg_turns=4 allows 2). After a completed action about
-    half of people react or ask the next thing, when the thread has
-    budget for it. Short-budget threads still end on the agent.
+    allows 6, avg_turns=4 allows 2). Otherwise the thread continues with
+    probability ``1 - 1/cap``, which makes the mean depth track the cap.
+    A budget under 4 still ends on the agent.
+
+    Before this, any reply that was not a question, a refusal, or a
+    recognised success ended the thread, and a completed action only
+    continued on a fixed coin flip. "Your reservation has been cancelled"
+    matches none of those, so threads died at one user turn and the mean
+    sat near 1.5 whatever ``avg_turns`` said: measured 1.54 at avg_turns=6
+    and 1.52 at avg_turns=10 on the same spec. That silently caps every
+    behaviour that needs three turns to happen at all. Confirm-before-
+    acting is the clearest case: the user asks, the agent names the action
+    and asks, the user says yes, the agent acts. At 1.5 user turns most
+    rollouts never reach the write, so the rule is never exercised and the
+    training set cannot demonstrate it.
     """
     cap = max(2, int(budget) // 2)
     if int(user_turns) >= cap:
@@ -909,10 +921,15 @@ def _want_followup(
         return True
     if _AGENT_REFUSAL.search(text):
         return True
-    if int(budget) >= 4 and _AGENT_SUCCESS.search(text):
-        digest = hashlib.sha256(f"{message}:{turn_i}:react".encode()).hexdigest()
-        return int(digest[:8], 16) % 2 == 0
-    return False
+    if int(budget) < 4:
+        # A short thread still ends on the agent: with room for one user line
+        # there is nothing a second one could be for.
+        return False
+    # Geometric with p = 1 - 1/cap: a thread of cap turns in expectation,
+    # deterministic in the message and turn so a seeded run reproduces.
+    digest = hashlib.sha256(f"{message}:{turn_i}:react".encode()).hexdigest()
+    draw = int(digest[:8], 16) / float(1 << 32)
+    return draw < (1.0 - 1.0 / float(cap))
 
 
 # Follow-up user turns only. Opener temperature lives on the writer (0.45–1.05).
@@ -1052,11 +1069,6 @@ _CONFIRM_ONLY = re.compile(
     re.I,
 )
 _AGENT_QUESTION = re.compile(r"\?\s*$|\b(which|what|who|where|can you|could you)\b", re.I)
-_AGENT_SUCCESS = re.compile(
-    r"\b(done|created|opened|fixed|all set|i (have|'ve|just)|"
-    r"successfully|completed)\b",
-    re.I,
-)
 _AGENT_REFUSAL = re.compile(
     r"\b(can't|cannot|won't|unable|not allowed|against (the )?(policy|rules?))\b",
     re.I,
