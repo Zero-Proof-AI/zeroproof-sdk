@@ -1,0 +1,311 @@
+{
+  "reward_shape": {
+    "rows": 360,
+    "with_reward": 360,
+    "fractional_would_be_skipped": 0,
+    "distinct": [
+      0.0,
+      1.0
+    ]
+  },
+  "gold": {
+    "rows": 360,
+    "labelled": 221
+  },
+  "agreement_all": {
+    "n": 221,
+    "agreement": 0.629,
+    "ci95": null,
+    "kappa": 0.0491,
+    "pass_when_gold_fail": 0.7945,
+    "fail_when_gold_pass": 0.1622,
+    "gold_kind": "program",
+    "ok": true,
+    "warnings": [
+      "judge passed 58 of 73 gold failures (79%); those rows train the failure, not the behavior"
+    ]
+  },
+  "per_class_action": {
+    "BIG": {
+      "n": 114,
+      "agreement": 0.7895,
+      "agreement_ci95": [
+        0.706,
+        0.854
+      ],
+      "rule_pass_rate": 0.8421,
+      "judge_pass_rate": 0.9474,
+      "gold_fail_rows": 18,
+      "judge_passed_them": 18,
+      "leak_rate": 1.0,
+      "leak_ci95": [
+        0.824,
+        1.0
+      ],
+      "leak_pattern": {
+        "announced_but_no_call": 15,
+        "wrong_tool_called": 1,
+        "no_action_no_claim": 2,
+        "total": 18
+      }
+    },
+    "SMALL": {
+      "n": 108,
+      "agreement": 0.6389,
+      "agreement_ci95": [
+        0.545,
+        0.723
+      ],
+      "rule_pass_rate": 0.5278,
+      "judge_pass_rate": 0.8889,
+      "gold_fail_rows": 51,
+      "judge_passed_them": 39,
+      "leak_rate": 0.7647,
+      "leak_ci95": [
+        0.632,
+        0.86
+      ],
+      "leak_pattern": {
+        "announced_but_no_call": 26,
+        "wrong_tool_called": 7,
+        "no_action_no_claim": 6,
+        "total": 39
+      }
+    }
+  },
+  "judge_retest": {
+    "base-big": {
+      "n": 120,
+      "aligned": 120,
+      "identical": 120,
+      "self_agreement": 1.0,
+      "judge_temperature": 0.0,
+      "note": "temperature 0: determinism, not stability under sampling"
+    },
+    "base-small": {
+      "n": 120,
+      "aligned": 120,
+      "identical": 120,
+      "self_agreement": 1.0,
+      "judge_temperature": 0.0,
+      "note": "temperature 0: determinism, not stability under sampling"
+    }
+  },
+  "verdict_flip": {
+    "rule": {
+      "mean_a": 0.6139751572660382,
+      "mean_b": 0.5637157683586255,
+      "delta": -0.050137782882751926,
+      "ci95": [
+        -0.20832738095238099,
+        0.1080150660742766
+      ],
+      "p_value": 0.551224387806097,
+      "verdict": "no_difference_detected",
+      "n_paired": 20
+    },
+    "judge": {
+      "mean_a": 0.8660950923431574,
+      "mean_b": 0.6076094540380255,
+      "delta": -0.26471467483754635,
+      "ci95": [
+        -0.3845392964878259,
+        -0.1590605189444199
+      ],
+      "p_value": 0.0004997501249375312,
+      "verdict": "a_better",
+      "n_paired": 20
+    }
+  },
+  "judge_trust": {
+    "ok": false,
+    "n_rows": 360,
+    "n_labeled": 221,
+    "gold_kind": "program",
+    "agreement": {
+      "n": 221,
+      "n_skipped": 139,
+      "n_unmatched": 0,
+      "agreement": 0.629,
+      "kappa": 0.0491,
+      "confusion": {
+        "tp": 124,
+        "fp": 58,
+        "fn": 24,
+        "tn": 15
+      },
+      "pass_when_gold_fail": 0.7945,
+      "fail_when_gold_pass": 0.1622,
+      "judge_pass_rate": 0.8235,
+      "gold_pass_rate": 0.6697,
+      "gold_kind": "program",
+      "ok": true,
+      "warnings": [
+        "judge passed 58 of 73 gold failures (79%); those rows train the failure, not the behavior"
+      ],
+      "ci95": [
+        0.5635723528457032,
+        0.689939452798804
+      ]
+    },
+    "held_out_halves": {
+      "a": {
+        "n": 149,
+        "n_skipped": 0,
+        "n_unmatched": 0,
+        "agreement": 0.6174,
+        "kappa": 0.0573,
+        "confusion": {
+          "tp": 80,
+          "fp": 39,
+          "fn": 18,
+          "tn": 12
+        },
+        "pass_when_gold_fail": 0.7647,
+        "fail_when_gold_pass": 0.1837,
+        "judge_pass_rate": 0.7987,
+        "gold_pass_rate": 0.6577,
+        "gold_kind": "program",
+        "ok": true,
+        "warnings": [
+          "judge passed 39 of 51 gold failures (76%); those rows train the failure, not the behavior"
+        ],
+        "ci95": [
+          0.5373897256618678,
+          0.6916055217053412
+        ]
+      },
+      "b": {
+        "n": 72,
+        "n_skipped": 0,
+        "n_unmatched": 0,
+        "agreement": 0.6528,
+        "kappa": 0.0196,
+        "confusion": {
+          "tp": 44,
+          "fp": 19,
+          "fn": 6,
+          "tn": 3
+        },
+        "pass_when_gold_fail": 0.8636,
+        "fail_when_gold_pass": 0.12,
+        "judge_pass_rate": 0.875,
+        "gold_pass_rate": 0.6944,
+        "gold_kind": "program",
+        "ok": true,
+        "warnings": [
+          "judge passed 19 of 22 gold failures (86%); those rows train the failure, not the behavior"
+        ],
+        "ci95": [
+          0.5376108847085543,
+          0.7524673836824078
+        ]
+      }
+    },
+    "length_sensitivity": {
+      "gold_1": {
+        "n": 148,
+        "median_chars": 421,
+        "judge_pass_short": 0.8513513513513513,
+        "judge_pass_long": 0.8243243243243243,
+        "gap_long_minus_short": -0.027027027027026973
+      },
+      "gold_0": {
+        "n": 73,
+        "median_chars": 341,
+        "judge_pass_short": 0.9444444444444444,
+        "judge_pass_long": 0.6486486486486487,
+        "gap_long_minus_short": -0.29579579579579574
+      },
+      "max_gap": 0.29579579579579574,
+      "flagged": true
+    },
+    "perturbation": null,
+    "probes": null,
+    "exploitable_by": [],
+    "warnings": [
+      "judge passed 58 of 73 gold failures (79%); those rows train the failure, not the behavior",
+      "Judge agreement with human labels is 0.56 (lower bound), under the 0.80 floor. Change the judge prompt or the judge model, then run judge_trust again.",
+      "Judge agreement with human labels beyond chance (kappa) is 0.05, under the 0.60 floor. Change the judge prompt or the judge model, then run judge_trust again.",
+      "judge pass rate differs by 30% between short and long replies with the same gold label: length bias"
+    ]
+  },
+  "literal_rubric": {
+    "BIG": {
+      "original": {
+        "n": 114,
+        "agreement": 0.7895,
+        "agreement_ci95": [
+          0.706,
+          0.854
+        ],
+        "gold_fail_rows": 18,
+        "judge_passed_them": 18,
+        "leak_rate": 1.0,
+        "leak_ci95": [
+          0.824,
+          1.0
+        ]
+      },
+      "literal": {
+        "n": 114,
+        "agreement": 0.807,
+        "agreement_ci95": [
+          0.725,
+          0.869
+        ],
+        "gold_fail_rows": 18,
+        "judge_passed_them": 17,
+        "leak_rate": 0.9444,
+        "leak_ci95": [
+          0.742,
+          0.99
+        ]
+      },
+      "mcnemar": {
+        "discordant": 8,
+        "b_orig_only": 3,
+        "c_lit_only": 5,
+        "p_value": 0.7266
+      }
+    },
+    "SMALL": {
+      "original": {
+        "n": 108,
+        "agreement": 0.6389,
+        "agreement_ci95": [
+          0.545,
+          0.723
+        ],
+        "gold_fail_rows": 51,
+        "judge_passed_them": 39,
+        "leak_rate": 0.7647,
+        "leak_ci95": [
+          0.632,
+          0.86
+        ]
+      },
+      "literal": {
+        "n": 108,
+        "agreement": 0.5648,
+        "agreement_ci95": [
+          0.471,
+          0.655
+        ],
+        "gold_fail_rows": 51,
+        "judge_passed_them": 44,
+        "leak_rate": 0.8627,
+        "leak_ci95": [
+          0.743,
+          0.932
+        ]
+      },
+      "mcnemar": {
+        "discordant": 10,
+        "b_orig_only": 9,
+        "c_lit_only": 1,
+        "p_value": 0.0215
+      }
+    }
+  }
+}

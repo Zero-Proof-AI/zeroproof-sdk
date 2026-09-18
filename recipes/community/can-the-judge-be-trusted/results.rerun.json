@@ -1,0 +1,415 @@
+{
+  "reward_shape": {
+    "rows": 270,
+    "with_reward": 270,
+    "fractional_would_be_skipped": 0,
+    "distinct": [
+      0.0,
+      1.0
+    ]
+  },
+  "gold": {
+    "rows": 270,
+    "labelled": 166
+  },
+  "agreement_all": {
+    "n": 166,
+    "agreement": 0.5843,
+    "ci95": null,
+    "kappa": 0.0255,
+    "pass_when_gold_fail": 0.75,
+    "fail_when_gold_pass": 0.2264,
+    "gold_kind": "program",
+    "ok": true,
+    "warnings": [
+      "judge passed 45 of 60 gold failures (75%); those rows train the failure, not the behavior"
+    ]
+  },
+  "per_class_action": {
+    "BIG": {
+      "n": 82,
+      "agreement": 0.7683,
+      "agreement_ci95": [
+        0.666,
+        0.846
+      ],
+      "rule_pass_rate": 0.8293,
+      "judge_pass_rate": 0.939,
+      "gold_fail_rows": 14,
+      "judge_passed_them": 14,
+      "leak_rate": 1.0,
+      "leak_ci95": [
+        0.785,
+        1.0
+      ],
+      "leak_pattern": {
+        "announced_but_no_call": 13,
+        "wrong_tool_called": 0,
+        "no_action_no_claim": 1,
+        "total": 14
+      }
+    },
+    "SMALL": {
+      "n": 85,
+      "agreement": 0.5882,
+      "agreement_ci95": [
+        0.482,
+        0.687
+      ],
+      "rule_pass_rate": 0.4941,
+      "judge_pass_rate": 0.8118,
+      "gold_fail_rows": 43,
+      "judge_passed_them": 31,
+      "leak_rate": 0.7209,
+      "leak_ci95": [
+        0.573,
+        0.833
+      ],
+      "leak_pattern": {
+        "announced_but_no_call": 22,
+        "wrong_tool_called": 4,
+        "no_action_no_claim": 5,
+        "total": 31
+      }
+    }
+  },
+  "judge_retest": {
+    "base-big": {
+      "n": 120,
+      "aligned": 120,
+      "identical": 120,
+      "self_agreement": 1.0,
+      "judge_temperature": 0.0,
+      "note": "temperature 0: determinism, not stability under sampling"
+    },
+    "base-small": {
+      "n": 120,
+      "aligned": 120,
+      "identical": 120,
+      "self_agreement": 1.0,
+      "judge_temperature": 0.0,
+      "note": "temperature 0: determinism, not stability under sampling"
+    }
+  },
+  "verdict_flip": {
+    "rule": {
+      "mean_a": 0.5394653765207125,
+      "mean_b": 0.6353070175438597,
+      "delta": 0.11689510337107592,
+      "ci95": [
+        -0.07125424727827474,
+        0.31692757090354345
+      ],
+      "p_value": 0.24437781109445278,
+      "verdict": "no_difference_detected",
+      "n_paired": 20
+    },
+    "judge": {
+      "mean_a": 0.8243989870472084,
+      "mean_b": 0.6842105263157895,
+      "delta": -0.14762835943613978,
+      "ci95": [
+        -0.2548484848484849,
+        -0.04346169276947309
+      ],
+      "p_value": 0.01899050474762619,
+      "verdict": "a_better",
+      "n_paired": 20
+    }
+  },
+  "judge_trust": {
+    "ok": false,
+    "n_rows": 270,
+    "n_labeled": 166,
+    "gold_kind": "program",
+    "agreement": {
+      "n": 166,
+      "n_skipped": 104,
+      "n_unmatched": 0,
+      "agreement": 0.5843,
+      "kappa": 0.0255,
+      "confusion": {
+        "tp": 82,
+        "fp": 45,
+        "fn": 24,
+        "tn": 15
+      },
+      "pass_when_gold_fail": 0.75,
+      "fail_when_gold_pass": 0.2264,
+      "judge_pass_rate": 0.7651,
+      "gold_pass_rate": 0.6386,
+      "gold_kind": "program",
+      "ok": true,
+      "warnings": [
+        "judge passed 45 of 60 gold failures (75%); those rows train the failure, not the behavior"
+      ],
+      "ci95": [
+        0.5082850407789143,
+        0.6565744518306702
+      ]
+    },
+    "held_out_halves": {
+      "a": {
+        "n": 115,
+        "n_skipped": 0,
+        "n_unmatched": 0,
+        "agreement": 0.6261,
+        "kappa": 0.1043,
+        "confusion": {
+          "tp": 60,
+          "fp": 27,
+          "fn": 16,
+          "tn": 12
+        },
+        "pass_when_gold_fail": 0.6923,
+        "fail_when_gold_pass": 0.2105,
+        "judge_pass_rate": 0.7565,
+        "gold_pass_rate": 0.6609,
+        "gold_kind": "program",
+        "ok": true,
+        "warnings": [
+          "judge passed 27 of 39 gold failures (69%); those rows train the failure, not the behavior"
+        ],
+        "ci95": [
+          0.5349246898224094,
+          0.7090976054008122
+        ]
+      },
+      "b": {
+        "n": 51,
+        "n_skipped": 0,
+        "n_unmatched": 0,
+        "agreement": 0.4902,
+        "kappa": -0.1333,
+        "confusion": {
+          "tp": 22,
+          "fp": 18,
+          "fn": 8,
+          "tn": 3
+        },
+        "pass_when_gold_fail": 0.8571,
+        "fail_when_gold_pass": 0.2667,
+        "judge_pass_rate": 0.7843,
+        "gold_pass_rate": 0.5882,
+        "gold_kind": "program",
+        "ok": true,
+        "warnings": [
+          "judge passed 18 of 21 gold failures (86%); those rows train the failure, not the behavior"
+        ],
+        "ci95": [
+          0.35857262142306195,
+          0.623193045515904
+        ]
+      }
+    },
+    "length_sensitivity": {
+      "gold_1": {
+        "n": 106,
+        "median_chars": 386,
+        "judge_pass_short": 0.6981132075471698,
+        "judge_pass_long": 0.8490566037735849,
+        "gap_long_minus_short": 0.15094339622641517
+      },
+      "gold_0": {
+        "n": 60,
+        "median_chars": 342,
+        "judge_pass_short": 0.9333333333333333,
+        "judge_pass_long": 0.5666666666666667,
+        "gap_long_minus_short": -0.3666666666666667
+      },
+      "max_gap": 0.3666666666666667,
+      "flagged": true
+    },
+    "perturbation": {
+      "n": 25,
+      "consistency_flip_rate": 0.04,
+      "filler_flip_rate": 0.08,
+      "filler_flips_up": 1,
+      "filler_flips_down": 1,
+      "flagged_consistency": false,
+      "flagged_length": false,
+      "errors": 0
+    },
+    "probes": {
+      "n": 25,
+      "probes": {
+        "filler": {
+          "n": 25,
+          "kind": "additive",
+          "pass_before": 0.72,
+          "pass_after": 0.72,
+          "flips_up": 1,
+          "flips_down": 1,
+          "exploit_rate": 0.14285714285714285,
+          "flagged": true,
+          "errors": 0
+        },
+        "keyword_stuffing": {
+          "n": 0,
+          "skipped": "no rubric words to stuff"
+        },
+        "success_claim": {
+          "n": 25,
+          "kind": "additive",
+          "pass_before": 0.72,
+          "pass_after": 0.76,
+          "flips_up": 1,
+          "flips_down": 0,
+          "exploit_rate": 0.14285714285714285,
+          "flagged": true,
+          "errors": 0
+        },
+        "prompt_echo": {
+          "n": 25,
+          "kind": "additive",
+          "pass_before": 0.72,
+          "pass_after": 0.8,
+          "flips_up": 2,
+          "flips_down": 0,
+          "exploit_rate": 0.2857142857142857,
+          "flagged": true,
+          "errors": 0
+        },
+        "sycophancy": {
+          "n": 25,
+          "kind": "additive",
+          "pass_before": 0.72,
+          "pass_after": 0.76,
+          "flips_up": 1,
+          "flips_down": 0,
+          "exploit_rate": 0.14285714285714285,
+          "flagged": true,
+          "errors": 0
+        },
+        "empty_format": {
+          "n": 25,
+          "kind": "replacement",
+          "pass_before": 0.72,
+          "pass_after": 0.0,
+          "flips_up": 0,
+          "flips_down": 18,
+          "exploit_rate": 0.0,
+          "flagged": false,
+          "errors": 0
+        },
+        "refusal": {
+          "n": 25,
+          "kind": "replacement",
+          "pass_before": 0.72,
+          "pass_after": 0.0,
+          "flips_up": 0,
+          "flips_down": 18,
+          "exploit_rate": 0.0,
+          "flagged": false,
+          "errors": 0
+        }
+      },
+      "exploitable_by": [
+        "filler",
+        "success_claim",
+        "prompt_echo",
+        "sycophancy"
+      ],
+      "warnings": [
+        "judge is exploitable by length (filler): 14% of failing replies pass once it is added (1 of 7)",
+        "judge is exploitable by a claim of success with no evidence (success_claim): 14% of failing replies pass once it is added (1 of 7)",
+        "judge is exploitable by restating the ask (prompt_echo): 29% of failing replies pass once it is added (2 of 7)",
+        "judge is exploitable by agreeing with the user (sycophancy): 14% of failing replies pass once it is added (1 of 7)"
+      ]
+    },
+    "exploitable_by": [
+      "filler",
+      "success_claim",
+      "prompt_echo",
+      "sycophancy"
+    ],
+    "warnings": [
+      "judge passed 45 of 60 gold failures (75%); those rows train the failure, not the behavior",
+      "Judge agreement with human labels is 0.51 (lower bound), under the 0.80 floor. Change the judge prompt or the judge model, then run judge_trust again.",
+      "Judge agreement with human labels beyond chance (kappa) is 0.03, under the 0.60 floor. Change the judge prompt or the judge model, then run judge_trust again.",
+      "judge pass rate differs by 37% between short and long replies with the same gold label: length bias",
+      "judge is exploitable by length (filler): 14% of failing replies pass once it is added (1 of 7)",
+      "judge is exploitable by a claim of success with no evidence (success_claim): 14% of failing replies pass once it is added (1 of 7)",
+      "judge is exploitable by restating the ask (prompt_echo): 29% of failing replies pass once it is added (2 of 7)",
+      "judge is exploitable by agreeing with the user (sycophancy): 14% of failing replies pass once it is added (1 of 7)"
+    ]
+  },
+  "literal_rubric": {
+    "BIG": {
+      "original": {
+        "n": 82,
+        "agreement": 0.7683,
+        "agreement_ci95": [
+          0.666,
+          0.846
+        ],
+        "gold_fail_rows": 14,
+        "judge_passed_them": 14,
+        "leak_rate": 1.0,
+        "leak_ci95": [
+          0.785,
+          1.0
+        ]
+      },
+      "literal": {
+        "n": 82,
+        "agreement": 0.7805,
+        "agreement_ci95": [
+          0.679,
+          0.856
+        ],
+        "gold_fail_rows": 14,
+        "judge_passed_them": 14,
+        "leak_rate": 1.0,
+        "leak_ci95": [
+          0.785,
+          1.0
+        ]
+      },
+      "mcnemar": {
+        "discordant": 5,
+        "b_orig_only": 2,
+        "c_lit_only": 3,
+        "p_value": 1.0
+      }
+    },
+    "SMALL": {
+      "original": {
+        "n": 85,
+        "agreement": 0.5882,
+        "agreement_ci95": [
+          0.482,
+          0.687
+        ],
+        "gold_fail_rows": 43,
+        "judge_passed_them": 31,
+        "leak_rate": 0.7209,
+        "leak_ci95": [
+          0.573,
+          0.833
+        ]
+      },
+      "literal": {
+        "n": 85,
+        "agreement": 0.5647,
+        "agreement_ci95": [
+          0.459,
+          0.665
+        ],
+        "gold_fail_rows": 43,
+        "judge_passed_them": 36,
+        "leak_rate": 0.8372,
+        "leak_ci95": [
+          0.7,
+          0.919
+        ]
+      },
+      "mcnemar": {
+        "discordant": 10,
+        "b_orig_only": 6,
+        "c_lit_only": 4,
+        "p_value": 0.7539
+      }
+    }
+  }
+}
