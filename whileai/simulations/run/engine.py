@@ -123,6 +123,7 @@ from .rows import (
     _stratified_prompts,
     _unusable_reason,
     _usable_rollout,
+    failed_criteria,
     mutation_worthy,
     record_coverage,
     row_cell_key,
@@ -168,9 +169,24 @@ def _timeout_error(message: str) -> bool:
 
 
 def _graded_failure(row: dict) -> bool:
-    """Did the grader fail this row? A reward under 0.5: a 0 from a 0/1
-    judge, a failed verifier, a rubric below half. ``None`` (not judged,
-    judge error) is not a failure."""
+    """Did the grader fail this row? A reward under 0.5, OR any single
+    rubric criterion failed.
+
+    The scalar alone is not enough. ``rubric_judge`` scores a rubric as the
+    mean of its criteria, so a row that breaks one rule of three still scores
+    0.667 and passes a 0.5 threshold. Those rows are exactly the ones a rubric
+    cares about, and reading only the mean made them invisible to the search:
+    the situation was never re-rolled, so the rule was never aimed at (#285,
+    where the four missed rules failed 4 to 10% of the time in the source
+    traces and 0 to 2% in what was generated from them).
+
+    A criterion that never varies contributes no advantage to a grouped
+    update (rlhf-book ch. 6), and difficulty filtering has to read the band on
+    the criterion being trained rather than on a mean that spans several
+    (ch. 7). ``None`` (not judged, judge error) is still not a failure.
+    """
+    if failed_criteria(row):
+        return True
     reward = row.get("reward")
     if reward is None or isinstance(reward, bool):
         return False
@@ -1226,6 +1242,10 @@ class Run:
         # produced (#285): a fault the world raised, or a grade the judge
         # gave. Reported as search["mutation_aims"].
         self.failure_aim: dict[str, str] = {}
+        # Which rubric criterion drove each mutation, by name. Reported as
+        # search["failure_criteria"], so a run can say what it aimed at
+        # rather than only how many rows it re-rolled.
+        self.failure_criteria: dict[str, int] = {}
         self.mutation_aims: dict[str, dict[str, int]] = {
             "world_fault": {"parents": 0, "rows": 0},
             "graded_failure": {"parents": 0, "rows": 0},
@@ -2665,6 +2685,9 @@ class Run:
         self.flat = self.flat + 1 if space_rate < NEW_SIGNATURE_FLOOR else 0
         data.search["plateau_batches"] = self.flat
         data.search["mutation_aims"] = {k: dict(v) for k, v in self.mutation_aims.items()}
+        data.search["failure_criteria"] = dict(
+            sorted(self.failure_criteria.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
         if c.until_sat and space_saturated(
             self.cell_counts, self.shape_counts, expected_cells=self.planned_cell_keys
         ):
@@ -2837,8 +2860,14 @@ class Run:
         """Record why ``row`` is a mutation parent, under the keys a
         mutated row's ``parent_failure_id`` can carry: the offline writer
         names the parent by its prompt head, the live writer by its
-        situation id."""
+        situation id.
+
+        ``aim`` says the row failed; ``failure_criteria`` says WHICH rule it
+        broke. A generic "this row failed" cannot steer toward a specific
+        behaviour, which is what a rubric is made of."""
         self.mutation_aims[aim]["parents"] += 1
+        for name in failed_criteria(row):
+            self.failure_criteria[name] = self.failure_criteria.get(name, 0) + 1
         prompt = str(row.get("prompt") or "")
         if prompt:
             self.failure_aim[prompt[:80]] = aim

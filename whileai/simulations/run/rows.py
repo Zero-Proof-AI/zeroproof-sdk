@@ -97,6 +97,40 @@ def system_prompt_stamp(text: str | None) -> tuple[str, str, int]:
     return sha, policy[:SYSTEM_PROMPT_HEAD_CHARS], len(policy)
 
 
+def failed_criteria(row: dict) -> list[str]:
+    """Names of the rubric criteria this row failed, from ``markers``.
+
+    The scalar reward is a mean over criteria, and a mean hides the thing the
+    search needs to aim at. A rule that fails 5% of the time never drags a
+    three-criterion mean under a 0.5 threshold, so a failure test that reads
+    only the scalar cannot see it, and the situation is never re-rolled to
+    produce more of it. Measured (#285): the criteria that got aimed at were
+    the ones with a world condition behind them; four rules about how the
+    agent phrased its reply were missed entirely, and their failure rates in
+    the source traces were 4 to 10%.
+
+    A criterion nothing ever fails carries no gradient (rlhf-book ch. 6:
+    groups where every rollout scores the same have zero advantage), and
+    difficulty filtering wants the band measured on the thing being trained,
+    not on an average that spans it (ch. 7).
+    """
+    markers = row.get("markers")
+    if not isinstance(markers, dict):
+        return []
+    failed = []
+    for name, value in markers.items():
+        if isinstance(value, bool):
+            if not value:
+                failed.append(str(name))
+            continue
+        try:
+            if float(value) < 0.5:
+                failed.append(str(name))
+        except (TypeError, ValueError):
+            continue
+    return sorted(failed)
+
+
 def mutation_worthy(row: dict) -> bool:
     """Re-roll and mutate on tool/sandbox faults. Ignores any score column.
 
