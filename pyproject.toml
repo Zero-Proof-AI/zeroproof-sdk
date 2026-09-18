@@ -108,6 +108,8 @@ allow-magic-value-types = ["str", "bytes"]
 "recipes/**" = ["E402", "PLR2004"]
 "tests/**" = ["E402", "PLR2004"]
 "scripts/**" = ["PLR2004"]
+# Skill playbooks are recipes: their check.py thresholds are the lesson, not engine defaults.
+"skills/**" = ["PLR2004"]
 ".github/**" = ["PLR2004"]
 # The account, ingest and platform clients outside simulations/ are not
 # under the no-hardcoding rule (yet); their numbers are HTTP codes and
