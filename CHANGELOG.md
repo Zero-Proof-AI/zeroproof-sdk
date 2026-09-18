@@ -5,6 +5,23 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `format_cuts(wai.cuts(...))` prints the summary as the sentence the traces
+  page leads with, instead of the dict a researcher was left to read. The call
+  answers the right question and printing it was 3.5 KB of JSON ending in
+  `groups`, one entry per prompt with its text; the twin of `format_markers`
+  and `format_stages` was the missing half. Three lines: the answer
+  (`3 prompts are worth training on`), the counts behind it (`9 runs · 3 train
+  · none held out`), and the line to run next — `wai.cut(agent=..., kind="rl")`
+  when there is something to cut, `wai.send_score(...)` when the runs are
+  grouped but unscored, so no state ends on a dead stop. `rl.support` stays in
+  the payload and out of what gets printed.
+- Naming a dataset from the SDK works. `otel_env(dataset=...)` and
+  `ingest_traces(..., dataset=...)` set `whileai.dataset`, and the gate names
+  the dataset from `zeroproof.dataset` alone — so every batch sent the
+  documented way landed in a dataset called `traces` whatever name was asked
+  for, and the 202 said so in a field nobody reads twice. Both keys are now
+  written. Same one-line fix in `recipes/01-simulate/agent-behavior`, whose
+  `--dataset` flag was silently ignored for the same reason.
 - README rewritten as the short form: badges (CI, PyPI, Python versions,
   downloads, coverage gate, license), a sixty-second offline run with its
   real output, the loop as one table of call, what it computes and the

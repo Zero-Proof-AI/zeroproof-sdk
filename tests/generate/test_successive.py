@@ -16,6 +16,7 @@ import time
 
 import whileai.simulations as wai
 from tests.helpers import offline, scripted_agent
+from whileai.simulations.score.stats import task_key
 
 
 def _flaky():
@@ -74,13 +75,17 @@ def test_unanimous_prompts_stop_when_fresh_prompts_split_more_often():
     )
     rows = data.trajectories
     groups = data.search["groups"]
-    sizes = collections.Counter(t["prompt"] for t in rows)
+    # group by task_key, the way pass_at does: a situation's textured
+    # phrasings share one scenario_id, and which situations get one
+    # depends on thread order, so grouping by prompt text drifts from
+    # the k-way numbers by one group now and then
+    sizes = collections.Counter(task_key(t) for t in rows)
     assert groups["mixed"] >= 2, groups
     # the grader ran inside the loop: every row is judged exactly once and
     # the allocation read rewards, so a split is a reward split
     assert all(t.get("judge_status") for t in rows)
     assert data.search["grader"]["scored"] == len(rows)
-    split = [p for p in sizes if len({t["reward"] for t in rows if t["prompt"] == p}) > 1]
+    split = [p for p in sizes if len({t["reward"] for t in rows if task_key(t) == p}) > 1]
     unanimous = [p for p in sizes if p not in split]
     assert split and unanimous, sizes
     # the budget went to the split prompts: they reached k unless the
@@ -100,7 +105,7 @@ def test_unanimous_prompts_stop_when_fresh_prompts_split_more_often():
     assert got.pass_at_k is not None and got.pass_pow_k is not None
     # a stopped group is not a cut group: the stamp marks exactly the
     # groups the summary calls partial
-    cut = {t["prompt"] for t in rows if t.get("group_cut")}
+    cut = {task_key(t) for t in rows if t.get("group_cut")}
     assert len(cut) == groups["partial"]
 
 

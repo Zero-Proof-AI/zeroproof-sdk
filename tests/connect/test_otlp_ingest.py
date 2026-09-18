@@ -50,7 +50,9 @@ def test_otel_env_points_the_exporter_at_the_gate_with_the_key_as_a_header(monke
     assert env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] == "https://api.zeroproofai.com/v1/traces"
     assert env["OTEL_EXPORTER_OTLP_HEADERS"] == "x-api-key=zp_abc"
     assert env["OTEL_EXPORTER_OTLP_PROTOCOL"] == "http/json"
-    assert env["OTEL_RESOURCE_ATTRIBUTES"] == "whileai.dataset=prod-refunds"
+    # The gate names the dataset from zeroproof.dataset only: without it the
+    # batch lands in a dataset called `traces` and the 202 says so.
+    assert "zeroproof.dataset=prod-refunds" in env["OTEL_RESOURCE_ATTRIBUTES"].split(",")
 
 
 def test_otel_env_honors_the_base_url_override_and_the_env_var(monkeypatch):
@@ -112,8 +114,9 @@ def test_ingest_traces_renames_the_dataset_on_every_resource(tmp_path, monkeypat
     assert out["datasetId"] == "ds_9"
     sent = json.loads(seen["data"])
     attrs = sent["resourceSpans"][0]["resource"]["attributes"]
-    names = [a["value"]["stringValue"] for a in attrs if a["key"] == "whileai.dataset"]
-    assert names == ["new-name"], "the old name is replaced, not doubled"
+    for key in ("zeroproof.dataset", "whileai.dataset"):
+        names = [a["value"]["stringValue"] for a in attrs if a["key"] == key]
+        assert names == ["new-name"], f"{key}: the old name is replaced, not doubled"
     assert any(a["key"] == "service.name" for a in attrs), "other attributes survive"
 
 
