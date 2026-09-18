@@ -168,6 +168,60 @@ def test_the_run_records_its_knobs_and_the_report_shows_them():
     assert plain["knobs"]["closing_margin"] == defaults.knob_default("closing_margin")
 
 
+def test_the_report_carries_every_simulate_knob_that_shapes_the_experiment():
+    """``hard_share`` and ``fault_rate`` are ``simulate()`` parameters
+    that steer what a run draws, and neither was on the run record:
+    ``hard_share`` lived only in ``search["tier_mix"]`` and ``fault_rate``
+    nowhere, so ``report()["world"]["default_fault_rate"]`` (the world
+    default, 1.0) read as the run's rate. The report now carries both,
+    plus the rest of the signature, as the run resolved them. Fails on
+    main, where ``report()["fault_rate"]`` is a KeyError."""
+
+    def own_grader(row):
+        return {"reward": 1}
+
+    data = wai.simulate(
+        scripted_agent,
+        budget=4,
+        grader=own_grader,
+        **offline(
+            hard_share=0.8,
+            fault_rate=0.7,
+            seed=7,
+            concurrency=1,
+            dimensions={"stance": ["boundary", "adversarial"]},
+            arm_weights={"structured": 1.0},
+            traces=[{"prompt": "refund order 81", "reward": 0, "steps": []}],
+        ),
+    )
+    report = data.report()
+    assert report["hard_share"] == 0.8
+    assert report["fault_rate"] == 0.7
+    # the world default is still the world default, and says so
+    assert report["world"]["default_fault_rate"] == defaults.WORLD_DEFAULT_FAULT_RATE
+    assert "fault_rate" in report["world_note"]
+    # the realized mix stays where it was
+    assert data.search["tier_mix"]["hard_share_requested"] == 0.8
+    assert report["seed"] == 7
+    assert report["concurrency"] == 1
+    assert report["dimensions"] == {"stance": ["boundary", "adversarial"]}
+    assert report["arm_weights"] == {"structured": 1.0}
+    assert report["traces"] == 1
+    assert report["grader"] == "own_grader"
+    assert report["simulator"] == "template"
+    assert report["agent_model"] == "scripted_agent"
+    assert report["runs"] == 1 and report["tasks"] == 0 and report["seeds"] == 0
+    # the defaults are recorded too, so a run with nothing set says so
+    plain = wai.simulate(scripted_agent, budget=2, **offline()).report()
+    assert plain["hard_share"] == diversity.HARD_SHARE
+    assert plain["fault_rate"] == defaults.DEFAULT_FAULT_RATE
+    assert plain["seed"] == defaults.DEFAULT_SEED
+    assert plain["grader"] is None and plain["dimensions"] is None
+    # runs=N: the merged record says N
+    again = wai.simulate(scripted_agent, budget=2, runs=2, **offline())
+    assert again.report()["runs"] == 2
+
+
 def test_a_fault_mode_added_through_advanced_world_fires_in_a_run():
     """A fault mode the caller adds reaches the coverage grid: name it as a
     tool_condition and rows carry it. Fails on a tree where scenarios.py
