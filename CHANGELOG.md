@@ -61,6 +61,31 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `reason`, `markers` and `failure_class` land on the row, everything
   else under `row["judge_meta"]` (a returned `failures` list reads back
   as `row["judge_meta"]["failures"]`). Also in `docs/evals.md`.
+- A run says where it is. Every ten seconds and every ten finished
+  rollouts, whichever comes first, `simulate` logs one line on the
+  `whileai.simulations` logger: `12/64 rollouts, 3 situations written,
+  1m40s elapsed, ~5m left`. The estimate is the finished rate carried
+  forward and is left off until five rollouts have landed. The hosted
+  writer also says when it starts, because the first rows cannot land
+  until it has written something. Budgets under 10 rows stay quiet, and
+  nothing is printed: `logging.basicConfig(level=logging.INFO)` to see
+  it. A tester watched a 64-rollout hosted run produce no output for
+  eight minutes and nearly killed it.
+- `simulator="hosted"` names the default writer, so the way back from
+  the offline `simulator=False` is a value you can pass, not "delete the
+  argument".
+- Anthropic-shaped tools (`{"name", "description", "input_schema"}`) are
+  accepted everywhere the OpenAI shapes are. `input_schema` is read as
+  `parameters` once, when the agent is inspected; before this the tools
+  sent to a model-backed agent lost their arguments.
+- Docs: `docs/evals.md`, the `02-measure/eval-your-agent` recipe and the
+  simulations skill say that the old `ZEROPROOF_*` names still
+  authenticate, that `concurrency` is 32 so a recorder needs
+  `threading.local`, which tool shapes are accepted, that `pass^k` needs
+  `repeats >= 4`, that `budget` must cover `situations * repeats`, and
+  which of `data.rows` / `data.trajectories` and `scored.failures()` /
+  `scored.failed_traces()` is the spelling to use. The README's first
+  screen now points at the evals page.
 
 ## 0.60 (2026-09-17)
 

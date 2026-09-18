@@ -26,6 +26,13 @@ machine that had the old package, `~/.zeroproof/credentials.json` is
 still picked up; set `WHILEAI_HOME=/some/fresh/dir` to isolate a new
 account from it.
 
+**The old names still work, so you may already be signed in.**
+`ZEROPROOF_API_KEY` is read whenever `WHILEAI_API_KEY` is unset (every
+`ZEROPROOF_*` variable is), a saved `~/.zeroproof/credentials.json`
+counts as a login, and `pip install zeroproof` installs `whileai`. If
+`whileai status` names a key you never set here, that is where it came
+from.
+
 **What the trial covers.** A fresh `signup` key is a trial: 25,000 input
 and 50,000 output tokens a day, which is about twelve hosted situations
 of a four-tool agent. One real run spends that, and the run then stops
@@ -64,9 +71,12 @@ Three things to know about a callable agent:
 
 Tools go in OpenAI function-calling shape (`{"type": "function",
 "function": {"name", "description", "parameters"}}`); a bare
-`{"name", "description", "parameters"}` dict works too. If your bot
-records calls through a shared global, wrap the recorder in a
-`threading.local`, because rollouts run concurrently.
+`{"name", "description", "parameters"}` dict works too, and so does the
+Anthropic shape `{"name", "description", "input_schema"}` (`input_schema`
+is read as `parameters`). If your bot records calls through a shared
+global, wrap the recorder in a `threading.local`: `concurrency` defaults
+to 32, so 32 threads call your function at once and one shared list
+interleaves calls from different rollouts into each other's rows.
 
 Or run `whileai init-evals` in the project and edit the three files it
 writes. It reads your Python with `ast`, never imports it, picks the tool
@@ -162,7 +172,7 @@ data = wai.simulate(
     tools=TOOLS,
     system_prompt=POLICY,
     seeds=SEEDS,
-    simulator=False,  # offline template writer: no key, seconds. Drop it for the hosted writer.
+    simulator=False,  # offline template writer: no key, seconds. simulator="hosted" for the hosted one.
     mode="rl",
     repeats=4,
     repeat_policy="fixed",  # every ask, all four repeats
@@ -187,6 +197,20 @@ for note in scored.warnings:  # hollow-run checks; fix before reading the number
   `scored.warnings` says so and names the fix. A pass@1 of 1.00 on a run
   where the agent never reached its tools is not a result. Do not report
   a number from a run with warnings.
+- `simulator=False` is the offline template writer (no key, no network);
+  `simulator="hosted"` is the default, the hosted writer, and means the
+  same as leaving the argument out.
+- `pass^k` and `pass@k` are `None` below `repeats=4` (`min_k`), because
+  four tries is the smallest draw those numbers mean anything on; the
+  `note` field says so. Raise `repeats` to get them.
+- `situations` counts asks, `budget` counts rows. Keep
+  `budget >= situations * repeats` or the run stops at the budget with
+  the later situations never rolled out at all.
+- A long run says where it is on the `whileai.simulations` logger, one
+  line at most ten seconds and ten rollouts apart
+  (`12/64 rollouts, 3 situations written, 1m40s elapsed, ~5m left`). Call
+  `logging.basicConfig(level=logging.INFO)` to see it; a hosted run can
+  sit a minute before the first row, and silence is not a hang.
 
 ## 5. Gate CI on it
 
@@ -234,6 +258,15 @@ same word, and guessing costs a round trip. What each call hands back:
 | `simulate(...)` | `SimulationData` | `data.rows` or `data.rows()`, both work |
 | `evaluate(...)`, `grade(...)` | `ScoredData` | `scored.rows` is a **list**; `scored.rows()` is a `TypeError` |
 | | | `scored.warnings`: hollow-run notes, print them before the number |
+
+Two concepts here have two spellings each. These docs use the left one;
+the right one is the same thing under another name, and the recipe uses
+it in places.
+
+| use this | also works | the difference |
+| --- | --- | --- |
+| `data.rows` | `data.trajectories` | `rows` is the exported row, exactly what `save()` writes and what the judge sees. `trajectories` is the same rollouts before export, still carrying the `privileged` block, which is why `leak_report` reads them. |
+| `scored.failures()` | `scored.failed_traces()`, `scored.traces` | Same list, all three. `failed_traces()` and the `traces` property are named for where they go next: `simulate(traces=...)`. |
 | `pass_at(rows)` | `PassAt` | fields below; `.to_dict()` for the same keys as JSON |
 | `marker_summary(rows)` | `{marker: stats}` | stats keys below |
 | `judge_trust(rows)` | `dict` | keys below |
@@ -268,7 +301,7 @@ line names its own fix.
 
 ## 8. Then
 
-- Every failure row is a training example: `simulate(traces=scored.failed_traces())`
+- Every failure row is a training example: `simulate(traces=scored.failures())`
   aims the next round at what broke. `evaluate` rows are stamped so the
   selectors refuse to use them as the reward (`eval_sourced`).
 - Push the eval set with a purpose so it stays out of training:

@@ -188,6 +188,60 @@ def _finish_reason(raw: dict, steps: list, final_text: str) -> str:
     return "stop"
 
 
+def _clock_text(seconds: float) -> str:
+    """Seconds as a short human span: ``45s``, ``1m40s``, ``1h4m``."""
+    total = max(0, int(seconds))
+    if total < 60:
+        return f"{total}s"
+    if total < 3600:
+        minutes, rest = divmod(total, 60)
+        return f"{minutes}m{rest}s" if rest else f"{minutes}m"
+    hours, rest = divmod(total, 3600)
+    minutes = rest // 60
+    return f"{hours}h{minutes}m" if minutes else f"{hours}h"
+
+
+def _left_text(seconds: float) -> str:
+    """The same span, rounded, for an estimate nobody should read to the
+    second: whole minutes over a minute, whole seconds under it."""
+    if seconds < 60:
+        return f"{max(1, round(seconds))}s"
+    if seconds < 3600:
+        return f"{max(1, round(seconds / 60))}m"
+    return _clock_text(seconds)
+
+
+#: rollouts a run needs before its rate is worth extrapolating from
+PROGRESS_MIN_ROWS_FOR_ESTIMATE = 5
+#: never more than this long between progress lines
+PROGRESS_EVERY_S = 10.0
+#: never more than this many finished rollouts between progress lines
+PROGRESS_EVERY_ROWS = 10
+#: runs smaller than this say nothing: they are over before a line helps
+PROGRESS_MIN_BUDGET = 10
+
+
+def progress_line(rows: int, cap: int, situations: int, elapsed: float) -> str:
+    """One line of run progress, in the words a waiting person wants:
+
+    ``12/64 rollouts, 3 situations written, 1m40s elapsed, ~5m left``
+
+    The estimate is the finished rate carried forward, and it is left off
+    until ``PROGRESS_MIN_ROWS_FOR_ESTIMATE`` rollouts have landed, because
+    before that it is the first rollout's latency dressed up as a forecast.
+    """
+    parts = [
+        f"{rows}/{cap} rollouts",
+        f"{situations} situations written",
+        f"{_clock_text(elapsed)} elapsed",
+    ]
+    if rows >= PROGRESS_MIN_ROWS_FOR_ESTIMATE and rows < cap and elapsed > 0:
+        rate = rows / elapsed
+        if rate > 0:
+            parts.append(f"~{_left_text((cap - rows) / rate)} left")
+    return ", ".join(parts)
+
+
 def _hit_length_cap(row: dict) -> bool:
     """A step the backend flagged as cut by its token cap, or a reply that
     ends mid-sentence by the hygiene rule."""
@@ -1089,6 +1143,13 @@ class Run:
         self.stream_started = False
         self.reported_rows = 0
         self.reported_at = self.started
+        # plain-words progress on the logger, for a run long enough that
+        # silence reads as a hang. Small budgets stay quiet.
+        self.progress_on = int(c.cap or 0) >= PROGRESS_MIN_BUDGET
+        self.progress_rows = 0
+        self.progress_at = self.started
+        # named so a test can hand the throttle a clock of its own
+        self.progress_clock = time.monotonic
         # writer waves
         self.walked_ids: set[str] = set()
         self.walked_lock = threading.Lock()
@@ -1268,6 +1329,36 @@ class Run:
         self._schedule_prompt(jobs, prompt, meta, row, action)
 
     # ------------------------------------------------------------ output
+
+    def _note_progress(self, *, force: bool = False) -> None:
+        """Say where the run is, on the logger, at most ten seconds and at
+        most ten finished rollouts apart. A hosted run can spend minutes
+        between rows, and a tester with no output assumes it hung."""
+        if not self.progress_on:
+            return
+        rows = len(self.data.trajectories)
+        now = self.progress_clock()
+        stale = now - self.progress_at >= PROGRESS_EVERY_S
+        many = rows - self.progress_rows >= PROGRESS_EVERY_ROWS
+        if not (force or stale or many):
+            return
+        log.info(
+            "%s", progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started)
+        )
+        self.progress_rows, self.progress_at = rows, now
+
+    def _note_writer_start(self) -> None:
+        """One line when the situation writer starts, because the first
+        rows cannot land until it has written something."""
+        if not self.progress_on:
+            return
+        if isinstance(self.simulator, str) and self.simulator not in ("hosted", "default"):
+            log.info(
+                "writing situations with %s; first rows in about a minute",
+                self.simulator,
+            )
+            return
+        log.info("writing situations with the hosted writer; first rows in about a minute")
 
     def _write_progress(self, payload: dict) -> None:
         Path(str(self.c.out_path) + ".progress.json").write_text(json.dumps(payload, default=str))
@@ -1483,6 +1574,7 @@ class Run:
             texts = list(gen(None, 0, include_model=False) or [])
             self.generated_pool.extend(texts)
         else:
+            self._note_writer_start()
             # Tiny batches first so rollouts start ~5s.
             initial_writers = min(2, max(1, self.c.writer_flight))
             for i in range(initial_writers):
@@ -2174,6 +2266,7 @@ class Run:
             note_stage(data, "row stored")
             self._flush_output("rollout")
         data.rollout_seconds += time.monotonic() - rollout_started
+        self._note_progress()
         return results, jobs_for
 
     def _update_search(
@@ -2757,6 +2850,7 @@ class Run:
         c = self.c
         data = self.data
         gen = self.generator
+        self._note_progress(force=True)
         data.declared_tools = self.declared
         # The README promises messages on every row. The JSONL writer built
         # them lazily; a caller reading data.trajectories saw only steps.

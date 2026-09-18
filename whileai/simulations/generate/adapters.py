@@ -715,6 +715,30 @@ class ConnectedAgent:
         return self.run(message)
 
 
+def _with_parameters(schema: dict) -> dict:
+    """Anthropic's ``input_schema`` read as ``parameters``.
+
+    Tools arrive in three shapes: the OpenAI envelope, a bare
+    ``{name, description, parameters}``, and Anthropic's
+    ``{name, description, input_schema}``. Everything downstream reads
+    ``parameters``, so the Anthropic key is copied onto it once, here,
+    instead of being missed one call site at a time (the wire tools built
+    for a model-backed agent dropped it, and the agent saw a tool with no
+    arguments). The caller's dict is left alone.
+    """
+    envelope = isinstance(schema.get("function"), dict)
+    fn = schema["function"] if envelope else schema
+    if not isinstance(fn.get("input_schema"), dict) or fn.get("parameters") is not None:
+        return schema
+    fn = dict(fn)
+    fn["parameters"] = fn["input_schema"]
+    if not envelope:
+        return fn
+    out = dict(schema)
+    out["function"] = fn
+    return out
+
+
 def _merge_tool_lists(base: list | None, extra: list | None) -> list[dict]:
     merged: dict[str, dict] = {}
     for schema in list(base or []) + list(extra or []):
@@ -722,7 +746,7 @@ def _merge_tool_lists(base: list | None, extra: list | None) -> list[dict]:
             continue
         name = _tool_name(schema)
         if name:
-            merged[name] = schema
+            merged[name] = _with_parameters(schema)
     return list(merged.values())
 
 

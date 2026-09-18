@@ -33,6 +33,11 @@ python run.py --gap                        # what the old suite never reaches
 | `--gap` | off | what the old `OLD_TESTS` suite never reaches, before the eval |
 | `--json` | off | every number to one file |
 
+`--k` stays at 4 or above: `pass^k` and `pass@k` are `None` below four
+repeats (`min_k`), and the `note` field says so. Rows are the budget and
+asks are the situations, so a run needs `budget >= situations * repeats`
+or the later asks never get rolled out.
+
 ## Find what is untested
 
 Before writing the eval: `wai.coverage_gap` takes the asks a suite
@@ -123,7 +128,9 @@ the number that matters; the overall pass@1 hides it.
 
 **The wrapper.** The engine hands your function one ask and wants the
 tool calls it made and what it said. A callable agent runs its own real
-tools and is played single-turn.
+tools and is played single-turn. `run.py` reads the raw rollouts as
+`data.trajectories`; `data.rows` is the same rollouts exported, and both
+`data.rows` and `data.rows()` work.
 
 ```python
 def agent(message: str) -> dict:
@@ -153,8 +160,9 @@ pass@1 from a hollow run is not reported.
 ## Swap in your agent
 
 Keep `run.py`, replace `AGENTS`. For a model-backed bot that records
-calls through a shared list, make the recorder thread-local: rollouts
-run concurrently.
+calls through a shared list, make the recorder thread-local: `concurrency`
+defaults to 32, so 32 rollouts call your function at once and one shared
+list mixes their calls together.
 
 ```python
 import threading
@@ -185,11 +193,17 @@ AGENTS = {"mine": my_agent}
 ```
 
 Convert the bot's tool list to OpenAI function shape for `TOOLS` (a bare
-`{"name", "description", "parameters"}` dict also works), put your real
+`{"name", "description", "parameters"}` dict works too, and so does the
+Anthropic `{"name", "description", "input_schema"}` shape), put your real
 ids in the descriptions or seeds, and keep `refundable()` as the policy
-your bot is supposed to follow. Then drop `simulator=False` to let the
-hosted writer (needs `whileai login`) produce more varied asks, and
-raise `--k`.
+your bot is supposed to follow. Then pass `simulator="hosted"` instead of
+`simulator=False` to let the hosted writer produce more varied asks, and
+raise `--k`. The hosted writer needs a key: `whileai login`, or the
+`ZEROPROOF_API_KEY` and `~/.zeroproof/credentials.json` you already have,
+which are still read under their old names. A hosted run is minutes, and
+it says where it is on the `whileai.simulations` logger
+(`12/64 rollouts, 3 situations written, 1m40s elapsed, ~5m left`) once
+`logging.basicConfig(level=logging.INFO)` is on.
 
 ## Next
 
@@ -198,7 +212,8 @@ raise `--k`.
 - Judge trust: `wai.attach_labels(rows, labels, kind="human")` then
   `wai.judge_trust(rows, refund_judge)`. FAIL on eight labels means label
   more (about thirty clears the Wilson bound), not that the judge is wrong.
-- Every failure is a training example: `wai.simulate(traces=scored.failed_traces())`
-  aims the next round at what broke. `evaluate` rows are stamped so the
+- Every failure is a training example: `wai.simulate(traces=scored.failures())`
+  aims the next round at what broke (`scored.failed_traces()` and
+  `scored.traces` are the same list under other names). `evaluate` rows are stamped so the
   selectors refuse to use them as the reward.
 - `scored.push("refund-evals", purpose="eval")` keeps the set out of training on the platform.
