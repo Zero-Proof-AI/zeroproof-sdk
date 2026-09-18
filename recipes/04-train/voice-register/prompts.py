@@ -4,6 +4,7 @@ Each prompt carries the concrete items its answer must contain, taken from the
 record it was built from, so "did concision destroy the answer" is decidable
 without a judge. Train and holdout are built from DISJOINT users.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,7 @@ import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import importlib  # noqa: E402
+import importlib
 
 # Which agent the voice is spoken THROUGH. A register is domain-neutral, so
 # the same constitution should train on any of them; running it on a second
@@ -31,8 +32,9 @@ _AGENT = os.environ.get("VOICE_AGENT", "")
 #: ``VOICE_AGENT`` is the other route: an importable ``agents.<name>`` module
 #: exposing ``POLICY`` and ``fresh_data()``, for a world with a live database.
 #: Set one or the other, not both.
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                          "..", "..", ".."))
+_REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+)
 _DEFAULT_SPEC = os.path.join(_REPO_ROOT, "tests", "fixtures", "github", "spec.json")
 _SPEC = "" if _AGENT else os.environ.get("VOICE_SPEC", _DEFAULT_SPEC)
 if _SPEC:
@@ -83,6 +85,7 @@ def _spec_facts(n: int, seed: int, skip_users: set[str] | None = None):
     """Simulated records for a spec with no world. Each record is its own
     'user', so the train/holdout split by user is a split by record."""
     import spec_records as SR
+
     recs = SR.build_records(_spec_obj, n * 2, seed=seed)
     out = []
     for r in recs:
@@ -96,10 +99,22 @@ def _spec_facts(n: int, seed: int, skip_users: set[str] | None = None):
         # answers as having dropped content. Same mistake as requiring the
         # airline user id, one level further out.
         import re as _re
-        cand = {str(v).strip() for v in _flat(r)
-                if isinstance(v, (str, int)) and _re.match(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{4,}$", str(v).strip())}
-        out.append({"user_id": rid, "reservations": [rid], "records": {rid: r},
-                    "id_pool": sorted(cand), "profile": {}})
+
+        cand = {
+            str(v).strip()
+            for v in _flat(r)
+            if isinstance(v, (str, int))
+            and _re.match(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{4,}$", str(v).strip())
+        }
+        out.append(
+            {
+                "user_id": rid,
+                "reservations": [rid],
+                "records": {rid: r},
+                "id_pool": sorted(cand),
+                "profile": {},
+            }
+        )
         if len(out) >= n:
             break
     return out
@@ -131,9 +146,18 @@ def _facts(n: int, seed: int, skip_users: set[str] | None = None):
         recs = {r: data[recs_key][r] for r in res if r in data[recs_key]}
         if not recs:
             continue
-        out.append({"user_id": uid, "reservations": list(recs), "records": recs,
-                    "profile": {k: v for k, v in data["users"][uid].items()
-                                if k in ("name", "membership", "payment_methods")}})
+        out.append(
+            {
+                "user_id": uid,
+                "reservations": list(recs),
+                "records": recs,
+                "profile": {
+                    k: v
+                    for k, v in data["users"][uid].items()
+                    if k in ("name", "membership", "payment_methods")
+                },
+            }
+        )
         if len(out) >= n:
             break
     return out
@@ -141,21 +165,28 @@ def _facts(n: int, seed: int, skip_users: set[str] | None = None):
 
 def build(n: int, seed: int, skip_users: set[str] | None = None, workers: int = 12):
     """(prompts, users_used). Each prompt's `required` is its real identifiers."""
-    import endpoint as RA
     from concurrent.futures import ThreadPoolExecutor
+
+    import endpoint as RA
 
     facts = _spec_facts(n, seed, skip_users) if _SPEC else _facts(n, seed, skip_users)
 
     def one(f: dict) -> dict | None:
-        ids = [f["user_id"]] + list(f["records"])
         try:
-            ask = RA.chat([{"role": "system", "content": ASK_SYSTEM},
-                           {"role": "user", "content":
-                            f"Identifiers: user id {f['user_id']}, "
-                            f"record(s) {', '.join(f['records'])}.\n\n"
-                            f"The record(s), so you ask about real fields:\n"
-                            + json.dumps(f["records"], indent=1, default=str)[:2200]}],
-                          temperature=1.0, max_tokens=140).strip()
+            ask = RA.chat(
+                [
+                    {"role": "system", "content": ASK_SYSTEM},
+                    {
+                        "role": "user",
+                        "content": f"Identifiers: user id {f['user_id']}, "
+                        f"record(s) {', '.join(f['records'])}.\n\n"
+                        f"The record(s), so you ask about real fields:\n"
+                        + json.dumps(f["records"], indent=1, default=str)[:2200],
+                    },
+                ],
+                temperature=1.0,
+                max_tokens=140,
+            ).strip()
         except Exception:
             return None
         # only the RECORD ids must appear; requiring the user id too rejected
@@ -171,15 +202,24 @@ def build(n: int, seed: int, skip_users: set[str] | None = None, workers: int = 
             if not all(i.lower() in ask.lower() for i in f["records"]):
                 return None
             req = list(f["records"])
-        context = ("The customer's record, already retrieved:\n"
-                   + json.dumps({"user_id": f["user_id"], "profile": f["profile"],
-                                 "reservations": f["records"]}, indent=1, default=str)[:3500])
+        context = (
+            "The customer's record, already retrieved:\n"
+            + json.dumps(
+                {"user_id": f["user_id"], "profile": f["profile"], "reservations": f["records"]},
+                indent=1,
+                default=str,
+            )[:3500]
+        )
         # Required = the RECORDS the answer is about. Not the user id: a
         # concise reply about reservation 4WQ150 has no reason to repeat
         # "chen_jackson_3290" back, and demanding it marked every good reply
         # as having dropped content.
-        return {"ask": ask, "system": SYSTEM + "\n\n" + context,
-                "required": req, "user_id": f["user_id"]}
+        return {
+            "ask": ask,
+            "system": SYSTEM + "\n\n" + context,
+            "required": req,
+            "user_id": f["user_id"],
+        }
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         got = [p for p in pool.map(one, facts) if p]
