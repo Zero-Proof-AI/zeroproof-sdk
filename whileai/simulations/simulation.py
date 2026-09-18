@@ -395,6 +395,7 @@ def _repeat_runs(agent: Any, n_runs: int, kwargs: dict[str, Any]) -> SimulationD
         first.degraded.extend(d for d in data.degraded if d not in first.degraded)
     assert first is not None
     first.search["eval_runs"] = {"runs": n_runs, "per_run": per_run}
+    first.coverage["runs"] = n_runs
     if output:
         first.save(str(output), meta=True)
     return first

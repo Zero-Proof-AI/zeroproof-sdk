@@ -3,6 +3,21 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `data.report()` is the whole experiment record. `hard_share` and
+  `fault_rate` (both `simulate()` parameters) were not on it: the first
+  lived only in `search["tier_mix"]`, the second nowhere, so
+  `report()["world"]["default_fault_rate"]` (the world's default for a
+  fault plan with no rate of its own) read as the run's rate. The report
+  now carries both as resolved, next to `patience`, plus `seed`, `runs`,
+  `strategy`, `time_budget`, `reproducible`, `concurrency`, `dimensions`,
+  `arm_weights`, counts of `tasks`, `traces` and `seeds`, the `grader`
+  name, `grade`, `llm_grade`, `simulator`, `agent_model`, `user_model`,
+  `max_turns`, `avg_turns`, `temperature`, `sampling`, `timeout` and
+  `logprobs`. `world_note` says which rate is which. `tier_mix` is
+  unchanged.
+
 ## 0.74 (2026-09-18)
 
 - The search aims at the criterion that failed, not at a low mean. A

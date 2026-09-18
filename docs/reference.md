@@ -1220,7 +1220,7 @@ Measured at `avg_turns=4`. The default is now `12`, so a row carries more turns 
 | `output` | | JSONL path |
 | `advanced` | | Keys below. `data.report()` records the resolved values (`knobs`, `patience`, `user_temperature`, `world`) so a saved run says what it ran under |
 
-**Experiment knobs.** What a researcher changes between runs: who plays the user and how patient they are, how the three models sample, what the mock world answers, how hard the situations are, and what the search steers by. `fault_rate=` and `repeats=` (k) sit in the parameter table above; they are the same kind of knob.
+**Experiment knobs.** What a researcher changes between runs: who plays the user and how patient they are, how the three models sample, what the mock world answers, how hard the situations are, and what the search steers by. `fault_rate=` and `repeats=` (k) sit in the parameter table above; they are the same kind of knob. `data.report()` carries every knob that produced the run, as resolved: the parameters above (`mode`, `budget`, `seed`, `repeats`, `hard_share`, `fault_rate`, `strategy`, `dimensions`, `arm_weights`, counts of `tasks`, `traces` and `seeds`, the `grader` name, `simulator`, `agent_model`, `user_model`, sampling and turn limits) and the `advanced` values below, so a saved run is its own experiment record. `report()["fault_rate"]` is the run's rate; `report()["world"]["default_fault_rate"]` is the rate a fault plan with no rate of its own fires at, and `world_note` says so.
 
 | `advanced` key | Default | |
 |---|---|---|

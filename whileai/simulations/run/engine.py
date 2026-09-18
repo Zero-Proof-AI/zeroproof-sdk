@@ -25,6 +25,7 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -1182,6 +1183,61 @@ class Run:
         reason = _unusable_reason(t) or "empty_reply"
         self.lost_by[reason] = self.lost_by.get(reason, 0) + 1
         note_stage(self.data, "rollout failure discarded")
+
+    def _record_experiment_knobs(self) -> None:
+        """Every other ``simulate()`` parameter that makes one run a
+        different experiment from the next, as the run resolved it, so
+        ``report()`` is the whole record and nothing lives only in the
+        caller's notebook. ``mode``, ``repeats``, ``budget``, ``until``
+        and the topology counts are written by the caller of this method.
+
+        ``hard_share`` is the dial as resolved (the default when unset);
+        what the rows actually drew stays in ``search["tier_mix"]``.
+        ``fault_rate`` is this run's rate. ``world["default_fault_rate"]``
+        is not: it is the rate a fault plan with no rate of its own fires
+        at, the world's default, so ``world_note`` says so next to it.
+        """
+        c = self.c
+        cov = self.data.coverage
+        cov["world_note"] = (
+            "world.default_fault_rate is the rate a fault plan with no rate of its "
+            "own fires at (the world default); this run's fault rate is fault_rate."
+        )
+        cov["hard_share"] = HARD_SHARE if c.hard_share is None else float(c.hard_share)
+        cov["fault_rate"] = float(c.fault_rate)
+        cov["seed"] = int(c.seed)
+        cov["runs"] = 1
+        cov["strategy"] = c.resolved_strategy
+        cov["time_budget"] = c.time_budget
+        cov["reproducible"] = bool(c.reproducible)
+        cov["concurrency"] = int(c.concurrency)
+        dims = c.dimensions
+        cov["dimensions"] = (
+            {str(k): list(v) for k, v in dims.items()} if isinstance(dims, Mapping) else dims
+        )
+        # the search-arm weights the run started from; ``data.arm_weights``
+        # is where the reallocation by yield left them
+        cov["arm_weights"] = dict(c.arm_weights) if c.arm_weights else dict(SEARCH_ARMS)
+        cov["tasks"] = len(c.pinned_tasks)
+        cov["traces"] = len(self.trace_rows)
+        cov["seeds"] = len(c.seeds or [])
+        grader = c.grader
+        cov["grader"] = (
+            None if grader is None else getattr(grader, "__name__", type(grader).__name__)
+        )
+        cov["grade"] = bool(c.grade)
+        cov["llm_grade"] = bool(c.llm_grade)
+        # who did which job: the situation writer ("template" offline),
+        # the agent's model (a callable agent's name), the simulated user
+        cov["simulator"] = self.writer_model
+        cov["agent_model"] = c.model_version_tag
+        cov["user_model"] = self.user_model
+        cov["max_turns"] = c.max_turns
+        cov["avg_turns"] = c.avg_turns
+        cov["temperature"] = c.temperature
+        cov["sampling"] = None if c.sampling is None else dict(c.sampling)
+        cov["timeout"] = c.rollout_timeout
+        cov["logprobs"] = c.logprobs
 
     def _rollouts_requested(self) -> int | None:
         """How many rows the run was asked for: pinned prompts times k
@@ -3309,6 +3365,7 @@ class Run:
         data.coverage["patience"] = c.patience
         data.coverage["user_temperature"] = c.user_temperature
         data.coverage["world"] = WorldOptions.coerce(c.world_options).summary()
+        self._record_experiment_knobs()
         data.coverage["mode"] = c.topo["mode"]
         data.coverage["repeat_policy"] = c.topo["repeat_policy"]
         data.coverage["until"] = c.until_key
