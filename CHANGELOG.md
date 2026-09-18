@@ -3,6 +3,23 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- The rubric judge is shown how many times each tool was called, not left
+  to infer it. On 222 rollouts the hosted judge credited an action the
+  agent announced ("I will escalate this") as one it performed on 18 of 18
+  failing rows in one regime, kappa 0.04 overall, and rewriting the
+  criterion to spell the rule out did not move it (#346). The judge payload
+  now carries `tool_calls`, a per-tool count with every declared tool at 0
+  when it never ran, placed before `steps` and kept in the reply-only
+  fallback so a long trajectory cannot lose it; the system prompt says a 0
+  means not called however plainly the agent said it would. One definition
+  of a performed call, `PERFORMED_CALL_SOURCES` in `defaults.py` (engine
+  `steps` or a platform `tool_trace`; text is never a call), is what
+  `tool_calls`, the new `tool_call_counts` and `tool_calls_of` all read.
+  The judge's verdict on that lane still needs a hosted re-run to confirm
+  the leak rate drops; the payload is what this changes.
+
 ## 0.78 (2026-09-18)
 
 - `whileai agents | agent <id> | runs <id> | verdict <id> | promote <id> <v> |

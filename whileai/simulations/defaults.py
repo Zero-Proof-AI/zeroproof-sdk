@@ -555,6 +555,18 @@ JUDGE_MAX_TOKENS = 120
 # to improve the robustness of LLM-as-a-judge workflows is to use a
 # sampling temperature of 0").
 JUDGE_TEMPERATURE = 0.0
+# PERFORMED_CALL_SOURCES = ("steps", "tool_trace"): the row keys a tool
+# call is read from when it counts as PERFORMED: the engine's ``steps``
+# (tool / arguments / result) or a platform pull's ``tool_trace`` (tool /
+# input / output), the first the row carries. A call the agent announces
+# in text ("I will escalate this to a human") is not one. Measured (#346,
+# 222 rollouts, hosted rubric judge): the judge credited announced calls as
+# performed on 18 of 18 failing rows in one regime, kappa 0.04 overall, and
+# spelling the rule out in the criterion did not move it. So
+# ``hygiene.tool_calls``, ``hygiene.tool_call_counts`` (the ``tool_calls``
+# ledger the judge payload carries) and ``grounding.tool_calls_of`` all
+# count from these keys and nothing else: one definition of "performed".
+PERFORMED_CALL_SOURCES: tuple[str, ...] = ("steps", "tool_trace")
 
 # ---------------------------------------------------------------------
 # score: reply truncation
@@ -1519,6 +1531,7 @@ __all__ = [
     "PARENT_HEAD_CHARS",
     "PASS_REWARD",
     "PASS_THRESHOLD",
+    "PERFORMED_CALL_SOURCES",
     "PLATFORM_CREDENTIAL_TTL_S",
     "PLATFORM_ERROR_DETAIL_CHARS",
     "PLATFORM_HF_DATASET_TIMEOUT_S",

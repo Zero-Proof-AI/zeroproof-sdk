@@ -27,6 +27,8 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import PERFORMED_CALL_SOURCES
+
 MARKER = "argument_grounding"
 
 _TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
@@ -49,10 +51,21 @@ def _parse_json_obj(raw: Any) -> dict | None:
     return obj if isinstance(obj, dict) else None
 
 
+def _performed_steps(row: dict) -> list:
+    """The step list performed calls are read from: the first of
+    ``PERFORMED_CALL_SOURCES`` the row carries (one definition with
+    ``hygiene.performed_tool_calls``)."""
+    for key in PERFORMED_CALL_SOURCES:
+        steps = row.get(key)
+        if steps:
+            return list(steps)
+    return []
+
+
 def _calls_from_steps(row: dict) -> list[tuple[str, dict, int]]:
     """(tool, arguments, index) for each tool step, in order."""
     out: list[tuple[str, dict, int]] = []
-    steps = row.get("steps") or row.get("tool_trace") or []
+    steps = _performed_steps(row)
     for i, step in enumerate(steps):
         if not isinstance(step, dict) or not step.get("tool"):
             continue
@@ -98,7 +111,7 @@ def tool_calls_of(row: dict) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     step_calls = _calls_from_steps(row)
     if step_calls:
-        steps = row.get("steps") or row.get("tool_trace") or []
+        steps = _performed_steps(row)
         for tool, args, i in step_calls:
             earlier = [
                 _norm(s.get("result") if s.get("result") is not None else s.get("output"))

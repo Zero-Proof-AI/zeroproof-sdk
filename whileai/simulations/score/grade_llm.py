@@ -25,6 +25,7 @@ from ..generate.agents import (
     missing_hosted_key,
     parse_backend_spec,
 )
+from .hygiene import tool_call_counts
 from .judge_trust import trust_after_grade
 
 log = logging.getLogger("whileai.simulations")
@@ -375,6 +376,7 @@ def _fit_payload(blob: dict, limit: int) -> str:
             "payload_reduced": True,
             "note": "trajectory too large to render; judging the final reply only",
             "tools": blob.get("tools"),
+            "tool_calls": blob.get("tool_calls"),
             "final_text": _cut(
                 str(blob.get("final_text") or ""),
                 max(REPLY_ONLY_MIN_CHARS, limit // REPLY_ONLY_SHARE),
@@ -415,8 +417,23 @@ def _render_payload(
     # final_text and agent_policy come BEFORE steps: on an oversized
     # payload the tail is what gets cut, and the verdict needs what the
     # agent finally said and the rules it was under more than step 14.
+    # ``tool_calls`` is counted from the record, not left for the judge to
+    # infer. Measured (#346): the judge credited an action the agent
+    # ANNOUNCED as one it performed on 18 of 18 failing rows in one regime,
+    # kappa 0.04 over 222 rollouts, with the system prompt already saying a
+    # claim the tools did not return meets nothing; spelling the rule out
+    # in the criterion did not move it. Absence from a step list is hard to
+    # see; a 0 is not. It sits before ``steps`` (the tail a long payload
+    # loses) and survives the reply-only fallback, which is exactly the
+    # regime where the judge would otherwise keep the declared tool names
+    # and the agent's claim and lose the evidence against them. A judge is
+    # a reward model, so what it is shown is part of the reward
+    # (rlhfbook.com/c/07-reward-models.html, LLM-as-a-judge), and paying
+    # for the claim of an action is the over-optimization path
+    # (rlhfbook.com/c/17-over-optimization.html).
     blob: dict[str, Any] = {
         "tools": _tool_names(tools),
+        "tool_calls": tool_call_counts(trajectory, _tool_names(tools)),
         "situation": str(trajectory.get("prompt", ""))[:JUDGE_SITUATION_CHARS],
         "world_state": trajectory.get("world_state"),
         "injected_faults": trajectory.get("faults"),

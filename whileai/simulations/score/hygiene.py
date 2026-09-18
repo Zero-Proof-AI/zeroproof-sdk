@@ -27,7 +27,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from ..defaults import HACK_THRESHOLD
+from ..defaults import HACK_THRESHOLD, PERFORMED_CALL_SOURCES
 from .grading import behavior_signature, dead_tools, dead_tools_note, looks_finished, tool_outcomes
 from .optimize import _binary_label, _messages
 
@@ -93,12 +93,38 @@ def reply_length(row: dict) -> int:
     return total
 
 
+def performed_tool_calls(row: dict) -> list[dict]:
+    """The tool calls a row performed: the entries with a tool name under
+    the first of ``PERFORMED_CALL_SOURCES`` the row carries (engine
+    ``steps``, tool/arguments/result, or a platform pull's ``tool_trace``,
+    tool/input/output). Text that announces a call is not a call (#346:
+    the judge credited announced calls as performed on 18 of 18 failing
+    rows); every counter in the package reads this one definition."""
+    for key in PERFORMED_CALL_SOURCES:
+        steps = row.get(key)
+        if steps:
+            return [s for s in steps if isinstance(s, dict) and s.get("tool")]
+    return []
+
+
 def tool_calls(row: dict) -> int:
-    """Tool calls in a row, whichever shape it arrived in: engine ``steps``
-    (tool/arguments/result) or a platform pull's ``tool_trace``
-    (tool/input/output)."""
-    steps = row.get("steps") or row.get("tool_trace") or []
-    return sum(1 for s in steps if isinstance(s, dict) and s.get("tool"))
+    """Performed tool calls in a row (``performed_tool_calls``), whichever
+    shape it arrived in."""
+    return len(performed_tool_calls(row))
+
+
+def tool_call_counts(row: dict, declared: Sequence[str] = ()) -> dict[str, int]:
+    """Performed calls per tool, by name: every ``declared`` tool at its
+    count, 0 included, plus any tool the row called without declaring.
+
+    The 0 is the point. A judge asked to read a step list for the ABSENCE
+    of a call missed it on 18 of 18 rows (#346); a tool sitting at 0 in a
+    ledger is unmissable. ``sum(counts.values()) == tool_calls(row)``."""
+    counts = {str(name): 0 for name in declared}
+    for step in performed_tool_calls(row):
+        name = str(step["tool"])
+        counts[name] = counts.get(name, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def assistant_turns(row: dict) -> int:
@@ -439,7 +465,9 @@ __all__ = [
     "length_report",
     "near_duplicate_prompts",
     "pearson",
+    "performed_tool_calls",
     "reply_length",
     "reward_correlations",
+    "tool_call_counts",
     "tool_calls",
 ]
