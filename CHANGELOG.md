@@ -3,6 +3,32 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `typesafe:<model>` is a judge backend spec: TypeSafe's Jev, a decision
+  model that answers typed questions with a probability each and writes
+  no text. `data.grade(spec="typesafe:jev-latest")` sends the judge the
+  same evidence and rubric as state and asks two questions: did the
+  agent do what it should (a yes/no, answered as a probability) and, if
+  not, which failure class (a choice over the `FAILURE_CLASSES`
+  vocabulary). The reward is the more probable outcome; every graded
+  row's `judge_meta` carries `confidence`; a probability within
+  `DECISION_UNSURE_BAND` (0.1) of even marks the row `unsure` and the
+  report counts them; a failing row's `failure_class` is the judge's own
+  choice instead of a regex over its sentence. The audit
+  (`audit_grades`, asked blind), `pairwise_judge` (A / B / tie as one
+  choice), `rubric_judge` (one yes/no per item) and the advisory
+  `llm_grade` (a three-level score) take the same spec, and
+  `judge_version` folds the questions in beside the prompt. The key is
+  `TYPESAFE_API_KEY` (`WHILEAI_TYPESAFE_API_KEY` overrides it,
+  `TYPESAFE_BASE_URL` points at a gateway); the warm-up is
+  `GET /v1/models`, so a bad key fails once, before the fan-out;
+  `DECISION_TIMEOUT_S` (30 s) is the request timeout. `agent=`,
+  `simulator=` and `user_model=` refuse the spec with the fix named, and
+  so does `complete()`. Built offline against `typesafe-sdk` 0.7's
+  request and response shapes; Jev is waitlisted early access and no
+  call here has run against the live API yet.
+
 ## 0.78 (2026-09-18)
 
 - `whileai agents | agent <id> | runs <id> | verdict <id> | promote <id> <v> |
@@ -20,6 +46,7 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   integrity floor in `hack_scan.py`, the audit-reason join in
   `grade_llm.py`, the calibration report in `optimize.py`, and the
   packaged schema path in `schema.py`.
+
 
 ## 0.76 (2026-09-18)
 

@@ -125,6 +125,7 @@ the judge (`spec=` on `grade()`). Each one takes the same backend spec.
 | `vllm:<model>@<url>` | vLLM, or any OpenAI-compatible endpoint you serve | `VLLM_API_KEY` when the endpoint wants one |
 | `openai:<model>` | OpenAI, or a compatible endpoint via `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
 | `anthropic:<model>` | the Claude Messages API | `ANTHROPIC_API_KEY`, or `WHILEAI_ANTHROPIC_API_KEY` to override it |
+| `typesafe:<model>` | TypeSafe's Jev, a decision model; the judge only (`spec=`) | `TYPESAFE_API_KEY`, or `WHILEAI_TYPESAFE_API_KEY` to override it |
 
 ```python
 data = wai.simulate(
@@ -140,6 +141,16 @@ Omitting `agent=` runs the While-hosted model on your account key instead.
 One model in more than one role is the regime to avoid. When the agent
 model also wrote the situations or played the user, `data.degraded`
 carries `same_model` and `warnings` says which call separates them.
+
+`spec="typesafe:jev-latest"` grades with a decision model instead of a chat
+judge. The same evidence and rubric go in as state; the verdict comes back
+as a probability, and a failing row's `failure_class` is the judge's own
+choice over the failure vocabulary rather than a regex over a sentence.
+Each graded row's `judge_meta` carries `confidence`; a probability within
+`DECISION_UNSURE_BAND` (0.1) of even marks the row `unsure`, and the grade
+report counts them. The audit, `pairwise_judge`, `rubric_judge` and the
+advisory `llm_grade` take the same spec. It cannot play the agent, the
+writer or the user, and the run says so before any call is made.
 
 ## What you get
 
