@@ -68,7 +68,10 @@ Write `source` as an installable verifiers environment under `out`.
 its profile), a row list, or a JSONL path; graded rows get the
 difficulty band, ungraded rows are exported as they are. `reward`
 is a `Verifier`, a judge callable honoring the SDK judge contract,
-or `'module:attr'`; it must be importable in the trainer process.
+or `'module:attr'`; it must be importable in the trainer process. A
+`@verifier` or `All([...])` bound to a name in your own module is
+referenced by that name (a script run as `__main__` by its file
+stem, so keep that directory on the trainer's path).
 With no reward the conduct grade is used and the report warns: it is
 a process reward, and a policy trained on it alone learns to call
 nothing (see recipes/03-select/prime-intellect-rl). `execute` names a live

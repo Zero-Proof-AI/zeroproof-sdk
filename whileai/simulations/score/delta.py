@@ -454,7 +454,10 @@ def delta_report(
     the after side to the before run's tasks (``tasks=``) or compare per
     tier with ``dataset_report``. A replay (``simulate(tasks=...)`` or
     ``runs=N``) keeps the writer of the run it replays on ``writer_model``,
-    so two runs of one call compare as one writer.
+    so two runs of one call compare as one writer. Situations nobody's
+    model wrote (a ``seeds=`` ask, the offline template writer, or a
+    replay of either) count as one writer for this check: nothing there
+    could have moved with the weights.
 
     ``headline_verdict`` is the verdict ``format_delta_report`` prints on
     its first line, in words: ``PASS`` only for a gain the report

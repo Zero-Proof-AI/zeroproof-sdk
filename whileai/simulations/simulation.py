@@ -263,8 +263,9 @@ def simulate(
     what ``delta_report`` needs before it will call a change real
     (rlhf-book ch. 16 and appendix C: one evaluation is a draw, three
     give a standard deviation). ``simulate(tasks=base, runs=3)`` is the
-    usual form; without ``tasks=`` the first run draws the task set and
-    the rest replay it. Between runs nothing changes but the agent's own
+    usual form; without ``tasks=`` the first run draws the task set (from
+    ``seeds=`` when given) and the rest replay it. Between runs nothing
+    changes but the agent's own
     sampling: same tasks, same faults, same world state, same seed, so a
     deterministic agent gives identical runs and a zero re-run band. The
     rows of every run come back in one ``SimulationData`` (``output=``
