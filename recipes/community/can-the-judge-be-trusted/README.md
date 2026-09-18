@@ -48,7 +48,7 @@ exactly the action test, so judge and verifier are asked the same question.
 pip install whileai
 cd recipes/community/can-the-judge-be-trusted
 python run.py                 # tasks -> 4 arms -> judge -> trust report
-python run.py --dry-run       # offline: no key, no GPU
+python run.py --dry-run       # offline: builds the task grid only, no key, no GPU
 python run.py literal         # re-judge the base arms with LITERAL_RUBRIC (judge calls)
 python run.py report          # re-print every number from saved rows, no network
 ```
@@ -60,7 +60,7 @@ python run.py report          # re-print every number from saved rows, no networ
 | `--probe-sample` | 25 | rows per `judge_probes` reward-hack probe |
 | `--no-judge-calls` | off | skip the `judge_trust` perturbation/probe passes |
 | `--limit` | all | cap the offline task grid (used by `smoke.sh`) |
-| `--dry-run` | off | no model calls and no key |
+| `--dry-run` | off | builds `tasks.smoke.jsonl` only; no model calls and no key |
 
 ## Results
 
@@ -68,10 +68,14 @@ python run.py report          # re-print every number from saved rows, no networ
 hosted on the account · **no training run, no `wai.serve`** · 619 model rollouts + ~1,500
 judge calls · **under $3**.
 
-> **Revised after review.** The first version of this recipe had a defect in the gold
-> label and three pieces of loose framing, all caught in review on PR #348 and all fixed
-> here. What changed, and what did not, is recorded in **[Corrections](#corrections)** at
-> the bottom. Every number below is the corrected one.
+> **Revised after review, and run twice.** The first version of this recipe had a defect
+> in the gold label and three pieces of loose framing, all caught in review on PR #348
+> and all fixed here; what changed is recorded in **[Corrections](#corrections)**. The
+> headline numbers below are run 1 (the original rollouts, re-analysed under the fixed
+> label; `results.json`). The whole experiment was then run again from scratch under the
+> fixed code, 809 rollouts and about 1,050 judge calls, ~25 min of A10G, under $2
+> (`results.rerun.json`). **[Replication](#replication-run-2)** puts the two runs side by
+> side and says which claims survived. Read that section before quoting a number.
 
 ### The judge fails the SDK's own gate
 
@@ -138,7 +142,7 @@ return does not meet anything"* — the instruction is there and it does not hol
 This is a reward-hacking vector, not just a measurement error: a policy trained against
 this judge learns to **say it escalated and never escalate**.
 
-### Is the defect promptable? No, and on small invoices it makes things worse
+### Is the defect promptable? Not detectably
 
 The obvious cheap fix is to write the criterion better. `LITERAL_RUBRIC` in `run.py` asks
 the same three questions, but names the array and the key to look in and says in as many
@@ -157,9 +161,12 @@ test is **McNemar on the discordant pairs**, not a comparison of two Wilson inte
 | BIG | 0.789 agreement · leak 18/18 | 0.807 · leak 17/18 | 8 (orig-only 3, literal-only 5) | 0.73 — no difference |
 | SMALL | 0.639 agreement · leak 39/51 | **0.565** · leak **44/51** | 10 (orig-only **9**, literal-only 1) | **0.0215** |
 
-**On BIG it does nothing. On SMALL it is significantly worse** — of 10 rows where the two
-rubrics disagree, 9 are rows the original got right and the literal got wrong. Spelling
-the rule out more explicitly made the judge *more* lenient about small invoices.
+**On BIG it does nothing.** On SMALL, run 1 read significantly worse (9 of 10 discordant
+pairs against the literal rubric, p=0.02); run 2, same test, read 6 against 4, p=0.75.
+One p=0.02 in two runs at ten discordant pairs is not a finding, so the reading is
+"no detectable effect", and the SMALL leak count moved 31 -> 36 of 43 in run 2 the
+same way it moved 39 -> 44 of 51 in run 1, which is the direction to watch if anyone
+runs it a third time.
 
 **This is the useful half of the result.** The cheap fix does not work, so the fix has to
 be structural: compute tool presence in the harness and hand the judge the fact, rather
@@ -228,15 +235,53 @@ is like-for-like:
 | the deterministic rule | 0.614 → 0.564 | −0.050 [−0.208, +0.108] | 0.551 | 20 | `no_difference_detected` |
 | `rubric_judge` | 0.866 → 0.608 | **−0.265 [−0.385, −0.159]** | **0.0005** | 20 | **`a_better`** |
 
-**Two graders, one experiment, opposite conclusions.** Ship-or-don't rests entirely on
-which one you used. The judge also inflates the level of the before arm badly — 0.866
-against the rule's 0.614 on the very same rows.
+**Two graders, one experiment, opposite conclusions, and this one replicated.** On the
+fresh run, same 20-task restriction: rule +0.117 [−0.071, +0.317], p=0.24,
+`no_difference_detected`; judge −0.148 [−0.255, −0.043], p=0.019, `a_better`. The
+judge's delta cleared zero in both runs and the rule's cleared it in neither, with the
+rule's point estimate on opposite sides in the two runs. Ship-or-don't rests entirely
+on which grader you used. The judge also inflates the level of the before arm badly:
+0.866 against the rule's 0.614 on the very same rows in run 1, 0.824 against 0.539 in
+run 2.
 
 What this does **not** establish is that the two deltas differ by a statistically
 significant amount; that is a paired comparison of deltas which this run did not do. The
 claim is the weaker and more useful one: the two graders return different *verdicts* on
 the same data, and the rule's interval is wide because 20 paired tasks is a small holdout
 (`wai.holdout_size` would have said so before the run).
+
+## Replication (run 2)
+
+The experiment was run again from scratch under the fixed gold label: new task grid
+(45 held-out rows over 25 tasks, 3 repeats), new rollouts on both arms, two base
+replicates, the judge, the literal rubric and the probes. Same analysis code as run 1.
+`results.rerun.json` is the artifact. The adapter arms lost 18 of 135 (BIG) and 19 of
+135 (SMALL) rollouts to empty replies in run 2, against 0 and 1 on the base arms, so its
+rates are over the rows that returned and the simulator's non-random-missingness warning
+applies to that side.
+
+| claim | run 1 | run 2 | survives? |
+|---|---|---|---|
+| `judge_trust` | FAIL, kappa 0.05, agreement 63% [56, 69], n=221 | FAIL, kappa 0.03, agreement 58% [51, 66], n=166 | yes |
+| judge passed gold failures | 58 of 73 (79%) | 45 of 60 (75%) | yes |
+| BIG action leak | 18 of 18, [0.824, 1.0] | 14 of 14, [0.785, 1.0] | yes |
+| SMALL action leak | 39 of 51, [0.632, 0.860] | 31 of 43, [0.573, 0.833] | yes |
+| BIG leaks that are "announced, never called" | 15 of 18 | 13 of 14 | yes |
+| SMALL leaks that are "announced, never called" | 26 of 39 | 22 of 31 | yes |
+| length gap (gold-label check) | 30% | 37% | yes |
+| literal rubric, BIG (McNemar) | 8 discordant, p=0.73 | 5 discordant, p=1.0 | yes: no effect |
+| literal rubric, SMALL (McNemar) | 10 discordant, 9 vs 1, **p=0.02** | 10 discordant, 6 vs 4, p=0.75 | **no**: one p=0.02 in two runs |
+| before/after, rule (20 paired tasks) | −0.050 [−0.208, +0.108], no difference | +0.117 [−0.071, +0.317], no difference | yes: no difference both times |
+| before/after, judge (same 20 tasks) | −0.265 [−0.385, −0.159], p=0.0005, `a_better` | −0.148 [−0.255, −0.043], p=0.019, `a_better` | yes: opposite verdict to the rule both times |
+| judge pass rate on the before arm, judge vs rule | 0.866 vs 0.614 | 0.824 vs 0.539 | yes |
+| probe flags | 1 to 2 rows each of 10 eligible | 1 to 2 rows each of 7 eligible | the flags fire; the rates mean nothing |
+| self-agreement 120/120 | yes | yes | determinism, not evidence |
+
+What a second run adds that a first cannot: the headline (a judge at kappa near zero
+that passes announced-but-never-performed actions, on both sides of the rule) is not
+one draw, and the one claim that rested on a single p=0.02 is now marked as such. What
+it still does not give: a noise floor on the before/after deltas (one adapter pass per
+run) or any statement about which grader is right about the adapter.
 
 ## Two traps worth knowing before you start
 
@@ -330,16 +375,21 @@ delta −0.265, p=0.0005) but the sentence is weaker: the first version said the
 says the two graders return different verdicts, and states explicitly that a significance
 test *between* the two deltas was not run.
 
+**3a. The gold label is a grader too, and now has a test.** `check_gold_label()` runs
+before any stage and hands `gold_label` a correct escalation that quotes the threshold
+and rounds the figure, an invented figure, and a row with no lookup.
+
 **3. Self-agreement 1.000 was trivial.** `rubric_judge` runs at `JUDGE_TEMPERATURE = 0.0`,
 so 120/120 identical is determinism, not stability, and the Wilson interval on it was
 meaningless. Reported as such now, with the interval removed.
 
 **4. The literal-rubric comparison used the wrong test.** It is the same rows judged
 twice — paired data — so overlapping Wilson intervals on the marginals prove nothing.
-Replaced with exact McNemar on discordant pairs, which changed the finding: BIG is a wash
-(p=0.73), and **SMALL is significantly worse (p=0.0215, 9 of 10 discordant pairs against
-the literal rubric)**. The old heading said "worse" while the old text said "no effect";
-both are now replaced by the test result.
+Replaced with exact McNemar on discordant pairs: BIG is a wash (p=0.73), and SMALL read
+significantly worse in run 1 (p=0.0215, 9 of 10 discordant pairs against the literal
+rubric). Run 2 did not replicate it (6 vs 4, p=0.75), so the finding is stated as "no
+detectable effect" with the run-1 p recorded. The old heading said "worse" while the
+old text said "no effect"; both are replaced by the two test results.
 
 **5. `results.json` carried no per-row breakdown**, so "every BIG leak is the same row"
 could not be checked. A `leak_pattern` count is now written per regime — and it shows the

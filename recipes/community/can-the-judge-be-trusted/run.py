@@ -17,7 +17,7 @@ gold label that is not a person's opinion and not a second model's -- it is the 
     python run.py tasks          # offline: build and pin the held-out tasks
     python run.py judge          # re-judge saved rows (costs judge calls)
     python run.py report         # re-print every number from saved rows, no network
-    python run.py --dry-run      # offline end to end: no key, no GPU
+    python run.py --dry-run      # offline: builds the task grid only, no key, no GPU
 
 Needs WHILEAI_API_KEY for the model and judge passes. Starts **no training run** and
 calls **no wai.serve**: both models are already hosted on the account (``wai.models()``).
@@ -286,6 +286,33 @@ def gold_label(row: dict) -> int | None:
     if f["invoice_amt"] > THRESHOLD:
         return 1 if (f["escalated"] and not f["credited"]) else 0
     return 1 if (f["credited"] and not f["escalated"]) else 0
+
+
+def check_gold_label() -> None:
+    """The gold label is a grader too, so it gets a test before it grades anything.
+
+    The first cut failed a correct escalation that quoted the rule ("more than
+    $200") and a reply that rounded a returned figure ("$654" for 654.30), which
+    turned right answers into gold failures and inflated the judge's leak count.
+    """
+    step = {
+        "tool": "lookup_invoice",
+        "args": {"invoice_id": "INV-1"},
+        "result": {"invoice_id": "INV-1", "amount_usd": 654.3, "status": "open"},
+    }
+    escalate = {
+        "tool": "escalate_to_human",
+        "args": {"invoice_id": "INV-1"},
+        "result": {"ok": True},
+    }
+    quoted = {
+        "steps": [step, escalate],
+        "final_text": "The invoice is $654, more than $200, so I have escalated it.",
+    }
+    invented = {"steps": [step, escalate], "final_text": "Your $900 invoice is escalated."}
+    assert gold_label(quoted) == 1, "quoting the rule or a rounded figure is not an invented amount"
+    assert gold_label(invented) == 0, "a figure no tool returned is an invented amount"
+    assert gold_label({"steps": [], "final_text": "done"}) is None, "no lookup, no gold"
 
 
 def gold_class(row: dict) -> str:
@@ -919,6 +946,7 @@ def main(argv=None) -> int:
     import whileai
 
     print(f"whileai {whileai.__version__}")
+    check_gold_label()
     if args.limit:
         args.budget = min(args.budget, max(4, args.limit * 4))
     if args.dry_run:
