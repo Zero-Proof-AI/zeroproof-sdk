@@ -66,8 +66,11 @@ def run_agent(root: Path, skill: str, name: str, model: str, minutes: int) -> di
         f"Follow the playbook at {SKILLS / skill / 'SKILL.md'} (the whileai package is "
         "installed; WHILEAI_API_KEY is set). Work unattended; do not ask me questions."
     )
+    claude = shutil.which("claude") or shutil.which("claude.cmd")
+    if not claude:
+        return {"seconds": 0, "rc": -2, "stdout_tail": "claude CLI not found on PATH"}
     cmd = [
-        "claude",
+        claude,
         "-p",
         ask,
         "--model",
