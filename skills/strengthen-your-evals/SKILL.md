@@ -8,21 +8,20 @@ description: >
   eval sizing, the four ways an eval silently lies, and what to put on a
   card.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # Strengthen your evals
 
-Every rule here was paid for. On 2026-09-17 seven lanes trained models against
-simulated data; the first two "wins" were both withdrawn, and the causes were
-measurement, not modelling.
+Every rule here comes from a withdrawn result. The cause was measurement,
+not modelling, every time. The SDK calls named below are documented in the
+`whileai-simulations` skill; load it for the call shapes.
 
 ## Cite the research. Always.
 
-Every claim, PR, dataset card and model card names the work it rests on. Chapter,
-not book: "rlhf-book ch. 16, the eval's own variance decides what a delta can mean"
-beats "per the literature". Load the `rlhf-post-training` skill before any
-post-training work.
+Every claim, PR, dataset card and model card names the work it rests on.
+Chapter, not book: "rlhf-book ch. 16, the eval's own variance decides what a
+delta can mean" beats "per the literature".
 
 Anchors for this document:
 - **Open Character Training.** Maiya, Bartsch, Lambert, Hubinger, arXiv 2511.01689.
@@ -33,11 +32,16 @@ Anchors for this document:
 - **Persona Vectors.** Chen et al., arXiv 2507.21509. Sycophancy and hallucination
   as measurable directions; both are negative controls worth training *in* to prove
   a pipeline steers rather than merely sanitises.
-- **Natural Emergent Misalignment from Reward Hacking in Production RL.** Reward
-  hacking generalised to alignment faking and sabotage. **Inoculation prompting.** A single line reframing hacking as acceptable during RL, cut final misalignment
-  75-90% despite hack rates over 99%. Filtering hack episodes out and distilling on
-  the rest did **not** work, and instructing the model not to hack can make it worse.
-  That is a data-composition result, which is what this SDK is for.
+- **Natural Emergent Misalignment from Reward Hacking in Production RL.**
+  MacDiarmid et al., arXiv 2511.18397. Reward hacking generalised to alignment
+  faking and sabotage. A single inoculation line reframing hacking as acceptable
+  during RL cut final misalignment 75-90% despite hack rates over 99%. Filtering
+  hack episodes out and distilling on the rest did **not** work, and instructing
+  the model not to hack can make it worse. That is a data-composition result,
+  which is what this SDK is for.
+- **Inoculation Prompting.** Two concurrent papers: Wichers et al., arXiv
+  2510.05024, and Tan et al., arXiv 2510.04340. Asking for the unwanted behaviour
+  in the training prompt stops the model learning it as a default.
 
 ## Simulate the training data. Evaluate for real.
 
@@ -66,7 +70,7 @@ fired, a judge that dropped the long rows, conversations that ended before the h
 turn, and criteria that nothing in the set ever failed.
 
 Every one of those inflates the base and hides the gain. The result that survived
-the day was the one graded on a benchmark nobody here wrote.
+was the one graded on a benchmark nobody here wrote.
 
 **The claim worth making is "trained on simulated data, better on a real eval."**
 Not "trained on simulated data, better on our simulation."
@@ -79,19 +83,16 @@ used, every time.
 ## The failure class behind most of this: correct about what it examines, silent about what it assumes
 
 Every check in this document can fail this way, including the checks this document
-recommends. Four instances from a single day of dogfooding:
+recommends. Measured instances:
 
 | check | correct about | silent about | what it cost |
 |---|---|---|---|
 | answer-production gate | its exit codes | the row schema, it read `reply`, the data carried `final_text` | reported **0% answered on 400 healthy rows**, i.e. failed every valid run |
-| "is the customer pinned?" | that absence from a signature proves nothing | that the knob's NAME is inverted between trees | circulated twice, would have retracted four good numbers |
 | a trait's base rate | the rate it measured | the prompt regime it measured under | a cell can pass or fail a headroom gate on how much policy was in the prompt |
 | a pass rate | the rows it scored | the rows that never reached it | base moved **0.717 to 0.603** when dropped rows came back |
 | a tool-binding test | that name-matching pairs a result to its call | whether real exports carry a `name` at all (they carry an id) | half of tool faults attributed to a tool that **never failed** |
 | a holdout-size calculator | the power arithmetic | that paired arms are **correlated**, not independent | ~30% more tasks demanded than the measured variance needs |
 | "zero rows show the behaviour" | a keyword match on the reply | the result **schema.** It read a `status` field the data does not have | claimed 0 of 504 positive examples; the real number was 191 |
-| "the fix isn't in the SDK" | the grep pattern | that the command had **errored** on an unquoted glob | read a failed command as evidence of absence |
-| `git apply` of a patch | the diff | that a **rebrand renamed the package directory** | "No such file or directory" reads exactly like "already upstream" |
 
 **The tell is always the same: the check examines one half and assumes the other.**
 Before trusting any gate, ask what it had to assume to produce its answer, then test
@@ -135,7 +136,7 @@ assumption you can see is an assumption someone can falsify.
 Before any statistics, check the agent was exercised at all. A hollow run does not
 look broken, it looks like a perfect score.
 
-Measured: a tester's first hosted run scored **pass@1 = 1.00** because the situation
+Measured: a first hosted run scored **pass@1 = 1.00** because the situation
 writer invented order ids that did not exist, so the refund tool was never called
 once. Nothing failed, so nothing looked wrong.
 
@@ -163,25 +164,29 @@ An eval too small to see your effect will report a null no matter how good the
 model is. Work out the resolvable effect FIRST.
 
 Per-prompt paired spread is remarkably stable for agent rubrics: **sd ~= 0.376**,
-measured across five independent lanes (range 0.336-0.453). At that spread:
+measured across five independent evals (range 0.336-0.453).
 
 **Use `holdout_size(effect, base=, k=, rows=)` from the SDK.** It models the test
 `delta_report` actually runs. Pass `rows=` to read base and k off your own data.
 
+Paired tasks needed, from `holdout_size(effect, base=0.6, k=4)` on whileai 0.62
+(the 50% column is the same call with `power=0.5`; the model's `sd_task` at these
+inputs is 0.34, close to the measured 0.376):
+
 | true effect | 50% power (interval just excludes zero) | **80% power (what you want)** |
 |---|---|---|
-| +0.03 | ~600 | **~1020** |
-| +0.05 | ~220 | **~370** |
-| +0.07 | ~110 | **~190** |
-| +0.10 | ~55 | **~95** |
+| +0.03 | 505 | **1032** |
+| +0.05 | 180 | **367** |
+| +0.07 | 91 | **185** |
+| +0.10 | 44 | **89** |
 
 **Design for 80% power, not 50%.** At 50% power a real effect of exactly that size
 fails to clear zero half the time, you are coin-flipping on whether your own true
-result reads as a null. The 50%-power column was first circulated here as if it were
-the answer; it is roughly half the prompts actually needed.
+result reads as a null. The 50% column is roughly half the prompts actually needed.
 
-**A 50-prompt eval only reliably detects a 13-point gain.** That is a very large gain
-to demand of a LoRA on a few hundred rows.
+**A 50-prompt eval only reliably detects a 13-point gain**
+(`detectable_effect(50, base=0.6, k=4)` = 0.131). That is a very large gain to
+demand of a LoRA on a few hundred rows.
 
 **`holdout_size` assumes the two arms are independent**, so on a paired eval it overstates the
 tasks you need. The size of the overstatement is set by how much your tasks differ in
@@ -200,13 +205,13 @@ rates**, `statistics.pstdev(pass_at(rows).per_task.values())`. Near 0.4, treat i
 bound. A measured external run at that spread needed 82 tasks where the model asked
 for 147.
 
-Averaging ratios across lanes hides this: a set spanning 0.72 to 1.16 has a mean near
+Averaging ratios across evals hides this: a set spanning 0.72 to 1.16 has a mean near
 1.0 and is not evidence of calibration. An understatement below 1.0 cannot come from
 the independence assumption, which can only overstate, look for another cause.
 
 **Prompts or rollouts? Measure, do not assume.** "Raising k never narrows a
 bootstrap over prompts, always spend on prompts" was asserted and then refuted by
-counter-measurement on another lane. It depends on how often your arms actually
+counter-measurement on another eval. It depends on how often your arms actually
 disagree on the same prompt:
 
 - **Mixed-verdict rate near 0%.** Every rollout of a prompt agrees. Extra k re-measures
@@ -228,7 +233,7 @@ asymmetry is legitimate, a better agent resolves things in fewer exchanges.
 
 **Rows vanish from the denominator.** If the grader can fail on a row, the row must
 still be COUNTED. Long trajectories are the ones that fail to grade, and long
-correlates with failing, so the drop is not random. One lane's base pass rate moved
+correlates with failing, so the drop is not random. One base pass rate moved
 **0.717 -> 0.603** when the dropped rows came back.
 > A random drop widens an interval. A drop correlated with failing moves the
 > estimate, and always in the flattering direction.
@@ -250,8 +255,8 @@ Ranked by how little can go wrong:
 
 1. **Fixed prompts + greedy decoding + a program grader.** Nothing is generated at
    eval time, so nothing can drift between arms. Identity-style trait evals and
-   execution-match SQL evals both work this way, and both produced defensible
-   numbers on a day when nothing else did.
+   execution-match SQL evals both work this way, and both produce defensible
+   numbers.
 2. **External benchmark with an external, pinned user simulator.** Code-graded, one
    process serving both arms.
 3. **Scripted multi-turn.** You can keep multi-turn and still be fixed: write the
@@ -274,7 +279,7 @@ Distinguish two different moves, because they are not the same thing:
 - **Removing a bias** (fixing a confound) genuinely changes the estimate.
 - **Adding prompts** narrows the interval; the point estimate moving is noise.
 
-One lane read +0.071 -> +0.059 -> +0.041 as "the effect erodes under scrutiny". The
+One run read +0.071 -> +0.059 -> +0.041 as "the effect erodes under scrutiny". The
 first step was a real bias removal. The second was **0.53 SE.** Noise. Treating
 both as erosion teaches you to expect every effect to vanish, when small evals are
 simply noisy in both directions.
@@ -288,31 +293,32 @@ gave p = 0.065. The bootstrap excluded zero, the sign test did not. Report both.
 
 ## 5. Before you train
 
-- **RUN A RANDOM-SELECTION CONTROL. This is not optional and we skipped it on nine
-  adapters.** Rejection sampling is: generate N completions, score them, keep the top,
-  SFT on those (rlhf-book ch. 9). The chapter's closing takeaway is explicit, *"Always
-  run a random-selection control alongside RM-selected training; if RM selection does
-  not beat random, the reward signal is not useful on that data."* Matched pairs:
-  `top_per_prompt` vs `random_per_prompt`, same rows, same count, selected at random
-  instead of by score.
+- **RUN A RANDOM-SELECTION CONTROL. This is not optional.** Rejection sampling is:
+  generate N completions, score them, keep the top, SFT on those (rlhf-book ch. 9).
+  The chapter's closing takeaway is explicit, *"Always run a random-selection control
+  alongside RM-selected training; if RM selection does not beat random, the reward
+  signal is not useful on that data."* Matched pairs: `select_for_sft(...,
+  select="top_per_prompt")` vs `select="random_per_prompt"`, same rows, same count,
+  selected at random instead of by score.
   **Without it, "the base had no headroom" and "our judge's selection carried no signal"
-  are the same observation.** We attributed seven nulls to the first and never tested the
-  second, while separately discovering the judge was dropping long trajectories from the
-  denominator. It is nearly free on a lane that is already generating.
+  are the same observation.** Nine adapters were trained without one; seven nulls were
+  attributed to the first cause while the judge was, separately, dropping long
+  trajectories from the denominator. The control is nearly free on a pipeline that is
+  already generating.
 - **Check completions per prompt against the method you are running.** Ch. 9: *"Successful
   implementations use 10 to 30 or more completions per prompt. Too few completions makes
   training biased and/or noisy."* That is the rejection-sampling/SFT-selection path, and
-  it is a different number from the k>=4 that GRPO groups need. Lanes running k=2 to k=4
-  and then selecting top-per-prompt are 5-15x under the guidance for the path they are
+  it is a different number from the k>=4 that GRPO groups need. Runs at k=2 to k=4
+  that then select top-per-prompt are 5-15x under the guidance for the path they are
   actually on.
   Why it bites: at k=2 the "top" completion is the better of two samples, which is close
   to a coin flip; the selected set is barely distinguishable from a random draw, which is
   exactly what the random control would reveal.
 - **Base pass rate decides the optimizer, measured ON THE EVAL YOU WILL RUN, not on
   the training distribution.** `select_for_sft` keeps only passing rows, so above
-  roughly 0.6 base there is little left to imitate. Lanes at 0.73 and 0.90 nulled for
-  exactly this.
-  One lane chose an arm because base scored **40%**, comfortably in the trainable
+  roughly 0.6 base there is little left to imitate. Runs at 0.73 and 0.90 base showed
+  no gain for exactly this.
+  One run chose an arm because base scored **40%**, comfortably in the trainable
   band, but that was measured on the training world (one numeric-boundary bug). The
   holdout was a different repo with a boolean-logic bug and two failing tests, where
   base scored **7%**. They sized the round on one distribution and graded it on a much
@@ -333,14 +339,14 @@ gave p = 0.065. The bootstrap excluded zero, the sign test did not. Report both.
   model.
 - **For a trait, gate twice:** does the base LACK it (judge base replies with no
   persona in the prompt), and does your DATA CARRY it (judge trait rows against
-  control rows). One lane measured base 0.150 and separation 0.983 before spending
+  control rows). One run measured base 0.150 and separation 0.983 before spending
   anything, and ruled out a second trait at base 0.93-0.96.
 - **If you fix your generator, RE-MEASURE THE BASE before sizing the round.** A
-  generation fix can move the base more than training moves the trained arm. One lane
+  generation fix can move the base more than training moves the trained arm. One run
   measured base 0.527, fixed a defect that was cutting conversations off before the
   confirmation step, and the base rose to 0.771 on the repaired set, because the base
-  was good at confirming once the conversation let it. Their own SDK fix removed most
-  of their own headroom, and the round was then too small to show anything.
+  was good at confirming once the conversation let it. The fix removed most of the
+  headroom, and the round was then too small to show anything.
 - **Control for length.** Passing trajectories are usually shorter than failing ones,
   so preference pairs carry a brevity signal. Report trained-vs-base reply length; a
   delta carried by length is not a delta in the trait.
