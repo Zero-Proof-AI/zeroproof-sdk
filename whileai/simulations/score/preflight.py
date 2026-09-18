@@ -309,6 +309,7 @@ def dataset_report(
 ) -> dict[str, Any]:
     """One report a developer reads after simulate/grade: size, signal, mix."""
     from ..generate.coverage import cell_key
+    from ..generate.diversity import behavior_tier
     from .grading import behavior_signature
 
     rows = [r for r in rows if isinstance(r, dict)]
@@ -322,6 +323,21 @@ def dataset_report(
     for r in fails:
         classes[classify_failure(r) or "unclassified"] += 1
     junk = sum(1 for r in passes if not str(r.get("final_text") or "").strip())
+    # Difficulty mix. behavior_tier maps a missing stance to "ordinary", which
+    # is right for sampling and wrong for a report: an unlabelled cell would
+    # count as evidence the easy tier was covered. Count it separately.
+    tiers: Counter[str] = Counter()
+    tier_labeled: dict[str, list[int]] = {}
+    for r in rows:
+        assignment = r.get("scenario_dimensions") or {}
+        has_stance = bool(assignment.get("stance") or assignment.get("user_behavior"))
+        tier = behavior_tier(assignment) if has_stance else "unlabelled"
+        tiers[tier] += 1
+        if r.get("reward") in (0, 1):
+            tier_labeled.setdefault(tier, []).append(int(r["reward"]))
+    hard = sum(tiers[t] for t in ("boundary", "ambiguous", "adversarial"))
+    hard_share = round(hard / len(rows), 3) if rows else None
+
     report: dict[str, Any] = {
         "rows": len(rows),
         "unique_prompts": len(prompts),
@@ -333,7 +349,26 @@ def dataset_report(
         "distinct_behaviors": len(behaviors),
         "cells_touched": len(cells),
         "failure_classes": dict(classes.most_common()),
+        "tier_mix": dict(tiers.most_common()),
+        "hard_share": hard_share,
+        "tier_fail_rate": {
+            t: round(1 - sum(v) / len(v), 3) for t, v in sorted(tier_labeled.items()) if v
+        },
     }
+    if hard_share is not None and hard_share < 0.3 and len(rows) >= 20:
+        report.setdefault("warnings", []).append(
+            f"easy set: {hard_share:.0%} of rows are boundary, ambiguous or adversarial. "
+            "The stance axis defaults to a mostly-ordinary draw, and an ordinary cell is "
+            "the one a base already passes, so a set like this reports a null whatever the "
+            "policy does. Pin it: dimensions={'stance': ['boundary', 'conflicting', "
+            "'ambiguous', 'underspecified', 'adversarial', 'policy-push']} "
+            "(rlhf-book ch. 7 on difficulty filtering)."
+        )
+    if tiers.get("unlabelled") and tiers["unlabelled"] / max(1, len(rows)) > 0.1:
+        report.setdefault("warnings", []).append(
+            f"{tiers['unlabelled']} rows carry no stance, so their difficulty is unknown "
+            "rather than ordinary."
+        )
     if tools is not None:
         pre = preflight(tools, system_prompt)
         report["cells_total"] = pre["cells"]
