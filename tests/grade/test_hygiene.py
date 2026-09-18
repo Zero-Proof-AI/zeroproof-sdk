@@ -162,9 +162,28 @@ def test_select_for_sft_notes_low_completions_per_prompt():
     _picked, report = select_for_sft(rows, target=10)
     assert report["completions_per_prompt_max"] == 1
     assert "rejection-sampling" in report["note"]
+    assert report["completions_per_prompt_mean"] == 1.0
+    assert report["selection_effective"] == "pass_filter"
     many = [_row("a", 1, f"Issue {i} is open.") for i in range(12)]
     _picked, report = select_for_sft(many, target=10)
     assert report["completions_per_prompt_max"] == 12 and "note" not in report
+    assert report["selection_effective"] == "top_per_prompt"
+
+
+def test_select_for_sft_note_fires_on_mean_not_max():
+    """One well-sampled prompt must not silence the note for a pool of singles.
+
+    The max is the most optimistic statistic in the pool. A measured pool ran
+    mean k=1.07 and produced a null; a max-based check would not have warned.
+    """
+    rows = [_row("fat", 1, f"Issue {i} is open.") for i in range(12)]
+    rows += [_row(f"p{j}", 1, "Issue 1 is open.") for j in range(500)]
+    _picked, report = select_for_sft(rows, target=100)
+    assert report["completions_per_prompt_max"] == 12
+    assert report["completions_per_prompt_mean"] < 2
+    assert report["prompts_with_one_completion"] == 500
+    assert "rejection-sampling" in report["note"]
+    assert report["selection_effective"] == "pass_filter"
 
 
 def test_publish_gate_reports_hygiene_without_dropping():
