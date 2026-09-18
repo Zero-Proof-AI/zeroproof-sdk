@@ -5,6 +5,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.82 (2026-09-18)
+
 - Releases are cut by one command, `gh workflow run release.yml`, which
   runs `.github/scripts/release.py` on main under a concurrency group:
   next hundredth, both pyprojects, `uv lock`, and a fresh `## Unreleased`
