@@ -165,9 +165,13 @@ When groups are uneven (the `rl` default allocates rollouts where groups split),
 
 ```python
 wai.logprob_report(rows)  # coverage, and whether reward tracks the policy's confidence
-wai.reference_logprobs(data, "vllm:Qwen/Qwen3-4B@https://your-vllm-host/v1")  # ref_logprob on every row
+wai.reference_logprobs(
+    data, "vllm:Qwen/Qwen3-4B@https://your-vllm-host/v1"
+)  # ref_logprob on every row
 wai.mean_kl(rows, ref="ref_logprob")  # sampled KL per generated token, overall and per task
-wai.staleness_report(rows, base_model="Qwen/Qwen3-4B")  # policy versions, stale rows, logprob coverage
+wai.staleness_report(
+    rows, base_model="Qwen/Qwen3-4B"
+)  # policy versions, stale rows, logprob coverage
 ```
 
 `staleness_report` is the off-policy check (rlhf-book ch. 6): rows sampled by an older policy are usable only when they carry the sampler's version and its logprobs, so the importance ratio can be formed; rows whose `model_version` differs from `base_model` are `stale`.

@@ -119,7 +119,9 @@ rows = wai.retire_solved(scored.rows)  # drop tasks the policy already aces
 An agent exists the moment a push names it or a trace arrives with `gen_ai.agent.name`. Everything on the platform hangs off it.
 
 ```python
-data.push("airline-v3", agent="airline-support")  # registers the agent, attaches tools + system prompt
+data.push(
+    "airline-v3", agent="airline-support"
+)  # registers the agent, attaches tools + system prompt
 wai.agents()  # every agent: traces, sets by purpose, public cards
 wai.register_agent("airline-support", description="Refunds and rebooking")
 ```
@@ -182,21 +184,31 @@ Runs of the same prompt are grouped by `zeroproof.scenario_id`. `kind="rl"` keep
 Checks that decide whether a result is believable. All are report-only and run offline over rows you already have.
 
 ```python
-rows, report = wai.attach_labels(rows, "labels.jsonl", annotator="ana")  # gold_reward + who said what
+rows, report = wai.attach_labels(
+    rows, "labels.jsonl", annotator="ana"
+)  # gold_reward + who said what
 wai.judge_trust(rows, judge=my_judge)  # is the judge trustworthy?
 data.grade(use_privileged=True)  # judge also reads privileged principle, reference, hidden state
 wai.run_judge(rows, likert_judge, scale=(1, 5))  # rating kept, reward = (r - 1) / 4
 pairs, report = wai.judge_pairs(pairs)  # A vs B both ways round: winner, tie, position_flip_rate
 rows, report = wai.write_rubrics(rows, domain="refunds")  # per-prompt criteria on privileged.rubric
 scored = wai.run_judge(rows, wai.rubric_judge())  # a verdict per criterion; markers rubric:<item>
-clean, report = wai.decontaminate(train_rows, against=[eval_rows])  # same task id, verbatim, or 8-gram overlap
-clean, report = wai.decontaminate(train_rows, against=[eval_rows], embedder=embed, similarity=0.85)  # plus a semantic pass
+clean, report = wai.decontaminate(
+    train_rows, against=[eval_rows]
+)  # same task id, verbatim, or 8-gram overlap
+clean, report = wai.decontaminate(
+    train_rows, against=[eval_rows], embedder=embed, similarity=0.85
+)  # plus a semantic pass
 wai.style_markers(rows)  # no_boilerplate, no_hedging, no_apology, no_sycophancy, answered
 wai.style_report(rows)["warnings"]  # "reward pays for hedging (corr +0.41 ...)"
 wai.refusal_report(benign_rows)  # over-refusal rate with a Wilson interval
 wai.compare_runs(run_a, run_b)  # paired delta with a 95% interval
-wai.holdout_size(0.05, base=0.6, k=4)  # tasks to prove a 5-point gain; n_tasks_concentrated beside it
-wai.holdout_size(0.05, before=before, after=after)  # the paired sd measured off a previous eval, no model
+wai.holdout_size(
+    0.05, base=0.6, k=4
+)  # tasks to prove a 5-point gain; n_tasks_concentrated beside it
+wai.holdout_size(
+    0.05, before=before, after=after
+)  # the paired sd measured off a previous eval, no model
 wai.holdout_size(0.05, task_std=0.38)  # or the sd read off a delta_report interval
 wai.delta_report(before, after, target="pass_at_1", must_not_regress=["honest_after_fault"])
 wai.delta_report(before, after, target="pass_at_1", by="category")  # the target per kind of prompt
@@ -204,7 +216,9 @@ before = wai.simulate(agent, tools=TOOLS, tasks=base, runs=3)  # the same eval t
 after = wai.simulate(trained, tools=TOOLS, tasks=base, runs=3)
 wai.delta_report(before.rows(), after.rows(), target="pass_at_1")  # run_std computed from the runs
 wai.eval_variance(before.rows())  # the eval's own re-run std, split by lineage.eval_run
-wai.mark_grounding(rows)  # markers["argument_grounding"]: every tool argument came from the conversation
+wai.mark_grounding(
+    rows
+)  # markers["argument_grounding"]: every tool argument came from the conversation
 wai.grounding_report(rows)  # grounded rate, and the invented values by tool and key
 ```
 
@@ -222,7 +236,9 @@ wai.grounding_report(rows)  # grounded rate, and the invented values by tool and
 
 ```python
 base = wai.simulate(agent, tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=4)
-rerun = wai.simulate(agent, tools=TOOLS, system_prompt=EDITED, tasks=base, mode="rl")  # k=4, inherited
+rerun = wai.simulate(
+    agent, tools=TOOLS, system_prompt=EDITED, tasks=base, mode="rl"
+)  # k=4, inherited
 assert base.rollouts_per_request == rerun.rollouts_per_request  # cheap guard
 ```
 
@@ -282,10 +298,14 @@ If you have already collected rows under an inverted name, flip the value (`1 - 
 Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO, DPO or a reward model, as a LoRA adapter) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
 
 ```python
-run = wai.train("ds_...", method="sft", base_model="Qwen/Qwen3-4B", epochs=2)  # or "grpo" / "dpo" / "rm" with steps=
+run = wai.train(
+    "ds_...", method="sft", base_model="Qwen/Qwen3-4B", epochs=2
+)  # or "grpo" / "dpo" / "rm" with steps=
 run.wait()  # done or failed; run.url is the curve while it goes
 run.training["before"], run.training["after"]  # holdout pass@1 (SFT: loss)
-run.delta(before_rows, after_rows, target="pass_at_1", by="category")  # paired delta on the run page
+run.delta(
+    before_rows, after_rows, target="pass_at_1", by="category"
+)  # paired delta on the run page
 model = wai.serve("refund-v2", run)  # adapter on an OpenAI-compatible endpoint
 # model["endpoint"] + /chat/completions, model="refund-v2", bearer = your zp_ key
 wai.models()  # what the account hosts
@@ -297,7 +317,9 @@ wai.models()  # what the account hosts
 
 ```python
 rm = wai.train("ds_...", method="rm", steps=60, wait=True)
-run = wai.train("ds_...", method="grpo", generations=8, beta=0.02, learning_rate=5e-6, seed=3)  # the knobs a run is compared by
+run = wai.train(
+    "ds_...", method="grpo", generations=8, beta=0.02, learning_rate=5e-6, seed=3
+)  # the knobs a run is compared by
 judge = wai.reward_model(rm)  # or reward_model("run_...", threshold=0.4)
 scored = data.grade(judge=judge)
 wai.judge_trust(scored.rows, judge=judge)  # the same checks as the LLM judge
@@ -309,7 +331,9 @@ Your own trainer, three ways in:
 
 ```python
 # one line on a Transformers or TRL trainer
-run = wai.training_run("identity-v1", dataset="ds_...", base_model="Qwen/Qwen3-4B-Instruct-2507", trainer="trl")
+run = wai.training_run(
+    "identity-v1", dataset="ds_...", base_model="Qwen/Qwen3-4B-Instruct-2507", trainer="trl"
+)
 trainer.add_callback(wai.TrainerCallback(run))
 trainer.train()  # loss, lr, eval loss, epoch, grad norm, then finish
 
@@ -404,7 +428,9 @@ Hugging Face, both directions. Connect your account once on any dataset page, th
 wai.hf_status()  # connected? namespaces
 wai.hf_publish("ds_...", repo="airline-refunds", wait=True)  # rows -> a dataset repo you own
 wai.hf_publish_run("run_...", private=True)  # a finished run's LoRA adapter -> a model repo
-row = wai.import_hf("tatsu-lab/alpaca", split="train", purpose="eval")  # any Hub split -> your account
+row = wai.import_hf(
+    "tatsu-lab/alpaca", split="train", purpose="eval"
+)  # any Hub split -> your account
 wai.profile(row["datasetId"])  # profiled before you train on it
 ```
 
