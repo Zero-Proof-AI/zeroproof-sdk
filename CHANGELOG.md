@@ -3,7 +3,7 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
-## Unreleased
+## 0.79 (2026-09-18)
 
 - `typesafe:<model>` is a judge backend spec: TypeSafe's Jev, a decision
   model that answers typed questions with a probability each and writes
@@ -28,6 +28,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   so does `complete()`. Built offline against `typesafe-sdk` 0.7's
   request and response shapes; Jev is waitlisted early access and no
   call here has run against the live API yet.
+
+- `delta_report` warnings, the `trace_clean` rubric docstring and the
+  `MONITOR_LENGTH_PCT` / `RUBRIC_WEIGHTS` notes cite
+  `rlhfbook.com/c/14-over-optimization`; the old link named chapter 17
+  (the product chapter) and the `.html` form the site now redirects.
 
 ## 0.78 (2026-09-18)
 
