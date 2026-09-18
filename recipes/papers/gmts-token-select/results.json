@@ -1,0 +1,31 @@
+{
+  "recipe": "gmts-token-select",
+  "title": "GMTS: rank tokens by entropy times advantage, not by entropy alone",
+  "paper": "https://arxiv.org/abs/2608.30632",
+  "book": "ch. 6 Policy gradients",
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "metric": "pass@1",
+  "n_holdout": 0,
+  "k": 4,
+  "arms": {
+    "base": {"score": 0.0, "ci": [0.0, 0.0], "steps": 0, "gpu_minutes": 0},
+    "baseline": {"score": 0.0, "ci": [0.0, 0.0], "steps": 0, "gpu_minutes": 0},
+    "recipe": {"score": 0.0, "ci": [0.0, 0.0], "steps": 0, "gpu_minutes": 0}
+  },
+  "delta": {"recipe_vs_baseline": 0.0, "ci": [0.0, 0.0], "verdict": "flat"},
+  "checks": {
+    "run_std": 0.0,
+    "decontaminated_dropped": 0,
+    "over_optimized": false,
+    "length_before": 0.0,
+    "length_after": {"baseline": 0.0, "recipe": 0.0},
+    "hack_scan_top": "",
+    "selection_overlap": {"baseline": 0.0, "recipe": 0.0},
+    "seed": 0
+  },
+  "gpu": "L40S",
+  "usd": 0.0,
+  "verified": "1970-01-01",
+  "whileai": "0.64",
+  "run_url": ""
+}
