@@ -207,11 +207,13 @@ class ScoredData:
     ``mine_traces``, ``export_training`` and JSONL writers directly —
     no conversion scripts.
 
-    ``.rows`` is a plain list here, so ``scored.rows()`` raises
-    ``TypeError: 'list' object is not callable``. On ``SimulationData``,
-    what ``simulate()`` returns, ``.rows`` is a property that works
-    called or uncalled. ``.warnings`` is the list of hollow-run notes
-    ``run_judge`` filled; print it before reading any number.
+    ``.rows`` is a ``RowList``: a list that also answers to being
+    called, so both ``scored.rows`` and ``scored.rows()`` give the
+    scored rows. ``SimulationData.rows``, what ``simulate()`` returns,
+    behaves the same way, so the two spellings are interchangeable
+    across ``simulate() -> run_judge()``. ``.warnings`` is the list of
+    hollow-run notes ``run_judge`` filled; print it before reading any
+    number.
     """
 
     def __init__(
@@ -223,7 +225,15 @@ class ScoredData:
         judge_name: str,
         model: str | None = None,
     ):
-        self.rows = rows
+        # A RowList, not the plain list handed in: ``scored.rows()`` used
+        # to raise ``TypeError: 'list' object is not callable`` while
+        # ``SimulationData.rows()`` worked, so a ``hasattr(x, "rows")``
+        # guard picked the wrong branch on the judging path (#344).
+        # RowList subclasses list, so every existing ``scored.rows``
+        # use keeps working unchanged.
+        from ..data import RowList
+
+        self.rows = RowList(rows)
         self.run_id = run_id
         self.source = source
         self.eval_coverage: dict[str, Any] | None = None
