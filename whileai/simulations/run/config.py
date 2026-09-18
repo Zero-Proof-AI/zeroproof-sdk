@@ -15,31 +15,53 @@ from typing import Any
 
 from whileai._env import getenv
 
+from ..defaults import (
+    AGENT_MAX_TOKENS_FLOOR,
+    DEAD_AGENT_MIN_ERRORS,
+    DEFAULT_AVG_TURNS,
+    DEFAULT_BUDGET,
+    DEFAULT_CARDS_PER_WAVE,
+    DEFAULT_COMPLETIONS_PER_REQUEST,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_EXTRA_CARDS,
+    DEFAULT_MIN_USER_TURNS,
+    DEFAULT_POOL_SIZE,
+    DEFAULT_PROBE,
+    DEFAULT_SEED,
+    DEFAULT_WRITER_FLIGHT,
+    HUNG_SLOT_S,
+    MAX_COMPLETIONS_PER_REQUEST,
+    RL_FAULT_RATE,
+    RL_ROLLOUTS_PER_PROMPT,
+    SATURATION_CAP,
+    SFT_PHRASINGS_PER_SITUATION,
+    STOP_GRACE_S,
+    RunKnobs,
+    resolve_knobs,
+)
 from ..generate.adapters import resolve_system_prompt
 from ..generate.agents import LOCAL_MODEL_TIMEOUT, PATIENCE_LEVELS
 from ..generate.diversity import adaptive_allocator
 from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS, check_dimensions
 from .spec import spec_rubric
 
-# Rows a saturation-bounded run may produce before the loop gives up.
-SATURATION_CAP = 50_000
-# Kill a hung Qwen slot after this wait. Omit the row. Not agent speech.
-# Ping-pong is several HTTP calls; 24s dropped healthy 2-person traces
-# and the replacement oversubscribed the GPU.
-HUNG_SLOT_S = 45.0
-# After a stop (clock, cap, saturation) wait this long for rollouts that
-# are already running. Queued ones are cancelled at once. Whatever is
-# still running afterwards is abandoned and reported.
-STOP_GRACE_S = 5.0
-# An agent that raises on every call is called off once this many
-# rollouts were lost with no row landed (or 2 x budget, whichever is
-# larger), instead of re-rolling until the writer runs dry (#88).
-DEAD_AGENT_MIN_ERRORS = 16
+# The values themselves, with the reason for each, live in
+# ``whileai.simulations.defaults``; these names stay importable from here.
+__all__ = [
+    "DEAD_AGENT_MIN_ERRORS",
+    "HUNG_SLOT_S",
+    "SATURATION_CAP",
+    "STOP_GRACE_S",
+    "RunConfig",
+    "resolve_run_config",
+    "resolve_topology",
+    "writer_spec_for",
+]
 
 _MODE_PRESETS: dict[str, dict[str, Any]] = {
     "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
-    "sft": {"n_req": 3, "k": 1, "repeat_policy": "adaptive"},
-    "rl": {"n_req": 1, "k": 8, "repeat_policy": "successive"},
+    "sft": {"n_req": SFT_PHRASINGS_PER_SITUATION, "k": 1, "repeat_policy": "adaptive"},
+    "rl": {"n_req": 1, "k": RL_ROLLOUTS_PER_PROMPT, "repeat_policy": "successive"},
     "adaptive": {"n_req": 1, "k": 1, "repeat_policy": "adaptive"},
 }
 
@@ -389,6 +411,8 @@ class RunConfig:
     stop_grace_s: float
     rollout_timeout: float
     model_version_tag: str
+    # every other engine number, each an ``advanced`` key of the same name
+    knobs: RunKnobs = field(default_factory=RunKnobs)
     # what is left goes to the situation writer as keyword arguments
     advanced: dict = field(default_factory=dict)
 
@@ -399,7 +423,7 @@ def resolve_run_config(
     spec: Any = None,
     tools: list[dict] | None = None,
     system_prompt: str | None = None,
-    budget: int | None = 1000,
+    budget: int | None = DEFAULT_BUDGET,
     time_budget: float | None = None,
     until: str = "compute",
     mode: str = "explore",
@@ -427,6 +451,9 @@ def resolve_run_config(
     Validation errors surface here, before any model or file is touched.
     """
     cfg, aliases = _merge_advanced(advanced, dict(passed or {}))
+    # Engine knobs first, so none of them rides ``**advanced`` into the
+    # situation writer as an unknown keyword.
+    knobs = resolve_knobs(cfg)
     policy = resolve_system_prompt(system_prompt, aliases.get("policy"))
     scaffold_text = str(scaffold or "").strip()
     unique_flag = bool(unique_situations or aliases.get("unique", False))
@@ -472,7 +499,7 @@ def resolve_run_config(
     elif pinned_tasks:
         pinned_tasks[0].pop("base_k", None)
 
-    concurrency = int(cfg.pop("concurrency", 32))
+    concurrency = int(cfg.pop("concurrency", DEFAULT_CONCURRENCY))
     dimensions = cfg.pop("dimensions", None)
     check_dimensions(dimensions)
     arm_weights = cfg.pop("arm_weights", None)
@@ -519,11 +546,11 @@ def resolve_run_config(
     if risk is not None:
         fault_rate = float(risk)
     elif str(topo["mode"]) == "rl" and not explicit_fault:
-        fault_rate = 0.8
+        fault_rate = RL_FAULT_RATE
     texture = cfg.pop("texture", None)
     max_turns = cfg.pop("max_turns", None)
-    avg_turns = float(cfg.pop("avg_turns", 12))
-    min_user_turns = max(1, int(cfg.pop("min_user_turns", 1)))
+    avg_turns = float(cfg.pop("avg_turns", DEFAULT_AVG_TURNS))
+    min_user_turns = max(1, int(cfg.pop("min_user_turns", DEFAULT_MIN_USER_TURNS)))
     patience = str(cfg.pop("patience", None) or "normal").strip().lower()
     if patience not in PATIENCE_LEVELS:
         raise ValueError(
@@ -536,8 +563,10 @@ def resolve_run_config(
     # answers needs more, or its replies are cut mid-thought and score 0.
     raw_max_tokens = cfg.pop("agent_max_tokens", None)
     agent_max_tokens = int(raw_max_tokens) if raw_max_tokens else None
-    if agent_max_tokens is not None and agent_max_tokens < 64:
-        raise ValueError("agent_max_tokens is a reply budget in tokens (64 or more)")
+    if agent_max_tokens is not None and agent_max_tokens < AGENT_MAX_TOKENS_FLOOR:
+        raise ValueError(
+            f"agent_max_tokens is a reply budget in tokens ({AGENT_MAX_TOKENS_FLOOR} or more)"
+        )
     logprobs = cfg.pop("logprobs", False)
     if logprobs not in (False, True, "tokens"):
         raise ValueError('logprobs must be False, True, or "tokens"')
@@ -549,7 +578,7 @@ def resolve_run_config(
             'sampling= is a dict of how your agent samples, like {"temperature": 0.7, '
             '"max_tokens": 1024, "model": "my-model"}'
         )
-    seed = int(cfg.pop("seed", 0))
+    seed = int(cfg.pop("seed", DEFAULT_SEED))
     # The named grader= parameter wins; advanced={"grader": ...} stays as
     # the legacy spelling. Both route to one application path at the end.
     grader = grader if grader is not None else cfg.pop("grader", None)
@@ -596,7 +625,7 @@ def resolve_run_config(
         k_immediate = False
     else:
         k_immediate = bool(topo["k_explicit"] or topo["mode"] == "rl")
-    probe = max(1, int(cfg.pop("probe", 2)))
+    probe = max(1, int(cfg.pop("probe", DEFAULT_PROBE)))
 
     out_path = Path(output).expanduser() if output else None
     if texture is not None:
@@ -615,23 +644,25 @@ def resolve_run_config(
             "advanced={'mutate_graded_failures': True} needs grader=; without a grader "
             "there is no verdict to steer by"
         )
-    pool_size = int(cfg.pop("per_round", 80))
+    pool_size = int(cfg.pop("per_round", DEFAULT_POOL_SIZE))
     writer_raw = cfg.pop("scenario_concurrency", None)
     # Writer flight is a scheduler internal. Topology (unique / explore)
-    # does not change it. Default 4; too many starves rollouts.
-    scenario_concurrency = 4 if writer_raw is None else max(1, int(writer_raw))
+    # does not change it. Too many starves rollouts.
+    scenario_concurrency = DEFAULT_WRITER_FLIGHT if writer_raw is None else max(1, int(writer_raw))
     writer_flight = max(1, scenario_concurrency)
-    scenarios_per_request = max(1, int(cfg.pop("scenarios_per_request", 8)))
+    scenarios_per_request = max(1, int(cfg.pop("scenarios_per_request", DEFAULT_CARDS_PER_WAVE)))
     # A unique-situation run must walk the planned grid. Previously the
     # public unique=True knob still left the model writer in weighted
     # resampling mode unless callers also knew about this private switch.
     distinct_cards = bool(cfg.pop("distinct_cards", unique_cards))
     if "completions_per_request" in cfg:
-        completions_per_request = max(1, min(8, int(cfg["completions_per_request"])))
+        completions_per_request = max(
+            1, min(MAX_COMPLETIONS_PER_REQUEST, int(cfg["completions_per_request"]))
+        )
     else:
-        completions_per_request = 1
+        completions_per_request = DEFAULT_COMPLETIONS_PER_REQUEST
     cfg.pop("completions_per_request", None)
-    extra_cards = max(0, int(cfg.pop("extra_cards", 1)))
+    extra_cards = max(0, int(cfg.pop("extra_cards", DEFAULT_EXTRA_CARDS)))
     hung_slot_s = float(cfg.pop("hung_slot", HUNG_SLOT_S))
     stop_grace_s = max(0.0, float(cfg.pop("stop_grace", STOP_GRACE_S)))
     cfg.pop("scene_brief", None)
@@ -748,5 +779,6 @@ def resolve_run_config(
         stop_grace_s=stop_grace_s,
         rollout_timeout=rollout_timeout,
         model_version_tag=model_version_tag,
+        knobs=knobs,
         advanced=cfg,
     )

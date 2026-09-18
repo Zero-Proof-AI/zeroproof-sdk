@@ -13,6 +13,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .defaults import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_LLM_JUDGE_CONCURRENCY,
+    DEFAULT_SELECT_TARGET,
+    HOLDOUT_BUCKET_HEX_CHARS,
+    JUDGE_CONCURRENCY_CAP,
+    LEAK_MIN_QUOTE_CHARS,
+    PASS_REWARD,
+    SHORT_HASH_CHARS,
+)
 from .export import export_training
 from .generate.adapters import AgentProfile
 from .ingest.platform import push_rows
@@ -131,7 +141,7 @@ _CONVERSATION_FIELDS = (
 def _prompt_hash(policy: str) -> str | None:
     if not policy:
         return None
-    return hashlib.sha256(policy.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(policy.encode("utf-8")).hexdigest()[:SHORT_HASH_CHARS]
 
 
 def _split_holdout(rows: list[dict], fraction: float | None) -> tuple[list[dict], list[dict]]:
@@ -148,7 +158,8 @@ def _split_holdout(rows: list[dict], fraction: float | None) -> tuple[list[dict]
     held: list[dict] = []
     for r in rows:
         key = str(r.get("scenario_id") or r.get("task_id") or r.get("prompt") or "")
-        bucket = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+        digits = hashlib.sha256(key.encode()).hexdigest()[:HOLDOUT_BUCKET_HEX_CHARS]
+        bucket = int(digits, 16) / (16**HOLDOUT_BUCKET_HEX_CHARS - 1)
         (held if bucket < fraction else train).append(r)
     if not train:
         raise ValueError("holdout fraction leaves no training rows")
@@ -421,8 +432,8 @@ class SimulationData:
         llm_spec: str | None = None,
         api_key: str | None = None,
         path: str | None = None,
-        concurrency: int = 32,
-        llm_concurrency: int = 16,
+        concurrency: int = DEFAULT_CONCURRENCY,
+        llm_concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
         version: str | None = None,
         use_privileged: bool = False,
         scale: tuple[float, float] | None = None,
@@ -464,7 +475,7 @@ class SimulationData:
                 self.trajectories,
                 judge,
                 source="grade",
-                concurrency=min(int(concurrency), 32),
+                concurrency=min(int(concurrency), JUDGE_CONCURRENCY_CAP),
                 version=version,
                 tools=sorted(str(t) for t in self.declared_tools),
                 scale=scale,
@@ -512,7 +523,7 @@ class SimulationData:
         for t in self.trajectories:
             slot = self.arm_yield.setdefault(t["arm"], {"executed": 0, "failing": 0})
             slot["executed"] += 1
-            slot["failing"] += t["reward"] < 1.0
+            slot["failing"] += t["reward"] < PASS_REWARD
         note = trust_after_grade(self.trajectories, mode=trust)["note"]
         if note:
             log.warning(note)
@@ -523,7 +534,7 @@ class SimulationData:
         self,
         *,
         spec: str | None = None,
-        concurrency: int = 16,
+        concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
         api_key: str | None = None,
         path: str | None = None,
     ):
@@ -550,7 +561,7 @@ class SimulationData:
         spec: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
-        concurrency: int = 16,
+        concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
         api_key: str | None = None,
         path: str | None = None,
         limit: int | None = None,
@@ -618,7 +629,7 @@ class SimulationData:
         self._rewrite(path)
         return summarize_quality(self.trajectories)
 
-    def select(self, *, target: int = 1000) -> list[dict]:
+    def select(self, *, target: int = DEFAULT_SELECT_TARGET) -> list[dict]:
         """The rows recommended for training, not everything generated.
 
         Diverse pass-labeled demonstrations via ``select_for_sft``: one of
@@ -640,7 +651,11 @@ class SimulationData:
         return selected
 
     def training_set(
-        self, output: str | None = None, *, target: int = 1000, validate: bool = True
+        self,
+        output: str | None = None,
+        *,
+        target: int = DEFAULT_SELECT_TARGET,
+        validate: bool = True,
     ) -> dict:
         """Select the recommended rows and export them trainer-ready.
 
@@ -659,7 +674,7 @@ class SimulationData:
         report["selection"] = self.search.get("selection")
         return report
 
-    def leak_report(self, *, min_len: int = 12) -> dict[str, Any]:
+    def leak_report(self, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> dict[str, Any]:
         """Did any reply quote its own ``privileged`` block? Reads the
         trajectories, which still carry the block; ``rows()`` is scrubbed
         and would check nothing. Same report as ``leak_report``."""
@@ -811,7 +826,7 @@ class SimulationData:
                 "arm": t["arm"],
             }
             for t in self.trajectories
-            if not failures_only or (t["reward"] is not None and t["reward"] < 1.0)
+            if not failures_only or (t["reward"] is not None and t["reward"] < PASS_REWARD)
         ]
 
     def save(self, path: str, *, meta: bool = False) -> str:
@@ -903,7 +918,7 @@ def llm_grade(
     data: SimulationData,
     *,
     spec: str | None = None,
-    concurrency: int = 16,
+    concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
     api_key: str | None = None,
     path: str | None = None,
 ) -> SimulationData:
@@ -917,7 +932,7 @@ def grade_llm(
     spec: str | None = None,
     base_url: str | None = None,
     model: str | None = None,
-    concurrency: int = 16,
+    concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
     api_key: str | None = None,
     path: str | None = None,
     limit: int | None = None,
