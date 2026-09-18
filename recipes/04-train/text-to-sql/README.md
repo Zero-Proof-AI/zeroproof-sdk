@@ -224,6 +224,8 @@ are what to read.
 | r4 | 0.55 (0.52..0.59) | 0.27 | 0.77 | +0.026 (+0.001..+0.050); hard +0.07 (+0.03..+0.11) |
 | r5 at step 25 (from r4: 326 band prompts, 32 prompts x 16 samples a step, truncation masked) | 0.57 (0.54..0.61) | 0.27 | 0.78 | +0.044 (+0.020..+0.069); vs r4 +0.018 (-0.005..+0.043), medium +0.04 (+0.01..+0.08) |
 | r5 at step 50 | **0.73 (0.69..0.77)** | 0.65 | 0.79 | **+0.205 (+0.179..+0.231)**; vs r4 +0.179 (+0.157..+0.203); vs step 25 +0.161 (+0.138..+0.185); easy +0.18, medium +0.19, hard +0.25, every interval above zero |
+| r5 at step 75 | 0.74 (0.71..0.78) | - | - | +0.218 (+0.192..+0.245); vs step 50 +0.014 (-0.001..+0.027): the curve is flattening |
+| **r5 final (step 100)** | **0.74 (0.70..0.78)** | - | - | **+0.212 (+0.187..+0.239)**; vs r4 +0.187 (+0.164..+0.211); vs step 75 -0.006 (-0.019..+0.008); `executes` 0.70 -> 0.95, `has_sql` 0.86 -> 1.00 |
 
 On the small holdout r4 vs base was +0.021 (-0.029..+0.068), "no change".
 On 459 tasks the same two checkpoints give +0.026 with an interval that
@@ -256,8 +258,20 @@ Rounds 1-4 (one prompt per optimizer step, every prompt, truncation scored
 0) spent 8,000 steps to gain 0.03; the batch, the band and the mask did
 0.20 in 50. A second eval run of step 50 (another 1,836 samples) gives 0.73
 (0.70..0.77), +0.207 (+0.181..+0.234) vs base: two of two. Steps 75 and 100
-follow. Eval sets on the platform: step 25 `ds_215b1d5320a2d04a`, step 50
-`ds_99e38c55ac4eb56d`.
+add nothing the interval can see (0.74, 0.74): the round saturated by step
+50, which is 25,600 samples over 326 prompts, about four passes. The final
+adapter is `zero-proof-ai/text-to-sql-shop-r5` on Hugging Face with the
+holdout rollouts of every checkpoint as `eval-r5-step25/50/75` and `eval-r5`.
+Eval sets on the platform: step 25 `ds_215b1d5320a2d04a`, step 50
+`ds_99e38c55ac4eb56d`, step 75 `ds_b2fcbee3a747b4e3`.
+
+What to run next, in order: the same recipe from the r5 adapter with the
+band re-measured on r5's own rollouts (the prompts it now always solves
+drop out, the ones it never solves stay out); then the ceiling question,
+since pass@4 sits at 0.79 for every r5 checkpoint and pass@1 has caught up
+to it, more of the same reward cannot move this base much further. New
+capability needs a bigger base or harder training prompts it can solve
+sometimes.
 
 ## Other bases on the same holdout (140 tasks, k=4)
 
