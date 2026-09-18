@@ -40,6 +40,7 @@ import json
 import os
 import time
 from collections.abc import Iterable, Mapping
+from typing import Any
 
 import requests
 
@@ -195,7 +196,7 @@ def _attr(key: str, value: object) -> dict:
     return {"key": key, "value": {"stringValue": str(value)}}
 
 
-def _field(row: Mapping, info: Mapping, keys: tuple[str, ...]) -> object:
+def _field(row: Mapping, info: Mapping, keys: tuple[str, ...]) -> Any:
     for source in (row, info):
         for key in keys:
             value = source.get(key)
@@ -255,7 +256,8 @@ def send_runs(
                 f"row {i} is a {type(row).__name__}, not a dict of "
                 "{scenario_id, prompt, final_text, reward}"
             )
-        info = row.get("info") if isinstance(row.get("info"), Mapping) else {}
+        raw = row.get("info")
+        info: Mapping = raw if isinstance(raw, Mapping) else {}
         prompt = _field(row, info, _PROMPT_KEYS)
         if prompt is None:
             raise WhileIngestError(
