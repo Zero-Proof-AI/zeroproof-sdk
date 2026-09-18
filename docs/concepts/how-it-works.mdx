@@ -1,0 +1,104 @@
+---
+title: "How it works"
+sidebarTitle: "How it works"
+description: "What happens inside one rollout: the prompt, the reply, the score and the held-out copy, and the five steps that turn an agent's weak spots into training data."
+---
+
+A rollout has four pieces. Three train the model. One evaluates it.
+
+| Piece | What it is |
+|---|---|
+| **Prompt** | What the customer asked, and the state of the world when they asked it. Which records exist, which tool is about to fail. |
+| **Reply** | What the agent did: every message and every tool call, in order. |
+| **Score** | Did the reply follow the policy and finish the job? Scored against a written rubric, with the reason. Used for training. |
+| **Held-out** | A copy of the prompt with the answer key, kept out of training. The paired before and after is measured here. |
+
+<Note>
+The test is not training data. It is the only piece the model never sees,
+which is why a score on it means something.
+</Note>
+
+## The loop
+
+<Steps>
+  <Step title="Watch">
+    See where the agent fails at work. Live traffic is read into a map of
+    what the agent handles well and what it does not.
+  </Step>
+  <Step title="Simulate">
+    Run it through realistic scenarios. The weak spots become thousands of
+    rollouts, with tools that break on purpose and customers who do not
+    cooperate.
+  </Step>
+  <Step title="Train">
+    Every rollout gets a reward, and the ones that pass become SFT, DPO or
+    GRPO data for the next version of the model.
+  </Step>
+  <Step title="Prove">
+    Evaluate on a held-out set. A paired before and after per task
+    category, with a 95% confidence interval.
+  </Step>
+</Steps>
+
+Then it starts again. The next day's traffic is the next training set.
+
+## Five steps inside one run
+
+<Steps>
+  <Step title="Pick a prompt">
+    Each prompt combines a task category, a tool condition and a customer
+    stance. Sometimes the tool is broken on purpose.
+  </Step>
+  <Step title="Track coverage">
+    Every prompt lands in a square on a grid of situations. A few per
+    square counts as covered. Generation stops when the squares stop
+    filling.
+  </Step>
+  <Step title="Focus on what works">
+    There are several ways to come up with the next prompt. The ones that
+    keep finding new behavior get more of the budget.
+  </Step>
+  <Step title="Run the conversation">
+    A separate model plays the customer. A mock world answers every tool
+    call. Two results come out: a score to train on and a test kept out of
+    training.
+  </Step>
+  <Step title="Cut it into training data">
+    Good replies become examples. Good and bad replies to the same prompt
+    become pairs. The tests go in a set of their own.
+  </Step>
+</Steps>
+
+## What goes in
+
+| Input | Detail |
+|---|---|
+| **Your agent** | Its tools and its policy. Nothing in the agent changes; the SDK reads what it does. |
+| **Its traffic** | Real conversations, so simulation spends its budget where the agent is actually weak. Plain OpenTelemetry traces work. |
+| **Or one sentence** | For an agent that does not exist yet: describe the behavior you want, and the SDK drafts the policy and the rollout set from it. |
+
+## What comes out
+
+| Output | Detail |
+|---|---|
+| **A score** | A paired before and after per task category on a held-out set, with a confidence interval. |
+| **Training data** | Every rollout, with its reward and the reason it was kept or dropped. |
+| **Your own model** | An open-weight model trained on your work, served from your own endpoint. |
+
+## Proving it
+
+After training, the new model answers the test set. So does the old one.
+The report is a pass@1 per task category, before and after, so a gain on
+refunds cannot hide a loss on cancellations.
+
+Nothing counts as better until the held-out interval excludes zero.
+
+The first public run of this method is written up in
+[We trained a support agent to hand customers off at the right time](https://withwhile.com/blog/simulated-data-pipeline-for-fine-tuning):
+a 15-dollar simulated set took a telecom support agent, one that runs a
+phone company's support chat with real account tools, from 5% to 30% on a
+public benchmark.
+
+The mechanics behind each step, with references, are on
+[the engine](/concepts/engine). The calls that run them are in the
+[reference](/reference/overview).

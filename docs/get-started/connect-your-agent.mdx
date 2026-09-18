@@ -1,0 +1,118 @@
+---
+title: "Connect your agent"
+sidebarTitle: "Connect your agent"
+description: "The four ways to hand simulate() an agent, what a callable has to return, and how traces aim the run at what the agent actually meets."
+---
+
+`simulate()` needs to know what the agent can do (its tools and system
+prompt) and how to run it. There are four ways to give it the second
+part.
+
+## A callable
+
+Any function that takes the user's message and returns the tool calls it
+made and what it finally said.
+
+```python
+def my_agent(message: str) -> dict:
+    return {
+        "steps": [
+            {
+                "tool": "get_order",
+                "arguments": {"order_id": "4412"},
+                "result": {"status": "shipped"},
+            }
+        ],
+        "final_text": "Order 4412 shipped yesterday.",
+    }
+
+data = wai.simulate(my_agent, tools=TOOLS, system_prompt=POLICY)
+```
+
+A callable is played single-turn: one message in, one trajectory out. It
+is the right shape for an agent you already run behind an HTTP handler or
+a queue worker. Wrap the handler, return what it did.
+
+<Tip>
+`wai.world(tools)` gives a callable agent the same mock world the engine
+uses, so a real tool call in your code can be answered by the sandbox
+(faults included) instead of by production.
+</Tip>
+
+## An OpenAI-compatible endpoint
+
+A served adapter, a local vLLM, Ollama, any chat server. The SDK plays the
+agent multi-turn: it sends the system prompt and tools, answers each tool
+call from the mock world, and lets a separate model play the customer.
+
+```python
+agent = wai.local_model(
+    "http://localhost:8000/v1",
+    "Qwen/Qwen3-8B",
+    tools=TOOLS,
+    system=POLICY,
+    thinking=False,  # reasoning bases: reply with the answer, not the trace
+)
+data = wai.simulate(agent, tools=TOOLS, system_prompt=POLICY)
+```
+
+`result_shapes=` pins what a tool returns so a policy branch is actually
+reached; `fault_plans=` schedules which tool fails on which ask. Both are
+on the [parameters](/reference/parameters) page.
+
+## A model spec string
+
+No wrapper at all. The string names the provider and the model, and the
+SDK builds the agent from the tools and system prompt you pass.
+
+```python
+data = wai.simulate("openai:gpt-4.1-mini", tools=TOOLS, system_prompt=POLICY)
+```
+
+| Spec | Talks to |
+|---|---|
+| `openai:<model>` | OpenAI, key from `OPENAI_API_KEY` |
+| `anthropic:<model>` | Anthropic, key from `ANTHROPIC_API_KEY` |
+| `vllm:<model>@<url>` | Any OpenAI-compatible server at `<url>` |
+| `ollama:<model>` | A local Ollama |
+
+## The hosted model
+
+Leave `agent=` out and the run uses the Qwen the platform hosts, on the
+key from `whileai login`. Useful for a policy that does not have an agent
+yet: pass only `system_prompt=` and `tools=` and see how a capable open
+model behaves under it.
+
+```python
+data = wai.simulate(tools=TOOLS, system_prompt=POLICY)
+```
+
+The judge is never the model it is judging: the hosted judge is a
+different family from the hosted agent.
+
+## Aim the run with traces
+
+Without traces, the coverage grid comes from the tools and policy alone
+(a cold start). With them, it aims at the situations the agent actually
+met: the tools called, the faults seen, the world states. Any generated
+row that near-copies a source trace is dropped, so held-out traces stay
+out of training.
+
+```python
+data = wai.simulate(my_agent, tools=TOOLS, system_prompt=POLICY, traces="traces.jsonl")
+```
+
+`traces=` takes rows or a JSONL path. `wai.load_traces` normalizes the
+common shapes (OpenAI `messages`, `tool_trace`, `final`/`output`) to the
+one the engine reads, and `wai.rows_from_otel` reads an OpenTelemetry
+batch. Traces reproduce situations, not wording failures: an unsupported
+claim or an estimate not labelled as one has no world-visible trigger, so
+put a grader in the loop for those (`grader=`, on the
+[what to run](/reference/what-to-run) page).
+
+## Seeds
+
+`seeds=` is a list of opening asks the writer keeps and varies. Every
+seed is run. With a callable agent whose world has real ids (order
+numbers, account names), put those ids in the seeds or in the tool
+descriptions, or the writer invents ids and every rollout is "not found".
