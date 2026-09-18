@@ -652,6 +652,14 @@ def delta_report(
             f"{cfg_b['judge_version']}); grade both sides with the same judge before reading "
             "the delta."
         )
+    if _both("prompt_hash") and cfg_a["prompt_hash"] != cfg_b["prompt_hash"]:
+        not_comparable.append("prompt_hash")
+        warnings.append(
+            f"NOT COMPARABLE: before rows were generated under system prompt "
+            f"{cfg_a['prompt_hash']} and after under {cfg_b['prompt_hash']} "
+            "(lineage.system_prompt_sha); re-run one side with the other's system_prompt= "
+            "(the text is in that run's system_prompts under the hash)."
+        )
     if _both("temperature") and cfg_a["temperature"] != cfg_b["temperature"]:
         warnings.append(
             f"Before was sampled at temperature {cfg_a['temperature']} and after at "

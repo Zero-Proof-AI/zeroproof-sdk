@@ -366,6 +366,10 @@ class SimulationData:
     # ``model_version`` on every row.
     writer_model: str = ""
     user_model: str | None = None
+    # The deploy prompt the rows were generated under, full text keyed by
+    # the hash every row carries in ``lineage.system_prompt_sha`` (#296).
+    # Those two are the hash's only homes: the row and this text.
+    system_prompts: dict[str, str] = field(default_factory=dict)
 
     @property
     def judge_model(self) -> str | None:
@@ -837,6 +841,10 @@ class SimulationData:
                         # The agent spec: a trainer loading this JSONL later
                         # needs the policy and tool schemas the run knew.
                         "system_prompt": str(getattr(self.profile, "policy", "") or ""),
+                        # the exact text the rows were generated under
+                        # (policy plus scaffold), keyed by the hash each
+                        # row carries in lineage.system_prompt_sha
+                        "system_prompts": dict(self.system_prompts),
                         "tools": list(getattr(self.profile, "tools", None) or []),
                         "stopped_because": self.stopped_because,
                         "coverage": self.coverage,

@@ -142,6 +142,25 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   the agent knows it got the record it asked for; a finding (`status`,
   `owner`, `quantity`, `amount`) comes from the generated record. Keys
   the record lacks are filled as before. (#281)
+- Every row says which deploy prompt it was generated under, so a base
+  rate read off stored rows can be audited later (#296). `policy_version`
+  is `<model>@<hash>` and reads as a model id, so a session screening
+  base rates could not tell rows made under the full numbered policy
+  from rows made under a bare prompt, and the two give different
+  numbers for the same model. Rows now carry
+  `lineage.system_prompt_sha` (the same 16-char hash),
+  `lineage.system_prompt_head` (the first 120 chars) and
+  `lineage.system_prompt_chars` (a bare prompt and a 1,000-word policy are
+  not the same run) and the run keeps the
+  full text once in `data.system_prompts[<sha>]` (policy plus scaffold,
+  the exact text the agent ran under) and in the `.meta.json` sidecar.
+  Those are the hash's two homes: `policy_version`'s suffix after `@` is
+  the same value, and `run_config["prompt_hash"]` reads it off
+  `lineage` (falling back to that suffix on rows stamped before).
+  `delta_report` compares the hash across arms and, when before and
+  after were generated under different prompts, adds `prompt_hash` to
+  the new `not_comparable` list and a `NOT COMPARABLE:` warning with
+  the fix.
 
 ## 0.63 (2026-09-17)
 

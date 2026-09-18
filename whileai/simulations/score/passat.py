@@ -97,10 +97,15 @@ def _row_config_values(row: dict) -> dict[str, Any]:
         "max_tokens": sampling.get("max_tokens"),
         "policy_version": str(policy_version) if policy_version else None,
         "judge_version": judge_meta.get("version") or lineage.get("judge_version") or None,
-        # policy_version is <model>@<sha256 of the system prompt>[:16]
-        "prompt_hash": str(policy_version).split("@", 1)[1]
-        if policy_version and "@" in str(policy_version)
-        else None,
+        # lineage.system_prompt_sha is the hash's home on the row; rows
+        # stamped before lineage carried it have the same hash as the
+        # suffix of policy_version (<model>@<sha256 of the prompt>[:16])
+        "prompt_hash": lineage.get("system_prompt_sha")
+        or (
+            str(policy_version).split("@", 1)[1]
+            if policy_version and "@" in str(policy_version)
+            else None
+        ),
         "user_model": str(row["user_model"]) if row.get("user_model") else None,
         "writer_model": str(row["writer_model"]) if row.get("writer_model") else None,
     }
