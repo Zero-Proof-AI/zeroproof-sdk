@@ -3,6 +3,15 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `data.report()` (and `data.coverage`) now carries `hard_share` (as
+  asked; `None` when the run was left to pick the mix, and
+  `search["tier_mix"]` still says what the rows drew) and `fault_rate`
+  (this run's rate as resolved; `world["default_fault_rate"]` is the
+  world's own default and was never the run's). The two were the only
+  `simulate()` keywords a saved run did not record.
+
 ## 0.73 (2026-09-18)
 
 - A run records what it ran under. `data.report()` (and `data.coverage`)

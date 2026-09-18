@@ -168,6 +168,24 @@ def test_the_run_records_its_knobs_and_the_report_shows_them():
     assert plain["knobs"]["closing_margin"] == defaults.knob_default("closing_margin")
 
 
+def test_the_run_records_hard_share_and_fault_rate():
+    """The two ``simulate()`` keywords a run used to keep only in
+    ``search["tier_mix"]`` (hard_share) or nowhere (fault_rate) are on the
+    coverage record: hard_share as asked, None when not set; fault_rate as
+    resolved. Fails with KeyError on a tree that records neither."""
+    report = wai.simulate(
+        scripted_agent, mode="rl", repeats=4, budget=32, hard_share=0.8, fault_rate=1.0, **offline()
+    ).report()
+    assert report["hard_share"] == 0.8
+    assert report["fault_rate"] == 1.0
+    # left to the run: hard_share is None (the tier mix says what was drawn),
+    # fault_rate is the rate the mode resolved, not the world's default
+    plain = wai.simulate(scripted_agent, mode="rl", repeats=4, budget=32, **offline()).report()
+    assert plain["hard_share"] is None
+    assert plain["fault_rate"] == defaults.RL_FAULT_RATE
+    assert plain["world"]["default_fault_rate"] != plain["fault_rate"]
+
+
 def test_a_fault_mode_added_through_advanced_world_fires_in_a_run():
     """A fault mode the caller adds reaches the coverage grid: name it as a
     tool_condition and rows carry it. Fails on a tree where scenarios.py

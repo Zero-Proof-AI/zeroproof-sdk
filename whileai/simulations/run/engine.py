@@ -3309,6 +3309,12 @@ class Run:
         data.coverage["patience"] = c.patience
         data.coverage["user_temperature"] = c.user_temperature
         data.coverage["world"] = WorldOptions.coerce(c.world_options).summary()
+        # ``hard_share`` as asked (None when the caller left it to the
+        # search; what the rows drew is ``search["tier_mix"]``) and this
+        # run's ``fault_rate`` as resolved (``world["default_fault_rate"]``
+        # is the world's own default, not this run's rate).
+        data.coverage["hard_share"] = c.hard_share
+        data.coverage["fault_rate"] = c.fault_rate
         data.coverage["mode"] = c.topo["mode"]
         data.coverage["repeat_policy"] = c.topo["repeat_policy"]
         data.coverage["until"] = c.until_key
