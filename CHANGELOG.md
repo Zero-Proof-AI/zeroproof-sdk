@@ -45,6 +45,28 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   (`world_fault`, `graded_failure`). The `traces=` docs now say plainly
   that traces reproduce situations and that failure modes in reply
   phrasing need a grader in the loop.
+- `eval_variance` returns `run_std_by_metric`: one re-run floor for pass@1
+  and for every marker the runs share, from the same run means as the
+  scalar `run_std` (which stays, and now matches its own entry to the
+  digit). `delta_report(run_std=)` takes that mapping as well as a float
+  and judges each metric against its own floor; a metric the mapping
+  lacks, or carries as `None`, gets `noise_note: no_replicate_floor`, a
+  warning next to the verdict, and no borrowed floor. A marker on 8 of 30
+  tasks was 2.7x noisier than pass@1, so pass@1's band read a model
+  compared to itself as `slipped`; with its own floor it is
+  `within_noise`. `format_delta_report` prints each metric's band.
+  Unchanged: a scalar `run_std` still applies one floor everywhere,
+  `report["run_std"]` is the headline metric's, and no `run_std` still
+  reads `moved_unreplicated`. (#300)
+- Every band in `delta_report` is `noise_band(floor, n_a, n_b, df)` from
+  `stats`: `floor * sqrt(1/n_a + 1/n_b)` (a delta is a mean of `n_a` runs
+  against a mean of `n_b`) times 1.96 for a given floor, or the two-sided 95%
+  t quantile at `df` when the report pooled the floor from `runs=3` on both
+  sides (df=4, 2.78). The same function sets `eval_variance`'s `noise_band`.
+  The report returns `noise_band` (the headline band) and `noise_rule`, each
+  metric carries its own `noise_band`, and `format_delta_report` prints the
+  rule next to the band. A flat `2 * floor` let about 15% of pure-noise
+  deltas through with one run per side.
 
 ## 0.63 (2026-09-17)
 

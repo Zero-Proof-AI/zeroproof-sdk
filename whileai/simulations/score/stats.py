@@ -65,6 +65,53 @@ def _z(p: float) -> float:
     return NormalDist().inv_cdf(p)
 
 
+#: Two-sided 95% quantiles of Student's t by degrees of freedom, for a
+#: ``run_std`` estimated from a handful of re-runs (three runs per side is
+#: df=4 and 2.78, not 1.96). Past 30 the Cornish-Fisher expansion below is
+#: within 0.001 of the table.
+_T975 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306,
+    9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145, 15: 2.131,
+    16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086, 21: 2.080, 22: 2.074,
+    23: 2.069, 24: 2.064, 25: 2.060, 26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045,
+    30: 2.042,
+}  # fmt: skip
+
+
+def _t975(df: int) -> float:
+    """The two-sided 95% t quantile at ``df`` degrees of freedom: the table
+    to 30, the Cornish-Fisher expansion in ``z`` past it (no scipy)."""
+    n = max(1, int(df))
+    if n in _T975:
+        return _T975[n]
+    z = 1.96
+    return z + (z**3 + z) / (4 * n) + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * n * n)
+
+
+def noise_band(run_std: float, n_a: int = 1, n_b: int = 1, df: int | None = None) -> float:
+    """The re-run band a before/after delta has to clear (rlhf-book ch. 16,
+    appendix C).
+
+    ``run_std`` is the standard deviation of ONE run's mean when the same
+    model is evaluated again. A delta is the mean of ``n_a`` before runs
+    against the mean of ``n_b`` after runs, so its own standard deviation
+    is ``run_std * sqrt(1/n_a + 1/n_b)``: ``sqrt(2)`` times ``run_std``
+    with one run per side, ``sqrt(2/3)`` times it with three. The band is
+    that times 1.96 when ``run_std`` is taken as the eval's true spread
+    (``df=None``: a number handed in), or times the two-sided 95% t
+    quantile at ``df`` when ``run_std`` was estimated from the re-runs
+    themselves, with ``df = sum(n_i - 1)`` over the sides (three runs per
+    side is df=4 and 2.78). Under pure noise about 5% of deltas land
+    outside it on either path; a flat ``2 * run_std`` let 15% through
+    with one run per side, and ``2 * sqrt(2) * run_std`` was right only
+    there and too wide with three.
+    """
+    if n_a < 1 or n_b < 1:
+        raise ValueError("n_a and n_b are run counts, at least 1 each")
+    q = 1.96 if df is None else _t975(df)
+    return q * float(run_std) * math.sqrt(1.0 / n_a + 1.0 / n_b)
+
+
 def _paired_task_sd(base: float, effect: float, k: int) -> float:
     """Standard deviation of one task's paired difference (after minus
     before pass rate over ``k`` rollouts each side) when the gain lands
@@ -581,10 +628,17 @@ def eval_variance(
     ``evaluate(run_id=)`` stamps), or a top-level or lineage key named by
     ``by``. Each run's ``metric`` is a mean over tasks; the report is
     those means, their mean, the sample standard deviation ``run_std``,
-    and ``noise_band`` = 2 x ``run_std``: a before/after delta inside it
-    is what re-running the eval does on its own. Hand ``run_std`` to
-    ``delta_report(run_std=)`` and it refuses to call such a delta a
-    change. ``stability`` places ``run_std`` on Olmo 3's bands in points.
+    and ``noise_band`` = ``noise_band(run_std)``, 1.96 x sqrt(2) x
+    ``run_std``: a before/after delta with one run per side is the
+    difference of two re-run draws, and a delta inside that band is what
+    re-running the eval does on its own (``run_std`` is taken as the
+    eval's spread; from three runs it is rough, and the note says so).
+    ``run_std_by_metric``
+    reports the same floor for pass@1 and every marker shared by all runs;
+    hand that mapping to ``delta_report(run_std=)`` so each metric uses its
+    own re-run variance. The scalar ``run_std`` remains the selected
+    ``metric``'s value for callers comparing only one metric. ``stability``
+    places ``run_std`` on Olmo 3's bands in points.
     Fewer than three runs is a difference, not a distribution; the report
     says so and ``run_std`` is ``None`` below two.
     """
@@ -606,21 +660,47 @@ def eval_variance(
         groups = [_run_rows(r, i + 1) for i, r in enumerate(runs)]
         labels = [f"run_{i + 1}" for i in range(len(groups))]
         unkeyed = 0
-    means: dict[str, float | None] = {}
-    task_sets: list[set[str]] = []
-    for label, rows in zip(labels, groups):
-        per_task = task_means(rows, metric)
-        means[label] = round(_mean(list(per_task.values())), 4) if per_task else None
-        task_sets.append(set(per_task))
-    values = [v for v in means.values() if v is not None]
+
+    def _run_means(which: str) -> tuple[dict[str, float | None], list[set[str]]]:
+        """Each run's mean of ``which`` over its tasks (unrounded), and the
+        task set each run covered."""
+        by_run: dict[str, float | None] = {}
+        covered: list[set[str]] = []
+        for label, rows in zip(labels, groups):
+            per_task = task_means(rows, which)
+            by_run[label] = _mean(list(per_task.values())) if per_task else None
+            covered.append(set(per_task))
+        return by_run, covered
+
+    def _sample_std(values: list[float]) -> float | None:
+        if len(values) < 2:
+            return None
+        centre = _mean(values)
+        return (sum((v - centre) ** 2 for v in values) / (len(values) - 1)) ** 0.5
+
+    raw_means, task_sets = _run_means(metric)
+    means: dict[str, float | None] = {
+        label: round(v, 4) if v is not None else None for label, v in raw_means.items()
+    }
+    values = [v for v in raw_means.values() if v is not None]
     n = len(values)
     mean = _mean(values) if values else None
-    std = (
-        (sum((v - mean) ** 2 for v in values) / (n - 1)) ** 0.5
-        if n >= 2 and mean is not None
-        else None
-    )
+    std = _sample_std(values)
     common = set.intersection(*task_sets) if task_sets else set()
+    # One floor per metric, each from the same unrounded run means as the
+    # scalar, so ``run_std`` and ``run_std_by_metric[metric]`` agree to the
+    # digit. A marker that applies to a subset of tasks is noisier than
+    # pass@1, which averages over all of them (#300).
+    shared_markers = (
+        set.intersection(*(set(marker_names(rows)) for rows in groups)) if groups else set()
+    )
+    floor_metrics = ["pass_at_1", *[f"marker:{name}" for name in sorted(shared_markers)]]
+    if metric not in floor_metrics:
+        floor_metrics.append(metric)
+    run_std_by_metric: dict[str, float | None] = {}
+    for floor_metric in floor_metrics:
+        metric_std = _sample_std([v for v in _run_means(floor_metric)[0].values() if v is not None])
+        run_std_by_metric[floor_metric] = round(metric_std, 4) if metric_std is not None else None
     stability = None
     if std is not None:
         points = std * 100
@@ -631,8 +711,9 @@ def eval_variance(
         "means": means,
         "mean": round(mean, 4) if mean is not None else None,
         "run_std": round(std, 4) if std is not None else None,
+        "run_std_by_metric": run_std_by_metric,
         "run_std_points": round(std * 100, 2) if std is not None else None,
-        "noise_band": round(2 * std, 4) if std is not None else None,
+        "noise_band": round(noise_band(std), 4) if std is not None else None,
         "stability": stability,
         "tasks_in_every_run": len(common),
         "notes": [],
@@ -1096,6 +1177,7 @@ __all__ = [
     "marker_names",
     "marker_summary",
     "metric_summary",
+    "noise_band",
     "task_means",
     "wilson_interval",
 ]

@@ -23,19 +23,21 @@ entirely above the target's. The report says so and fails.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from statistics import NormalDist
 from typing import Any
 
 from .passat import answer_counts, pass_at
 from .stats import (
     DEFAULT_BOOT,
+    _t975,
     compare_runs,
     detectable_effect,
     eval_variance,
     holdout_size,
     marker_names,
     metric_summary,
+    noise_band,
     task_means,
 )
 
@@ -82,14 +84,37 @@ def _eval_runs(rows: Sequence[dict]) -> set[str]:
 
 def _pooled_run_std(before: Sequence[dict], after: Sequence[dict], metric: str) -> float | None:
     """The eval's re-run standard deviation from both sides' repeats:
-    ``eval_variance`` per side, pooled as the root mean square, since
-    each side is the same eval on one model (rlhf-book appendix C)."""
-    stds = [
-        eval_variance(rows, metric=metric, by="eval_run")["run_std"] for rows in (before, after)
-    ]
-    if any(v is None for v in stds):
-        return None
-    return (sum(float(v) ** 2 for v in stds) / len(stds)) ** 0.5
+    ``eval_variance`` per side, pooled by degrees of freedom (each side's
+    variance weighted by its runs minus one), since each side is the same
+    eval on one model (rlhf-book appendix C). The pooled estimate has
+    ``sum(n_i - 1)`` degrees of freedom, which is what ``noise_band``
+    widens for."""
+    variances = []
+    for rows in (before, after):
+        side = eval_variance(rows, metric=metric, by="eval_run")
+        if side["run_std"] is None or int(side["n_runs"]) < 2:
+            return None
+        variances.append((float(side["run_std"]) ** 2, int(side["n_runs"]) - 1))
+    df = sum(w for _, w in variances)
+    return (sum(v * w for v, w in variances) / df) ** 0.5
+
+
+def _band_args(
+    eval_runs: dict[str, int], run_std_source: str | None
+) -> tuple[int, int, int | None]:
+    """What ``noise_band`` needs: how many runs each side's mean averages
+    over, and the degrees of freedom behind ``run_std`` when the report
+    estimated it from those runs itself (``None`` for a given ``run_std``,
+    which is taken as the eval's spread)."""
+    n_a, n_b = max(1, int(eval_runs["before"])), max(1, int(eval_runs["after"]))
+    df = (n_a - 1) + (n_b - 1) if run_std_source == "eval_run" else None
+    return n_a, n_b, df
+
+
+def _band_rule(n_a: int, n_b: int, df: int | None) -> str:
+    """The band as a reader can check it: the quantile, then the run counts."""
+    q = "1.96" if df is None else f"t(df={df})={_t975(df):.2f}"
+    return f"{q} x run_std x sqrt(1/{n_a} + 1/{n_b})"
 
 
 def _group_of(row: dict, by: str | Callable[[dict], Any]) -> str | None:
@@ -211,7 +236,7 @@ def delta_report(
     must_not_regress: Sequence[str] = (),
     markers: Sequence[str] | None = None,
     by: str | Callable[[dict], Any] | None = None,
-    run_std: float | None = None,
+    run_std: float | Mapping[str, float | None] | None = None,
     proxy: str | None = None,
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
@@ -241,18 +266,35 @@ def delta_report(
     should).
 
     ``run_std`` is the evaluation's own re-run standard deviation
-    (``eval_variance(...)["run_std"]``, rlhf-book ch. 16). A metric
-    whose delta is smaller than twice it is ``within_noise``: not
-    improved, not slipped, not a regression, and a target there reads
+    (rlhf-book ch. 16, appendix C). Pass
+    ``eval_variance(...)["run_std_by_metric"]`` so pass@1 and each marker
+    are judged against their own floor: a marker on a subset of tasks is
+    several times noisier than pass@1, and pass@1's floor reads a re-run
+    draw of it as a regression (#300). A scalar applies one floor to
+    every metric, as before. A metric the mapping lacks, or carries as
+    ``None``, is never given another metric's floor: it gets
+    ``noise_note: "no_replicate_floor"``, a warning, and its verdict rests
+    on the task interval alone. A metric whose delta is inside
+    ``noise_band(floor, n_a, n_b, df)`` is ``within_noise``: not improved,
+    not slipped, not a regression, and a target there reads
     ``within_eval_noise`` rather than moved, because re-running the eval
-    moves it that much on its own. When both row sets carry two or more
-    ``lineage.eval_run`` values (``simulate(tasks=..., runs=3)``) the
-    report computes ``run_std`` itself on the headline metric, pooled
-    over the two sides, and ``eval_runs`` says how many runs each side
-    had. With one run on either side and no ``run_std`` a target that
-    moved reads ``moved_unreplicated`` and a warning says how to fix it:
+    moves it that much on its own. The band is ``floor * sqrt(1/n_a +
+    1/n_b)`` (the delta is a mean of ``n_a`` runs against a mean of
+    ``n_b``) times 1.96 for a given floor, which is taken as the eval's
+    spread. When both row sets carry two or more ``lineage.eval_run``
+    values (``simulate(tasks=..., runs=3)``) the report computes each
+    metric's floor itself, pooled over the two sides, and uses the t
+    quantile at ``df = sum(runs - 1)`` instead (three runs per side: 2.78 x
+    floor x sqrt(2/3)); ``run_std`` is the headline metric's floor,
+    ``run_std_by_metric`` has them all, ``noise_band`` is the headline
+    band, ``noise_rule`` spells it out, and ``eval_runs`` says how many
+    runs each side had. With one run on either side and no ``run_std`` a
+    target that moved reads ``moved_unreplicated`` and a warning says how
+    to fix it:
     one evaluation is a draw, not a distribution (rlhf-book ch. 16,
     "why many comparisons are unreliable", and appendix C).
+    ``not_comparable`` lists every reason the two arms cannot be compared
+    at all (none are raised here; the comparability checks add theirs).
 
     ``ceiling`` is set when the before side already passes
     ``CEILING_PASS_RATE`` of its tasks, or when fewer than
@@ -305,16 +347,54 @@ def delta_report(
             degenerate_guards.append(m)
     eval_runs = {"before": len(_eval_runs(before)), "after": len(_eval_runs(after))}
     run_std_source = "given" if run_std is not None else None
-    if run_std is None and min(eval_runs.values()) >= 2:
-        run_std = _pooled_run_std(
-            before, after, target_key if target_key in results else "pass_at_1"
+
+    # One floor per metric. A marker that applies to a subset of tasks is
+    # noisier than pass@1, which averages over all of them, so judging it
+    # against pass@1's floor calls a re-run draw a regression (#300).
+    run_std_by_metric: dict[str, float | None]
+    if isinstance(run_std, Mapping):
+        run_std_by_metric = {
+            _key(str(name)): (float(value) if value is not None else None)
+            for name, value in run_std.items()
+        }
+    elif run_std is not None:
+        scalar_floor = float(run_std)
+        run_std_by_metric = {m: scalar_floor for m in metrics}
+    elif min(eval_runs.values()) >= 2:
+        run_std_by_metric = {m: _pooled_run_std(before, after, m) for m in metrics}
+        run_std_source = (
+            "eval_run" if any(value is not None for value in run_std_by_metric.values()) else None
         )
-        run_std_source = "eval_run" if run_std is not None else None
-    replicated = run_std is not None
-    noise = 2.0 * float(run_std) if run_std is not None else None
+    else:
+        run_std_by_metric = {}
+
+    headline_metric = target_key if target_key in results else "pass_at_1"
+    headline_run_std = run_std_by_metric.get(headline_metric)
+    replicated = headline_run_std is not None
+    # A floor is how far ONE run's mean moves when the eval is re-run. The
+    # delta is a mean of n_a runs against a mean of n_b, so its own standard
+    # deviation is ``floor * sqrt(1/n_a + 1/n_b)``, and the band is that
+    # times 1.96, or times the t quantile when the floor was estimated from
+    # these very runs (rlhf-book ch. 16, appendix C).
+    n_a, n_b, band_df = _band_args(eval_runs, run_std_source)
+    noise_rule = _band_rule(n_a, n_b, band_df)
     within_noise: list[str] = []
+    no_floor: list[str] = []
     for m in metrics:
         r = results[m]
+        metric_run_std = run_std_by_metric.get(m)
+        noise = (
+            noise_band(metric_run_std, n_a, n_b, df=band_df) if metric_run_std is not None else None
+        )
+        r["run_std"] = metric_run_std
+        r["noise_band"] = noise
+        # A floor was supplied or computed, but not for this metric: absent
+        # from the mapping, or ``None`` there (what ``eval_variance`` returns
+        # for a metric under two runs carried). Never borrow another
+        # metric's floor; say so instead.
+        if run_std_source is not None and metric_run_std is None:
+            r["noise_note"] = "no_replicate_floor"
+            no_floor.append(m)
         r["within_noise"] = (
             noise is not None and r.get("delta") is not None and abs(r["delta"]) < noise
         )
@@ -338,12 +418,19 @@ def delta_report(
     ok = not regressions and target_verdict not in {"moved_the_wrong_way"}
     warnings: list[str] = []
     not_comparable: list[str] = []
-    if target_verdict == "moved_unreplicated":
+    if target_verdict == "moved_unreplicated" and headline_metric not in no_floor:
         single = [side for side, n in eval_runs.items() if n < 2]
-        where = "each side" if len(single) == 2 else f"the {single[0]} side"
+        where = "each side" if len(single) != 1 else f"the {single[0]} side"
         warnings.append(
             f"One eval run on {where}, so this could be noise. Run each side three times with "
             "simulate(tasks=..., runs=3) and the report will say."
+        )
+    if no_floor:
+        warnings.append(
+            f"no re-run floor for {', '.join(no_floor)}: run_std has no value for it, so its "
+            "verdict rests on the task interval alone and is not checked against eval noise; "
+            "pass eval_variance(...)['run_std_by_metric'] from three runs that all carry the "
+            "marker, or judge it by hand"
         )
     for m in degenerate_guards:
         warnings.append(
@@ -411,10 +498,11 @@ def delta_report(
                 f"{headline_name} {headline_for_proxy['delta']:+.3f} (95% {tspan}): the policy "
                 "learned something the target does not credit (rlhf-book ch. 14)"
             )
-    if noise is not None and target_verdict == "within_eval_noise" and target_result:
+    headline_noise = results[headline_metric]["noise_band"]
+    if headline_noise is not None and target_verdict == "within_eval_noise" and target_result:
         warnings.append(
             f"{target_key}: {target_result['delta']:+.3f} is inside the eval's own re-run band "
-            f"(2 x run_std = {noise:.3f}); re-running the eval moves it that much"
+            f"({noise_rule} = {headline_noise:.3f}); re-running the eval moves it that much"
         )
     for m in regressions:
         r = results[m]
@@ -547,8 +635,11 @@ def delta_report(
         "regressions": regressions,
         "slipped": slipped,
         "within_noise": within_noise,
-        "run_std": float(run_std) if run_std is not None else None,
+        "run_std": headline_run_std,
+        "run_std_by_metric": {m: run_std_by_metric.get(m) for m in metrics},
         "run_std_source": run_std_source,
+        "noise_band": headline_noise,
+        "noise_rule": noise_rule,
         "eval_runs": eval_runs,
         "replicated": replicated,
         "ceiling": ceiling,
@@ -595,17 +686,22 @@ def format_delta_report(report: dict[str, Any]) -> str:
         else:
             lines.append(f"proxy {report['proxy']}: {report['proxy_verdict']}")
     lines.append("PASS" if report["ok"] else "FAIL")
-    if report.get("run_std") is not None:
+    floors = report.get("run_std_by_metric") or {}
+    if report.get("run_std") is not None or report.get("run_std_source") is not None:
         runs = report.get("eval_runs") or {}
         source = (
             f"{runs.get('before')} eval runs before, {runs.get('after')} after"
             if report.get("run_std_source") == "eval_run"
             else "run_std given"
         )
-        lines.append(
-            f"eval noise: run_std {report['run_std']:.3f}, a delta under "
-            f"{2 * report['run_std']:.3f} is noise ({source})"
+        headline = report.get("run_std")
+        head = (
+            f"run_std {headline:.3f}, a delta under {report['noise_band']:.3f} is noise"
+            if headline is not None
+            else "no run_std for the headline metric"
         )
+        per_metric = ", per metric below" if len(set(floors.values())) > 1 else ""
+        lines.append(f"eval noise: {head} ({report['noise_rule']}; {source}{per_metric})")
     if report.get("ceiling"):
         lines.append("CEILING: the before run already passes most tasks; use harder situations")
     answered = {
@@ -629,9 +725,17 @@ def format_delta_report(report: dict[str, Any]) -> str:
         if r.get("within_noise"):
             tag = "noise"
         pair = "paired" if r["paired"] else "unpaired"
+        # The floor this line was judged against, so a reader can see that
+        # a marker's band is its own and not pass@1's (#300).
+        if r.get("noise_band") is not None:
+            floor = f"  noise<{r['noise_band']:.3f}"
+        elif r.get("noise_note"):
+            floor = f"  {r['noise_note']}"
+        else:
+            floor = ""
         lines.append(
             f"  {name:<28} {r['mean_a']:.3f} -> {r['mean_b']:.3f}  {r['delta']:+.3f} "
-            f"[{span}]  {tag}  ({r['n_used']} {pair})"
+            f"[{span}]  {tag}  ({r['n_used']} {pair}){floor}"
         )
     groups = report.get("groups")
     if groups:
