@@ -4,6 +4,7 @@ coverage keys, stratified prompt picks, and the conversation stub."""
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import re
 from typing import Any
@@ -80,6 +81,20 @@ def _collect_finished(pending: dict, wait_s: float, *, retry: bool = False):
             results.append(fut.result())
             jobs_for.append(pending[fut])
     return results, jobs_for
+
+
+SYSTEM_PROMPT_HEAD_CHARS = 120
+
+
+def system_prompt_stamp(text: str | None) -> tuple[str, str, int]:
+    """The short hash, the opening chars and the length of the system
+    prompt a row was generated under (#296). The hash is the one
+    ``policy_version`` carries after ``@``; the head and the length are
+    enough to tell a full numbered policy from a bare prompt at a glance
+    without reading the run's record."""
+    policy = str(text or "")
+    sha = hashlib.sha256(policy.encode("utf-8")).hexdigest()[:16]
+    return sha, policy[:SYSTEM_PROMPT_HEAD_CHARS], len(policy)
 
 
 def mutation_worthy(row: dict) -> bool:

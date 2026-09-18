@@ -256,7 +256,8 @@ def test_own_model_line_fires_only_for_one_served_name_under_two_policies():
     shared = delta_report(_arm("qwen@abc"), _arm("qwen@def"), n_boot=100)
     note = [w for w in shared["warnings"] if "agent's own served model ('qwen')" in w]
     assert len(note) == 1 and "pin user_model=" in note[0]
-    assert shared["ok"] is True and shared["not_comparable"] == []
+    # the two stamps differ in their prompt hash, which #296 names as well
+    assert shared["ok"] is True and shared["not_comparable"] == ["prompt_hash"]
     # identical stamps are the model-to-itself case, not this one
     same = delta_report(_arm("qwen@abc"), _arm("qwen@abc"), n_boot=100)
     assert not any("agent's own served model" in w for w in same["warnings"])
