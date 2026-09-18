@@ -110,7 +110,8 @@ def simulate(
     repeats; ``mode="rl"`` defaults to ``"successive"``, which stops
     early on unanimous asks), ``concurrency`` (parallel rollouts, 32),
     ``simulator`` (the situation writer; ``False`` is the offline
-    template writer, no key), ``user_model``, ``backend`` (the agent's
+    template writer, no key, and ``"hosted"`` is the default written out,
+    the same as leaving it unset), ``user_model``, ``backend`` (the agent's
     model when ``agent=`` is not a callable), ``seed``, ``sampling``,
     ``max_turns`` / ``avg_turns`` (model-backed agents only; a callable
     agent is played single-turn: one message in, one trajectory out),
