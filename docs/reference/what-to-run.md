@@ -58,7 +58,7 @@ Pass `grader=` and it runs beside the rollouts as they land, never in front of t
 
 Near the end of a `time_budget` the run stops opening groups and finishes the rollouts in flight; a group still short of k at the whistle is stamped `group_cut`.
 
-`data.search["groups"]` reports `mixed`, `stopped_unanimous`, `complete`, `partial`, `rollouts_saved`, the measured `mixed_rate` and the `hazard` per group size. `data.pass_at` scores stopped unanimous groups as unanimous. `repeat_policy="fixed"` restores k rollouts for every prompt (and then `search["groups"]` is not written); `advanced={"probe": n}` changes the probe. This is DAPO's dynamic sampling (arXiv 2503.14476) and difficulty filtering (rlhfbook.com/c/14-reasoning.html), applied at generation time.
+`data.search["groups"]` reports `mixed`, `stopped_unanimous`, `complete`, `partial`, `rollouts_saved`, the measured `mixed_rate` and the `hazard` per group size. `data.pass_at` scores stopped unanimous groups as unanimous. `repeat_policy="fixed"` restores k rollouts for every prompt (and then `search["groups"]` is not written); `advanced={"probe": n}` changes the probe. This is DAPO's dynamic sampling (arXiv 2503.14476) and difficulty filtering (rlhfbook.com/c/07-reasoning), applied at generation time.
 
 ## Close the loop: aim the budget with traces
 
