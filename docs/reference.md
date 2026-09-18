@@ -849,16 +849,22 @@ wai.agents()  # every agent: traces, sets by purpose, public cards
 wai.register_agent("airline-support", description="Refunds and rebooking")
 ```
 
-### Clean up
+### From the terminal
 
 ```bash
-whileai purge --agent demo-agent --dry-run   # count its traces, datasets, record
-whileai purge --agent demo-agent             # delete them, after a y/N
-whileai purge --empty --max-rows 2           # datasets with no bytes, or 2 rows or fewer
+whileai agents                 # tracked agents and what each serves
+whileai agent <id>             # record, behaviors, verdict
+whileai runs <id>              # the version table, newest first
+whileai verdict <id> [--behavior <name>]
+whileai promote <id> <version>
+whileai live <id> --day YYYY-MM-DD --version <v> --replies N [--flagged N --p50 S --cost USD]
+whileai keys                   # names and prefixes; create or revoke under Account
 ```
 
-Python: `wai.purge_agent("demo-agent")`, `wai.delete_empty_datasets(max_rows=2)`.
-Both take `dry_run=True`.
+All take `--json` and `--api-key`; errors exit 1 with the reason on stderr.
+Thin calls into `whileai.platform`. The old `whileai purge` (ZeroProof traces
+and datasets) is gone; `wai.purge_agent` remains until the ingest module is
+retired.
 
 ### Train, holdout, eval
 
