@@ -201,6 +201,23 @@ training file.
 - **Thinking models need a reply budget.** `simulate(agent_max_tokens=4096,
   timeout=300)` (whileai >= 0.47); on the default 2048-token cap and
   60 s timeout the base lost 8% of replies mid-thought and 4 of 81 tasks.
+- **A reply budget needs a matching call timeout.** Qwen3.5-9B writes up to
+  4,096 tokens of plain-text reasoning; at 32 concurrent requests on one L40S
+  that is about 28 tokens a second per request, so the long replies took
+  longer than the 300 s default and the SDK re-rolled each one up to
+  `repeats` times. Sampling 601 prompts ran 6.5 hours and never finished.
+  `rollout.py --timeout 900 --concurrency 16` finishes; the rule is timeout
+  >= max_tokens / per-request tokens per second.
+- **Newer checkpoints, newer stack, and the weight sync is where it breaks.**
+  Qwen3.5-* (`Qwen3_5ForConditionalGeneration`) need vLLM >= 0.26 and
+  transformers 5: `--stack new` in the trainer, `--vllm 0.29.0` in
+  `serve_modal.py`, both on a CUDA devel image because vLLM compiles kernels
+  at start. transformers 5 names the text stack `model.layers...` and vLLM
+  keeps it under `language_model.model.layers...`; TRL's colocate weight sync
+  passes names straight through, so before the rename in
+  `_guard_vllm_weight_sync` every LoRA weight either crashed the run or was
+  silently skipped (training a policy vLLM never saw). The guard prints any
+  name it cannot place.
 - **Check what the SDK sent the model, not just what came back.** Before
   0.51, `simulate(tasks=...)` with a prompt-only agent drafted a tool surface
   for the situation writer and sent those schemas to the policy too. Qwen
