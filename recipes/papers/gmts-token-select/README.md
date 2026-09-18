@@ -22,7 +22,7 @@ Both arms keep exactly the same *number* of tokens, so the comparison isolates w
 
 ```bash
 python recipe.py --selftest   # the ranking, the mask and the normalizer, offline, no GPU and no key
-python recipe.py              # both arms, ~45 GPU minutes on one L40S
+python recipe.py              # both arms, ~45 GPU minutes and ~$1.50 on one L40S
 python recipe.py --lr 3e-5    # the same two arms at a third of the step size (Climb round 2)
 ```
 
@@ -46,29 +46,36 @@ destroyed the policy. Mean completion length fell from 700 characters to 374
 and `hack_scan` came back with `frac:upper`, both signatures of a model coming
 apart rather than one gaming a reward.
 
-The trainer's own logs say why, and it is not subtle. Gradient norm over the 40
-steps:
+The trainer's logs show the divergence plainly. Gradient norm over the 40 steps:
 
 | Arm | grad_norm mean | grad_norm max |
 |---|---|---|
 | Baseline (entropy) | 11.5 | 48.1 |
 | Recipe (entropy x advantage) | **60.1** | **107.8** |
 
-Both arms keep the same number of tokens and use the same learning rate, but
-they do not produce the same size of step. The advantage is constant along a
-rollout, so ranking by `|E * omega|` does not reorder tokens *within* an
-answer — it decides how many slots each answer gets, and it gives them to the
-answers with the largest |advantage|. In a group of eight with a binary reward
-and one correct rollout, TRL's scaled advantage is about +2.6 for the correct
-one against -0.38 for each wrong one, so GMTS spends its 20% almost entirely
-on that one rollout. Entropy selection spreads the same 20% across all eight,
-where positive and negative advantages partly cancel. Same token budget, about
-five times the gradient. At lr 1e-4 that is past this setup's stability point.
+**Round 2 is what stops that table from being over-read, so read it too.** At
+lr 3e-5 the same two arms produce grad_norm means of 9.9 and 10.1 — the same
+number. The 5x gap above is not a fixed property of the selection; it is what
+divergence looks like from inside. GMTS did not take uniformly larger steps, it
+fell into a feedback loop at a step size where entropy selection did not.
 
-So at the paper's settings this recipe does not test the paper's claim so much
-as discover that the claim's mechanism is also a step-size change. Round 2
-lowers the learning rate for both arms to find out whether anything is left of
-it once that is controlled for. See Climb.
+What the selection does mechanically is narrower than "bigger gradients". The
+advantage is constant along a rollout, so ranking by `|E * omega|` cannot
+reorder tokens *within* an answer — it only decides how many slots each answer
+gets, and it gives them to the answers with the largest |advantage|. In a group
+of eight with a binary reward and one correct rollout, TRL's scaled advantage is
+about +2.6 for the correct one against -0.38 for each wrong one, so GMTS spends
+its 20% almost entirely on that single rollout where entropy selection spreads
+the same 20% across all eight. That concentration is measured
+(`selection_overlap` 0.703). That it makes each update depend on fewer
+sequences, and so widens the spread of updates enough to destabilise a step
+size entropy selection survives, is the reading those two rounds support — it
+is not separately measured here, and a per-step gradient-variance log would be
+the way to check it.
+
+The practical conclusion does not depend on which mechanism is right: **the
+substitution is not drop-in.** It changes which learning rates are stable, so
+comparing the two rankings at one learning rate is not comparing the rankings.
 
 ## Checks
 
@@ -103,17 +110,41 @@ cause available to it.
 | Round | What changed | pass@1 | vs previous |
 |---|---|---|---|
 | 1 | as the paper: top 20% of tokens, k = 8 rollouts, 40 steps, lr 1e-4, LoRA r=32, bnpo loss, on-policy | baseline 0.49, recipe 0.18 | -0.310 [-0.383, -0.235], flat (wrong way) |
-| 2 | same, both arms at lr 3e-5 (`--lr 3e-5`), to separate the paper's selection from the step size it implies | pending | pending |
+| 2 | same, both arms at lr 3e-5 (`--lr 3e-5`), to separate the selection from the step size | baseline 0.35, recipe 0.33 | -0.019 [-0.052, +0.015], flat |
 
-Round 2 changes the one knob round 1 showed to be confounded with the change
-itself. It moves **both** arms, because moving only the recipe arm would leave
-the two differing in two things and stop testing the paper at all.
+Round 2 moves **both** arms, because moving only the recipe arm would leave the
+two differing in two things and stop testing the paper at all.
+
+It bought exactly one clean answer and one dead end.
+
+The clean answer: **the collapse was a step-size effect.** At a third of the
+learning rate the recipe arm is 0.33 against the baseline's 0.35, the interval
+covers zero, and the grad_norm gap is gone (9.9 against 10.1). Nothing about
+the GMTS ranking destroys a policy on its own.
+
+The dead end: **at lr 3e-5 neither arm learns.** The base is 0.36; the baseline
+finishes at 0.35 and the recipe at 0.33. Forty steps at that step size moves
+nothing, so the -0.019 is a comparison between two models that barely trained,
+and it says nothing about the paper's claim.
+
+So the two rounds bracket the question without answering it. At 1e-4 entropy
+selection trains and GMTS diverges; at 3e-5 GMTS is stable and neither trains.
+Somewhere between them is a step size where both train and the rankings can be
+compared, and finding it is the next round — a learning-rate sweep on the
+recipe arm to locate its stability edge, then both arms at the largest rate
+both survive. That is two more GPU hours, not two more minutes, which is why it
+is written down here rather than run.
+
+Two rounds is this directory's limit, so the honest summary of the recipe as it
+stands is: **the paper's claim is untested at this budget**, and the reason it
+is untested is itself the result.
 
 ## Learned
 
-- **A token selection is also a step-size change, and the paper's framing hides that.** Ranking by `|E * advantage|` cannot reorder tokens inside an answer, since the advantage is constant along it (rlhfbook ch. 6). All it can do is move slots between answers — toward the ones with the largest |advantage|, whose per-token loss terms are by construction the largest. Under a batch-wide normalizer that is a straight multiplication of the gradient: 5x here, measured. Anyone reproducing this paper should re-tune the learning rate per arm, or report the gradient norms, or the comparison is not the one they think it is.
+- **A token selection is also a stability change, and comparing two selections at one learning rate does not compare the selections.** Ranking by `|E * advantage|` cannot reorder tokens inside an answer, since the advantage is constant along it (rlhfbook ch. 6); all it can do is move slots between answers, toward the ones with the largest |advantage|. At lr 1e-4 that difference was enough for one ranking to train and the other to diverge. Anyone reproducing this paper should establish each arm's stable learning-rate range first and compare at a rate both survive, or report gradient norms alongside the scores, or the number they publish is a step-size result wearing a token-selection label.
+- **Do not read a gradient norm from a diverging run as a property of the method.** Round 1 showed grad_norm 60.1 against the baseline's 11.5 and the obvious story was "GMTS takes 5x the step". Round 2 killed that story: at a stable learning rate the two arms sit at 10.1 and 9.9. The 5x was the divergence, not its cause. One extra run at one changed knob was the difference between a clean mechanism and a confident wrong one.
 - **Check that your change is reachable, then check what else it changed.** `selection_overlap` 0.703 confirmed the arms trained on genuinely different tokens, which is the check the recipe next door was missing. It is necessary and it is not sufficient: the change was reachable and still did not isolate what it meant to, because the thing it touched carries a second effect.
 - **Computing the entropy is the expensive part of this recipe.** The score needs the full next-token distribution, so the trainer takes an extra no-grad forward and materializes a `(rows, tokens, 151936)` float32 tensor for a `log_softmax`. TRL's own scoring pass never does this — `selective_log_softmax` gathers one logprob per position. This ran at about 20 seconds a step at 8 rollouts x 256 tokens, and that pass is the bulk of it. A cheaper entropy (bf16, or fused) would be the first thing to change if this were run at any size.
 - **A flat verdict and a collapse are not the same news, and the table says the same word for both.** `check.py` reserves "moved" for a gain, so an arm that ends below the untrained base reads as "flat" in the index. That is the correct verdict by the rule and it is worth knowing that the rule compresses it; the Result table above says what actually happened.
 
-Verified 2026-09-18, whileai 0.64, TRL 0.19.1 + PEFT 0.16.0 on torch 2.7.1. 45.3 GPU minutes, $1.51 on one L40S. Run page: https://www.zeroproofai.com/platform/training/run_5198278ad1c4d851
+Verified 2026-09-18, whileai 0.64, TRL 0.19.1 + PEFT 0.16.0 on torch 2.7.1. Round 1, the numbers above: 45.3 GPU minutes, $1.51 on one L40S; round 2: 45.9 minutes, $1.53. Run page: https://www.zeroproofai.com/platform/training/run_5198278ad1c4d851 (round 2: https://www.zeroproofai.com/platform/training/run_93e11a46757d3f56)
