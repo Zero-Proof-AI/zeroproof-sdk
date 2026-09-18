@@ -224,6 +224,7 @@ are what to read.
 | r4 | 0.55 (0.52..0.59) | 0.27 | 0.77 | +0.026 (+0.001..+0.050); hard +0.07 (+0.03..+0.11) |
 | r5 at step 25 (from r4: 326 band prompts, 32 prompts x 16 samples a step, truncation masked) | 0.57 (0.54..0.61) | 0.27 | 0.78 | +0.044 (+0.020..+0.069); vs r4 +0.018 (-0.005..+0.043), medium +0.04 (+0.01..+0.08) |
 | r5 at step 50 | **0.73 (0.69..0.77)** | 0.65 | 0.79 | **+0.205 (+0.179..+0.231)**; vs r4 +0.179 (+0.157..+0.203); vs step 25 +0.161 (+0.138..+0.185); easy +0.18, medium +0.19, hard +0.25, every interval above zero |
+| r5 at step 75 | 0.74 (0.71..0.78) | - | - | +0.218 (+0.192..+0.245); vs step 50 +0.014 (-0.001..+0.027): the curve is flattening |
 
 On the small holdout r4 vs base was +0.021 (-0.029..+0.068), "no change".
 On 459 tasks the same two checkpoints give +0.026 with an interval that
