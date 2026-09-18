@@ -1081,6 +1081,42 @@ run.holdout(before=0.42, after=0.58)  # did it work? the run page opens with thi
 
 A run's page opens with one word — **Better**, **Worse**, **About the same** — over the held-out pass rate before and after. The platform's trainer measures it; a run on your own hardware says it with `run.holdout(before, after)`, or `wai.attach_holdout(run_id, before=..., after=...)` once the run has finished. Pass rates are 0 to 1, so 58% is `0.58`; `metric="loss"` sends held-out loss instead (SFT), where lower is better. `run.delta(...)` and `wai.attach_delta(...)` already measure both sides, so they fill the two numbers in themselves, and add `summary["holdout"]` (also `run.holdout_summary`): each side's pass rate with `n_tasks`, `k` and a `ci95`, plus the delta report's verdict word (`moved`, `moved_unreplicated`, `within_eval_noise`, `no_change_detected`). A hosted run read back with `run.refresh()` has the same block with the interval fields `None` and a note that the platform only returned two numbers.
 
+### Report a run so a person can decide
+
+The platform draws one screen per agent at [while.ai/platform/runs](https://while.ai/platform/runs): the held-out score by version with the frontier model as the line to beat, the training curve, what moved on the behaviors you did not train, the judge checks, live traffic on the served version, and cost. A coding agent fills it with `whileai.platform`; the person reads it and presses Promote.
+
+```python
+from whileai.platform import Agent
+
+agent = Agent(
+    "refund-bot",
+    model="Qwen/Qwen3-4B",
+    harness="h2",
+    frontier={"name": "Sonnet 5", "score": 81, "cost_per_1k": 18.0},
+)
+agent.behavior(
+    "refunds",
+    test_version="v2",
+    n=240,
+    judge={"agreement": 0.86, "human_n": 60, "length_bias": 0.08},
+    noise_floor=2.4,
+    contamination=0,
+    reward_is_judge=False,
+)
+
+run = agent.run(
+    "v4", method="GRPO", targets=["refunds"], trained_on=["refunds-grpo", "character-sft"]
+)
+run.log(10, reward=0.41, kl=0.01)  # or trainer.add_callback(wai.TrainerCallback(run))
+run.score("refunds", 83, ci=2.7, n=240)  # every behavior, not only the targets
+run.score("length", 76, ci=2.8, n=120)
+run.finish(hours=2.1, gpu="1xH100", cost_usd=31)
+
+agent.verdict()  # "refunds: v4 beats v3 by 5 (interval excludes zero); 1 regression"
+```
+
+An *agent* is a model plus a harness (prompt, tools, skills); changing the harness is a version too. A *behavior* is one thing you measure, with its own frozen held-out test (`test_version`) and its own judge. A *run* trains once on a mixture of datasets (`trained_on`) and is scored on every behavior: the ones you trained are the claim, the others are the check. `ci` is the half-width of the 95% interval; the verdict is whether the candidate's and the served version's intervals overlap. `agent.live(day, version=, replies=, flagged=)` reports a day of traffic when you serve the model yourself; the platform's endpoint reports its own. Logging buffers and never raises into the training loop. The worked example is `recipes/04-train/report-run/`.
+
 ### Is it hacking the reward right now?
 
 ```python

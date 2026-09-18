@@ -25,6 +25,7 @@ CLI_EXAMPLES = [
     "01-simulate/agent-behavior/run.py",
     "01-simulate/bring-your-own-agent/run.py",
     "04-train/hosted-loop/run.py",
+    "04-train/report-run/run.py",
     "03-select/character/from_model_spec.py",
     "03-select/character/measure.py",
     "03-select/character/run.py",
