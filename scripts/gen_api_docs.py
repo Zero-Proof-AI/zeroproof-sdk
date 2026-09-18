@@ -14,6 +14,7 @@ then commit docs/api/ and docs/docs.json.
 from __future__ import annotations
 
 import argparse
+import difflib
 import importlib
 import inspect
 import json
@@ -244,7 +245,17 @@ def main(argv: list[str] | None = None) -> int:
         current = path.read_text(encoding="utf-8") if path.exists() else None
         if current != text:
             stale.append(rel)
-            if not args.check:
+            if args.check:
+                diff = difflib.unified_diff(
+                    (current or "").splitlines(),
+                    text.splitlines(),
+                    f"committed {rel}",
+                    "generated",
+                    lineterm="",
+                    n=1,
+                )
+                print("\n".join(list(diff)[:40]))
+            else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8", newline="\n")
     extra = [p.name for p in API.glob("*.mdx") if f"api/{p.name}" not in pages]
