@@ -161,6 +161,8 @@ def _timeout_error(message: str) -> bool:
     on 3.10+ and reads ``timed out``; a wrapper may say ``timeout``."""
     text = str(message or "").lower()
     return any(mark in text for mark in _TIMEOUT_MARKS)
+
+
 def _graded_failure(row: dict) -> bool:
     """Did the grader fail this row? A reward under 0.5: a 0 from a 0/1
     judge, a failed verifier, a rubric below half. ``None`` (not judged,

@@ -27,6 +27,24 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `notes`, `n_tasks_concentrated`) is present on every path. README: size
   before you run; the effective sample is prompts, not rollouts. (#292,
   refs #288)
+- The search loop steers by the grader's verdict, not only by tool
+  faults (#285). `mutation_worthy` fills the mutation parents from
+  sandbox faults and ignores any score column, so with a 12-rule grader
+  every rule with a tool-result trigger was reproduced by `traces=` and
+  every rule about the reply's wording (grounded, estimate labelled,
+  one question) was not, while the aggregate failure rate looked right.
+  With `grader=` set, a row the grader fails (reward under 0.5) is a
+  mutation parent, its situation counts as failing, and it is re-rolled
+  under the same gate a faulted row gets; the live writer's retry card
+  now says what the grader found wrong instead of only that something
+  broke. The grader is the switch (no new `simulate()` parameter); to
+  grade beside the loop and steer by tool faults alone, pass
+  `advanced={"mutate_graded_failures": False}`, next to
+  `mutate_failures`.
+  `search["mutation_aims"]` counts parents and mutated rows per aim
+  (`world_fault`, `graded_failure`). The `traces=` docs now say plainly
+  that traces reproduce situations and that failure modes in reply
+  phrasing need a grader in the loop.
 
 ## 0.63 (2026-09-17)
 
@@ -210,22 +228,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   follow-up (under one per row before, about three now), and fewer rows
   per minute. To keep the old depth, lower `avg_turns`: 4 gives a mean of
   about 1.9, the shallowest the new draw goes; 6 gives about 2.3.
-- The search loop steers by the grader's verdict, not only by tool
-  faults (#285). `mutation_worthy` fills the mutation parents from
-  sandbox faults and ignores any score column, so with a 12-rule grader
-  every rule with a tool-result trigger was reproduced by `traces=` and
-  every rule about the reply's wording (grounded, estimate labelled,
-  one question) was not, while the aggregate failure rate looked right.
-  With `grader=` set, `mutate_graded_failures` (a `simulate()` knob, on
-  by default whenever a grader runs, off without one) makes a row the
-  grader fails (reward under 0.5) a mutation parent, counts its
-  situation as failing, and re-rolls it under the same gate a faulted
-  row gets; the live writer's retry card now says what the grader
-  found wrong instead of only that something broke.
-  `search["mutation_aims"]` counts parents and mutated rows per aim
-  (`world_fault`, `graded_failure`). The `traces=` docs now say plainly
-  that traces reproduce situations and that failure modes in reply
-  phrasing need a grader in the loop.
 
 ## 0.62 (2026-09-17)
 
