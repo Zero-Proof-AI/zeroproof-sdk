@@ -439,3 +439,164 @@ def test_tools_from_traces_recovers_the_surface_from_the_package_path():
     tools = sims.tools_from_traces(rows)
     assert [t["function"]["name"] for t in tools] == ["run_tests"]
     assert "path" in tools[0]["function"]["parameters"]["properties"]
+
+
+def test_anthropic_content_blocks_become_tool_steps():
+    """Claude-shaped traces carry tool_use / tool_result as content blocks.
+
+    Stringifying those lists emitted a Python repr as the agent's turn and
+    mined zero tool calls, so an agent that used tools looked like one that
+    never did.
+    """
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "fix it"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "reading the file"},
+                            {
+                                "type": "tool_use",
+                                "id": "tu1",
+                                "name": "Read",
+                                "input": {"file_path": "a.py"},
+                            },
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "tu1", "content": "import os"}
+                        ],
+                    },
+                ]
+            }
+        ]
+    )
+    steps = rows[0]["steps"]
+    call = next(s for s in steps if "tool" in s)
+    assert call["tool"] == "Read"
+    assert call["arguments"] == {"file_path": "a.py"}
+    assert call["result"] == "import os"
+    assert any(s.get("text") == "reading the file" for s in steps)
+    # a tool answer is not a person speaking
+    assert not any("tool_result" in str(s.get("user", "")) for s in steps)
+
+
+def test_anthropic_parallel_tool_use_binds_by_id():
+    """Content-block calls carry their id on the block, and results name it
+    in tool_use_id, so parallel blocks answered out of order still pair."""
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "tool_use", "id": "a", "name": "Read", "input": {"p": "x"}},
+                            {"type": "tool_use", "id": "b", "name": "Read", "input": {"p": "y"}},
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "b", "content": "Y"},
+                            {"type": "tool_result", "tool_use_id": "a", "content": "X"},
+                        ],
+                    },
+                ]
+            }
+        ]
+    )
+    got = {s["arguments"]["p"]: s["result"] for s in rows[0]["steps"] if "tool" in s}
+    assert got == {"x": "X", "y": "Y"}
+
+
+def test_anthropic_tool_result_block_list_is_flattened():
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "t1", "name": "run", "input": {}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "t1",
+                                "content": [{"type": "text", "text": "2 failed"}],
+                            }
+                        ],
+                    },
+                ]
+            }
+        ]
+    )
+    assert next(s for s in rows[0]["steps"] if "tool" in s)["result"] == "2 failed"
+
+
+def _anthropic_bash_trace(result_block: dict) -> dict:
+    return {
+        "messages": [
+            {"role": "user", "content": "run the tests"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"cmd": "pytest"}}
+                ],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", **result_block}],
+            },
+            {"role": "assistant", "content": "all green"},
+        ]
+    }
+
+
+def test_anthropic_is_error_tool_result_counts_as_a_fault():
+    """`is_error: true` rides next to the text, not inside it. Grading keys a
+    fault on `status` / `error`, so dropping the flag made a failed tool read
+    as a success and "all green" after it read as honest."""
+    from whileai.simulations.score.grading import NO_FAULT, _step_faulted, trace_fault
+
+    failed = load_traces(
+        [_anthropic_bash_trace({"content": "pytest: command not found", "is_error": True})]
+    )
+    step = next(s for s in failed[0]["steps"] if "tool" in s)
+    assert step["result"] == {"error": "pytest: command not found", "status": "error"}
+    assert _step_faulted(step["result"])
+    assert trace_fault(failed[0]) == "error"
+    report = trace_report(failed)
+    assert report["tools_observed"]["Bash"]["fault_n"] == 1
+    assert report["faults_observed"] == {"error": 1}
+
+    # the same trace without the flag is a clean run
+    clean = load_traces([_anthropic_bash_trace({"content": "pytest: command not found"})])
+    assert trace_fault(clean[0]) == NO_FAULT
+    assert trace_report(clean)["tools_observed"]["Bash"]["fault_n"] == 0
+    assert trace_report(clean)["faults_observed"] == {}
+
+
+def test_anthropic_is_error_keeps_a_structured_result():
+    """A JSON result under is_error keeps its fields and gains the status
+    grading reads, so a tool that already says why still says it."""
+    from whileai.simulations.score.grading import trace_fault
+
+    rows = load_traces(
+        [
+            _anthropic_bash_trace(
+                {"content": json.dumps({"code": 127, "stderr": "not found"}), "is_error": 1}
+            )
+        ]
+    )
+    step = next(s for s in rows[0]["steps"] if "tool" in s)
+    assert step["result"]["code"] == 127
+    assert step["result"]["status"] == "error"
+    assert step["result"]["error"]
+    assert trace_fault(rows[0]) == "error"
