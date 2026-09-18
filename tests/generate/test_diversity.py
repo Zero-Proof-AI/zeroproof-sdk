@@ -239,3 +239,70 @@ def test_same_scenario_id_different_prompts_allowed():
         by_sid.setdefault(sid, set()).add(t["prompt"])
     multi = [sid for sid, ps in by_sid.items() if len(ps) > 1]
     assert multi, "expected same scenario_id with different wording"
+
+
+def _tiered_pool(per_tier: int = 40):
+    from whileai.simulations.generate.diversity import _TIERS
+
+    return [{"t": tier} for tier in _TIERS for _ in range(per_tier)]
+
+
+def _tier_of(item):
+    return item["t"]
+
+
+def test_ordinary_share_is_honoured_below_half():
+    """It used to be floored at half, so 0.0, 0.2 and 0.5 all produced exactly
+    50% ordinary and only values above 0.5 did anything. A caller asking for a
+    hard set got a half-ordinary one and was told nothing."""
+    from whileai.simulations.generate.diversity import mix_items_by_tier, tier_mix
+
+    pool = _tiered_pool()
+    for asked in (0.2, 0.25, 0.4, 0.5, 0.6):
+        picked = mix_items_by_tier(pool, 40, _tier_of, ordinary_share=asked)
+        got = tier_mix(picked, _tier_of)["shares"]["ordinary"]
+        assert abs(got - asked) <= 0.05, (asked, got)
+
+
+def test_ordinary_share_zero_leaves_the_set_hard():
+    """Asking for no ordinary fill yields at most the one breadth-first seed,
+    not half the set."""
+    from whileai.simulations.generate.diversity import mix_items_by_tier, tier_mix
+
+    picked = mix_items_by_tier(_tiered_pool(), 40, _tier_of, ordinary_share=0.0)
+    mix = tier_mix(picked, _tier_of)
+    assert mix["counts"]["ordinary"] <= 1, mix
+    assert mix["shares"]["ordinary"] < 0.05, mix
+
+
+def test_every_tier_is_represented_when_the_slice_is_big_enough():
+    """Breadth-first seeding is deliberate and survives the share change: a
+    40-row slice is not one tier, whichever share was asked for."""
+    from whileai.simulations.generate.diversity import _TIERS, mix_items_by_tier, tier_mix
+
+    for asked in (0.0, 0.5, 1.0):
+        mix = tier_mix(
+            mix_items_by_tier(_tiered_pool(), 40, _tier_of, ordinary_share=asked), _tier_of
+        )
+        for tier in _TIERS:
+            assert mix["counts"][tier] >= 1, (asked, mix)
+
+
+def test_tier_mix_counts_stances_it_could_not_map():
+    """An unknown stance is counted as ordinary, which is safe and silent. A
+    spec using its own stance vocabulary therefore produces an all-ordinary
+    set while the request is never contradicted, so the count is reported."""
+    from whileai.simulations.generate.diversity import behavior_tier, tier_mix
+
+    rows = [{"stance": "sceptical"}] * 6 + [{"stance": "boundary"}] * 4
+    mix = tier_mix(rows, behavior_tier, stance_of=lambda r: r.get("stance"))
+    assert mix["unmapped"] == 6, mix
+    assert mix["counts"]["ordinary"] == 6 and mix["counts"]["boundary"] == 4, mix
+    assert mix["n"] == 10
+
+    # Without the raw stance there is nothing left to detect, because
+    # behavior_tier has already turned the unknown one into "ordinary".
+    # That must read as not-measured, never as none-found.
+    blind = tier_mix(rows, behavior_tier)
+    assert blind["unmapped"] is None, blind
+    assert blind["counts"]["ordinary"] == 6, blind

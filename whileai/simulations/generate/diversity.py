@@ -363,10 +363,25 @@ def conversation_features(
 def mix_items_by_tier(
     items: list, n: int, tier_of, *, ordinary_share: float = ORDINARY_SHARE
 ) -> list:
-    """Breadth-first across tiers, then fill ordinary-majority.
+    """Breadth-first across tiers, then fill to ``ordinary_share``.
 
-    First items hit ordinary plus a hard case. A 24-cell or 100-row slice
-    is not one tier. Unknown tiers count as ordinary.
+    First items hit ordinary plus a hard case: a 24-cell or 100-row slice
+    is not one tier. After that the fill targets ``ordinary_share`` and
+    nothing overrides it.
+
+    ``ordinary_share`` used to be floored at half, so every value at or
+    below 0.5 produced exactly 50% ordinary and only values above it did
+    anything. A caller asking for 0.2 got 0.5 and was told nothing. That
+    matters because ordinary is the tier a deployed model already handles:
+    a set that is majority ordinary spends most of its rows on situations
+    the base already passes, which caps the headroom a training run can
+    show and widens every interval measured on it (rlhf-book ch. 7 on
+    filtering to the 0.2-0.8 solve band, ch. 6 on groups whose rollouts all
+    score alike carrying no advantage).
+
+    ``ordinary_share=0`` now yields no ordinary fill at all. Unknown tiers
+    still count as ordinary, which is safe but silent, so
+    :func:`tier_mix` reports how many were reclassified that way.
     """
     if not items or n <= 0:
         return []
@@ -389,7 +404,8 @@ def mix_items_by_tier(
             return True
         return False
 
-    take("ordinary")
+    if ordinary_share > 0:
+        take("ordinary")
     if n >= 2:
         for tier in ("adversarial", "boundary", "ambiguous"):
             if take(tier):
@@ -402,7 +418,7 @@ def mix_items_by_tier(
             if tier not in have:
                 take(tier)
 
-    target_ordinary = max((n + 1) // 2, round(n * ordinary_share))
+    target_ordinary = round(n * max(0.0, min(1.0, float(ordinary_share))))
     while len(picked) < n:
         ordinary_count = sum(1 for item in picked if tier_of(item) == "ordinary")
         if ordinary_count < target_ordinary and take("ordinary"):
@@ -415,6 +431,40 @@ def mix_items_by_tier(
         if not progressed:
             break
     return picked
+
+
+def tier_mix(items: list, tier_of, *, stance_of=None) -> dict:
+    """What tier mix a set actually has, next to what was asked for.
+
+    Returns counts and shares per tier. Pass ``stance_of`` to also get
+    ``unmapped``: the number of items whose raw stance is missing or is not
+    one of the known aliases. Those become ordinary, so a spec written with
+    its own stance vocabulary silently produces an all-ordinary set while
+    the request is never contradicted.
+
+    ``unmapped`` needs ``stance_of`` because :func:`behavior_tier` has
+    already collapsed an unknown stance to ``"ordinary"`` by the time this
+    sees it. Without the raw value there is nothing left to detect, so the
+    count is ``None`` rather than ``0``: not-measured and none-found are
+    different answers and reporting the second for the first is how a check
+    ends up silent about its own blind spot.
+    """
+    counts = {tier: 0 for tier in _TIERS}
+    unmapped: int | None = 0 if stance_of is not None else None
+    for item in items or []:
+        if stance_of is not None:
+            raw = str(stance_of(item) or "")
+            if raw not in _TIER_ALIASES:
+                unmapped = (unmapped or 0) + 1
+        tier = tier_of(item)
+        counts[tier if tier in counts else "ordinary"] += 1
+    total = sum(counts.values())
+    return {
+        "n": total,
+        "counts": counts,
+        "shares": {t: (counts[t] / total if total else 0.0) for t in _TIERS},
+        "unmapped": unmapped,
+    }
 
 
 _HINT_STOP = {
