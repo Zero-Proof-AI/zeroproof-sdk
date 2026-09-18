@@ -400,3 +400,42 @@ def test_call_id_separates_two_calls_to_one_tool():
     )
     steps = {s["arguments"]["q"]: s["result"] for s in rows[0]["steps"] if "tool" in s}
     assert steps == {"a": "a-hit", "b": "b-hit"}
+
+
+def test_trace_and_marker_helpers_are_importable_from_the_package():
+    """Four helpers were public in their own modules and reachable only
+    through a private path.
+
+    ``tools_from_traces`` is the one a caller needs most: with traces and no
+    harness, it recovers the agent's tool surface from the calls the traces
+    contain, which is what ``simulate_from_traces`` uses internally.
+    """
+    import whileai.simulations as sims
+
+    for name in ("tools_from_traces", "opening_share", "infer_harness", "marker_names"):
+        assert hasattr(sims, name), f"{name} is not exported"
+        assert name in sims.__all__, f"{name} is missing from __all__"
+
+
+def test_tools_from_traces_recovers_the_surface_from_the_package_path():
+    import whileai.simulations as sims
+
+    rows = sims.load_traces(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "check it"},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {"function": {"name": "run_tests", "arguments": '{"path": "t/"}'}}
+                        ],
+                    },
+                    {"role": "tool", "name": "run_tests", "content": "ok"},
+                ]
+            }
+        ]
+    )
+    tools = sims.tools_from_traces(rows)
+    assert [t["function"]["name"] for t in tools] == ["run_tests"]
+    assert "path" in tools[0]["function"]["parameters"]["properties"]

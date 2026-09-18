@@ -183,6 +183,18 @@ print(wai.pass_at(scored.rows), *scored.warnings)  # a hollow run says so here
 `scored.warnings` is new: no rollout called a tool, a declared tool no
 rollout touched, a marker that fired on no row. A 1.00 on a run like that is not a result; the note names the fix.
 
+A declared tool the world cannot answer is the quiet version of the same
+failure: with `execute=`, a tool that is in the schema but has no branch in
+your function fails exactly like a world fault, the agent reports the miss
+honestly, and a candour rubric rewards the row. Every run now records calls
+and successes per tool in `data.coverage["tools"]` (`n`, `ok`, `fault_n`, and
+`injected` for faults the run scheduled itself), lists the tools that never
+work in `data.coverage["dead_tools"]` (the Wilson 95% upper bound on the
+success rate is under 0.30, so 0 of 9 or 4 of 612 is dead and 0 of 3 or 2 of
+5 is not), adds `dead_tools` to `data.degraded`, and puts the names and the
+one fix that applies to your world in `data.warnings` and `data.report()`.
+Steps with no recorded result are not evidence and never accuse a tool.
+
 ### Bring a model
 
 Bring your own model. Any OpenAI-compatible chat endpoint that returns tool
