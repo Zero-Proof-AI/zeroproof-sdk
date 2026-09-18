@@ -39,6 +39,13 @@ from whileai._env import getenv
 _DEFAULT_TRACE_URL = "https://api.zeroproofai.com"
 _GZIP_MAGIC = b"\x1f\x8b"
 
+# The resource attribute that names the dataset. The gate reads
+# `zeroproof.dataset` and nothing else, so sending only the whileai spelling
+# lands every batch in a dataset called `traces` whatever you asked for, with
+# a 202 that says so too late to notice. Both are written: the second costs
+# one attribute and means the rename needs no release.
+_DATASET_KEYS = ("zeroproof.dataset", "whileai.dataset")
+
 
 class WhileIngestError(Exception):
     """Raised when the gate rejects a trace batch."""
@@ -67,7 +74,7 @@ def otel_env(api_key: str, dataset: str = "traces", base_url: str | None = None)
         "OTEL_EXPORTER_OTLP_HEADERS": "x-api-key=" + api_key,
         "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
         # Resource attribute the gate reads to name the dataset.
-        "OTEL_RESOURCE_ATTRIBUTES": "whileai.dataset=" + dataset,
+        "OTEL_RESOURCE_ATTRIBUTES": ",".join(k + "=" + dataset for k in _DATASET_KEYS),
     }
 
 
@@ -133,9 +140,9 @@ def ingest_traces(
     Push a local OTLP batch file end to end and return ``{datasetId, dataset,
     rows}``.
 
-    ``dataset`` overrides the dataset name by setting the
-    ``whileai.dataset`` resource attribute on every resourceSpan, which
-    requires reading the batch; leave it unset to send the bytes untouched.
+    ``dataset`` overrides the dataset name by setting the dataset resource
+    attribute on every resourceSpan, which requires reading the batch; leave
+    it unset to send the bytes untouched.
     """
     with open(file, "rb") as fh:
         body = fh.read()
@@ -148,9 +155,9 @@ def ingest_traces(
         for resource_span in batch.get("resourceSpans", []):
             resource = resource_span.setdefault("resource", {})
             attributes = [
-                a for a in resource.get("attributes", []) if a.get("key") != "whileai.dataset"
+                a for a in resource.get("attributes", []) if a.get("key") not in _DATASET_KEYS
             ]
-            attributes.append({"key": "whileai.dataset", "value": {"stringValue": dataset}})
+            attributes += [{"key": k, "value": {"stringValue": dataset}} for k in _DATASET_KEYS]
             resource["attributes"] = attributes
         body = json.dumps(batch).encode("utf-8")
 

@@ -3,6 +3,16 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Naming a dataset from the SDK works. `otel_env(dataset=...)` and
+  `ingest_traces(..., dataset=...)` set `whileai.dataset`, and the gate names
+  the dataset from `zeroproof.dataset` alone — so every batch sent the
+  documented way landed in a dataset called `traces` whatever name was asked
+  for, and the 202 said so in a field nobody reads twice. Both keys are now
+  written. Same one-line fix in `recipes/01-simulate/agent-behavior`, whose
+  `--dataset` flag was silently ignored for the same reason.
+
 ## 0.64 (2026-09-18)
 
 - `holdout_size` measures the per-task paired sd instead of modelling it
