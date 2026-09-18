@@ -561,22 +561,31 @@ def _normalize_step(step: dict) -> dict:
 
 def _steps_from_messages(messages: Sequence[dict]) -> list[dict]:
     steps: list[dict] = []
+    by_id: dict[str, dict] = {}
 
-    def _attach(result: Any, name: str) -> None:
-        # Match by tool name first, then first-unfilled (FIFO). Never
-        # last-unfilled: parallel calls answered in order would swap
+    def _attach(result: Any, name: str, call_id: str = "") -> None:
+        # Match by call id first: it is the only binding that survives
+        # parallel calls, which providers answer out of order. Name, then
+        # first-unfilled (FIFO), remain for exports that carry no ids.
+        # Never last-unfilled: parallel calls answered in order would swap
         # payloads and mining would blame the wrong tool. An orphan result
         # becomes its own step so its fault still reaches the miner.
-        unfilled = [s for s in steps if "tool" in s and "result" not in s]
-        target = None
-        if name:
-            target = next((s for s in unfilled if s.get("tool") == name), None)
-        if target is None and unfilled:
-            target = unfilled[0]
+        target = by_id.pop(call_id, None) if call_id else None
+        if target is not None and "result" in target:
+            target = None
+        if target is None:
+            unfilled = [s for s in steps if "tool" in s and "result" not in s]
+            if name:
+                target = next((s for s in unfilled if s.get("tool") == name), None)
+            if target is None and unfilled:
+                target = unfilled[0]
         if target is None:
             steps.append({"tool": name, "arguments": {}, "result": result})
-        else:
-            target["result"] = result
+            return
+        target["result"] = result
+        for key, step in list(by_id.items()):
+            if step is target:
+                by_id.pop(key)
 
     for message in messages:
         if not isinstance(message, dict):
@@ -592,19 +601,24 @@ def _steps_from_messages(messages: Sequence[dict]) -> list[dict]:
                 if isinstance(raw, str):
                     with contextlib.suppress(ValueError):
                         raw = json.loads(raw)
-                steps.append(
-                    {
-                        "tool": str((fn or {}).get("name") or ""),
-                        "arguments": raw if isinstance(raw, dict) else {},
-                    }
-                )
+                step = {
+                    "tool": str((fn or {}).get("name") or ""),
+                    "arguments": raw if isinstance(raw, dict) else {},
+                }
+                steps.append(step)
+                if call.get("id"):
+                    by_id[str(call["id"])] = step
             if content:
                 steps.append({"text": content})
         elif role == "tool":
             result: Any = content
             with contextlib.suppress(ValueError):
                 result = json.loads(content)
-            _attach(result, str(message.get("name") or ""))
+            _attach(
+                result,
+                str(message.get("name") or ""),
+                str(message.get("tool_call_id") or message.get("tool_use_id") or ""),
+            )
     return steps
 
 

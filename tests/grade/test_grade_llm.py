@@ -263,3 +263,67 @@ def test_audit_grades_reports_false_passes_and_reasons(monkeypatch):
     assert report["findings"] and "PASSED the grader" in report["findings"][0]
     assert "never did the job" in report["findings"][0]
     assert report["by_judge_reason"]["policy held"]["disagreed"] == 3
+
+
+def test_the_payload_always_parses_however_large_the_trajectory():
+    """The judge payload is parsed back by rubric_judge, so it must be JSON.
+
+    It used to be serialised and THEN sliced to the character cap, which cut
+    mid-string. Parsing raised JSONDecodeError, the row was recorded ungraded,
+    and it left every rate's denominator. The rows lost that way are the long
+    ones and long trajectories are the hard ones, so judge-scored pass rates
+    came out too high: repairing it moved one measured base from 0.717 to
+    0.603.
+
+    Step pruning alone cannot fix it. The per-field caps are 4000 + 2000 +
+    2000, which reaches the cap with no steps at all, so the third case here
+    is the one that matters.
+    """
+    import json as _json
+
+    from whileai.simulations.score.grade_llm import _PAYLOAD_CHARS, _render_payload
+
+    trajectories = {
+        "small": {"prompt": "hi", "final_text": "ok", "steps": []},
+        "one enormous step": {
+            "prompt": "p",
+            "final_text": "f",
+            "steps": [{"tool": "t", "arguments": {}, "result": {"r": "y" * 300000}}],
+        },
+        "over the cap with zero steps": {
+            "prompt": "q" * 50000,
+            "final_text": "z" * 50000,
+            "steps": [],
+        },
+        "many large steps": {
+            "prompt": "p",
+            "final_text": "f",
+            "steps": [
+                {"tool": "t", "arguments": {"a": "x" * 900}, "result": {"r": "y" * 900}}
+                for _ in range(200)
+            ],
+        },
+    }
+    for name, row in trajectories.items():
+        text = _render_payload(row, policy="P" * 50000)
+        assert len(text) <= _PAYLOAD_CHARS, name
+        payload = _json.loads(text)  # must not raise: that is the whole fix
+        assert isinstance(payload, dict), name
+
+
+def test_a_reduced_payload_says_that_it_was_reduced():
+    """Evidence may be dropped to fit, but never silently."""
+    import json as _json
+
+    from whileai.simulations.score.grade_llm import _render_payload
+
+    # situation 4000 + final_text 2000 + agent_policy 2000 reaches the cap
+    # with no steps at all, which is the case step pruning cannot help.
+    payload = _json.loads(
+        _render_payload(
+            {"prompt": "q" * 50000, "final_text": "z" * 50000, "steps": []},
+            policy="P" * 50000,
+        )
+    )
+    assert payload.get("payload_reduced") is True
+    assert "chars omitted" in payload["situation"]

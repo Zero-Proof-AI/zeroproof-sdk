@@ -37,6 +37,59 @@ MODEL_GOLD_REASON = (
     "The gold labels came from a model, not a person, so this does not measure the "
     "judge. Label 50 rows with attach_labels(rows, labels, kind='human') and run again."
 )
+# Gold set by hand (``row["gold_reward"] = 1``) carries no kind, so it read as
+# a model's labels and the fix, attach_labels(kind="human"), was never named
+# for the case that needs it most: a person who did label the rows.
+UNKNOWN_GOLD_REASON = (
+    "These rows carry gold_reward with no record of who wrote it, so it does not measure "
+    "the judge. If you labeled them yourself, attach the labels with "
+    "attach_labels(rows, labels, kind='human'), which marks them as a person's; a model's "
+    "labels stay model gold."
+)
+
+
+def gold_kind_reason(kind: str | None) -> str:
+    """Why gold that is not a person's does not measure the judge, by kind.
+
+    ``"unknown"`` (gold_reward written by hand, no ``gold_kind``) gets the
+    sentence that names ``attach_labels(kind="human")`` as the way to say
+    a person wrote them; anything else gets the model-gold sentence.
+    """
+    return UNKNOWN_GOLD_REASON if kind == "unknown" else MODEL_GOLD_REASON
+
+
+def missing_side_note(
+    n_reward: int, n_gold: int, *, reward: str = "reward", gold: str = "gold_reward"
+) -> str:
+    """Which half of an agreement check is missing, said on its own.
+
+    One sentence covering both halves ("no rows carry both 'reward' and a
+    gold label") sent a tester to look at the labels when the rewards
+    were what was missing. Each half now names its own call.
+    """
+    if not n_reward and not n_gold:
+        return (
+            f"no row has a reward and no row has a gold label: score the rows first with "
+            f"run_judge(rows, judge) or evaluate(data, judge), then hand-label a sample with "
+            f"attach_labels(rows, labels, kind='human'), which writes {gold!r}"
+        )
+    if not n_reward:
+        return (
+            f"no row has a reward: score them first with run_judge(rows, judge) or "
+            f"evaluate(data, judge), which writes {reward!r}. Passing judge= to judge_trust "
+            "only runs the perturbation probes; it does not score the rows."
+        )
+    if not n_gold:
+        return (
+            f"no row has a gold label: attach_labels(rows, labels, kind='human') writes "
+            f"{gold!r} (0/1) and marks it as a person's, and {MIN_GOLD} labeled rows is the "
+            "sample to aim for."
+        )
+    return (
+        f"{n_reward} row(s) have a reward and {n_gold} have a gold label, but no row has "
+        "both: label the rows that were scored (attach_labels matches on rollout_id, "
+        "scenario_id plus rollout_index, or prompt plus final_text)."
+    )
 
 
 def gold_kind_of(kinds: Any) -> str | None:
@@ -114,9 +167,15 @@ def judge_agreement(
     kinds: set[str] = set()
     skipped = 0
     unmatched = 0
+    # counted so a report with nothing to compare can say which half is
+    # missing, rather than naming both and leaving the reader to guess
+    n_reward = 0
+    n_gold = 0
     if isinstance(gold, str):
         for row in judged:
             j, g = _label(row.get(reward)), _label(row.get(gold))
+            n_reward += j is not None
+            n_gold += g is not None
             if j is None or g is None:
                 skipped += 1
                 continue
@@ -149,8 +208,7 @@ def judge_agreement(
     warnings: list[str] = []
     if n == 0:
         warnings.append(
-            f"no rows carry both {reward!r} and a gold label; hand-label a sample into "
-            f"{gold!r} first"
+            missing_side_note(n_reward, n_gold, reward=reward, gold=gold)
             if isinstance(gold, str)
             else "no judged row matched a gold row by rollout id, scenario id, or prompt"
         )
@@ -167,7 +225,7 @@ def judge_agreement(
     gold_kind = gold_kind_of(kinds) if n else None
     trusted = gold_kind == "human" or allow_model_gold
     if n and not trusted:
-        warnings.append(MODEL_GOLD_REASON)
+        warnings.append(gold_kind_reason(gold_kind))
     return {
         "n": n,
         "n_skipped": skipped,
@@ -190,7 +248,10 @@ __all__ = [
     "LEAK_THRESHOLD",
     "MIN_GOLD",
     "MODEL_GOLD_REASON",
+    "UNKNOWN_GOLD_REASON",
     "gold_kind_of",
+    "gold_kind_reason",
     "judge_agreement",
+    "missing_side_note",
     "row_key",
 ]

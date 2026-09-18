@@ -26,6 +26,24 @@ machine that had the old package, `~/.zeroproof/credentials.json` is
 still picked up; set `WHILEAI_HOME=/some/fresh/dir` to isolate a new
 account from it.
 
+**The old names still work, so you may already be signed in.**
+`ZEROPROOF_API_KEY` is read whenever `WHILEAI_API_KEY` is unset (every
+`ZEROPROOF_*` variable is), a saved `~/.zeroproof/credentials.json`
+counts as a login, and `pip install zeroproof` installs `whileai`. If
+`whileai status` names a key you never set here, that is where it came
+from.
+
+**What the trial covers.** A fresh `signup` key is a trial: 25,000 input
+and 50,000 output tokens a day, which is about twelve hosted situations
+of a four-tool agent. One real run spends that, and the run then stops
+with `Hosted model daily quota exceeded`. Two ways around it:
+`simulate(..., simulator=False)` writes the situations offline with no
+quota and no network, which is how every recipe here runs; and signing
+in once at zeroproofai.com/sign-in lifts the daily limit. `whileai
+status` prints the same two facts while the key is on the trial, and a
+run that would spend the trial on the hosted writer says them once
+before it starts, in the log and in `data.warnings`.
+
 ## 2. Wrap your agent
 
 The engine calls your function once per rollout with the ask the writer
@@ -53,9 +71,23 @@ Three things to know about a callable agent:
 
 Tools go in OpenAI function-calling shape (`{"type": "function",
 "function": {"name", "description", "parameters"}}`); a bare
-`{"name", "description", "parameters"}` dict works too. If your bot
-records calls through a shared global, wrap the recorder in a
-`threading.local`, because rollouts run concurrently.
+`{"name", "description", "parameters"}` dict works too, and so does the
+Anthropic shape `{"name", "description", "input_schema"}` (`input_schema`
+is read as `parameters`). If your bot records calls through a shared
+global, wrap the recorder in a `threading.local`: `concurrency` defaults
+to 32, so 32 threads call your function at once and one shared list
+interleaves calls from different rollouts into each other's rows.
+
+Or run `whileai init-evals` in the project and edit the three files it
+writes. It reads your Python with `ast`, never imports it, picks the tool
+list, the system prompt and the callable that answers a message, and
+writes `evals/agent.py` (this wrapper, with your tools converted to
+OpenAI shape and your tool runner wrapped in the thread-local recorder),
+`evals/judge.py`, `evals/run.py` and `evals/test_judge.py` wired to them.
+It prints what it picked, so a wrong guess is one flag away: `--agent
+module:callable`, `--tools module:NAME`, `--system-prompt module:NAME`.
+When it finds nothing the files are still written, with every place that
+needs your code marked TODO.
 
 ## 3. Write the judge as a program
 
@@ -83,6 +115,53 @@ reads as one column then. A marker that does not apply to a row is
 `None`, so its rate counts only the rows it measured. A verifier
 (`wai.verify.*`) is a judge too, when the answer is checkable.
 
+Any other key you return is kept under `row["judge_meta"]`, not on the row:
+a judge that returns `failures` reads back as `row["judge_meta"]["failures"]`.
+
+## 3b. Find what your tests miss
+
+The suite you have sends a set of asks. Which parts of the policy do they
+never reach?
+
+```python
+old_tests = [
+    "I want a refund for order A1001, the shoes did not fit.",
+    "What is the status of order A1001?",
+    "Can you refund order Z9999?",
+]
+report = wai.coverage_gap(old_tests, tools=TOOLS, system_prompt=POLICY)
+print(wai.format_coverage_gap(report))
+# 3 asks cover 5 of 6 policy rules and 2 of 2 tools; untested: Refunds over
+# $200 need a manager: ...; no ask puts the agent under pressure; every ask
+# runs once
+```
+
+`asks` is a list of prompt strings, a list of rows with a `prompt` key, or
+a path to a `.py` or `.jsonl` file holding either. From a `.py` file the
+asks are the string literals that look like asks (passed to a call or in a
+list, over fifteen characters, with a space): a heuristic, so read
+`report["asks"]` before trusting the counts.
+
+The axes are the ones `simulate` covers, so the report is in the engine's
+own words: `untested_rules` are the policy clauses no ask reaches,
+`untested_tools` the tools no ask names, `single_shot` says every ask runs
+once (one rollout cannot tell a flake from a failure), and `notes` names
+the fix for each. `world_state` and `tool_condition` are not readable from
+an ask at all, which is the honest reason a hand-written suite misses
+fault handling: a prompt never says the record is missing or the tool
+timed out.
+
+Rules are matched on the words an ask shares with the clause, so a branch
+that only the fixture data selects (an amount, a date) reads as untested
+even when an ask lands on it. Pass `rows=` from a graded run to check the
+world side: a rule whose every row ended in the same tool fault is one the
+asks reach but the fixtures never let happen, and the fix is a fixture
+case, not another ask.
+
+`preflight(tools, system_prompt)["rules"]` is the same rule axis on its
+own, which is the list of policy branches the engine extracted from your
+prompt.
+
 ## 4. Run it
 
 ```python
@@ -93,7 +172,7 @@ data = wai.simulate(
     tools=TOOLS,
     system_prompt=POLICY,
     seeds=SEEDS,
-    simulator=False,  # offline template writer: no key, seconds. Drop it for the hosted writer.
+    simulator=False,  # offline template writer: no key, seconds. simulator="hosted" for the hosted one.
     mode="rl",
     repeats=4,
     repeat_policy="fixed",  # every ask, all four repeats
@@ -118,6 +197,20 @@ for note in scored.warnings:  # hollow-run checks; fix before reading the number
   `scored.warnings` says so and names the fix. A pass@1 of 1.00 on a run
   where the agent never reached its tools is not a result. Do not report
   a number from a run with warnings.
+- `simulator=False` is the offline template writer (no key, no network);
+  `simulator="hosted"` is the default, the hosted writer, and means the
+  same as leaving the argument out.
+- `pass^k` and `pass@k` are `None` below `repeats=4` (`min_k`), because
+  four tries is the smallest draw those numbers mean anything on; the
+  `note` field says so. Raise `repeats` to get them.
+- `situations` counts asks, `budget` counts rows. Keep
+  `budget >= situations * repeats` or the run stops at the budget with
+  the later situations never rolled out at all.
+- A long run says where it is on the `whileai.simulations` logger, one
+  line at most ten seconds and ten rollouts apart
+  (`12/64 rollouts, 3 situations written, 1m40s elapsed, ~5m left`). Call
+  `logging.basicConfig(level=logging.INFO)` to see it; a hosted run can
+  sit a minute before the first row, and silence is not a hang.
 
 ## 5. Gate CI on it
 
@@ -155,9 +248,60 @@ to clear 0.8 even at perfect agreement. Labels attached any other way
 count as model-made and keep `ok` false unless you say
 `allow_model_gold=True`.
 
-## 7. Then
+## 7. Return shapes
 
-- Every failure row is a training example: `simulate(traces=scored.failed_traces())`
+The names in the print and the names on the object are not always the
+same word, and guessing costs a round trip. What each call hands back:
+
+| call | you get | read it as |
+| --- | --- | --- |
+| `simulate(...)` | `SimulationData` | `data.rows` or `data.rows()`, both work |
+| `evaluate(...)`, `grade(...)` | `ScoredData` | `scored.rows` is a **list**; `scored.rows()` is a `TypeError` |
+| | | `scored.warnings`: hollow-run notes, print them before the number |
+
+Two concepts here have two spellings each. These docs use the left one;
+the right one is the same thing under another name, and the recipe uses
+it in places.
+
+| use this | also works | the difference |
+| --- | --- | --- |
+| `data.rows` | `data.trajectories` | `rows` is the exported row, exactly what `save()` writes and what the judge sees. `trajectories` is the same rollouts before export, still carrying the `privileged` block, which is why `leak_report` reads them. |
+| `scored.failures()` | `scored.failed_traces()`, `scored.traces` | Same list, all three. `failed_traces()` and the `traces` property are named for where they go next: `simulate(traces=...)`. |
+| `pass_at(rows)` | `PassAt` | fields below; `.to_dict()` for the same keys as JSON |
+| `marker_summary(rows)` | `{marker: stats}` | stats keys below |
+| `judge_trust(rows)` | `dict` | keys below |
+
+`PassAt` fields, with the name each prints as:
+
+| field | prints as | what it is |
+| --- | --- | --- |
+| `pass_at_1` | `pass@1` | mean per-task pass rate, the headline |
+| `pass_pow_k` | `pass^k (pass_pow_k)` | all k repeats pass. Not `pass_hat_k` |
+| `pass_at_k` | `pass@k` | at least one of k passes |
+| `headroom` | `headroom` | `pass_at_k - pass_at_1` |
+| `ci95` | `[lo..hi]` | task-bootstrap interval on pass@1 |
+| `pass_pow_k_ci95`, `pass_at_k_ci95` | `[lo..hi]` | the same for the k-way numbers |
+| `k`, `n_groups`, `n_rows` | `(N groups, k=4)` | draw size, tasks, graded rows |
+| `n_groups_at_k`, `n_groups_imputed` | not printed | tasks the k-way numbers used |
+| `per_task` | not printed | `{task key: pass rate}`, a dict, not a list |
+| `note` | tail of the line | why a number is missing, and the fix |
+| `config` | token-cap share | temperature, versions, prompt hash |
+
+Marker stats (`marker_summary(rows)["grounded"]`): `mean`, `ci95` (not
+`ci`), `n_tasks`, `n_rows` (not `n`), `n_rows_at_1`, `n_rows_at_0`,
+`degenerate`, and one of `note` (no interval, too few tasks: the
+bootstrap needs three) or `warning` (the marker never varied). `ci95` is
+`None` in both cases, and the sentence says which one you have.
+
+`judge_trust(rows)`: `ok` (measured and clean), `agreement.agreement`
+with `agreement.ci95` and `agreement.n`, `gold_kind` (`"human"`,
+`"model"`, `"unknown"`), `held_out_halves`, `length_sensitivity`,
+`perturbation`, `probes`, `disagreements`, and `warnings`, where every
+line names its own fix.
+
+## 8. Then
+
+- Every failure row is a training example: `simulate(traces=scored.failures())`
   aims the next round at what broke. `evaluate` rows are stamped so the
   selectors refuse to use them as the reward (`eval_sourced`).
 - Push the eval set with a purpose so it stays out of training:

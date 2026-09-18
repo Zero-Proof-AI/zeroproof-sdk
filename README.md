@@ -5,7 +5,9 @@ The While Python SDK. One package, two importable modules:
 - `whileai`: the platform client. OTLP trace ingest and trace-dataset listing against the token gate.
 - `whileai.simulations`: post-training data for an agent. Give it the agent's traces, or its tools and system prompt; it simulates the situations, the people, and the world, plays the agent through multi-turn tool-calling conversations, and returns rows for your grader.
 
-**Renamed.** This SDK was `zeroproof` (ZeroProof is now While). `pip install zeroproof` still works: it installs `whileai`, and `import zeroproof` (or the older `zeroproof_simulations`) resolves to the same modules with a deprecation warning. `ZEROPROOF_*` environment variables and a saved `~/.zeroproof/credentials.json` are still read. Change the import when you can; new releases land under `whileai`. zp, ZeroProof and While all name this one product: the package is `whileai`, the import is `whileai.simulations`, keys start with `zp_`. A machine with the old package still picks up `~/.zeroproof/credentials.json`; set `WHILEAI_HOME` to a fresh directory to isolate a new account from it.
+Have an agent and want a pass rate with an interval? Start at [docs/evals.md](docs/evals.md) (offline, seconds, `coverage_gap` names what your tests miss).
+
+**Renamed.** This SDK was `zeroproof` (ZeroProof is now While). `pip install zeroproof` still works: it installs `whileai`, and `import zeroproof` (or the older `zeroproof_simulations`) resolves to the same modules with a deprecation warning. `ZEROPROOF_*` environment variables and a saved `~/.zeroproof/credentials.json` are still read. Change the import when you can; new releases land under `whileai`. zp, ZeroProof and While all name this one product: the package is `whileai`, the import is `whileai.simulations`, keys start with `zp_`. `zp`, `wai` and `whileai` run the same CLI, so `zp login` and `whileai login` do the same thing (the help text says `whileai`). A machine with the old package still picks up `~/.zeroproof/credentials.json`; set `WHILEAI_HOME` to a fresh directory to isolate a new account from it.
 
 Releases of `whileai` before 0.3 were an unrelated encrypted agent-to-agent messaging client. That code was removed in 0.04; pin `whileai<0.3` if you still depend on it.
 
@@ -15,7 +17,7 @@ Two ways in, one engine. Give it the agent's tools and system prompt and it samp
 
 ![How a row gets made: the draw, the coverage grid, the search arms, the rollout, the split](docs/how-a-row-gets-made.svg)
 
-A situation is drawn across the world axes (from the agent's tools) and the human axes (from a separate writer). It fills a cell in the coverage grid, nudges the five search arms, and the agent plays it against a world that breaks on schedule. The row that comes out splits into `Task`, `Rollout`, `Judgment`, and `Marker`, and every training target is a projection of some of those four. The engine on one page, with references: [docs/engine.md](docs/engine.md), also at [while.ai/docs/engine](https://while.ai/docs/engine).
+A situation is drawn across the world axes (from the agent's tools) and the human axes (from a separate writer). It fills a cell in the coverage grid, nudges the five search arms, and the agent plays it against a world that breaks on schedule. The row that comes out splits into `Task`, `Rollout`, `Judgment`, and `Marker`, and every training target is a projection of some of those four. The engine on one page, with references: [docs/engine.md](docs/engine.md), also at [zeroproofai.com/docs/engine](https://zeroproofai.com/docs/engine).
 
 ## Overview
 
@@ -159,7 +161,9 @@ that reads the trajectory, run the asks `k` times each, and read pass@1
 with its interval. Offline first, then the hosted writer. The how-to is
 [docs/evals.md](docs/evals.md); the runnable version is
 [`recipes/02-measure/eval-your-agent`](recipes/02-measure/eval-your-agent),
-which ends at a CI gate, not a push.
+which ends at a CI gate, not a push. `whileai init-evals` writes those
+four files for you, wired to the tools, system prompt and callable it
+finds in the project, and prints what it picked.
 
 ```python
 data = wai.simulate(
@@ -201,6 +205,33 @@ data = wai.simulate(
     agent="openai:gpt-4.1-mini",
     tools=my_tools,
     system_prompt=my_system_prompt,
+    output="rollout.jsonl",
+)
+```
+
+A model spec names the backend and the model. Four are built in:
+
+- `ollama:<model>`: a local Ollama server, no key.
+- `vllm:<model>@<url>`: any vLLM or OpenAI-compatible endpoint you serve.
+- `openai:<model>`: `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a
+  compatible endpoint that is not OpenAI's.
+- `anthropic:<model>`: the Claude Messages API on `ANTHROPIC_API_KEY`
+  (`WHILEAI_ANTHROPIC_API_KEY` overrides it).
+
+A spec works everywhere one is accepted: `agent=`, `simulator=` for the
+situation writer, `user_model=` for the simulated person, and `spec=` for the
+judge.
+
+```bash
+export ANTHROPIC_API_KEY=...
+```
+
+```python
+data = wai.simulate(
+    agent="anthropic:claude-haiku-4-5",
+    tools=my_tools,
+    system_prompt=my_system_prompt,
+    simulator="anthropic:claude-sonnet-5",  # the writer, on the same key
     output="rollout.jsonl",
 )
 ```

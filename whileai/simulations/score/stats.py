@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_BOOT = 2000
+#: tasks a bootstrap interval needs; below it the interval is the data itself
+MIN_CI_TASKS = 3
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -176,9 +178,10 @@ def bootstrap_ci(
     level: float = 0.95,
 ) -> tuple[float, float] | None:
     """Percentile bootstrap interval of ``stat`` over ``values``. ``None``
-    below three values, where the interval would be the data itself."""
+    below ``MIN_CI_TASKS`` values, where the interval would be the data
+    itself."""
     vals = [float(v) for v in values]
-    if len(vals) < 3:
+    if len(vals) < MIN_CI_TASKS:
         return None
     rng = random.Random(seed)
     n = len(vals)
@@ -308,11 +311,26 @@ def marker_summary(
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
 ) -> dict[str, dict[str, Any]]:
-    """``metric_summary`` for every marker on the rows (or ``names``)."""
-    return {
-        name: metric_summary(rows, f"marker:{name}", n_boot=n_boot, seed=seed)
-        for name in (names or marker_names(rows))
-    }
+    """``metric_summary`` for every marker on the rows (or ``names``).
+
+    Each marker's stats are keyed ``mean``, ``ci95`` (not ``ci``),
+    ``n_tasks``, ``n_rows`` (not ``n``), ``n_rows_at_1``, ``n_rows_at_0``,
+    ``degenerate``, and ``note`` or ``warning`` when there is one.
+    ``ci95`` is ``None`` below ``MIN_CI_TASKS`` tasks, and ``note`` then
+    says how many tasks the marker has and how many the interval needs;
+    a reader who sees only ``None`` cannot tell that from a bug.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for name in names or marker_names(rows):
+        stats = metric_summary(rows, f"marker:{name}", n_boot=n_boot, seed=seed)
+        if stats["ci95"] is None and not stats["degenerate"]:
+            stats["note"] = (
+                f"no interval: {stats['n_tasks']} task(s) carry {name}, and the bootstrap "
+                f"needs {MIN_CI_TASKS} or more. Add tasks (more situations, not more "
+                "rollouts of one) and score them."
+            )
+        out[name] = stats
+    return out
 
 
 # ------------------------------------------------------------------ re-run variance
@@ -709,6 +727,7 @@ def decontaminate(
 
 __all__ = [
     "DEFAULT_BOOT",
+    "MIN_CI_TASKS",
     "bootstrap_ci",
     "compare_runs",
     "decontaminate",

@@ -200,6 +200,14 @@ For BYOK, set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`, then use
 completions with tool calls. The model writes the situations and plays the
 target agent, so both consume its endpoint.
 
+The same spec works for `simulator=` (the situation writer), `user_model=`
+(the simulated person) and the judge's `spec=`. Backends: `ollama:<model>`,
+`vllm:<model>@<url>`, `openai:<model>`, and `anthropic:<model>` for the Claude
+Messages API on `ANTHROPIC_API_KEY` (`WHILEAI_ANTHROPIC_API_KEY` overrides it),
+for example `agent="anthropic:claude-haiku-4-5"`. Use `anthropic:` when the
+developer's only credential is an Anthropic key, instead of falling back to
+the template writer.
+
 While normally builds a simulated world from the supplied tools, policy,
 and traces. That is appropriate for record-shaped tools and behavioral
 questions. If the evaluated agent edits code or correctness depends on a real
@@ -289,7 +297,10 @@ developer already runs, do not start from training data. The path is
 
 1. Wrap the agent as `agent(message) -> {"steps": [...], "final_text": str}`.
    It runs its own real tools and is played single-turn. Record tool calls
-   through a `threading.local`; rollouts are concurrent.
+   through a `threading.local`: `concurrency` defaults to 32, so 32 rollouts
+   call the function at once and one shared list mixes their calls together.
+   Tools may be OpenAI-shaped (enveloped or bare) or Anthropic-shaped
+   (`input_schema`, read as `parameters`).
 2. Put the ids the developer's world has (order numbers, account names) in
    the tool descriptions or in `seeds=`, one seed per policy branch.
    Otherwise the writer invents ids and every rollout is "not found".
@@ -297,7 +308,11 @@ developer already runs, do not start from training data. The path is
    `reason`, `markers` (1.0 = the good outcome, `None` = not applicable).
 4. `wai.simulate(agent, tools=, system_prompt=, seeds=, simulator=False,
    mode="rl", repeats=4, repeat_policy="fixed", reproducible=True)` first
-   (offline), then without `simulator=False` for the hosted writer.
+   (offline), then `simulator="hosted"` (the default, written out) for the
+   hosted writer. Keep `repeats` at 4 or more or `pass^k` and `pass@k` come
+   back `None` (`min_k`), and keep `budget >= situations * repeats` or the
+   later situations never run. A hosted run takes minutes and logs its
+   progress on the `whileai.simulations` logger at INFO.
 5. `scored = wai.evaluate(data, judge)` (pass the run itself so the declared tools are known); `wai.pass_at(scored.rows)`
    overall and per category. Read `scored.warnings` before any number: a
    run with no tool calls, an untouched declared tool or a marker on zero
@@ -309,6 +324,11 @@ developer already runs, do not start from training data. The path is
    `wai.judge_trust(rows, judge)`. FAIL on eight labels means label more.
 
 Names: zp, ZeroProof and While are the same product; install `whileai`.
+`ZEROPROOF_API_KEY` and `~/.zeroproof/credentials.json` are still read, and
+`pip install zeroproof` installs `whileai`. Two spellings per concept:
+`data.rows` (exported, also `data.rows()`) beside `data.trajectories` (the
+same rollouts before export), and `scored.failures()` beside
+`scored.failed_traces()` / `scored.traces`.
 
 ## Deliverable
 

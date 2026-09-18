@@ -3997,7 +3997,7 @@ wheels = [
 
 [[package]]
 name = "whileai"
-version = "0.58"
+version = "0.62"
 source = { editable = "." }
 dependencies = [
     { name = "requests" },

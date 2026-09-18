@@ -151,6 +151,7 @@ def _train(
     micro_batch: int = 0,
     mask_truncated: bool = True,
     save_every: int = 0,
+    vllm_mem: float = 0.25,
 ) -> dict:
     import json
 
@@ -194,7 +195,13 @@ def _train(
         from peft import PeftModel
 
         model = PeftModel.from_pretrained(
-            model, os.path.join(VOLUME_ROOT, from_run, "adapter"), is_trainable=True
+            # "<run_id>" is that run's final adapter; "<run>/checkpoints/checkpoint-25"
+            # is a directory written by --save-every (a run cut short resumes here).
+            model,
+            os.path.join(VOLUME_ROOT, from_run)
+            if "/" in from_run
+            else os.path.join(VOLUME_ROOT, from_run, "adapter"),
+            is_trainable=True,
         )
         print(f"resumed adapter from {from_run}")
 
@@ -309,7 +316,7 @@ def _train(
         # several prompts into one generate call, then takes that many steps.
         use_vllm=use_vllm,
         vllm_mode="colocate",
-        vllm_gpu_memory_utilization=0.25,
+        vllm_gpu_memory_utilization=vllm_mem,
         # 0 = TRL's default (= gradient_accumulation_steps), so one generate call
         # covers exactly num_generations samples. TRL requires per_device x
         # steps_per_generation to be a multiple of num_generations; 1 with
@@ -435,7 +442,8 @@ def _train(
 
 _FN = dict(
     gpu=DEFAULT_GPU,
-    timeout=4 * 60 * 60,
+    # 32 prompts x 16 samples a step runs ~8 min a step; a 4 h cap killed round 5 at step 28.
+    timeout=24 * 60 * 60,
     volumes={VOLUME_ROOT: runs_volume, "/root/.cache/huggingface": hf_cache},
     secrets=[dashboard_secret],
 )
@@ -478,6 +486,7 @@ def main(
     mask_truncated: bool = True,
     save_every: int = 0,
     task_ids: str = "",
+    vllm_mem: float = 0.25,
 ):
     import hashlib
     import json
@@ -530,6 +539,7 @@ def main(
         micro_batch=micro_batch,
         mask_truncated=mask_truncated,
         save_every=save_every,
+        vllm_mem=vllm_mem,
     )
     if spawn:
         # Submit and return. With `modal run --detach` the call keeps running

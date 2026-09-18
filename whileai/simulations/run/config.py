@@ -186,7 +186,12 @@ def writer_spec_for(agent: Any, simulator: Any) -> Any:
     bring-your-own model; the writer runs on it too, so no While key
     is involved. ``WHILEAI_SURROGATE`` and an explicit ``simulator``
     still win.
+
+    ``simulator="hosted"`` is the default written out, so the way back
+    from the offline writer is a value, not "delete the argument".
     """
+    if isinstance(simulator, str) and simulator.strip().lower() == "hosted":
+        simulator = None
     if simulator is not None or getenv("SURROGATE"):
         return simulator
     if isinstance(agent, str) and ":" in agent and not agent.startswith(("http://", "https://")):

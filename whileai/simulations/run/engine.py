@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ...auth import trial_prerun_note
 from ..data import SimulationData, clean_faults, conversation, export_row, note_stage, row_world
 from ..generate.actionspace import (
     action_space_targets,
@@ -39,6 +40,7 @@ from ..generate.actionspace import (
 )
 from ..generate.adapters import inspect, resolve
 from ..generate.agents import (
+    _account_url,
     current_rollout,
     default_agent_spec,
     default_max_turns,
@@ -186,6 +188,60 @@ def _finish_reason(raw: dict, steps: list, final_text: str) -> str:
     return "stop"
 
 
+def _clock_text(seconds: float) -> str:
+    """Seconds as a short human span: ``45s``, ``1m40s``, ``1h4m``."""
+    total = max(0, int(seconds))
+    if total < 60:
+        return f"{total}s"
+    if total < 3600:
+        minutes, rest = divmod(total, 60)
+        return f"{minutes}m{rest}s" if rest else f"{minutes}m"
+    hours, rest = divmod(total, 3600)
+    minutes = rest // 60
+    return f"{hours}h{minutes}m" if minutes else f"{hours}h"
+
+
+def _left_text(seconds: float) -> str:
+    """The same span, rounded, for an estimate nobody should read to the
+    second: whole minutes over a minute, whole seconds under it."""
+    if seconds < 60:
+        return f"{max(1, round(seconds))}s"
+    if seconds < 3600:
+        return f"{max(1, round(seconds / 60))}m"
+    return _clock_text(seconds)
+
+
+#: rollouts a run needs before its rate is worth extrapolating from
+PROGRESS_MIN_ROWS_FOR_ESTIMATE = 5
+#: never more than this long between progress lines
+PROGRESS_EVERY_S = 10.0
+#: never more than this many finished rollouts between progress lines
+PROGRESS_EVERY_ROWS = 10
+#: runs smaller than this say nothing: they are over before a line helps
+PROGRESS_MIN_BUDGET = 10
+
+
+def progress_line(rows: int, cap: int, situations: int, elapsed: float) -> str:
+    """One line of run progress, in the words a waiting person wants:
+
+    ``12/64 rollouts, 3 situations written, 1m40s elapsed, ~5m left``
+
+    The estimate is the finished rate carried forward, and it is left off
+    until ``PROGRESS_MIN_ROWS_FOR_ESTIMATE`` rollouts have landed, because
+    before that it is the first rollout's latency dressed up as a forecast.
+    """
+    parts = [
+        f"{rows}/{cap} rollouts",
+        f"{situations} situations written",
+        f"{_clock_text(elapsed)} elapsed",
+    ]
+    if rows >= PROGRESS_MIN_ROWS_FOR_ESTIMATE and rows < cap and elapsed > 0:
+        rate = rows / elapsed
+        if rate > 0:
+            parts.append(f"~{_left_text((cap - rows) / rate)} left")
+    return ", ".join(parts)
+
+
 def _hit_length_cap(row: dict) -> bool:
     """A step the backend flagged as cut by its token cap, or a reply that
     ends mid-sentence by the hygiene rule."""
@@ -211,6 +267,15 @@ class Run:
         self.inflight: dict = {}
         self.scenario_futs: list = []
         self.generated_pool: list[str] = []
+        # The caller's own asks, filled by _seed_pool; never evicted by
+        # the situations quota. Seeds the budget cannot pay for are
+        # dropped before the run and named here.
+        self.seed_prompt_set: set[str] = set()
+        self.seeds_dropped: list[str] = []
+        self.seed_budget_note: str = ""
+        # Loop state the seed reservation reads; _init_loop_state resets both.
+        self.prompt_rollouts: dict[str, int] = {}
+        self.used: set[str] = set()
 
     # ------------------------------------------------------------ driver
 
@@ -296,6 +361,19 @@ class Run:
 
     def _amplify_seeds(self) -> None:
         c = self.c
+        # The asks the caller handed in (plus a spec's situations and any
+        # failing asks mined from traces), before the writer mints
+        # variants of them. Every one of these is run: the situations
+        # quota never evicts them and a writer ask never takes their
+        # rows. Only the budget can drop one, and _fit_seeds_to_budget
+        # says which before the run starts.
+        self.given_seeds: list[str] = list(dict.fromkeys(self.seed_prompts))
+        self._fit_seeds_to_budget()
+        if c.n_situations_target and len(self.given_seeds) > int(c.n_situations_target):
+            # situations= below the number of seeds used to evict the
+            # extra seeds. The seeds win: they are the asks the caller
+            # wrote, so the target grows to hold them.
+            c.n_situations_target = len(self.given_seeds)
         # Amplifies seed prompts only when seeds= is given; advanced["seed_prompts"]
         # stays literal. Offline runs (simulator=False) make no network calls.
         # Runs after inspect() so the writer hint carries the resolved policy.
@@ -422,6 +500,9 @@ class Run:
         if self.tool_draft_failed:
             data.degraded.append("tool_draft_unavailable")
         self.data = data
+        if self.seed_budget_note:
+            data.warnings.append(self.seed_budget_note)
+            data.search["seeds_dropped"] = list(self.seeds_dropped)
         self.scene_box: dict[str, Any] = {"brief": ""}
         self.shape_box: dict[str, dict] = {}
         self.trace_exemplars: dict[str, list] = {}
@@ -431,6 +512,50 @@ class Run:
             # did not show.
             self.trace_exemplars = mine_result_exemplars(self.trace_rows)
             self.shape_box.update(exemplar_result_shapes(self.trace_exemplars))
+
+    def _fit_seeds_to_budget(self) -> None:
+        """Work out which seeds the budget cannot pay for, before the run.
+
+        Every seed costs ``repeats`` rows. When ``budget`` is smaller
+        than that bill the run used to spend it on whichever seeds came
+        first, and the caller had to count asks in the output to notice
+        the rest were gone. The seeds that do not fit are dropped here,
+        named in ``warnings`` and listed in ``search["seeds_dropped"]``
+        once the run object exists.
+        """
+        c = self.c
+        seeds = list(self.given_seeds)
+        if not seeds or c.budget is None:
+            return
+        k = max(1, int(c.repeat_count))
+        covered = max(1, int(c.budget) // k)
+        if covered >= len(seeds):
+            return
+        dropped = seeds[covered:]
+        gone = set(dropped)
+        self.seed_prompts = [p for p in self.seed_prompts if p not in gone]
+        self.given_seeds = seeds[:covered]
+        self.seeds_dropped = dropped
+        self.seed_budget_note = (
+            f"budget={int(c.budget)} covers {covered} of {len(seeds)} seeds at "
+            f"repeats={k}; raise budget to {len(seeds) * k}+ or drop seeds"
+        )
+
+    def _seeds_waiting(self) -> int:
+        """Seeds the run has not started yet. Their situation slots and
+        their rows are held for them: a writer ask never takes one."""
+        if not self.seed_prompt_set:
+            return 0
+        return sum(1 for p in self.seed_prompt_set if p not in self.used)
+
+    def _room_for_a_new_ask(self) -> bool:
+        """False when every row left in the budget is owed to a seed."""
+        c = self.c
+        waiting = self._seeds_waiting()
+        if not waiting or c.budget is None:
+            return True
+        scheduled = sum(self.prompt_rollouts.values())
+        return int(c.cap) - scheduled - waiting * max(1, int(c.repeat_count)) > 0
 
     def _start_scene_thread(self) -> None:
         self.scene_thread: threading.Thread | None = None
@@ -638,6 +763,20 @@ class Run:
                 threading.Thread(
                     target=touch_hosted, args=(hosted_url,), kwargs={"timeout": 5.0}, daemon=True
                 ).start()
+                # A trial key buys about a dozen hosted situations a day.
+                # Saying so after the run has spent them is no use, so the
+                # note lands before the first writer wave. Only for the
+                # writer this run picked for itself (simulator= brings its
+                # own model, and no quota of ours) on the account route,
+                # which is what the allowance meters (VLLM_API_KEY goes to
+                # the shared pool and spends no trial), and only for a
+                # saved key whose tier the credentials file recorded:
+                # reading it costs no network call.
+                if c.simulator is None and _account_url(hosted_url):
+                    trial = trial_prerun_note()
+                    if trial:
+                        self.data.warnings.append(trial)
+                        log.warning(trial)
         self.fault_plans.update(gen.fault_plans)
         self.declared = {
             str((t.get("function", t) or {}).get("name", "")) for t in self.tools or []
@@ -946,7 +1085,7 @@ class Run:
         self.explore_only = False
         self.failing_regions: list[dict] = []
         self.failing_rows: list[dict] = []
-        self.used: set[str] = set()
+        self.used = set()
         self.rerolls: dict[str, int] = {}
         self.discarded: set[str] = set()
         self.used_situations: set[str] = set()
@@ -963,7 +1102,7 @@ class Run:
         self.pinned_plans: dict[str, dict] = {}
         self.scenario_families: list[tuple[str, frozenset[str]]] = []
         self.situation_prompts: dict[str, list[str]] = {}
-        self.prompt_rollouts: dict[str, int] = {}
+        self.prompt_rollouts = {}
         self.verify_queue: list[tuple] = []
         self.allocator_counts: dict[str, int] = {"explore": 0, "expand": 0, "verify": 0}
         # Successive allocation (rl): one label per finished rollout of a
@@ -1004,6 +1143,13 @@ class Run:
         self.stream_started = False
         self.reported_rows = 0
         self.reported_at = self.started
+        # plain-words progress on the logger, for a run long enough that
+        # silence reads as a hang. Small budgets stay quiet.
+        self.progress_on = int(c.cap or 0) >= PROGRESS_MIN_BUDGET
+        self.progress_rows = 0
+        self.progress_at = self.started
+        # named so a test can hand the throttle a clock of its own
+        self.progress_clock = time.monotonic
         # writer waves
         self.walked_ids: set[str] = set()
         self.walked_lock = threading.Lock()
@@ -1053,6 +1199,7 @@ class Run:
                 # The runner reads this dict by prompt: the mock world
                 # answers under the same faults and world state as before.
                 self.fault_plans[prompt] = plan
+        self.seed_prompt_set = {str(t).strip() for t in self.given_seeds if str(t).strip()}
         for text in self.seed_prompts:
             text = str(text).strip()
             if not text:
@@ -1101,6 +1248,12 @@ class Run:
             # A pinned prompt is owed its rollouts whatever the situation
             # caps say; the caller fixed the task set.
             return True
+        if prompt in self.seed_prompt_set:
+            # So is a seed: it is the ask the caller wrote, not a
+            # situation the search picked, so the situations= quota
+            # never evicts it. Only the budget can, and the run says so
+            # up front when it does.
+            return True
         meta = self.generator.meta.get(prompt) or {}
         sk = _situation_key_from_meta(meta, prompt)
         if self.explore_only:
@@ -1110,11 +1263,14 @@ class Run:
             if sk and sk in self.used_situations:
                 return False
         elif sk:
+            if not self._room_for_a_new_ask():
+                # Every row left is owed to a seed that has not gone out.
+                return False
             if (
                 c.n_situations_target
                 and not self.cap_lifted["lifted"]
                 and sk not in self.used_situations
-                and len(self.used_situations) >= c.n_situations_target
+                and len(self.used_situations) + self._seeds_waiting() >= c.n_situations_target
             ):
                 return False
             if len(self.situation_prompts.get(sk, [])) >= c.n_req and prompt not in (
@@ -1173,6 +1329,36 @@ class Run:
         self._schedule_prompt(jobs, prompt, meta, row, action)
 
     # ------------------------------------------------------------ output
+
+    def _note_progress(self, *, force: bool = False) -> None:
+        """Say where the run is, on the logger, at most ten seconds and at
+        most ten finished rollouts apart. A hosted run can spend minutes
+        between rows, and a tester with no output assumes it hung."""
+        if not self.progress_on:
+            return
+        rows = len(self.data.trajectories)
+        now = self.progress_clock()
+        stale = now - self.progress_at >= PROGRESS_EVERY_S
+        many = rows - self.progress_rows >= PROGRESS_EVERY_ROWS
+        if not (force or stale or many):
+            return
+        log.info(
+            "%s", progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started)
+        )
+        self.progress_rows, self.progress_at = rows, now
+
+    def _note_writer_start(self) -> None:
+        """One line when the situation writer starts, because the first
+        rows cannot land until it has written something."""
+        if not self.progress_on:
+            return
+        if isinstance(self.simulator, str) and self.simulator not in ("hosted", "default"):
+            log.info(
+                "writing situations with %s; first rows in about a minute",
+                self.simulator,
+            )
+            return
+        log.info("writing situations with the hosted writer; first rows in about a minute")
 
     def _write_progress(self, payload: dict) -> None:
         Path(str(self.c.out_path) + ".progress.json").write_text(json.dumps(payload, default=str))
@@ -1388,6 +1574,7 @@ class Run:
             texts = list(gen(None, 0, include_model=False) or [])
             self.generated_pool.extend(texts)
         else:
+            self._note_writer_start()
             # Tiny batches first so rollouts start ~5s.
             initial_writers = min(2, max(1, self.c.writer_flight))
             for i in range(initial_writers):
@@ -1716,16 +1903,19 @@ class Run:
     ) -> int:
         c = self.c
         sk = _situation_key_from_meta(meta, prompt)
-        if (
-            action == "explore"
-            and c.n_situations_target
-            and not self.cap_lifted["lifted"]
-            and (
-                sk not in self.used_situations
-                and len(self.used_situations) >= c.n_situations_target
-            )
-        ):
-            return 0
+        if prompt not in self.seed_prompt_set:
+            # Seeds are served first: a writer ask waits for the
+            # situation slots and the rows the seeds have not spent yet.
+            if action in ("explore", "expand") and not self._room_for_a_new_ask():
+                return 0
+            if (
+                action == "explore"
+                and c.n_situations_target
+                and not self.cap_lifted["lifted"]
+                and sk not in self.used_situations
+                and len(self.used_situations) + self._seeds_waiting() >= c.n_situations_target
+            ):
+                return 0
         before = len(batch)
         self._schedule_prompt(batch, prompt, meta, row, action)
         added = len(batch) - before
@@ -2076,6 +2266,7 @@ class Run:
             note_stage(data, "row stored")
             self._flush_output("rollout")
         data.rollout_seconds += time.monotonic() - rollout_started
+        self._note_progress()
         return results, jobs_for
 
     def _update_search(
@@ -2659,6 +2850,7 @@ class Run:
         c = self.c
         data = self.data
         gen = self.generator
+        self._note_progress(force=True)
         data.declared_tools = self.declared
         # The README promises messages on every row. The JSONL writer built
         # them lazily; a caller reading data.trajectories saw only steps.
@@ -2674,6 +2866,18 @@ class Run:
             self._finish_traces()
         if gen.model is not None and gen.last_errors:
             data.search["writer_errors"] = dict(gen.last_errors)
+        lost = int(self.cap_lifted.get("lost", 0))
+        if lost:
+            import warnings as _warnings
+
+            _warnings.warn(
+                f"{lost} rollout(s) failed and were dropped: they carry no reward and "
+                f"fall out of every rate computed from this run, and they are not "
+                f"missing at random. data.report()['rollouts_lost'] carries the count; "
+                f"first agent error: {self.first_agent_error or 'n/a'}. If the agent is "
+                f"a scale-to-zero endpoint, warm it before the first rollout.",
+                stacklevel=2,
+            )
         if self.agent_errors:
             # The callable raised (or returned nothing usable). The rows
             # were built and dropped; without this the run reports zero
@@ -2763,12 +2967,26 @@ class Run:
         data.coverage["mode"] = c.topo["mode"]
         data.coverage["repeat_policy"] = c.topo["repeat_policy"]
         data.coverage["until"] = c.until_key
+        # Rollouts that never became rows: agent-call errors (a server still
+        # booting, an auth failure, a timeout) and results the engine could
+        # not use. These were counted internally and never surfaced, so a
+        # run could lose its first 64 pinned tasks to a cold endpoint and
+        # report a clean pass rate over the rest, with no error in the log
+        # and nothing in the report. Rows lost this way are not missing at
+        # random, so every rate over the survivors is biased (rlhf-book
+        # ch. 16).
+        data.coverage["rollouts_lost"] = int(self.cap_lifted.get("lost", 0))
+        data.coverage["agent_errors"] = int(self.agent_errors)
         data.coverage["n_situations"] = c.n_situations_target
         data.coverage["requests_per_situation"] = c.n_req
         data.coverage["rollouts_per_request"] = c.repeat_count
         data.allocator = dict(self.allocator_counts)
         if self.seed_amp_report:
             data.search["seed_amplification"] = self.seed_amp_report
+        if self.seeds_dropped:
+            # search is rebuilt every batch, so the note written before
+            # the run is put back here, on the run the caller reads.
+            data.search["seeds_dropped"] = list(self.seeds_dropped)
         if c.pinned_tasks:
             ran = {str(t.get("prompt") or "") for t in data.trajectories}
             pinned = set(self.pinned_prompts)

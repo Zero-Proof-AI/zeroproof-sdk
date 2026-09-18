@@ -41,6 +41,48 @@ def test_no_tools_declared_means_no_tool_note():
     assert wai.coverage_warnings([_row([]) for _ in range(4)]) == []
 
 
+def test_some_rows_with_no_tool_call_are_named():
+    # The expensive case: most rows do the work, a few answer from the
+    # prompt alone and score 1/1, and the pass rate goes up for it.
+    lookup = {"tool": "lookup_order", "arguments": {"order_id": "A1001"}, "result": {}}
+    refund = {"tool": "issue_refund", "arguments": {"order_id": "A1001"}, "result": {}}
+    rows = [_row([lookup, refund]) for _ in range(8)]
+    rows.append(_row([], prompt="what are your hours?"))
+    rows.append(_row([], prompt="do you ship to Canada?"))
+    notes = wai.coverage_warnings(rows, tools=TOOLS)
+    assert len(notes) == 1
+    assert notes[0].startswith(
+        "2 of 10 rows made no tool call (2 situations: what are your hours?; "
+        "do you ship to Canada?); they score without touching a tool."
+    )
+    assert "Drop them from the eval or give them a seed that reaches one." in notes[0]
+
+
+def test_at_most_three_asks_are_shown_and_each_is_cut_at_60_chars():
+    lookup = {"tool": "lookup_order", "arguments": {}, "result": {}}
+    refund = {"tool": "issue_refund", "arguments": {}, "result": {}}
+    long_ask = "please tell me everything about your refund policy " + "x" * 80
+    rows = [_row([lookup, refund]) for _ in range(6)]
+    rows += [_row([], prompt=f"{long_ask} {i}") for i in range(4)]
+    notes = wai.coverage_warnings(rows, tools=TOOLS)
+    assert len(notes) == 1
+    assert notes[0].startswith("4 of 10 rows made no tool call (4 situations: ")
+    assert notes[0].count(long_ask[:60]) == 3  # three asks, each cut at 60
+    assert "x" * 61 not in notes[0]
+
+
+def test_one_odd_silent_row_in_a_big_run_is_not_worth_a_note():
+    lookup = {"tool": "lookup_order", "arguments": {}, "result": {}}
+    refund = {"tool": "issue_refund", "arguments": {}, "result": {}}
+    rows = [_row([lookup, refund], prompt=f"refund {i}") for i in range(19)]
+    rows.append(_row([], prompt="thanks!"))
+    assert wai.coverage_warnings(rows, tools=TOOLS) == []
+    # ...but one row in nine is a tenth of the run, so it is
+    rows = [*rows[:8], _row([], prompt="thanks!")]
+    notes = wai.coverage_warnings(rows, tools=TOOLS)
+    assert len(notes) == 1 and notes[0].startswith("1 of 9 rows made no tool call")
+
+
 def test_untouched_declared_tool_is_named():
     lookup = {"tool": "lookup_order", "arguments": {"order_id": "A1001"}, "result": {}}
     rows = [_row([lookup]) for _ in range(4)]

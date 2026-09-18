@@ -12,6 +12,176 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   what a caller who brings traces and no harness needs, and what
   `simulate_from_traces` already does internally.
 
+## 0.62 (2026-09-17)
+
+- `init-evals` finds an agent whose extra parameters have defaults
+  (`answer(message, history=None)`), which is how the first real bot it met
+  was written; and says when no real ids were read off the tool descriptions,
+  since placeholder asks then stop at "which order?" and the run is hollow.
+
+## 0.61 (2026-09-17)
+
+- `whileai init-evals` writes the eval harness, instead of a coding agent
+  copying the recipe into the project by hand. It reads the project's
+  Python with `ast` (never imports it), picks the tool list, the system
+  prompt and the callable that answers a message, and writes
+  `evals/agent.py` (the wrapper, with the tools converted to OpenAI
+  function shape and the bot's tool runner wrapped in a thread-local
+  recorder, because rollouts run concurrently), `evals/judge.py` (the
+  contract, two example markers, a `classify` stub), `evals/run.py`
+  (pass@1 with an interval per branch, the marker table, `scored.warnings`,
+  `--gap`, and a CI gate that exits 1 under the floor and 2 on a hollow
+  run) and `evals/test_judge.py` (the judge on hand-written rows, no model
+  calls). It prints what it picked, so a wrong guess is one flag away
+  (`--agent module:callable`, `--tools module:NAME`, `--system-prompt
+  module:NAME`), and when it finds nothing the files are still written
+  with every place that needs your code marked TODO. Three cold-start
+  agents asked to build evals for a refund bot each spent ten to thirteen
+  minutes transplanting `recipes/02-measure/eval-your-agent/run.py` by
+  hand, and asked for this command by name (2026-09-17).
+
+- A trial key is named before a hosted run spends it, not after. `whileai
+  signup` records the tier (and the trial's daily input tokens and expiry)
+  in `~/.whileai/credentials.json`, and `whileai status` and `whileai
+  login` refresh it from `/me`. When the situation writer is the hosted
+  model and the saved key is a trial one, `simulate()` logs one line and
+  puts it in `data.warnings` before generation starts: how many situations
+  a day the allowance covers, that `simulator=False` writes them offline
+  with no quota, and where to sign in to lift it. It reads the saved tier,
+  so it costs no extra call. A key from `WHILEAI_API_KEY` has no recorded
+  tier, so nothing is said about it.
+- The offline template writer no longer reads tool descriptions back as
+  customer speech. An action-shape ask is built from the tool's name in
+  plain words ("Can you check an order for me?") instead of its
+  description, which a tester saw quoted verbatim ("Can you look up an
+  order by id. Returns item, total, order date and status for me?").
+- `zp` and `wai` are console scripts for the same CLI as `whileai`, so
+  `zp login` works on a machine where someone typed the product's name.
+  The help text still says `whileai`.
+- Every seed is run. `situations=` is sized up to `len(seeds)` when you
+  pass a smaller number, and the search no longer spends a seed's slot on
+  an ask it wrote itself, so `simulate(seeds=[10 asks], situations=3)`
+  runs all ten instead of two. When `budget` cannot pay for
+  `len(seeds) * repeats` rows the run says so before it starts
+  (`budget=12 covers 3 of 10 seeds at repeats=4; raise budget to 40+ or
+  drop seeds`), drops the seeds it named, and lists them in
+  `search["seeds_dropped"]`.
+- `coverage_warnings` also names a run that is hollow in part: rows that
+  made no tool call while other rows did score on the reply alone and
+  lift the pass rate. The note gives the count, the situations and the
+  first three asks, and fires once two rows (or a tenth of the run) are
+  silent.
+- `SimulationData` iterates: `list(data)`, `for row in data` and
+  `len(data)` work on a run, the way they already did on `ScoredData`.
+- The judge contract says where a judge's extra keys go: `reward`,
+  `reason`, `markers` and `failure_class` land on the row, everything
+  else under `row["judge_meta"]` (a returned `failures` list reads back
+  as `row["judge_meta"]["failures"]`). Also in `docs/evals.md`.
+- A run says where it is. Every ten seconds and every ten finished
+  rollouts, whichever comes first, `simulate` logs one line on the
+  `whileai.simulations` logger: `12/64 rollouts, 3 situations written,
+  1m40s elapsed, ~5m left`. The estimate is the finished rate carried
+  forward and is left off until five rollouts have landed. The hosted
+  writer also says when it starts, because the first rows cannot land
+  until it has written something. Budgets under 10 rows stay quiet, and
+  nothing is printed: `logging.basicConfig(level=logging.INFO)` to see
+  it. A tester watched a 64-rollout hosted run produce no output for
+  eight minutes and nearly killed it.
+- `simulator="hosted"` names the default writer, so the way back from
+  the offline `simulator=False` is a value you can pass, not "delete the
+  argument".
+- Anthropic-shaped tools (`{"name", "description", "input_schema"}`) are
+  accepted everywhere the OpenAI shapes are. `input_schema` is read as
+  `parameters` once, when the agent is inspected; before this the tools
+  sent to a model-backed agent lost their arguments.
+- Docs: `docs/evals.md`, the `02-measure/eval-your-agent` recipe and the
+  simulations skill say that the old `ZEROPROOF_*` names still
+  authenticate, that `concurrency` is 32 so a recorder needs
+  `threading.local`, which tool shapes are accepted, that `pass^k` needs
+  `repeats >= 4`, that `budget` must cover `situations * repeats`, and
+  which of `data.rows` / `data.trajectories` and `scored.failures()` /
+  `scored.failed_traces()` is the spelling to use. The README's first
+  screen now points at the evals page.
+
+## 0.60 (2026-09-17)
+
+- `coverage_gap(asks, tools=, system_prompt=, rows=)` maps the asks a test
+  suite already sends onto the grid `simulate` covers, and names what they
+  never reach: `untested_rules` (policy clauses no ask touches),
+  `untested_tools`, the per-axis counts, and `single_shot` when every ask
+  runs once. `asks` is prompt strings, rows, or a path to a `.py` or
+  `.jsonl` file (from a `.py` file the asks are the string literals that
+  look like asks, a documented heuristic). `world_state` and
+  `tool_condition` cannot be read from an ask at all, and the report says
+  so with the fix. With `rows=` from a graded run it also names rules whose
+  every row ended in the same tool fault: the asks reach the rule but the
+  fixtures never let it happen. `format_coverage_gap` prints it.
+  Three cold-start agents asked to "find the situations our tests do not
+  cover" each hand-wrote this mapping, and each found the same untestable
+  policy branch by hand (2026-09-17).
+- `preflight()` reports `rules`, the rule axis the engine extracted from
+  the system prompt, so the policy branches are readable without running
+  a simulation.
+- `data.coverage["pairwise"]` is labeled in the docs as what it counts:
+  pairwise cells of the 6-axis grid, which is training-data coverage, not
+  policy coverage. A small fraction on a short run read as a failed eval.
+- Recipe `02-measure/eval-your-agent`: `--gap` runs `coverage_gap` on the
+  three-ask `OLD_TESTS` suite it replaces, with a README section and a
+  `docs/evals.md` section 3b.
+- `anthropic:<model>` is a backend spec, so a developer whose only
+  credential is `ANTHROPIC_API_KEY` can point the situation writer
+  (`simulator=`), the simulated person (`user_model=`), a model-backed
+  agent (`agent=`) and the judge (`spec=`) at the model they already pay
+  for. Two coding agents evaluating a refund bot had neither an OpenAI key
+  nor a local server, so they fell back to the offline template writer or
+  spent the hosted trial quota. The Messages API calls go out over
+  `requests` (no new dependency) and are translated at the boundary: tool
+  definitions become `input_schema`, tool calls and results become
+  `tool_use` and `tool_result` blocks, the system prompt moves to `system`,
+  `stop_reason: "max_tokens"` becomes the engine's truncated marker, and
+  the reply keeps the OpenAI shape every loop already reads. There are no
+  log-probabilities from this API, so `logprobs=True` rows carry none.
+- A trial key now says what it buys before a run spends it. `whileai
+  signup` and `whileai status` print one line under the trial allowance:
+  about how many hosted situations a day it covers (25,000 input tokens
+  at around 2,000 a situation for a four-tool spec, so about twelve),
+  that `simulate(..., simulator=False)` writes situations offline with no
+  quota, and that signing in once lifts the limit. The daily-quota error
+  the run dies with names the same two ways on. A twelve-situation eval
+  spent 28,490 input tokens and stopped with a number and no next step.
+- Return shapes are readable off the print and the docs instead of
+  guessed. `PassAt` prints `pass^k (pass_pow_k)` once (testers reached
+  for `pass_hat_k`), and its docstring is a field table with the printed
+  name of every field. `marker_summary` adds a `note` when `ci95` is
+  `None` for want of tasks, saying how many the marker has and that the
+  bootstrap needs three. `ScoredData` and `SimulationData.rows` each say
+  which spelling is which: `scored.rows` is a list, `data.rows()` also
+  works. docs/evals.md and docs/simulations.md carry a Return shapes
+  table (`PassAt` fields, marker stat keys, `ScoredData.warnings`,
+  `judge_trust` keys).
+- `judge_trust` and `judge_agreement` name the half that is missing.
+  "no rows carry both 'reward' and a gold label" is now "no row has a
+  reward: score them first with run_judge(rows, judge) or
+  evaluate(data, judge)" (adding that a `judge=` here only runs the
+  perturbation probes) or "no row has a gold label:
+  attach_labels(rows, labels, kind='human')", and rows with both on
+  different rows say that instead. Gold written by hand carries no
+  `gold_kind`, so it read as "the gold labels came from a model"; it now
+  says there is no record of who wrote it and names
+  `attach_labels(..., kind="human")` as the way to mark labels as a
+  person's.
+
+## 0.59 (2026-09-17)
+
+- `judge_trust` on a judge that agrees with every human label but has
+  too few of them (14 perfect labels: lower bound 0.78 under the 0.80
+  floor) said "change the judge prompt or the judge model". It now says
+  the judge is not the problem, the sample is, and how many labels the
+  bound needs at that agreement rate. The recipe README's thread-local
+  recorder snippet dropped calls when the wrapper had not set the list;
+  fixed. Both from the second cold-start test of "use zp to build evals"
+  (2026-09-17, whileai 0.58).
+
 ## 0.58 (2026-09-17)
 
 - `split_pseudo_production` splits by `task_key` (the `scenario_id`,
@@ -68,6 +238,13 @@ timed (2026-09-17). This is what they tripped on.
   (`while.ai` does not resolve yet; `examples/coding-efficiency`).
 
 ## 0.56 (2026-09-17)
+
+- `load_traces` binds a tool result to the call that asked for it by
+  `tool_call_id`, falling back to name then position. Real agent exports
+  carry an id and no `name`, so every result fell through to position, and
+  providers answer parallel calls out of order: on a 100-trace corpus in
+  that shape, half the tool faults were attributed to a tool that never
+  failed. Two calls to one tool are separable only by id.
 
 - `holdout_size(effect, base=, k=, power=, alpha=, rows=)` says how many
   paired tasks a holdout needs to prove a gain, modelled on the paired

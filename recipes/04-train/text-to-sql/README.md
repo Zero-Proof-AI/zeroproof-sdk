@@ -222,11 +222,24 @@ are what to read.
 |---|---|---|---|---|
 | base (Qwen3-4B, thinking on) | 0.53 (0.49..0.56) | 0.25 | 0.76 | - |
 | r4 | 0.55 (0.52..0.59) | 0.27 | 0.77 | +0.026 (+0.001..+0.050); hard +0.07 (+0.03..+0.11) |
+| r5 at step 25 (from r4: 326 band prompts, 32 prompts x 16 samples a step, truncation masked) | 0.57 (0.54..0.61) | 0.27 | 0.78 | +0.044 (+0.020..+0.069); vs r4 +0.018 (-0.005..+0.043), medium +0.04 (+0.01..+0.08) |
 
 On the small holdout r4 vs base was +0.021 (-0.029..+0.068), "no change".
 On 459 tasks the same two checkpoints give +0.026 with an interval that
 excludes zero: the gain was real and small, and the eval was too small to
 see it. Every later row is measured here.
+
+Round 5 is the batch experiment (whilehq/whileai-sdk#252): the same reward
+and prompts, but 512 samples per optimizer step instead of 8, only prompts
+the r4 policy solves sometimes (every non-unanimous group at k=8, 326 of
+601, `build.py --band 0.1,0.9`), and length-truncated samples masked instead
+of scored 0. Twenty-five steps (12,800 samples, 3.5 h on one H100) moved the
+holdout as much as rounds 1-4 combined (8,000 steps, 32,000 samples). The
+step-25 row is served from the saved checkpoint through `serve_modal.py` on
+Modal rather than the hosted endpoint; the base was sampled through the same
+server as a control: base through that server is 0.53 (0.49..0.57), +0.004
+(-0.019..+0.029) against the hosted base, so the serving path adds nothing.
+Steps 50, 75 and 100 follow.
 
 ## Other bases on the same holdout (140 tasks, k=4)
 

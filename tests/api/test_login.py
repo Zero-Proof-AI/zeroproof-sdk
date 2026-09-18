@@ -114,6 +114,8 @@ def test_login_prints_link_and_saves_key_after_approval(gate, tmp_path):
     saved = json.loads((tmp_path / "credentials.json").read_text())
     assert saved["api_key"] == key
     assert saved["name"] == "cli box"
+    assert saved["tier"] == "full", "login records the tier it learned from /me"
+    assert auth.trial_prerun_note() is None
     assert saved["api_url"] == "https://api.zeroproofai.com"
     assert not (tmp_path / "pending-login.json").exists()
     assert auth.stored_api_key() == key
@@ -224,6 +226,19 @@ def test_logout_and_status(gate, capsys):
     assert json.loads(capsys.readouterr().out.split("Logged out.\n")[-1])["source"] is None
 
 
+def test_status_records_the_tier_on_an_older_credentials_file(gate, tmp_path):
+    gate.approved = True
+    auth.login(open_browser=False, out=lambda s: None)
+    path = tmp_path / "credentials.json"
+    stale = json.loads(path.read_text())
+    stale.pop("tier", None)
+    path.write_text(json.dumps(stale))
+    assert auth.trial_prerun_note() is None
+
+    assert auth.status()["tier"] == "full"
+    assert json.loads(path.read_text())["tier"] == "full"
+
+
 def test_signup_creates_the_account_and_saves_the_key(gate, tmp_path):
     lines: list[str] = []
     key = auth.signup("Agent@Example.com", name="claude-code", out=lines.append)
@@ -231,6 +246,12 @@ def test_signup_creates_the_account_and_saves_the_key(gate, tmp_path):
     saved = json.loads((tmp_path / "credentials.json").read_text())
     assert saved["email"] == "agent@example.com"
     assert saved["user_id"] == "user_new"
+    # the tier rides along, so a run can name the trial limit before it
+    # spends one without asking /me
+    assert saved["tier"] == "trial"
+    assert saved["daily_input_tokens"] == 25000
+    assert saved["expires_at"] == "2026-09-21T00:00:00.000Z"
+    assert auth.trial_prerun_note().startswith("trial key: the hosted writer covers about 12")
     assert gate.calls[-1] == ("/signup", {"email": "Agent@Example.com", "name": "claude-code"})
     assert "Account created" in lines[0]
     assert "Trial key" in lines[1] and "25,000" in lines[1] and "2026-09-21" in lines[1]

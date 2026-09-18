@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whileai"
-version = "0.58"
+version = "0.62"
 description = "While Python SDK: trace ingestion and verification client, plus agent simulations grounded in your tools and system prompt."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -38,6 +38,10 @@ Datasets = "https://huggingface.co/datasets/zero-proof-ai/agent-simulations"
 
 [project.scripts]
 whileai = "whileai.cli:main"
+# same CLI under the two names people type: the product is "zp"
+# (keys start with zp_) and "wai" is the short import alias.
+zp = "whileai.cli:main"
+wai = "whileai.cli:main"
 whileai-simulations = "whileai.simulations.score.quality:main"
 
 [project.optional-dependencies]

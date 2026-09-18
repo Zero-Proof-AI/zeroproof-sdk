@@ -110,7 +110,8 @@ def simulate(
     repeats; ``mode="rl"`` defaults to ``"successive"``, which stops
     early on unanimous asks), ``concurrency`` (parallel rollouts, 32),
     ``simulator`` (the situation writer; ``False`` is the offline
-    template writer, no key), ``user_model``, ``backend`` (the agent's
+    template writer, no key, and ``"hosted"`` is the default written out,
+    the same as leaving it unset), ``user_model``, ``backend`` (the agent's
     model when ``agent=`` is not a callable), ``seed``, ``sampling``,
     ``max_turns`` / ``avg_turns`` (model-backed agents only; a callable
     agent is played single-turn: one message in, one trajectory out),
@@ -121,6 +122,17 @@ def simulate(
     whose world has real ids (order numbers, account names), put those
     ids in the seeds or the tool descriptions, or the writer invents
     ids and every rollout is "not found".
+
+    Every seed is run. Each one becomes at least one situation:
+    ``situations`` is sized up to ``len(seeds)`` when you pass a smaller
+    number, and the search never spends a seed's slot on an ask it wrote
+    itself. The one thing that can still drop a seed is ``budget``,
+    which pays for ``len(seeds) * repeats`` rows before anything else;
+    when it cannot, the run says which seeds it dropped in ``warnings``
+    and lists them in ``search["seeds_dropped"]`` before rolling out.
+    Seeds are asks to build a run around, not the eval set: to check
+    that a fixed list of asks all ran and how each scored, use
+    ``evaluate(eval_set=asks)``.
 
     Input is an intent or an agent: ``system_prompt`` alone, ``tools``
     plus a prompt, or ``spec=``. Search writes a grid of human requests

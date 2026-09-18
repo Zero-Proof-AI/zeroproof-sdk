@@ -15,8 +15,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 from whileai._env import getenv
+from whileai.auth import SIGN_IN_URL
 
 from ..world.sandbox import MockEnvironment
+from .anthropic_backend import ANTHROPIC_BASE_URL, is_anthropic_url
+from .anthropic_backend import DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL
+from .anthropic_backend import complete as anthropic_complete
+from .anthropic_backend import missing_key as missing_anthropic_key
+from .anthropic_backend import resolve_key as anthropic_key
 from .diversity import running_turn_mean, sample_turn_budget
 from .usage_meter import report_usage
 
@@ -60,7 +66,7 @@ current_rollout = _CurrentRollout()
 
 
 def parse_backend_spec(spec: str) -> tuple[str, str]:
-    """Return (base_url, model) for ollama:/vllm:/openai: specs."""
+    """Return (base_url, model) for ollama:/vllm:/openai:/anthropic: specs."""
     kind, _, rest = str(spec).partition(":")
     if kind == "ollama":
         return "http://localhost:11434/v1", rest or "llama3.1:8b"
@@ -74,9 +80,14 @@ def parse_backend_spec(spec: str) -> tuple[str, str]:
             os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1",
             rest or "gpt-4o-mini",
         )
+    if kind == "anthropic":
+        # The Messages API, on ANTHROPIC_API_KEY. The URL is fixed, so the
+        # spec is just the model name and every caller (writer, user model,
+        # agent, judge) records that name the way the other backends do.
+        return ANTHROPIC_BASE_URL, rest or ANTHROPIC_DEFAULT_MODEL
     raise ValueError(
         f"unsupported backend spec {spec!r}; use ollama:<model>, "
-        "vllm:<model>@<url>, or openai:<model>"
+        "vllm:<model>@<url>, openai:<model>, or anthropic:<model>"
     )
 
 
@@ -227,6 +238,8 @@ def resolve_completion_key(base_url: str | None = None, api_key: str | None = No
     """
     if api_key:
         return str(api_key).strip()
+    if is_anthropic_url(base_url):
+        return anthropic_key()
     vllm = str(os.environ.get("VLLM_API_KEY") or "").strip()
     if not base_url:
         # no URL means the default agent, whichever route that resolves to
@@ -264,6 +277,8 @@ def missing_hosted_key(base_url: str | None = None, api_key: str | None = None) 
     endpoints run without one. Without this a bring-your-own run with no
     key spent its whole time budget on 401s and returned nothing.
     """
+    if is_anthropic_url(base_url):
+        return missing_anthropic_key(api_key)
     key = resolve_completion_key(base_url, api_key)
     if key:
         return None
@@ -285,12 +300,20 @@ MISSING_HOSTED_KEY = (
     "VLLM_API_KEY for the shared pool."
 )
 QUOTA_MARK = "quota exceeded"
+#: What to do about a spent daily allowance. A trial day is about 12
+#: hosted situations (``auth.trial_note``), which one real run spends, so
+#: the error names the writer that has no allowance and the sign-in that
+#: lifts the limit instead of leaving the run dead with a number.
+QUOTA_FIX = (
+    "simulate(..., simulator=False) writes the situations offline with no quota and no "
+    f"network; signing in once at {SIGN_IN_URL} lifts a trial key's daily limit."
+)
 
 
 def _quota_error(status: int, body: str) -> str | None:
     """The proxy's 429 for a spent daily allowance, or None. Not transient:
     every later call today answers the same, so the run stops instead of
-    retrying into the clock."""
+    retrying into the clock. Carries ``QUOTA_FIX``, the two ways on."""
     if int(status) != 429:
         return None
     text = str(body or "")
@@ -300,7 +323,8 @@ def _quota_error(status: int, body: str) -> str | None:
         msg = json.loads(text).get("error", {}).get("message") or text
     except (ValueError, AttributeError):
         msg = text
-    return f"Hosted model daily {msg[msg.lower().find('quota') :]}"
+    head = f"Hosted model daily {msg[msg.lower().find('quota') :]}".rstrip(". ")
+    return f"{head}. {QUOTA_FIX}"
 
 
 def _client_metered(base_url: str | None) -> bool:
@@ -541,7 +565,30 @@ def complete(
     reply then carries ``_logprobs`` (sum, n, and with ``"tokens"`` the
     per-token list). ``_finish_reason`` is always set from the first choice.
     A server that rejects ``logprobs`` gets the request again without it.
+
+    An ``anthropic:`` spec goes to the Messages API instead, translated to
+    and from this same shape by ``anthropic_backend``. That API returns no
+    log-probabilities, so ``logprobs`` yields no ``_logprobs`` there.
     """
+    if is_anthropic_url(base_url):
+        # The Messages API, translated at the boundary. It runs before the
+        # context squeeze below because that budget is sized to hosted Qwen's
+        # 4k window, not to a 200k one; report_usage stays out of it because a
+        # bring-your-own model is the customer's own bill.
+        reply = anthropic_complete(
+            base_url,
+            model,
+            messages,
+            tools=tools,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            n=n,
+            extra=extra,
+        )
+        _trim_length_cut({"finish_reason": reply.get("_finish_reason"), "message": reply})
+        return reply
     key = resolve_completion_key(base_url, api_key)
     auth_err = missing_hosted_key(base_url, key)
     if auth_err:

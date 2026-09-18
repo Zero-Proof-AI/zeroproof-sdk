@@ -335,6 +335,73 @@ def test_traces_with_faults_keep_the_fault_cells():
     assert share(aimed) > share(cold), (share(aimed), share(cold))
 
 
+def test_parallel_tool_results_attach_by_call_id():
+    """Real exports link a result to its call by id, not name.
+
+    Providers answer parallel calls out of order, so position alone swaps
+    the payloads and every miner downstream blames the wrong tool. On a
+    synthetic 100-trace corpus in this shape, half the tool faults landed
+    on a tool that never failed.
+    """
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {"role": "user", "content": "read both"},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call_a",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": '{"path": "test_auth.py"}',
+                                },
+                            },
+                            {
+                                "id": "call_b",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": '{"path": "auth.py"}',
+                                },
+                            },
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "call_b", "content": "def login(): ..."},
+                    {"role": "tool", "tool_call_id": "call_a", "content": "assert login()"},
+                ]
+            }
+        ]
+    )
+    steps = {s["arguments"]["path"]: s for s in rows[0]["steps"] if "tool" in s}
+    assert steps["test_auth.py"]["result"] == "assert login()"
+    assert steps["auth.py"]["result"] == "def login(): ..."
+
+
+def test_call_id_separates_two_calls_to_one_tool():
+    """Two calls to one tool are indistinguishable by name; only the id
+    separates them, so the name fallback cannot cover this case."""
+    rows = load_traces(
+        [
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {"id": "c1", "function": {"name": "grep", "arguments": '{"q": "a"}'}},
+                            {"id": "c2", "function": {"name": "grep", "arguments": '{"q": "b"}'}},
+                        ],
+                    },
+                    {"role": "tool", "name": "grep", "tool_call_id": "c2", "content": "b-hit"},
+                    {"role": "tool", "name": "grep", "tool_call_id": "c1", "content": "a-hit"},
+                ]
+            }
+        ]
+    )
+    steps = {s["arguments"]["q"]: s["result"] for s in rows[0]["steps"] if "tool" in s}
+    assert steps == {"a": "a-hit", "b": "b-hit"}
+
+
 def test_trace_and_marker_helpers_are_importable_from_the_package():
     """Four helpers were public in their own modules and reachable only
     through a private path.

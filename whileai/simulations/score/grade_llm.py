@@ -137,7 +137,7 @@ def judge_spec(
     text = str(spec or "").strip()
     _, default_model = parse_backend_spec(default_judge_spec())
     if text:
-        if text.startswith(("vllm:", "ollama:", "openai:")):
+        if text.startswith(("vllm:", "ollama:", "openai:", "anthropic:")):
             return text
         return f"vllm:{default_model}@" + text.rstrip("/")
     url = str(base_url or "").strip().rstrip("/")
@@ -208,6 +208,96 @@ def _judge_only(privileged: Any) -> dict[str, Any]:
     return out
 
 
+def _cut(value: str, cap: int) -> str:
+    """Shorten a field and SAY SO, so the judge is never quietly misled."""
+    text = str(value or "")
+    if len(text) <= cap:
+        return text
+    return text[:cap] + f"...[{len(text) - cap} chars omitted]"
+
+
+def _shrink_step(step: Any, cap: int) -> Any:
+    if not isinstance(step, dict):
+        return step
+    out = {}
+    for key, value in step.items():
+        out[key] = _cut(value, cap) if isinstance(value, str) else value
+        if key in {"arguments", "result"} and not isinstance(value, str):
+            rendered = json.dumps(value, default=str)
+            if len(rendered) > cap:
+                out[key] = _cut(rendered, cap)
+    return out
+
+
+def _fit_payload(blob: dict, limit: int) -> str:
+    """Serialise inside ``limit`` by reducing STRUCTURE, never slicing the JSON.
+
+    The old tail ``return text[:limit]`` cut mid-string, so every oversized
+    trajectory produced invalid JSON. ``rubric_judge`` parses this back, so
+    it raised ``JSONDecodeError`` and the row was recorded ungraded and left
+    every rate's denominator. Measured 2026-09-17: 37 of 120 and 35 of 120
+    rows on one paired eval, deterministic, retries recovering none.
+
+    The bias has a direction. The rows removed are the LONG ones, long
+    trajectories are the hard ones, so judge-scored pass rates come out too
+    high. Repairing it moved one base score from 0.717 to 0.603. The error
+    is not a constant: it scales with a lane's trajectory-length
+    distribution, so nobody can subtract it after the fact.
+
+    Every return here is ``json.dumps`` of a real object, so the result
+    always parses. Fields are shortened in order of how little the verdict
+    needs them, each cut is announced in the text, and ``payload_reduced``
+    marks any payload that lost evidence so a caller can see it rather
+    than infer it.
+    """
+    text = json.dumps(blob, default=str)
+    if len(text) <= limit:
+        return text
+
+    blob = dict(blob)
+    blob["payload_reduced"] = True
+    for cap in (800, 300, 80):
+        blob["steps"] = [_shrink_step(x, cap) for x in (blob.get("steps") or [])]
+        text = json.dumps(blob, default=str)
+        if len(text) <= limit:
+            return text
+
+    # The situation and the policy go before the final reply: the verdict
+    # needs what the agent actually SAID more than the rules it was under.
+    for field, cap in (
+        ("situation", 1500),
+        ("agent_policy", 900),
+        ("situation", 500),
+        ("agent_policy", 300),
+        ("final_text", 1500),
+        ("final_text", 600),
+    ):
+        value = blob.get(field)
+        if isinstance(value, str) and len(value) > cap:
+            blob[field] = _cut(value, cap)
+            text = json.dumps(blob, default=str)
+            if len(text) <= limit:
+                return text
+
+    kept = [x for x in (blob.get("steps") or []) if isinstance(x, dict)]
+    blob["steps"] = [{"dropped_all_steps": len(kept)}]
+    text = json.dumps(blob, default=str)
+    if len(text) <= limit:
+        return text
+
+    # Nothing else fits. Still a real object, so the row is judged on the
+    # reply alone rather than dropped.
+    return json.dumps(
+        {
+            "payload_reduced": True,
+            "note": "trajectory too large to render; judging the final reply only",
+            "tools": blob.get("tools"),
+            "final_text": _cut(str(blob.get("final_text") or ""), max(400, limit // 3)),
+        },
+        default=str,
+    )
+
+
 def _render_payload(
     trajectory: dict,
     *,
@@ -269,8 +359,7 @@ def _render_payload(
     if skipped:
         kept.append({"skipped_steps": skipped})
     blob["steps"] = kept
-    text = json.dumps(blob, default=str)
-    return text[:_PAYLOAD_CHARS]
+    return _fit_payload(blob, _PAYLOAD_CHARS)
 
 
 def _normalize_fault(mode: str) -> str | None:

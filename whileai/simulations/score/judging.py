@@ -14,8 +14,17 @@ Judge contract (minimal now, extensible later)::
                           "reason": "...",             # optional
                           "markers": {"name": 1.0},    # optional
                           "failure_class": "...",      # optional
-                          ...anything else}            # kept as metadata
+                          "failures": [...],           # optional
+                          ...anything else}            # kept in judge_meta
     judge(trajectory) -> 0 or 1 or 0.7                 # bare number works
+
+``reward``, ``reason``, ``markers`` and ``failure_class`` are the keys
+that land on the row itself. Every other key the judge returns is kept
+under ``row["judge_meta"]`` and nowhere else, so a judge that returns
+``failures`` reads back as ``row["judge_meta"]["failures"]``, not
+``row["failures"]``. A judge may also hand those extras over already
+gathered in its own ``judge_meta`` dict; both spellings land in the same
+place.
 
 ``markers`` is lifted onto ``row["markers"]``, which is what
 ``marker_summary``, ``delta_report`` and ``from_row`` read. Marker
@@ -197,6 +206,12 @@ class ScoredData:
     Iterates as plain dicts, so it feeds ``simulate(traces=...)``,
     ``mine_traces``, ``export_training`` and JSONL writers directly —
     no conversion scripts.
+
+    ``.rows`` is a plain list here, so ``scored.rows()`` raises
+    ``TypeError: 'list' object is not callable``. On ``SimulationData``,
+    what ``simulate()`` returns, ``.rows`` is a property that works
+    called or uncalled. ``.warnings`` is the list of hollow-run notes
+    ``run_judge`` filled; print it before reading any number.
     """
 
     def __init__(

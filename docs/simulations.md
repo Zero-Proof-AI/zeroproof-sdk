@@ -53,7 +53,12 @@ start the engine then flips most fault cells to success (one cell per
 fault type stays), so the tool-condition axis is sampled, not covered,
 unless you raise `fault_rate` or pass `prefer_success=False`. What the
 run actually touched is a number: `data.coverage["pairwise"]` is
-planned pairs, covered pairs, and the fraction.
+planned pairs, covered pairs, and the fraction. Read it as what it
+counts: pairwise cells of the 6-axis grid, which is training-data
+coverage, not policy coverage. A 200-row run over a grid with thousands
+of pairs reports a small fraction and that is arithmetic, not a failed
+eval. Whether your policy is covered is a different question, and
+`coverage_gap(asks, tools=..., system_prompt=...)` answers it.
 
 **People are sampled, not described.** A coordinate says the customer is
 in a hurry and their order was already cancelled. A second layer decides
@@ -92,6 +97,33 @@ labels teaches the behavior or the judge's blind spot.
 job, the run says so. Template fallbacks are never quietly substituted for
 model-written situations, because a dataset that looks real and is not is
 worse than no dataset.
+
+## Which model runs it
+
+Four roles can each take their own model: the agent (`agent=`), the
+situation writer (`simulator=`), the simulated person (`user_model=`) and
+the judge (`spec=`). Each one takes the same backend spec.
+
+| Spec | Backend | Key |
+| --- | --- | --- |
+| `ollama:<model>` | a local Ollama server | none |
+| `vllm:<model>@<url>` | vLLM, or any OpenAI-compatible endpoint you serve | `VLLM_API_KEY` when the endpoint wants one |
+| `openai:<model>` | OpenAI, or a compatible endpoint via `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
+| `anthropic:<model>` | the Claude Messages API | `ANTHROPIC_API_KEY`, or `WHILEAI_ANTHROPIC_API_KEY` to override it |
+
+```python
+data = wai.simulate(
+    agent="anthropic:claude-haiku-4-5",
+    tools=my_tools,
+    system_prompt=my_system_prompt,
+    simulator="anthropic:claude-sonnet-5",
+    output="rollout.jsonl",
+)
+```
+
+Omitting `agent=` runs the While-hosted model on your account key instead.
+One model in more than one role is the regime to avoid, and the run says so
+on `data.degraded`: a judge grading its own writing prefers it.
 
 ## What you get
 
@@ -142,6 +174,22 @@ delta (rows, pass rate, support), and `whileai.json` in the repo keeps
 the history: which While dataset each split came from, and what it
 replaced. `load_dataset(repo, split, revision="zp-ds_...")` loads exactly
 one push.
+
+## Return shapes
+
+One table, because these cost testers a round trip each:
+
+| call | you get | read it as |
+| --- | --- | --- |
+| `simulate(...)` | `SimulationData` | `data.rows` and `data.rows()` both work |
+| `evaluate(...)`, `grade(...)` | `ScoredData` | `scored.rows` is a **list**; `scored.rows()` is a `TypeError` |
+| | | `scored.warnings`: hollow-run notes, print them before any number |
+| `pass_at(rows)` | `PassAt` | `pass_at_1`, `pass_pow_k` (printed `pass^k`, not `pass_hat_k`), `pass_at_k`, `headroom`, `ci95` |
+| `marker_summary(rows)` | `{marker: stats}` | `mean`, `ci95` (not `ci`), `n_tasks`, `n_rows` (not `n`), `note` or `warning` |
+| `judge_trust(rows)` | `dict` | `ok`, `agreement.agreement`, `agreement.ci95`, `gold_kind`, `warnings` |
+
+The full field-by-field version, including which fields print and which
+do not, is in [evals.md](evals.md#7-return-shapes).
 
 ## What it is not
 

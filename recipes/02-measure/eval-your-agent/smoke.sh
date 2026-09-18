@@ -4,4 +4,5 @@
 set -eu
 cd "$(dirname "$0")"
 python run.py --dry-run --limit 4 --k 2 --grid 0
+python run.py --gap --limit 2 --k 1 --grid 0 --agent careful
 python run.py --agent careful --limit 4 --k 2 --grid 0 --gate 0.9

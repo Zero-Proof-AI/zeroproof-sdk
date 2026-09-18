@@ -34,10 +34,57 @@ from pathlib import Path
 from whileai._env import env_name, getenv
 
 DEFAULT_API_URL = "https://api.zeroproofai.com"
+SIGN_IN_URL = "https://www.zeroproofai.com/sign-in"
+#: the trial allowance the gate hands out, used when the reply does not say
+DEFAULT_TRIAL_INPUT_TOKENS = 25_000
+#: Input tokens one hosted situation spends, measured on a 4-tool spec: a
+#: 12-situation run of one cost 28,490, so round it to 2,000 a situation.
+#: The trial allowance is small enough that the count is the first thing
+#: anyone needs to know about it.
+INPUT_TOKENS_PER_SITUATION = 2_000
 
 
 class LoginError(RuntimeError):
     pass
+
+
+def trial_situations(daily_input_tokens: float | None = None) -> int:
+    """About how many hosted situations a trial day buys, in round numbers."""
+    tokens = float(daily_input_tokens or DEFAULT_TRIAL_INPUT_TOKENS)
+    return max(1, int(tokens / INPUT_TOKENS_PER_SITUATION))
+
+
+def trial_note(daily_input_tokens: float | None = None) -> str:
+    """The two facts a trial key needs before its first hosted run: how
+    far the daily allowance goes, and the offline writer that has no
+    allowance at all."""
+    return (
+        f"That is about {trial_situations(daily_input_tokens)} hosted situations a day "
+        f"(a 4-tool spec spends around {INPUT_TOKENS_PER_SITUATION:,} input tokens per "
+        "situation); simulate(..., simulator=False) writes situations offline with no quota "
+        f"and no network; signing in once at {SIGN_IN_URL} lifts the limit."
+    )
+
+
+def trial_prerun_note() -> str | None:
+    """The one line a trial key needs before a hosted run spends it, or ``None``.
+
+    Read from the tier the credentials file recorded at sign-up or at the
+    last ``whileai status`` / ``whileai login``, so a run can say this
+    without a network call. A key from the environment has no recorded
+    tier, so this says nothing rather than guess at one.
+    """
+    if getenv("API_KEY"):
+        return None
+    saved = _read(credentials_path()) or {}
+    if not saved.get("api_key") or str(saved.get("tier") or "") != "trial":
+        return None
+    tokens = int(float(saved.get("daily_input_tokens") or DEFAULT_TRIAL_INPUT_TOKENS))
+    return (
+        f"trial key: the hosted writer covers about {trial_situations(tokens)} situations a day "
+        f"({tokens // 1000}k input tokens); simulator=False writes them offline with no quota; "
+        f"sign in once at {SIGN_IN_URL} to lift it"
+    )
 
 
 def _api_url() -> str:
@@ -84,6 +131,37 @@ def _read(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _tier_fields(payload: dict) -> dict:
+    """The tier facts worth keeping next to the key, from ``/signup`` or ``/me``."""
+    tier = str((payload or {}).get("tier") or "").strip()
+    if not tier:
+        return {}
+    fields: dict = {"tier": tier}
+    trial = (payload or {}).get("trial") or {}
+    if isinstance(trial, dict):
+        if trial.get("daily_input_tokens") is not None:
+            fields["daily_input_tokens"] = trial["daily_input_tokens"]
+        if trial.get("expires_at"):
+            fields["expires_at"] = str(trial["expires_at"])
+    return fields
+
+
+def remember_account(payload: dict) -> None:
+    """Record a ``/signup`` or ``/me`` reply's tier in the credentials file.
+
+    Only for the key that file holds: a key from the environment may belong
+    to another account, and writing its tier here would mislabel this one.
+    """
+    fields = _tier_fields(payload)
+    saved = _read(credentials_path())
+    if not fields or not saved or not saved.get("api_key"):
+        return
+    if all(saved.get(key) == value for key, value in fields.items()):
+        return
+    saved.update(fields)
+    _write_private(credentials_path(), saved)
 
 
 def stored_api_key() -> str | None:
@@ -238,6 +316,10 @@ def login(
             )
             with contextlib.suppress(OSError):
                 _pending_path().unlink()
+            # the tier the key carries, saved next to it, so a run can
+            # name a trial limit before it spends one
+            with contextlib.suppress(LoginError, OSError, ValueError):
+                remember_account(account(data["api_key"]))
             say(f"Logged in. Key saved to {credentials_path()}")
             return data["api_key"]
         error = data.get("error", "")
@@ -280,6 +362,9 @@ def signup(email: str, *, name: str | None = None, out: Callable[[str], None] | 
                 "user_id": data.get("user_id"),
                 "email": data.get("email", email),
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                # so simulate() can warn about the trial before a hosted
+                # run spends it, without a call to /me
+                **_tier_fields(data),
             },
         )
         say(f"Account created for {data.get('email', email)}. Key saved to {credentials_path()}")
@@ -291,6 +376,7 @@ def signup(email: str, *, name: str | None = None, out: Callable[[str], None] | 
                 f"output tokens a day, {int(trial.get('storage_bytes', 104857600)) // 1048576} MB, "
                 f"{trial.get('datasets', 10)} datasets, expires {str(trial.get('expires_at', ''))[:10]}."
             )
+            say(trial_note(trial.get("daily_input_tokens")))
             say(
                 trial.get("lift")
                 or "Sign in once at https://www.zeroproofai.com/sign-in with an email code to lift trial limits."
@@ -321,7 +407,12 @@ def logout() -> bool:
 
 
 def status() -> dict:
-    """What the SDK would use right now, with the key masked."""
+    """What the SDK would use right now, with the key masked.
+
+    On a trial key ``trial_note`` says how many hosted situations the
+    daily allowance covers and names the offline writer that has none.
+    ``tier`` comes from ``GET /me``, so reading it costs one call.
+    """
     env = getenv("API_KEY")
     env_var = env_name("API_KEY")
     saved = _read(credentials_path()) or {}
@@ -350,8 +441,11 @@ def status() -> dict:
             out["tier"] = f"unknown ({err})"
         else:
             out["tier"] = me.get("tier")
+            if not env:
+                remember_account(me)
             if me.get("tier") == "trial":
                 trial = me.get("trial") or {}
                 out["trial_expires_at"] = trial.get("expires_at")
                 out["lift"] = trial.get("lift")
+                out["trial_note"] = trial_note(trial.get("daily_input_tokens"))
     return out

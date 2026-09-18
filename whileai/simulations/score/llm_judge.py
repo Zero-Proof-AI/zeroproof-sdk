@@ -28,14 +28,19 @@ JUDGE_SYSTEM = (
 
 
 def resolve_judge_key(api_key: str | None = None, backend_spec: str | None = None) -> str | None:
-    """User-supplied OpenAI-compatible key. Hosted Qwen only if spec points there."""
+    """User-supplied OpenAI-compatible key. An ``anthropic:`` spec reads
+    ANTHROPIC_API_KEY; hosted Qwen only if the spec points there."""
     key = str(api_key or "").strip()
     if key:
         return key
+    spec = str(backend_spec or "")
+    if spec.startswith("anthropic:"):
+        from ..generate.anthropic_backend import resolve_key as anthropic_key
+
+        return anthropic_key() or None
     env = str(os.environ.get("OPENAI_API_KEY") or "").strip()
     if env:
         return env
-    spec = str(backend_spec or "")
     if "modal.run" in spec or spec.startswith("vllm:"):
         hosted = str(os.environ.get("VLLM_API_KEY") or "").strip()
         if hosted:
