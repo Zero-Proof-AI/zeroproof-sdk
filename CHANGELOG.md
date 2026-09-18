@@ -6,13 +6,15 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 ## Unreleased
 
 - `dataset_report` reports the difficulty mix: `tier_mix`, `hard_share` and
-  `tier_fail_rate` per tier, and it warns when fewer than 30% of rows are
-  boundary, ambiguous or adversarial. The stance axis draws mostly ordinary
-  cells unless it is pinned, and an ordinary cell is the one a base already
-  passes, so an unpinned set reports a null whatever the policy does. On a
-  1,048-row set the hard tiers failed at 0.589 (boundary) and 0.531
-  (adversarial) against 0.407 for ordinary (rlhf-book ch. 7 on difficulty
-  filtering, ch. 6 on groups that carry no gradient).
+  `tier_fail_rate` per tier, and `warnings` (always a list, beside the tool
+  check's `preflight_warnings`) says when fewer than 30% of rows are
+  boundary, ambiguous or adversarial, naming `ordinary_share=` as the dial
+  and `dimensions={"stance": [...]}` as the pin. An ordinary ask is the one a
+  base already passes, so an easy set reports a null whatever the policy
+  does. On a 1,048-row set the hard tiers failed at 0.589 (boundary) and
+  0.531 (adversarial) against 0.407 for ordinary (rlhf-book ch. 7 on
+  difficulty filtering, ch. 6 on groups that carry no gradient). The rendered
+  report shows the hard share and the warnings.
 - The same report counts a row whose cell names no stance as `unlabelled`
   rather than `ordinary`. `behavior_tier` maps a missing stance to ordinary,
   which is right for sampling and wrong for a report, where it would count as

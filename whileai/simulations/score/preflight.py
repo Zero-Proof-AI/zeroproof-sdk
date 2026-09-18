@@ -304,6 +304,12 @@ def classify_failure(row: dict) -> str | None:
     return None
 
 
+#: Below this share of boundary, ambiguous and adversarial rows the set is easy.
+HARD_SHARE_FLOOR = 0.3
+#: Rows before the hard share is worth a warning.
+HARD_SHARE_MIN_ROWS = 20
+
+
 def dataset_report(
     rows: Sequence[dict], *, tools: Sequence[dict] | None = None, system_prompt: str = ""
 ) -> dict[str, Any]:
@@ -354,18 +360,25 @@ def dataset_report(
         "tier_fail_rate": {
             t: round(1 - sum(v) / len(v), 3) for t, v in sorted(tier_labeled.items()) if v
         },
+        # Always a list, like every other report's warnings; the tool
+        # preflight's own list is preflight_warnings.
+        "warnings": [],
     }
-    if hard_share is not None and hard_share < 0.3 and len(rows) >= 20:
-        report.setdefault("warnings", []).append(
+    if (
+        hard_share is not None
+        and hard_share < HARD_SHARE_FLOOR
+        and len(rows) >= HARD_SHARE_MIN_ROWS
+    ):
+        report["warnings"].append(
             f"easy set: {hard_share:.0%} of rows are boundary, ambiguous or adversarial. "
-            "The stance axis defaults to a mostly-ordinary draw, and an ordinary cell is "
-            "the one a base already passes, so a set like this reports a null whatever the "
-            "policy does. Pin it: dimensions={'stance': ['boundary', 'conflicting', "
-            "'ambiguous', 'underspecified', 'adversarial', 'policy-push']} "
-            "(rlhf-book ch. 7 on difficulty filtering)."
+            "An ordinary ask is the one a base already passes, so a set like this reports "
+            "a null whatever the policy does. Lower the share: "
+            "simulate(..., ordinary_share=0.3) draws 70% from the hard tiers; "
+            "dimensions={'stance': ['boundary', 'ambiguous', 'adversarial']} pins the axis "
+            "to hard tiers only (rlhf-book ch. 7 on difficulty filtering)."
         )
     if tiers.get("unlabelled") and tiers["unlabelled"] / max(1, len(rows)) > 0.1:
-        report.setdefault("warnings", []).append(
+        report["warnings"].append(
             f"{tiers['unlabelled']} rows carry no stance, so their difficulty is unknown "
             "rather than ordinary."
         )
@@ -398,6 +411,13 @@ def format_dataset_report(report: dict[str, Any]) -> str:
         total = sum(classes.values()) or 1
         for name, n in list(classes.items())[:6]:
             lines.append(f"  {name:<20} {n:>4}  ({n / total:.0%})")
+    if report.get("hard_share") is not None:
+        lines.append(
+            f"Hard tiers:           {report['hard_share']:>6.0%}"
+            "  (boundary, ambiguous, adversarial rows)"
+        )
+    for warning in (report.get("warnings") or [])[:4]:
+        lines.append(f"! {warning}")
     for warning in (report.get("preflight_warnings") or [])[:4]:
         lines.append(f"! {warning}")
     return "\n".join(lines)
