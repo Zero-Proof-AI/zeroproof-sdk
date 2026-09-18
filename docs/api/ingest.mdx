@@ -119,6 +119,7 @@ dimensions_from_traces(
     tools: list[dict],
     policy: str = '',
     broaden: bool = True,
+    fault_to_axis: Mapping[str, tuple[str, str]] | None = None,
 ) -> dict[str, list[str]]
 ```
 
@@ -130,6 +131,8 @@ tools first; `broaden=False` drops tools the traces never touched
 (keeping the base specials such as `unrelated`), so a run spends its
 budget near the flaws instead of boiling the ocean. Fault and world
 axes always keep their clean value: contrast needs passing rows too.
+`fault_to_axis` maps an observed fault chip to the axis value that
+reproduces it (`FAULT_TO_AXIS` by default).
 
 ### `drop_leaky_rows`
 
@@ -139,6 +142,7 @@ drop_leaky_rows(
     sources: Sequence[Any],
     threshold: float = 0.9,
     embedder: Any = 'hash',
+    examples: int = 20,
 ) -> tuple[list[dict], dict[str, Any]]
 ```
 
@@ -187,7 +191,8 @@ hf_publish(
     repo: str | None = None,
     private: bool = False,
     wait: bool = True,
-    timeout: float = 600,
+    timeout: float = 600.0,
+    poll: float = 2.5,
     api_key: str | None = None,
 ) -> dict
 ```
@@ -211,7 +216,8 @@ hf_publish_run(
     repo: str | None = None,
     private: bool = True,
     wait: bool = True,
-    timeout: float = 900,
+    timeout: float = 900.0,
+    poll: float = 3.0,
     api_key: str | None = None,
 ) -> dict
 ```
@@ -248,7 +254,8 @@ import_hf(
     description: str | None = None,
     max_rows: int = 100000,
     wait: bool = True,
-    timeout: float = 900,
+    timeout: float = 900.0,
+    poll: float = 3.0,
     api_key: str | None = None,
 ) -> dict
 ```
@@ -286,7 +293,7 @@ issue_delegated_credential(
     clerk_token: str | None,
     ttl_seconds: int = 3600,
     name: str = 'sdk-default',
-    timeout: int = 120,
+    timeout: float = 120,
 ) -> dict
 ```
 
@@ -304,15 +311,18 @@ leakage_report(
     sources: Sequence[Any],
     threshold: float = 0.9,
     embedder: Any = 'hash',
+    examples: int = 20,
 ) -> dict[str, Any]
 ```
 
 Near-copy check of generated prompts against source traces.
 
 A generated row whose prompt sits at or above `threshold` cosine
-similarity to any source prompt is flagged. Exact matches always flag,
-whatever the embedder thinks. `leaky` lists the first 20 offenders;
-`n_leaky` is the full count.
+similarity to any source prompt is flagged (0.9 by default: the 8-gram
+exact-overlap test of rlhfbook.com/c/16-evaluation.html with a small
+paraphrase allowance). Exact matches always flag, whatever the embedder
+thinks. `leaky` lists the first `examples` offenders; `n_leaky` is
+the full count.
 
 ### `load_traces`
 
@@ -463,6 +473,7 @@ push_rows(
     description: str | None = None,
     endorsed: Sequence[str] = (),
     strict_hacks: bool = False,
+    prove_effect: float = 0.05,
 ) -> dict
 ```
 
@@ -479,7 +490,9 @@ without a mixed group) and returns its report as `entry["gate"]`.
 `hack_scan`; `strict_hacks=True` refuses a set whose reward is
 best explained by something else.
 `SimulationData.push` gates by default; this row-level entry point
-does not, because the caller may already have run `optimize`.
+does not, because the caller may already have run `optimize`. A
+`purpose="holdout"` push warns when the set is too small to prove a
+`prove_effect` gain (5 points) at 80% power.
 
 ### `refresh_delegated_credential`
 
@@ -488,7 +501,7 @@ refresh_delegated_credential(
     clerk_token: str | None,
     credential: str,
     ttl_seconds: int = 3600,
-    timeout: int = 120,
+    timeout: float = 120,
 ) -> dict
 ```
 
@@ -512,7 +525,10 @@ Create or update an agent record: the name, and optionally what it is
 ### `rows_from_otel`
 
 ```python
-rows_from_otel(source: Any) -> list[dict]
+rows_from_otel(
+    source: Any,
+    reward_keys: Sequence[str] = ('whileai.reward',),
+) -> list[dict]
 ```
 
 Conversations from an OTLP JSON batch or an iterable of spans.
@@ -520,7 +536,8 @@ Conversations from an OTLP JSON batch or an iterable of spans.
 One row per conversation id (trace id when no conversation id is
 emitted): the first user message becomes `prompt`, tool spans in
 time order become `steps`, later user turns become user steps, and
-the last assistant output becomes `final_text`.
+the last assistant output becomes `final_text`. `reward_keys` names
+the span attributes a 0..1 reward is read from (`REWARD_KEYS`).
 
 ### `send_score`
 

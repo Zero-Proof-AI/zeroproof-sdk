@@ -57,6 +57,7 @@ TrainingRun(
     total_steps: int | None = None,
     flush_every: int = 25,
     flush_seconds: float = 15.0,
+    max_batch: int = 500,
     transport: Callable[..., Any] | None = None,
 )
 ```
@@ -170,8 +171,9 @@ after, seconds, rows) and `error` once it has ended.
 wait(self, timeout: float | None = None, poll: float = 15.0) -> str
 ```
 
-Block until a hosted run ends. Returns the final status;
-raises `TimeoutError` when `timeout` seconds pass first.
+Block until a hosted run ends, reading its state every `poll`
+seconds (never under `TRAINING_POLL_MIN_S`). Returns the final
+status; raises `TimeoutError` when `timeout` seconds pass first.
 
 ### `attach_delta`
 
@@ -273,6 +275,7 @@ reward_model(
     threshold: float | None = None,
     api_key: str | None = None,
     transport: Callable[..., Any] | None = None,
+    batch: int = 256,
 ) -> RewardModel
 ```
 
@@ -373,9 +376,11 @@ says what GRPO does with a sampled reply the token cap cut:
 the old way. A cut reply scored 0 teaches shorter thinking before it
 teaches the task, so `"zero"` is the knob to reach for only when the
 cap itself is the behavior under training (#253). Each has a
-trainer default when left `None`. `config` passes further host
-keys as given
-(`epsilonHigh`, `scaleRewards`, `balance`).
+trainer default when left `None`; the range each is accepted in and
+the value the cited paper used are in `TRAINING_KNOBS` (defaults.py:
+DAPO, Dr. GRPO, ProRL, DPO and the rlhf-book chapters), and a rejected
+value is told the reference. `config` passes further host keys as
+given (`epsilonHigh`, `scaleRewards`, `balance`).
 Every knob lands on the run's `config` so the run page shows it.
 
 A dataset already training answers with that run instead of a second.
@@ -394,6 +399,7 @@ training_run(
     api_key: str | None = None,
     flush_every: int = 25,
     flush_seconds: float = 15.0,
+    max_batch: int = 500,
     transport: Callable[..., Any] | None = None,
 ) -> TrainingRun
 ```

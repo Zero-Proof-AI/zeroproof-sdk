@@ -67,6 +67,10 @@ HackMonitor(
     max_new_tokens: int = 256,
     concurrency: int = 8,
     seed: int = 0,
+    n_boot: int = 500,
+    n_perm: int = 50,
+    scan_min: int = 8,
+    sampling: Mapping[str, Any] | None = None,
 )
 ```
 
@@ -81,7 +85,13 @@ leave it `None` to use the reward function passed through
 in, a reward or `{"reward": ...}` out). `sample` overrides how
 completions are drawn: `sample(model, tokenizer, prompts, n=,
 max_new_tokens=) -> list[list[str]]`; the default uses the chat
-template and `model.generate`.
+template and `model.generate`; `sampling` (`temperature`,
+`top_p`, `batch`) steers that default sampler.
+
+`n_boot` is the bootstrap count behind the gold-vs-window interval,
+`n_perm` the permutation count behind the feature scan, `scan_min`
+the fewest buffered completions the scan runs on. Every number has its
+reason in `defaults.py` (MONITOR_*).
 
 `run` is the platform run the points and alarms land on; `None`
 keeps everything on the monitor (`history`, `alarms`,

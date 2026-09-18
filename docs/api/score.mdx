@@ -216,13 +216,16 @@ Chosen/rejected pairs from same-task contrast. Failures earn here.
 select_for_rl(
     self,
     target: int = 1000,
-    lo: float = 0.3,
-    hi: float = 0.7,
+    lo: float = 0.2,
+    hi: float = 0.8,
     has_tools: bool = True,
 ) -> tuple[list[dict], dict[str, Any]]
 ```
 
-Whole mixed-reward groups for RL; groups never split.
+Whole mixed-reward groups for RL; groups never split. `lo` and
+`hi` default to `DIFFICULTY_BAND` (0.2, 0.8), the same band
+`select_for_rl` and `optimize` use; they used to be 0.3 and
+0.7 here alone.
 
 #### `ScoredData.select_for_sft`
 
@@ -359,6 +362,7 @@ audit_grades(
     concurrency: int = 4,
     timeout: float = 120,
     judge_name: str | None = None,
+    fn_warn: float = 0.1,
 ) -> dict[str, Any]
 ```
 
@@ -370,15 +374,16 @@ rule. `sample` failed rows (reward 0, judge ok) are drawn with
 `seed` and each is put to `judge` (any judge in the `run_judge`
 contract: `rubric_judge()`, `grade_llm`, your own callable) with
 the reference in place and `question` as the rubric when the row
-carries none. A judge reward at or above 0.5 on a failed row is a
-false negative. `passes` samples passed rows the same way for the
-false-positive side.
+carries none. A judge reward at or above `PASS_THRESHOLD` (0.5) on
+a failed row is a false negative. `passes` samples passed rows the
+same way for the false-positive side.
 
 Returns `fn_rate` with `fn_ci95` (Wilson), `estimated_wrong_fails`
 (the rate over every failed row), `reasons` (the verifier's failure
 kinds in the sample, each with how many the judge overturned), a few
 `examples`, `fp_rate` when `passes` > 0, and `warnings`. Above
-`FN_WARN` the summary says to fix the verifier before training;
+`fn_warn` (`FN_WARN`, 0.10) the summary says to fix the verifier
+before training;
 `select_for_rl(audit=report)` and `optimize(audit=)` carry the
 same warning into the selection.
 
@@ -489,13 +494,15 @@ compare_runs(
     n_boot: int = 2000,
     seed: int = 0,
     min_paired: int = 5,
+    level: float = 0.95,
 ) -> dict[str, Any]
 ```
 
 Is run `b` different from run `a` on `metric`?
 
 Tasks the two runs share are compared as paired differences (b minus
-a, per task); the interval is a bootstrap over those pairs and the
+a, per task); the interval is a `level` bootstrap over those pairs
+(`ci95` at the default, with `level` reported beside it) and the
 p-value is a sign-flip permutation test. With fewer than `min_paired`
 shared tasks the comparison falls back to unpaired task means and says
 so. `verdict` is one of `"b_better"`, `"a_better"`,
@@ -587,10 +594,13 @@ dataset_report(
     rows: Sequence[dict],
     tools: Sequence[dict] | None = None,
     system_prompt: str = '',
+    hard_share_floor: float = 0.3,
 ) -> dict[str, Any]
 ```
 
 One report a developer reads after simulate/grade: size, signal, mix.
+`hard_share_floor` (`HARD_SHARE_FLOOR`, 0.3) is the share of hard-
+tier rows under which the set is called easy.
 
 ### `decontaminate`
 
@@ -699,10 +709,23 @@ delta_report(
     n_boot: int = 2000,
     seed: int = 0,
     balance_rollouts: bool = False,
+    alpha: float = 0.05,
+    power: float = 0.8,
+    ceiling_pass_rate: float = 0.9,
+    answered_gap_points: float = 0.1,
+    answered_alpha: float = 0.01,
 ) -> dict[str, Any]
 ```
 
 Compare `after` to `before` on pass@1 and every shared marker.
+
+`alpha` is the false-positive rate every verdict runs at: each
+interval is at `1 - alpha` (`ci95` at the default), the re-run
+band uses the same quantile, and `family_error` is `1 - (1 -
+alpha) ** n_metrics`. `power` feeds the sizing line
+(`detectable_effect`, `holdout_size`). `ceiling_pass_rate`,
+`answered_gap_points` and `answered_alpha` are the flags' thresholds
+(`CEILING_PASS_RATE`, `ANSWERED_GAP_POINTS`, `ANSWERED_P_MAX`).
 
 The two sides should have the same number of rollouts per task. When
 a run lost rollouts (`data.report()["rollouts_lost"]`), one arm can
@@ -816,8 +839,9 @@ detectable_effect(
 ```
 
 The smallest gain `n_tasks` paired tasks can prove at `power`:
-`holdout_size` solved for the effect (a few fixed-point steps, since
-the after-side variance depends on it). `None` below two tasks.
+`holdout_size` solved for the effect (`FIXED_POINT_STEPS`
+fixed-point steps, since the after-side variance depends on it).
+`None` below `MIN_HOLDOUT_TASKS` tasks.
 
 ### `eval_variance`
 
@@ -1027,11 +1051,16 @@ hack_scan(
     reward: str = 'reward',
     seed: int = 0,
     top_features: int | None = 20,
+    alpha: float = 0.05,
 ) -> dict[str, Any]
 ```
 
 Rank what separates reward within each ask against a permutation
 noise floor, and say what a grouped update would learn.
+
+`alpha` (`ALPHA`, 0.05) sets the floor: `tau` is the
+`1 - alpha` quantile of the strongest feature's |rho| when reward is
+shuffled within ask, so a feature above it clears chance at that rate.
 
 `rows` are graded rollouts, several per ask (`mode="rl"`); the
 reward under `reward` may be 0/1 or partial credit. `endorsed`
@@ -1208,6 +1237,8 @@ judge_pairs(
     concurrency: int = 8,
     api_key: str | None = None,
     examples: int = 10,
+    position_flip_flag: float = 0.2,
+    prefers_rejected_flag: float = 0.2,
 ) -> tuple[list[dict], dict[str, Any]]
 ```
 
@@ -1227,7 +1258,11 @@ and `tie` (bool). Report: `position_flip_rate` (position bias:
 the judge's answer changed with the order), `tie_rate`,
 `agrees_with_scores` (the pairwise winner is the pointwise
 `chosen`), `prefers_rejected` (the two disagree outright, the
-rows a person should read), `failed`.
+rows a person should read), `failed`. A `position_flip_rate` at
+or over `position_flip_flag` (`POSITION_FLIP_FLAG`, 0.2: Zheng et
+al. arXiv:2306.05685 measured 35% of GPT-4 verdicts flipping with the
+order) and a prefers-rejected share at or over
+`prefers_rejected_flag` each add a warning.
 
 ### `judge_probes`
 
@@ -1240,6 +1275,7 @@ judge_probes(
     sample: int = 40,
     seed: int = 0,
     concurrency: int = 8,
+    flip_flag: float = 0.1,
 ) -> dict[str, Any]
 ```
 
@@ -1257,7 +1293,8 @@ without it the row's system prompt is used. A probe that applies to
 no row is `skipped` with the reason.
 
 Returns per-probe counts and rates, `exploitable_by` (probes at or
-over `FLIP_FLAG`), and one warning per exploit.
+over `flip_flag`, `FLIP_FLAG` by default), and one warning per
+exploit.
 
 ### `judge_trust`
 
@@ -1274,10 +1311,18 @@ judge_trust(
     min_agreement: float = 0.8,
     min_kappa: float = 0.6,
     allow_model_gold: bool = False,
+    length_gap_flag: float = 0.15,
+    flip_flag: float = 0.1,
 ) -> dict[str, Any]
 ```
 
 The judge-trust report. See the module docstring.
+
+The floors and flags are keywords with their defaults in
+`whileai.simulations.defaults`: `min_agreement` (0.8, the
+human-human agreement of MT-Bench, arXiv:2306.05685), `min_kappa`
+(0.6, Landis and Koch "substantial"), `length_gap_flag` (0.15) and
+`flip_flag` (0.10).
 
 `rows` carry the judge's `reward`; rows that also carry `gold`
 (0/1, default `gold_reward`) feed the agreement, held-out, and
@@ -1576,6 +1621,8 @@ pairwise_judge(
     policy: str = '',
     tools: Sequence | None = None,
     timeout: float = 120,
+    max_tokens: int = 120,
+    request_chars: int = 4000,
 ) -> Callable[[dict, dict], Verdict]
 ```
 
@@ -1583,7 +1630,8 @@ A model judge for `judge_pairs`: `judge(a_row, b_row) ->
 \{"winner": "A" | "B" | "tie" | None, "reason": str\}`. `spec` is a
 backend spec (default the hosted judge); `prompt` replaces the
 pairwise system prompt. The judge's name is `<model>@<prompt sha>`
-so a prompt edit is a new judge.
+so a prompt edit is a new judge. `max_tokens` is the judge's reply
+budget and `request_chars` how much of the request it is shown.
 
 ### `pass_at`
 
@@ -1616,9 +1664,11 @@ such group contributes to the `k`-way estimators; groups with fewer
 than `k` graded repeats are left out of pass^k and pass@k (counted
 in `n_groups_at_k`). pass@1 always averages every group.
 
-Below `min_k` repeats the `k`-way numbers are `None` with a
-`note` instead of a number too noisy to act on. Pass `k=` to
-choose the draw size yourself.
+Below `min_k` repeats (`ROLLOUTS_PER_TASK`, 4: the smallest k
+tau-bench and tau2-bench report a pass^k on, arXiv:2406.12045 and
+arXiv:2506.07982) the `k`-way numbers are `None` with a `note`
+instead of a number too noisy to act on. Pass `k=` to choose the
+draw size yourself.
 
 `unanimous_short=True` counts a unanimous group shorter than `k`
 as if it stayed unanimous (pass^k and pass@k equal to its pass rate,

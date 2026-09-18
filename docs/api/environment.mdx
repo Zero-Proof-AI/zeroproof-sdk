@@ -11,9 +11,10 @@ A dataset is rollouts; an environment is what produces them. On-policy
 RL (GRPO, RLOO, PPO) samples its own rollouts from the policy under
 training, so what it needs from us is not rows but the three things a
 row came from: the task set, the world that answers tool calls, and the
-reward that grades the finished trajectory (rlhf-book ch. 6 on on-policy
-sampling, ch. 13 on multi-turn tool use with a single end-of-trajectory
-reward). `export_environment` writes those three as an installable
+reward that grades the finished trajectory
+(rlhfbook.com/c/11-policy-gradients.html on on-policy sampling,
+rlhfbook.com/c/14-reasoning.html on multi-turn tool use with a single
+end-of-trajectory reward). `export_environment` writes those three as an installable
 `verifiers` package, the shape Prime Intellect and TRL consume::
 
     import whileai.simulations as wai
@@ -54,6 +55,7 @@ build_tasks(
     rows: Sequence[dict],
     holdout: float | Sequence[str] = 0.2,
     band: tuple[float, float] | None = (0.2, 0.8),
+    ngram: int = 8,
 ) -> tuple[list[dict], list[dict], dict[str, Any]]
 ```
 
@@ -61,12 +63,16 @@ One task per distinct prompt, split into train and holdout.
 
 When a prompt has two or more graded rollouts its solve rate is known
 (partial credit counts as it is) and, with `band`, prompts the policy
-always or never solved are dropped: they carry no advantage (rlhf-book
-ch. 7, difficulty filtering at 20 to 80 percent). Ungraded prompts and
-single rollouts are kept as they are. `holdout` is a fraction, split by scenario id
-(or the prompt) so a task is wholly on one side, or an explicit list
-of holdout prompts. Train and holdout are decontaminated against each
-other at 8-grams and the report says what overlapped.
+always or never solved are dropped: they carry no advantage
+(rlhfbook.com/c/14-reasoning.html, difficulty filtering at 20 to 80
+percent; DAPO's dynamic sampling drops accuracy 0 and 1,
+arXiv:2503.14476). Ungraded prompts and single
+rollouts are kept as they are. `holdout` is a fraction, split by
+scenario id (or the prompt) so a task is wholly on one side, or an
+explicit list of holdout prompts. Train and holdout are decontaminated
+against each other at `ngram`-grams (8: the overlap size
+rlhfbook.com/c/16-evaluation.html found its contaminations with) and
+the report says what overlapped.
 
 ### `export_environment`
 
@@ -83,6 +89,8 @@ export_environment(
     band: tuple[float, float] | None = (0.2, 0.8),
     max_turns: int | None = None,
     description: str = '',
+    ngram: int = 8,
+    world: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]
 ```
 
@@ -98,7 +106,13 @@ a process reward, and a policy trained on it alone learns to call
 nothing (see recipes/03-select/prime-intellect-rl). `execute` names a live
 world `(tool, arguments) -> result`; without it the SDK's mock
 world answers, seeded per task so every rollout of a task sees the
-same world. Returns the report; the same text is the package README.
+same world. `world` is a dict of the mock world's dials
+(`WorldOptions` fields: `search_hits`, `exists_share`,
+`default_fault_mode`, name pools, ...); it is written into
+`spec.json` and the trainer's world is built from it, so the world a
+policy trains against is the one the export says. `ngram` is the
+train-vs-holdout decontamination size. Returns the report; the same
+text is the package README.
 
 ### `load_environment`
 
@@ -108,6 +122,7 @@ load_environment(
     split: str = 'train',
     reward: Any = None,
     execute: Any = None,
+    world: Any = None,
     **kwargs: Any,
 ) -> Any
 ```
@@ -116,4 +131,6 @@ Build the verifiers environment from an exported `spec.json`.
 
 `split` picks the training task set; the holdout file, when present,
 becomes `eval_dataset`. `reward` and `execute` override the
-spec's references (a callable or `'module:attr'`).
+spec's references (a callable or `'module:attr'`). `world` (a
+`WorldOptions` or a dict of its fields) overrides the mock world's
+dials the spec carries; here callables such as `fault_modes` are fine.
