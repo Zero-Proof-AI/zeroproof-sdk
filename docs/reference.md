@@ -746,7 +746,7 @@ whileai signup --email you@example.com
 
 That key is a trial key (25k input and 50k output tokens a day, 100 MB,
 ten datasets, seven days) until the person signs in once at
-https://www.zeroproofai.com/sign-in with an email code. `whileai status`
+the While site with an email code (`whileai status` prints the link). `whileai status`
 shows the tier; `whileai.account()` returns tier, limits and usage.
 
 ## Store datasets on While
