@@ -3,6 +3,19 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- `format_cuts(wai.cuts(...))` prints the summary as the sentence the traces
+  page leads with, instead of the dict a researcher was left to read. The call
+  answers the right question and printing it was 3.5 KB of JSON ending in
+  `groups`, one entry per prompt with its text; the twin of `format_markers`
+  and `format_stages` was the missing half. Three lines: the answer
+  (`3 prompts are worth training on`), the counts behind it (`9 runs · 3 train
+  · none held out`), and the line to run next — `wai.cut(agent=..., kind="rl")`
+  when there is something to cut, `wai.send_score(...)` when the runs are
+  grouped but unscored, so no state ends on a dead stop. `rl.support` stays in
+  the payload and out of what gets printed.
+
 ## 0.64 (2026-09-18)
 
 - `holdout_size` measures the per-task paired sd instead of modelling it
