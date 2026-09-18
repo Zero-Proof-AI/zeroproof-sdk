@@ -32,6 +32,30 @@ def home(tmp_path, monkeypatch):
     return path
 
 
+def _run_against_blocked_writer() -> None:
+    """Start a hosted run whose writer conftest has blocked.
+
+    The note under test is logged before the writer's first call. What
+    happens after is a race between the one-second clock and the engine's
+    empty-writer guard: the clock wins and the run returns empty, or eight
+    empty rounds win first and the engine raises "hosted Qwen produced no
+    situations". Both are the right answer to a blocked writer, so the
+    tests read the note off the log and accept either ending.
+    """
+    try:
+        wai.simulate(
+            scripted_agent,
+            tools=TOOLS,
+            system_prompt=POLICY,
+            budget=2,
+            seed=0,
+            grade=False,
+            time_budget=1,
+        )
+    except RuntimeError as err:
+        assert "produced no situations" in str(err)
+
+
 def test_note_reads_the_recorded_tier(home):
     _save(home, tier="trial", daily_input_tokens=25000, expires_at="2026-09-21T00:00:00.000Z")
     assert auth.trial_prerun_note() == LINE
@@ -59,16 +83,7 @@ def test_allowance_from_the_file_sets_the_count(home):
 def test_the_run_warns_before_the_hosted_writer_starts(home, caplog):
     _save(home, tier="trial", daily_input_tokens=25000)
     with caplog.at_level(logging.WARNING, logger="whileai.simulations"):
-        data = wai.simulate(
-            scripted_agent,
-            tools=TOOLS,
-            system_prompt=POLICY,
-            budget=2,
-            seed=0,
-            grade=False,
-            time_budget=1,
-        )
-    assert LINE in data.warnings
+        _run_against_blocked_writer()
     assert LINE in caplog.text
 
 
@@ -89,32 +104,18 @@ def test_the_offline_writer_has_no_quota_to_warn_about(home):
     assert not [w for w in data.warnings if "trial key" in w]
 
 
-def test_a_full_key_runs_without_the_note(home):
+def test_a_full_key_runs_without_the_note(home, caplog):
     _save(home, tier="full")
-    data = wai.simulate(
-        scripted_agent,
-        tools=TOOLS,
-        system_prompt=POLICY,
-        budget=2,
-        seed=0,
-        grade=False,
-        time_budget=1,
-    )
-    assert not [w for w in data.warnings if "trial key" in w]
+    with caplog.at_level(logging.WARNING, logger="whileai.simulations"):
+        _run_against_blocked_writer()
+    assert "trial key" not in caplog.text
 
 
-def test_the_shared_pool_spends_no_trial_so_it_says_nothing(home, monkeypatch):
+def test_the_shared_pool_spends_no_trial_so_it_says_nothing(home, monkeypatch, caplog):
     # VLLM_API_KEY routes the writer to the shared pool, which the trial
     # allowance does not meter
     _save(home, tier="trial", daily_input_tokens=25000)
     monkeypatch.setenv("VLLM_API_KEY", "pool-key")
-    data = wai.simulate(
-        scripted_agent,
-        tools=TOOLS,
-        system_prompt=POLICY,
-        budget=2,
-        seed=0,
-        grade=False,
-        time_budget=1,
-    )
-    assert not [w for w in data.warnings if "trial key" in w]
+    with caplog.at_level(logging.WARNING, logger="whileai.simulations"):
+        _run_against_blocked_writer()
+    assert "trial key" not in caplog.text
