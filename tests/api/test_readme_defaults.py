@@ -1,4 +1,4 @@
-"""The README's parameter tables state the defaults the code resolves.
+"""The reference's parameter tables state the defaults the code resolves.
 
 Every row of the form ``| `name` | `literal` | ...`` whose name maps to a
 RunConfig field is compared against a default resolve_run_config(). A
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from whileai.simulations.run.config import resolve_run_config
 
-README = Path(__file__).resolve().parents[2] / "README.md"
+README = Path(__file__).resolve().parents[2] / "docs" / "reference.md"
 ROW = re.compile(r"^\| `([a-z_]+)` \| `([^`]*)` \|", re.M)
 
 # README knob -> how to read it off a RunConfig

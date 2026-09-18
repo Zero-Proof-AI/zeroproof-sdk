@@ -37,6 +37,15 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   for, and the 202 said so in a field nobody reads twice. Both keys are now
   written. Same one-line fix in `recipes/01-simulate/agent-behavior`, whose
   `--dataset` flag was silently ignored for the same reason.
+- README rewritten as the short form: badges (CI, PyPI, Python versions,
+  downloads, coverage gate, license), a sixty-second offline run with its
+  real output, the loop as one table of call, what it computes and the
+  rlhfbook.com chapter, and a section per method family (SFT, RLVR,
+  character training, evaluation, over-optimization). The previous 1,279
+  lines moved unchanged to `docs/reference.md`; every anchor still resolves
+  there, and `tests/api/test_readme_defaults.py` now reads the parameter
+  tables from that file. `CITATION.cff` added. The PyPI description says
+  what the package is for.
 
 ## 0.65 (2026-09-18)
 
