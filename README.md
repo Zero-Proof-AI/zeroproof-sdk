@@ -213,7 +213,7 @@ points the next simulation at the situations that failed.
 ```bash
 uv sync --extra dev
 uv run pytest
-uv run ruff check . && uv run mypy
+uv run ruff check . && uv run mypy && uv run ty check
 ```
 
 CI runs the suite on Python 3.10 to 3.13, gates coverage at 90%, and runs

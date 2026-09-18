@@ -1054,6 +1054,8 @@ def patience_hazards(patience: Patience | None) -> tuple[float, float]:
         items = tuple(patience)
         raw_second, raw_later = (items[0], items[1]) if len(items) == 2 else (None, None)  # noqa: PLR2004  # a patience table is a pair (second, later)
     try:
+        if raw_second is None or raw_later is None:
+            raise TypeError("patience table is missing a value")
         second, later = float(raw_second), float(raw_later)
     except (TypeError, ValueError):
         raise ValueError(
@@ -2250,14 +2252,14 @@ def local_model(
 
     agent.__name__ = f"local_model[{model}]"
     # How every reply was sampled, as the engine stamps it on the row.
-    agent.sampling = {  # type: ignore[attr-defined]
+    agent.sampling = {  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         "temperature": float(temperature),
         "max_tokens": reply_budget(max_tokens),
         "model": model,
     }
-    agent.fault_plans = plans  # type: ignore[attr-defined]
-    agent.system = policy_text  # type: ignore[attr-defined]
-    agent.policy = policy_text  # type: ignore[attr-defined]
+    agent.fault_plans = plans  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+    agent.system = policy_text  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+    agent.policy = policy_text  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return agent
 
 

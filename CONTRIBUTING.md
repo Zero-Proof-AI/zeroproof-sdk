@@ -13,6 +13,7 @@ uv run pytest -q            # the suite, on 3.10 / 3.11 / 3.12 / 3.13; add -n0 f
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
+uv run ty check             # faster mypy pass; mypy stays the gate until ty is 1.0
 python -m build && python -m twine check dist/*   # if you touched packaging or imports
 ```
 

@@ -1075,7 +1075,7 @@ def audit_grades(
         else:
             disagreed += 1
     n_called = len(targets)
-    disagreements = [
+    disagreements: list[dict[str, Any]] = [
         {
             "prompt": v.get("prompt", ""),
             "graded": v.get("existing"),

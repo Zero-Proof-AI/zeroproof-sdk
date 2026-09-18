@@ -231,7 +231,7 @@ def bge_embedder(model: str = _BGE_MODEL, device: str | None = None) -> Callable
         )
 
     embedder = CallableEmbedder(encode, name=f"sentence-transformers:{model}")
-    embedder.device = chosen  # type: ignore[attr-defined]
+    embedder.device = chosen  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return embedder
 
 

@@ -166,7 +166,7 @@ def _default_sample(
     return out
 
 
-class HackMonitor(_callback_base()):  # type: ignore[misc]
+class HackMonitor(_callback_base()):  # type: ignore[misc]  # ty: ignore[unsupported-base]
     """Watch a TRL run for reward hacking. See the module docstring.
 
     ``holdout`` is a list of prompts (strings or message lists) or rows
