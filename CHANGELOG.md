@@ -23,6 +23,22 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   written. Same one-line fix in `recipes/01-simulate/agent-behavior`, whose
   `--dataset` flag was silently ignored for the same reason.
 
+## 0.65 (2026-09-18)
+
+- `whileai.platform`: report what you trained so a person can decide on
+  while.ai/platform/runs. `track(name_or_agent_object, model=, harness=,
+  frontier=)` returns a `Tracked` handle (no `Agent` class: your framework
+  has one); it reads name, model, instructions and tools off an OpenAI
+  Agents SDK, Pydantic AI, LangGraph or Claude Agent SDK object by
+  attribute, and the harness fingerprint is the harness version. Typed
+  end to end with pydantic (now a core dependency): `Behavior` (frozen
+  `test_version`, `n`, `Judge` agreement and length bias, `noise_floor`,
+  `contamination`, `reward_is_judge`), `RunSpec`, `TrainPoint`, `Score`,
+  `LiveDay` out; `Dashboard` and `Verdict` back. `tracked.run(...)` gives
+  a `Run` with buffered `log`, `score` on every behavior, `finish`, and
+  the shape `wai.TrainerCallback` calls. Each model's docstring names the
+  rlhfbook.com chapter it comes from. Recipe `recipes/04-train/report-run/`.
+
 ## 0.64 (2026-09-18)
 
 - `holdout_size` measures the per-task paired sd instead of modelling it
