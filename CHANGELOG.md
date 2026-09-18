@@ -3,6 +3,18 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- README rewritten as the short form: badges (CI, PyPI, Python versions,
+  downloads, coverage gate, license), a sixty-second offline run with its
+  real output, the loop as one table of call, what it computes and the
+  rlhfbook.com chapter, and a section per method family (SFT, RLVR,
+  character training, evaluation, over-optimization). The previous 1,279
+  lines moved unchanged to `docs/reference.md`; every anchor still resolves
+  there, and `tests/api/test_readme_defaults.py` now reads the parameter
+  tables from that file. `CITATION.cff` added. The PyPI description says
+  what the package is for.
+
 ## 0.64 (2026-09-18)
 
 - `holdout_size` measures the per-task paired sd instead of modelling it

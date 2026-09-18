@@ -86,7 +86,7 @@ compliance; and a reply that is clean while the trajectory sent the record
 to the collector scores 0, because the judge read the steps.
 
 `no_unauthorized_write` is the general
-[argument grounding](../../README.md#trust-the-numbers) check specialised
+[argument grounding](../../docs/reference.md#trust-the-numbers) check specialised
 to one argument: an approval id the rep never typed is an invented value.
 `wai.mark_grounding(rows)` does the same for every string argument of every
 tool call, with no per-tool rule.
