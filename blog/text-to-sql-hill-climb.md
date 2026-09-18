@@ -1,6 +1,6 @@
 ---
 title: "Teaching a Small Model to Write SQL for Your Database, and Checking Whether It Worked"
-description: "Training a small open model to write correct SQL for one schema, scored by running the query. Five checkpoints, one held-out test, honest numbers, and the dataset and adapters on Hugging Face."
+description: "Training a small open model to write correct SQL for one schema, scored by running the query. Four rounds that barely moved, one that went 53% to 74% on 459 held-out questions, and why. Dataset and adapters on Hugging Face."
 slug: text-to-sql-hill-climb
 date: 2026-09-17
 author: While
@@ -25,12 +25,13 @@ trained to write correct SQL for one specific database, and whether that
 improvement can be proven rather than claimed. So we built a checker that
 runs the model's query and compares the rows it returns to the right answer,
 trained the model in rounds against that checker, and scored every round on
-the same 140 questions it never saw during training. After three rounds the
-first-try accuracy went from 58% to 61%. That is progress, but the
-uncertainty band still reaches back to zero, so we do not call it proven yet.
-Two other things improved clearly: the model stopped producing answers with
-no query in them, and it got more consistent from one try to the next. All
-the data and every trained checkpoint are public on Hugging Face at
+the same questions it never saw during training. Four rounds moved first-try
+accuracy from 58% to 61%, inside the uncertainty band. Then we changed three
+things about how the trainer is fed, not the reward and not the model, and
+the fifth round went from 53% to 74% on a bigger test of 459 unseen
+questions, with the band nowhere near zero. The whole story is below, in
+order, including the four rounds that did not work. All the data and every
+trained checkpoint are public on Hugging Face at
 [`zero-proof-ai/text-to-sql-shop`](https://huggingface.co/datasets/zero-proof-ai/text-to-sql-shop),
 and the code is a recipe in the open-source
 [whileai SDK](https://github.com/whilehq/whileai-sdk/tree/main/recipes/04-train/text-to-sql).
@@ -165,15 +166,71 @@ bigger learning rate.
    invented tools. The round 3 numbers above are the clean re-measure; the
    first measurement (62%) is kept alongside the data.
 
+## Round five: the same reward, fed differently
+
+After round four we compared this run with a much larger one we had done on
+another schema, and the difference was not the reward, the tasks or the
+model. It was three things about how the trainer was being fed.
+
+1. **How many answers each update looked at.** Rounds one to four updated the
+   model after every single question, eight answers at a time. That is a
+   random walk: the model's distance from its starting point never moved in
+   round four. The larger run had looked at thousands of answers per update.
+   Round five looks at 32 questions times 16 answers, 512 per update.
+2. **Which questions it practiced on.** If the model gets a question right
+   every time, or wrong every time, there is nothing to learn from it, and
+   about half the questions had become one or the other. Round five trains
+   only on the 326 questions the model was getting right some of the time
+   (the SDK's difficulty band, measured on the model's own attempts).
+3. **What happens when an answer is cut off.** A reply that ran out of room
+   mid-thought used to score zero, so the cheapest lesson was to think less.
+   Round five ignores those replies instead of punishing them.
+
+We also grew the test. 140 questions gave a band of about six points, so a
+real three-point gain could never be proven. We wrote 1,482 more questions
+the same way and the test set grew to 459, a band of about three and a half
+points. On that bigger test the base model scores 53% (the new questions are
+harder) and round four scores 55%, and now the round-four gain, +2.6 points,
+sits just outside the band. It had been real all along; the test was too
+small to see it.
+
+| Round five checkpoint | Right on first try (459 questions, 95% band) | Better than base | Right on all four tries | Reply contains a query |
+|---|---|---|---|---|
+| base | 53% (49..56) | - | 25% | 86% |
+| round 4 | 55% (52..59) | +2.6 (+0.1..+5.0) | 27% | 85% |
+| step 25 | 57% (54..61) | +4.4 (+2.0..+6.9) | 27% | 86% |
+| step 50 | 73% (69..77) | +20.5 (+17.9..+23.1) | 65% | 100% |
+| step 75 | 74% (71..78) | +21.8 (+19.2..+24.5) | - | 100% |
+| step 100 | 74% (70..78) | +21.2 (+18.7..+23.9) | - | 100% |
+
+Step 50 was measured twice from scratch (0.73 both times), and the base
+model was measured through the same server that served the checkpoints,
+to rule out the serving path (+0.4 points, inside the band). Fifty steps took
+about seven hours on one H100 and saw 25,600 scored answers; rounds one to
+four had seen 32,000 answers over 8,000 steps for their three points.
+
+Read the other columns before calling this new capability. The share of
+questions the model can get right in at least one of four tries barely moved
+(76% to 79%). What moved is the share it gets right every time: 25% to 65%.
+The model did not learn many queries it could not write before. It learned
+to produce the query it could already find sometimes, every time, and to
+stop before the reply budget: no-query replies went from 13% to none and SQL
+errors from 12% to 5%. That is what a verifier reward does on a difficulty
+band, and it is exactly what "reliable in production" means for a customer.
+
+The smaller Nemotron model told the same story faster: one 44-minute round
+took it from 26% to 35% on its 140 questions, proven three times over,
+almost entirely by learning to write SQL that runs.
+
 ## What we would do next
 
-Skip the practice questions the model already always gets right or always
-gets wrong, so every step teaches something. Run five to ten passes over the
-questions now that a round takes minutes. Try a bigger base model, since this
-kind of training sharpens what a model can already do sometimes, and a
-4-billion-parameter model tops out near 80% on these questions. And keep
-scoring every checkpoint on the same 140 questions. A result you cannot
-check is a story.
+The round-five curve is flat from step 50 on, and the model's one-in-four
+ceiling is flat at 79% for every checkpoint. So the next round is not more
+of the same. First, re-measure the difficulty band on the round-five model
+itself, so the questions it now always gets right drop out. Then either a
+bigger base model or harder training questions it can solve sometimes,
+because that is where new capability comes from. And keep every checkpoint
+on the same 459 questions.
 
 ## Try it on your own database
 
