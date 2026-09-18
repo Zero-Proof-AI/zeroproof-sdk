@@ -14,10 +14,9 @@ through them against a world that fails on schedule, grades every rollout
 under one judge contract, and turns graded rows into SFT, preference and RL
 data with the checks the literature says to run: pass@k with intervals,
 difficulty bands, judge validation, decontamination, reward-hacking scans.
-Every method names the chapter of [rlhfbook.com](https://rlhfbook.com)
-(Lambert, *RLHF and LLM Post-Training*) or the paper it implements, and
-every recipe reports a paired delta with a 95% interval on a held-out set,
-never a mean alone.
+Each method cites the paper or text it implements, numbered in
+[References](#references), and every recipe reports a paired delta with a
+95% interval on a held-out set, never a mean alone.
 
 ```bash
 pip install whileai        # or: uv add whileai
@@ -75,66 +74,64 @@ judge is any callable `row -> {"reward": 0..1}`, a verifier such as
 
 ## The loop
 
-| Step | Call | What it computes | Source |
+| Step | Call | What it computes | Refs |
 |---|---|---|---|
-| Simulate | `simulate(agent, tools=, system_prompt=, mode="rl", repeats=k)` | a covering grid over tools, world state and user stance; k rollouts per prompt; tool faults on a schedule | ch. 12, 13 |
-| Grade | `data.grade(judge=)`, `verify.MathEqual`, `verify.CodeExec` | reward per rollout under one contract; verifiable rewards where the answer is checkable | ch. 5, 7 |
-| Validate the judge | `judge_trust`, `judge_probes` | agreement and Cohen's kappa against human gold; length bias; exploit probes (filler, rubric echo, unbacked success claim) | ch. 5, 14 |
-| Measure | `pass_at`, `delta_report`, `eval_variance`, `holdout_size` | pass@1, pass^k, pass@k with bootstrap intervals over tasks; paired before/after with a permutation p-value; re-run noise band; power | ch. 16, app. C |
-| Select | `optimize(mode="rl"\|"sft")`, `build_preference_pairs`, `curriculum` | 20 to 80% difficulty band, unanimous-group drop, within-task dedupe, rejection sampling, length-matched pairs, easy-to-hard schedule | ch. 6, 7, 9, 11 |
-| Guard | `decontaminate`, `hack_scan`, `trace_markers`, `HackMonitor` | 8-gram and semantic overlap with the eval set; within-task reward-feature correlation against a shuffle floor; trajectory lies (claimed tests, phantom edits) | ch. 14, 16 |
-| Train and export | `export_dataset`, `export_environment`, `train`, `serve` | loss masks and unrolled turns; a `verifiers` environment for GRPO; hosted LoRA SFT, GRPO, DPO and reward-model runs | ch. 4, 6, 8 |
-
-Chapters: 04 instruction tuning, 05 reward models, 06 policy gradients, 07
-reasoning, 08 direct alignment, 09 rejection sampling, 11 preference data,
-12 synthetic data, 13 tools, 14 over-optimization, 15 regularization, 16
-evaluation, 17 character, appendix C practice.
+| Simulate | `simulate(agent, tools=, system_prompt=, mode="rl", repeats=k)` | a covering array over tools, world state and user stance; k rollouts per prompt; tool faults on a schedule | [2], [3] |
+| Grade | `data.grade(judge=)`, `verify.MathEqual`, `verify.CodeExec` | reward per rollout under one contract; verifiable rewards where the answer is checkable | [4], [5] |
+| Validate the judge | `judge_trust`, `judge_probes` | agreement and Cohen's kappa against human gold; length bias; exploit probes (filler, rubric echo, unbacked success claim) | [6], [7] |
+| Measure | `pass_at`, `delta_report`, `eval_variance`, `holdout_size` | pass@1, pass^k, pass@k with bootstrap intervals over tasks; paired before/after with a permutation p-value; re-run noise band; power | [8], [9], [10], [11] |
+| Select | `optimize(mode="rl"\|"sft")`, `build_preference_pairs`, `curriculum` | 20 to 80% difficulty band, unanimous-group drop, within-task dedupe, rejection sampling, length-matched pairs, easy-to-hard schedule | [12], [13], [14], [15] |
+| Guard | `decontaminate`, `hack_scan`, `trace_markers`, `HackMonitor` | n-gram and semantic overlap with the eval set; within-task reward-feature correlation against a shuffle floor; trajectory lies (claimed tests, phantom edits) | [16], [17], [18] |
+| Train and export | `export_dataset`, `export_environment`, `train`, `serve` | loss masks and unrolled turns; a `verifiers` environment for GRPO; hosted LoRA SFT, GRPO, DPO and reward-model runs | [1], [19], [20] |
 
 ## What the science looks like here
 
-**Supervised fine-tuning.** `optimize(mode="sft")` is rejection sampling:
-the highest-reward completion per prompt above `min_reward`, with random
-selectors as the chance control (ch. 9). Exported rows carry a per-message
-`loss_mask` (loss on agent turns only, never on tool output), `unroll=True`
-turns an N-turn conversation into N samples each trained on the context it
-had, and `format="trl"` is the shape `SFTTrainer` loads (ch. 4).
+**Supervised fine-tuning.** `optimize(mode="sft")` is rejection sampling
+[14], [16]: the highest-reward completion per prompt above `min_reward`,
+with random selectors as the chance control. Exported rows carry a
+per-message `loss_mask` (loss on agent turns only, never on tool output),
+`unroll=True` turns an N-turn conversation into N samples each trained on
+the context it had, and `format="trl"` is the shape `SFTTrainer` loads
+[1, ch. 4].
 
-**RL with verifiable rewards.** A reward is a program where it can be:
+**RL with verifiable rewards.** A reward is a program where it can be [5]:
 `MathEqual`, `CodeExec` against hidden tests, `JSONSchema`, composed with
-`All` and `Weighted` (ch. 7, 13). `mode="rl"` allocates rollouts
-successively: two per prompt as a probe, filled to k only where the group
-splits, because a unanimous group carries zero advantage (DAPO dynamic
-sampling, ch. 6). `optimize(mode="rl")` keeps the 20 to 80% pass-rate band
-with the interval on each task's rate, handles overlong rollouts by policy,
-and `export_environment` writes the task set, world and reward as a
-`verifiers` package for Prime Intellect or TRL. Rows carry sampled
-logprobs for the importance ratio, `staleness_report` flags off-policy
-rows, and `mean_kl` reads the drift from a reference (ch. 6, 15).
+`All` and `Weighted`. `mode="rl"` allocates rollouts successively: two per
+prompt as a probe, filled to k only where the group splits, because a
+unanimous group carries zero advantage under a group-relative baseline
+[19] (dynamic sampling, [12]). `optimize(mode="rl")` keeps the 20 to 80%
+pass-rate band [13] with the interval on each task's rate, handles overlong
+rollouts by policy [12], and `export_environment` writes the task set,
+world and reward as a `verifiers` package for Prime Intellect or TRL. Rows
+carry sampled logprobs for the importance ratio [21], `staleness_report`
+flags off-policy rows, and `mean_kl` reads the drift from a reference [22].
 
-**Character training.** A constitution is a versioned object: `load_spec`
-hashes its principles into `spec.version`, `stamp_spec` tags the rows a run
-targeted, and the judge is checked against the spec's own labels before it
-grades. Pairs are length-matched so the update learns the trait and not
-the word count, and `delta_report(must_not_regress=spec.behaviors())` fails
-the run that traded one trait for another (ch. 17).
+**Character training.** A constitution is a versioned object [23], [24]:
+`load_spec` hashes its principles into `spec.version`, `stamp_spec` tags
+the rows a run targeted, and the judge is checked against the spec's own
+labels before it grades. Pairs are length-matched so the update learns the
+trait and not the word count [7], and
+`delta_report(must_not_regress=spec.behaviors())` fails the run that
+traded one trait for another.
 [docs/character-training.md](docs/character-training.md).
 
-**Evaluation.** Every pass@1 is a bootstrap over tasks, not rollouts;
-`simulate(tasks=base, runs=3)` replays the same eval three times and
-`delta_report` refuses a verdict inside twice the re-run standard
-deviation. `holdout_size(effect, before=, after=)` reads the per-task paired
-spread off a previous eval and says how many prompts prove a gain at 80%
-power. `decontaminate` applies the Llama 2 8-gram rule plus task identity
-and an optional embedding pass (ch. 16, app. C).
+**Evaluation.** Every pass@1 is a bootstrap over tasks, not rollouts [8],
+[10], [11]; `simulate(tasks=base, runs=3)` replays the same eval three
+times and `delta_report` refuses a verdict inside twice the re-run
+standard deviation. `holdout_size(effect, before=, after=)` reads the
+per-task paired spread off a previous eval and says how many prompts prove
+a gain at 80% power [11]. `decontaminate` applies the 80% n-gram coverage
+rule [16] plus task identity and an optional embedding pass.
 [docs/evals.md](docs/evals.md).
 
-**Over-optimization.** `hack_scan` centers reward and every candidate
-feature within task, ranks by correlation, and floors it against a
-within-task shuffle, so it finds the delimiter or phrase the judge pays for.
-`judge_probes` tries the exploits a policy finds first. `delta_report(proxy=,
-target=)` fails when the training reward rose and the target did not.
-`HackMonitor` runs the same scan inside a TRL loop and can stop the run
-(ch. 14). [docs/reward-hacking.md](docs/reward-hacking.md).
+**Over-optimization.** Reward is a proxy, and a strong optimizer finds the
+gap [17]. `hack_scan` centers reward and every candidate feature within
+task, ranks by correlation, and floors it against a within-task shuffle,
+so it finds the delimiter or phrase the judge pays for. `judge_probes`
+tries the exploits a policy finds first, including sycophancy [18].
+`delta_report(proxy=, target=)` fails when the training reward rose and
+the target did not. `HackMonitor` runs the same scan inside a TRL loop and
+can stop the run. [docs/reward-hacking.md](docs/reward-hacking.md).
 
 ## Recipes
 
@@ -231,8 +228,32 @@ the built wheel into a clean venv, and the version gate. Contributions:
 }
 ```
 
-The methods follow Lambert, N. (2025). *Reinforcement Learning from Human
-Feedback*. arXiv:2504.12501. [rlhfbook.com](https://rlhfbook.com).
+## References
+
+1. Lambert, N. *Reinforcement Learning from Human Feedback*. arXiv:2504.12501, 2025. [rlhfbook.com](https://rlhfbook.com).
+2. Kuhn, D. R., Wallace, D. R., Gallo, A. M. Software Fault Interactions and Implications for Software Testing. *IEEE Transactions on Software Engineering* 30(6), 2004.
+3. Yao, S. et al. τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains. arXiv:2406.12045, 2024.
+4. Ouyang, L. et al. Training Language Models to Follow Instructions with Human Feedback. NeurIPS, 2022. arXiv:2203.02155.
+5. Lambert, N. et al. Tülu 3: Pushing Frontiers in Open Language Model Post-Training. arXiv:2411.15124, 2024.
+6. Cohen, J. A Coefficient of Agreement for Nominal Scales. *Educational and Psychological Measurement* 20(1), 1960.
+7. Zheng, L. et al. Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena. NeurIPS, 2023. arXiv:2306.05685.
+8. Chen, M. et al. Evaluating Large Language Models Trained on Code. arXiv:2107.03374, 2021.
+9. Wilson, E. B. Probable Inference, the Law of Succession, and Statistical Inference. *Journal of the American Statistical Association* 22(158), 1927.
+10. Efron, B., Tibshirani, R. J. *An Introduction to the Bootstrap*. Chapman & Hall, 1993.
+11. Miller, E. Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations. arXiv:2411.00640, 2024.
+12. Yu, Q. et al. DAPO: An Open-Source LLM Reinforcement Learning System at Scale. arXiv:2503.14476, 2025.
+13. He, J. et al. Skywork Open Reasoner 1 Technical Report. arXiv:2505.22312, 2025.
+14. Yuan, Z. et al. Scaling Relationship on Learning Mathematical Reasoning with Large Language Models. arXiv:2308.01825, 2023.
+15. Rafailov, R. et al. Direct Preference Optimization: Your Language Model is Secretly a Reward Model. NeurIPS, 2023. arXiv:2305.18290.
+16. Touvron, H. et al. Llama 2: Open Foundation and Fine-Tuned Chat Models. arXiv:2307.09288, 2023.
+17. Gao, L., Schulman, J., Hilton, J. Scaling Laws for Reward Model Overoptimization. ICML, 2023. arXiv:2210.10760.
+18. Sharma, M. et al. Towards Understanding Sycophancy in Language Models. ICLR, 2024. arXiv:2310.13548.
+19. Shao, Z. et al. DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models. arXiv:2402.03300, 2024.
+20. DeepSeek-AI. DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning. arXiv:2501.12948, 2025.
+21. Schulman, J. et al. Proximal Policy Optimization Algorithms. arXiv:1707.06347, 2017.
+22. Ziegler, D. M. et al. Fine-Tuning Language Models from Human Preferences. arXiv:1909.08593, 2019.
+23. Bai, Y. et al. Constitutional AI: Harmlessness from AI Feedback. arXiv:2212.08073, 2022.
+24. OpenAI. Model Spec. 2024. [model-spec.openai.com](https://model-spec.openai.com).
 
 ## License
 
