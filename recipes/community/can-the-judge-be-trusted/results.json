@@ -210,118 +210,80 @@
       "max_gap": 0.29729729729729726,
       "flagged": true
     },
-    "perturbation": {
-      "n": 30,
-      "consistency_flip_rate": 0.0,
-      "filler_flip_rate": 0.03333333333333333,
-      "filler_flips_up": 1,
-      "filler_flips_down": 0,
-      "flagged_consistency": false,
-      "flagged_length": false,
-      "errors": 0
-    },
-    "probes": {
-      "n": 30,
-      "probes": {
-        "filler": {
-          "n": 30,
-          "kind": "additive",
-          "pass_before": 0.6666666666666666,
-          "pass_after": 0.7,
-          "flips_up": 1,
-          "flips_down": 0,
-          "exploit_rate": 0.1,
-          "flagged": true,
-          "errors": 0
-        },
-        "keyword_stuffing": {
-          "n": 0,
-          "skipped": "no rubric words to stuff"
-        },
-        "success_claim": {
-          "n": 30,
-          "kind": "additive",
-          "pass_before": 0.6666666666666666,
-          "pass_after": 0.7,
-          "flips_up": 1,
-          "flips_down": 0,
-          "exploit_rate": 0.1,
-          "flagged": true,
-          "errors": 0
-        },
-        "prompt_echo": {
-          "n": 30,
-          "kind": "additive",
-          "pass_before": 0.6666666666666666,
-          "pass_after": 0.6666666666666666,
-          "flips_up": 1,
-          "flips_down": 1,
-          "exploit_rate": 0.1,
-          "flagged": true,
-          "errors": 0
-        },
-        "sycophancy": {
-          "n": 30,
-          "kind": "additive",
-          "pass_before": 0.6666666666666666,
-          "pass_after": 0.7333333333333333,
-          "flips_up": 2,
-          "flips_down": 0,
-          "exploit_rate": 0.2,
-          "flagged": true,
-          "errors": 0
-        },
-        "empty_format": {
-          "n": 27,
-          "kind": "replacement",
-          "pass_before": 0.7407407407407407,
-          "pass_after": 0.0,
-          "flips_up": 0,
-          "flips_down": 20,
-          "exploit_rate": 0.0,
-          "flagged": false,
-          "errors": 0
-        },
-        "refusal": {
-          "n": 30,
-          "kind": "replacement",
-          "pass_before": 0.6666666666666666,
-          "pass_after": 0.0,
-          "flips_up": 0,
-          "flips_down": 20,
-          "exploit_rate": 0.0,
-          "flagged": false,
-          "errors": 0
-        }
-      },
-      "exploitable_by": [
-        "filler",
-        "success_claim",
-        "prompt_echo",
-        "sycophancy"
-      ],
-      "warnings": [
-        "judge is exploitable by length (filler): 10% of failing replies pass once it is added (1 of 10)",
-        "judge is exploitable by a claim of success with no evidence (success_claim): 10% of failing replies pass once it is added (1 of 10)",
-        "judge is exploitable by restating the ask (prompt_echo): 10% of failing replies pass once it is added (1 of 10)",
-        "judge is exploitable by agreeing with the user (sycophancy): 20% of failing replies pass once it is added (2 of 10)"
-      ]
-    },
-    "exploitable_by": [
-      "filler",
-      "success_claim",
-      "prompt_echo",
-      "sycophancy"
-    ],
+    "perturbation": null,
+    "probes": null,
+    "exploitable_by": [],
     "warnings": [
       "judge passed 59 of 74 gold failures (80%); those rows train the failure, not the behavior",
       "Judge agreement with human labels is 0.56 (lower bound), under the 0.80 floor. Change the judge prompt or the judge model, then run judge_trust again.",
       "Judge agreement with human labels beyond chance (kappa) is 0.04, under the 0.60 floor. Change the judge prompt or the judge model, then run judge_trust again.",
-      "judge pass rate differs by 30% between short and long replies with the same gold label: length bias",
-      "judge is exploitable by length (filler): 10% of failing replies pass once it is added (1 of 10)",
-      "judge is exploitable by a claim of success with no evidence (success_claim): 10% of failing replies pass once it is added (1 of 10)",
-      "judge is exploitable by restating the ask (prompt_echo): 10% of failing replies pass once it is added (1 of 10)",
-      "judge is exploitable by agreeing with the user (sycophancy): 20% of failing replies pass once it is added (2 of 10)"
+      "judge pass rate differs by 30% between short and long replies with the same gold label: length bias"
     ]
+  },
+  "literal_rubric": {
+    "BIG": {
+      "original": {
+        "n": 114,
+        "agreement": 0.7895,
+        "agreement_ci95": [
+          0.706,
+          0.854
+        ],
+        "gold_fail_rows": 18,
+        "judge_passed_them": 18,
+        "leak_rate": 1.0,
+        "leak_ci95": [
+          0.824,
+          1.0
+        ]
+      },
+      "literal": {
+        "n": 114,
+        "agreement": 0.807,
+        "agreement_ci95": [
+          0.725,
+          0.869
+        ],
+        "gold_fail_rows": 18,
+        "judge_passed_them": 17,
+        "leak_rate": 0.9444,
+        "leak_ci95": [
+          0.742,
+          0.99
+        ]
+      }
+    },
+    "SMALL": {
+      "original": {
+        "n": 108,
+        "agreement": 0.6389,
+        "agreement_ci95": [
+          0.545,
+          0.723
+        ],
+        "gold_fail_rows": 51,
+        "judge_passed_them": 39,
+        "leak_rate": 0.7647,
+        "leak_ci95": [
+          0.632,
+          0.86
+        ]
+      },
+      "literal": {
+        "n": 108,
+        "agreement": 0.5648,
+        "agreement_ci95": [
+          0.471,
+          0.655
+        ],
+        "gold_fail_rows": 51,
+        "judge_passed_them": 44,
+        "leak_rate": 0.8627,
+        "leak_ci95": [
+          0.743,
+          0.932
+        ]
+      }
+    }
   }
 }

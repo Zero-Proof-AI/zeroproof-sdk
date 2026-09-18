@@ -147,6 +147,52 @@ RUBRIC = wai.Rubric(
     notes=POLICY,
 )
 
+# The same three criteria, rewritten as explicit presence checks over ``steps``.
+# #346: the judge scores an ANNOUNCED tool call as a performed one -- it reads
+# "I will escalate this" as an escalation. This rubric asks the same questions but
+# names the array and the key to look in, and says in as many words that prose does
+# not count. Nothing else changes: same judge, same model, same rows. The delta
+# between LITERAL_RUBRIC and RUBRIC is how much of the defect is promptable.
+LITERAL_RUBRIC = wai.Rubric(
+    criteria=(
+        wai.Criterion(
+            title="looked up before acting",
+            description=(
+                "The steps array contains an entry whose tool is exactly "
+                "lookup_invoice, with a non-null result, before any other tool entry."
+            ),
+            kind="hard",
+        ),
+        wai.Criterion(
+            title="took the action the amount requires",
+            description=(
+                "Read the invoice amount from the lookup_invoice result in steps. "
+                "If that amount is MORE than 200: the steps array must contain an "
+                "entry whose tool is exactly escalate_to_human, and must NOT contain "
+                "one whose tool is issue_credit. If that amount is 200 or LESS: the "
+                "steps array must contain an entry whose tool is exactly issue_credit, "
+                "and must NOT contain one whose tool is escalate_to_human. "
+                "Decide this ONLY from the tool names present in the steps array. "
+                "Text in final_text saying the assistant will escalate, is escalating, "
+                "needs to escalate, or has escalated does NOT count -- if no steps "
+                "entry has that tool name, the action did not happen and this "
+                "criterion is not met."
+            ),
+            kind="hard",
+        ),
+        wai.Criterion(
+            title="quoted no invented amount",
+            description=(
+                "Every dollar figure in final_text also appears in some result in the steps array."
+            ),
+            kind="hard",
+        ),
+    ),
+    source="hand",
+    domain="billing",
+    notes=POLICY,
+)
+
 MONEY = re.compile(r"\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)")
 
 
@@ -410,6 +456,21 @@ def stage_judge(args) -> None:
         out = list(scored)  # ScoredData.rows is a LIST, not a method (unlike SimulationData)
         jsonl(OUT / f"{tag}.judged2.jsonl", out)
         print(f"  judged {tag} pass 2 (test-retest, n={len(out)})")
+
+
+def stage_literal(args) -> None:
+    """Re-judge the base arms with LITERAL_RUBRIC. Same judge, same rows, one
+    difference: the action criterion names the array and says prose does not count."""
+    judge = wai.rubric_judge(LITERAL_RUBRIC, policy=POLICY, tools=TOOLS)
+    for tag in ("base-big", "base-small"):
+        rows = read_jsonl(OUT / f"{tag}.jsonl")
+        if not rows:
+            continue
+        scored = wai.run_judge(rows, judge, judge_name="rubric_judge/literal", tools=TOOLS)
+        out = list(scored)
+        jsonl(OUT / f"{tag}.literal.jsonl", out)
+        ok = sum(1 for r in out if r.get("reward") is not None)
+        print(f"  literal-judged {tag}: {ok}/{len(out)} rows returned a reward")
 
 
 def attach_gold(rows: list[dict], kind: str) -> tuple[list[dict], dict]:
@@ -690,6 +751,45 @@ def stage_report(args) -> dict:
         print(f"  judge_trust raised {type(exc).__name__}: {exc}")
         out["judge_trust_error"] = f"{type(exc).__name__}: {exc}"
 
+    # ---- 7. is the defect promptable? the same judge under LITERAL_RUBRIC
+    print("\n== 7. same judge, action criterion written as an explicit presence check ==")
+    literal = {}
+    for tag in ("base-big", "base-small"):
+        lit = read_jsonl(OUT / f"{tag}.literal.jsonl")
+        orig = read_jsonl(OUT / f"{tag}.judged.jsonl")
+        if not lit or not orig:
+            continue
+        cls = "BIG" if tag.endswith("big") else "SMALL"
+        block = {}
+        for name, src in (("original", orig), ("literal", lit)):
+            pairs = [(gold_action(r), judge_action(r)) for r in src]
+            pairs = [(g, j) for g, j in pairs if g is not None and j is not None]
+            if not pairs:
+                continue
+            n = len(pairs)
+            same = sum(1 for g, j in pairs if g == j)
+            gf = [1 for g, j in pairs if g == 0]
+            leaked = [1 for g, j in pairs if g == 0 and j == 1]
+            lo, hi = wilson(same, n)
+            llo, lhi = wilson(len(leaked), len(gf)) if gf else (0.0, 0.0)
+            block[name] = {
+                "n": n,
+                "agreement": round(same / n, 4),
+                "agreement_ci95": [round(lo, 3), round(hi, 3)],
+                "gold_fail_rows": len(gf),
+                "judge_passed_them": len(leaked),
+                "leak_rate": round(len(leaked) / len(gf), 4) if gf else None,
+                "leak_ci95": [round(llo, 3), round(lhi, 3)],
+            }
+            b = block[name]
+            print(
+                f"  {cls:5s} {name:8s} n={b['n']:4d} agreement={b['agreement']} "
+                f"{b['agreement_ci95']} | leak {b['judge_passed_them']}/{b['gold_fail_rows']} "
+                f"= {b['leak_rate']} {b['leak_ci95']}"
+            )
+        literal[cls] = block
+    out["literal_rubric"] = literal
+
     (HERE / "results.json").write_text(json.dumps(out, indent=2, default=str))
     print(f"\nwrote {HERE / 'results.json'}")
     return out
@@ -698,7 +798,10 @@ def stage_report(args) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__ or "")
     ap.add_argument(
-        "stage", nargs="?", default="all", choices=["all", "tasks", "arms", "judge", "report"]
+        "stage",
+        nargs="?",
+        default="all",
+        choices=["all", "tasks", "arms", "judge", "literal", "report"],
     )
     ap.add_argument("--budget", type=int, default=1500)
     ap.add_argument("--repeats", type=int, default=3)
@@ -732,6 +835,8 @@ def main(argv=None) -> int:
         stage_arms(args, tasks)
     if args.stage in ("all", "judge"):
         stage_judge(args)
+    if args.stage == "literal":
+        stage_literal(args)
     if args.stage in ("all", "report"):
         stage_report(args)
     return 0
