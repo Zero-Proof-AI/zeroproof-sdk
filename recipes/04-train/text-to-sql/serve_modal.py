@@ -42,17 +42,20 @@ GPU = _cfg.get("gpu") or "L40S"
 MAX_LEN = int(_cfg.get("max_len") or 16384)
 # "llama3_json" for Llama-family models (Nemotron-Nano-8B-v1), "hermes" for Qwen.
 TOOL_PARSER = _cfg.get("tool_parser") or ("hermes" if "qwen" in MODEL.lower() else "llama3_json")
+# 0.10.0 is the pin the Qwen3 / Nemotron rows were measured on; qwen3_5-family
+# checkpoints (Qwen3.5-*, a Qwen3_5ForConditionalGeneration) need >= 0.26.
+VLLM_VERSION = _cfg.get("vllm") or "0.10.0"
 SLUG = re.sub(r"[^a-z0-9]+", "-", MODEL.lower()).strip("-")[-40:]
 
 app = modal.App(f"t2s-serve-{SLUG}")
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("vllm==0.10.0", "huggingface_hub[hf_transfer]==0.34.4")
+    .pip_install(f"vllm=={VLLM_VERSION}", "huggingface_hub[hf_transfer]>=0.34.4")
     .env(
         {
             "HF_HOME": "/root/.cache/huggingface",
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
-            "VLLM_USE_V1": "0",
+            **({"VLLM_USE_V1": "0"} if VLLM_VERSION.startswith("0.10") else {}),
         }
     )
 )
@@ -147,6 +150,7 @@ if __name__ == "__main__":
     ap.add_argument("--gpu", default=GPU)
     ap.add_argument("--max-len", type=int, default=MAX_LEN)
     ap.add_argument("--tool-parser", default=TOOL_PARSER)
+    ap.add_argument("--vllm", default=VLLM_VERSION, help="vLLM version for the image")
     ap.add_argument(
         "--runs-volume", default=RUNS_VOLUME, help="Modal volume holding <run_id>/adapter"
     )
@@ -165,6 +169,7 @@ if __name__ == "__main__":
                 "gpu": a.gpu,
                 "max_len": a.max_len,
                 "tool_parser": a.tool_parser,
+                "vllm": a.vllm,
                 "runs_volume": a.runs_volume,
                 "hf_cache": a.hf_cache,
             },
