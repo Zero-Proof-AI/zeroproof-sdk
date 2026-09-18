@@ -45,8 +45,8 @@ wai = "whileai.cli:main"
 whileai-simulations = "whileai.simulations.score.quality:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.12", "mypy>=1.16",
-       "types-requests"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "pytest-xdist>=3.6", "ruff>=0.12",
+       "mypy>=1.16", "types-requests"]
 rl = ["verifiers>=0.3; python_version >= '3.11' and python_version < '3.14'"]
 
 [tool.setuptools]
@@ -68,6 +68,10 @@ namespaces = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# One worker per core. The suite is 1,600 small tests with no shared state;
+# serial it takes about three minutes, on four cores about forty seconds.
+# Pass -n0 for a serial run (needed for --pdb and for reading -s output in order).
+addopts = "-n auto"
 
 [tool.ruff]
 line-length = 100
