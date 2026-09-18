@@ -13,39 +13,50 @@
   <a href="https://github.com/whilehq/whileai-sdk/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/whilehq/whileai-sdk/ci.yml?branch=main&label=ci&labelColor=0b1220&color=5cb08a" alt="CI"></a>
   <a href="https://pypi.org/project/whileai/"><img src="https://img.shields.io/pypi/v/whileai?labelColor=0b1220&color=5cb08a" alt="PyPI"></a>
   <a href="https://pypi.org/project/whileai/"><img src="https://img.shields.io/pypi/pyversions/whileai?labelColor=0b1220&color=3f8f6b" alt="Python"></a>
-  <a href="https://pypistats.org/packages/whileai"><img src="https://img.shields.io/pypi/dm/whileai?labelColor=0b1220&color=3f8f6b" alt="Downloads"></a>
+  <a href="https://pepy.tech/project/whileai"><img src="https://img.shields.io/pepy/dt/whileai?labelColor=0b1220&color=3f8f6b" alt="Downloads"></a>
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-%E2%89%A5%2090%25%20gated-5cb08a?labelColor=0b1220" alt="Coverage gate"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-3f8f6b?labelColor=0b1220" alt="License"></a>
 </p>
 
-Post-training data and evaluation for tool-using language-model agents.
-`whileai` simulates the situations an agent can meet, grades every rollout
-under one judge contract, and turns graded rows into SFT, preference and
-RL data with the checks the literature calls for. Each method cites its
-source in [References](#references).
+`whileai` makes training and eval data for agents that call tools. Give it
+an agent, or just the agent's tools and system prompt. It writes the
+situations the agent might meet, runs the agent through them against a fake
+world that fails on purpose, and hands back every conversation as a row.
+You grade the rows with your own judge or a verifier. The package then does
+the bookkeeping that is easy to skip and expensive to get wrong: pass rates
+with intervals, difficulty bands for RL, a check that your judge agrees with
+people, decontamination against your eval set, and a scan for rewards the
+policy can game. Every method says where it comes from
+([References](#references)).
 
 ```bash
 uv add whileai
 ```
 
 Or `pip install whileai`. Python 3.10 to 3.13, one dependency, typed.
-Formerly `zeroproof`; the old name still installs this package.
+This package used to be called `zeroproof`; that name still installs it.
 
 ## Two ways in
 
-**Evals and the harness, no training.** A pass rate with an interval, a
-table of where the agent fails, and a check that turns red in CI.
-`whileai init-evals` writes the harness around the agent it finds in your
-project, `coverage_gap` names what your tests never reach, and
-`compare_runs` says whether a prompt or tool edit helped on the same pinned
-tasks. Start at [docs/evals.md](docs/evals.md).
+**You only want evals.** Plenty of teams cannot train and still need to
+know whether the last prompt edit helped. Run `whileai init-evals` in your
+project. It finds your agent, writes a judge and a runner around it, and
+gives you a pass rate with a 95% interval, a table of where the agent
+fails, and a test that goes red in CI when it gets worse. `coverage_gap`
+tells you which situations your tests never reach. `compare_runs` reruns
+the same tasks after a prompt or tool change and says whether the change
+helped. Start at [docs/evals.md](docs/evals.md).
 
-**Post-training.** The same graded rows, selected and exported: the loop below.
+**You want to train.** Grade the same rows, keep the ones that carry
+signal, export. That is the rest of this page.
 
 ## Sixty seconds, offline
 
-No key, no network. The seeded agent misbehaves on a labeled fraction of
-rollouts, so a judge that catches exactly those rows is a judge that works.
+No key, no network. `seeded_agent` is a stand-in agent. It answers
+honestly most of the time and, on a labeled fraction of rollouts, does one
+thing wrong on purpose: hedges, flatters, or claims success after a tool
+failed. Each row records what it did in `seeded`, so you can check that
+your judge catches exactly those rows before you trust it on real ones.
 
 ```python
 import whileai.simulations as wai
@@ -83,10 +94,16 @@ print(scored.pass_at)
 pass@1 0.67 [0.55..0.78] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.33 (16 groups, k=4)
 ```
 
-Your agent is a callable `agent(message) -> {"steps", "final_text"}` or a
-model spec: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
-`ollama:<model>`. With no `agent=`, hosted Qwen runs on your key
-(`whileai login`) and Phi-4 judges, so the judge is never the policy.
+pass@1 is the pass rate over tasks with a bootstrap interval. pass^4 is
+how often all four rollouts of a task pass. Headroom is pass@4 minus
+pass@1, the gap an RL update could close.
+
+To use your own agent, pass any callable that takes the user message and
+returns `{"steps": [...], "final_text": "..."}`. To use a model, pass a
+spec string: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
+or `ollama:<model>`. With no `agent=` at all, the run uses the Qwen we
+host, on your key from `whileai login`, and Phi-4 grades. The judge is
+never the model it is judging.
 
 ## The loop
 
@@ -102,43 +119,60 @@ model spec: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
 
 ## The science
 
-**Supervised fine-tuning.** `optimize(mode="sft")` is rejection sampling
-[14], [16] with random selectors as the chance control. Rows carry a
-per-message `loss_mask`, `unroll=True` trains each turn on the context it
-had, and `format="trl"` is what `SFTTrainer` loads [1, ch. 4].
+**SFT.** `optimize(mode="sft")` is rejection sampling [14], [16]: keep the
+best-scoring completion for each prompt, with a random selector alongside
+so you can tell whether picking the best did anything. Exported rows carry
+a `loss_mask` per message, so the trainer learns from the agent's turns and
+not from tool output. `unroll=True` splits a long conversation into one
+sample per agent turn, each with the context that turn actually saw.
+`format="trl"` is the shape `SFTTrainer` loads [1, ch. 4].
 
-**RL with verifiable rewards.** A reward is a program where it can be [5].
-`mode="rl"` probes each prompt twice and fills to k only where the group
-splits: a unanimous group has zero advantage under a group-relative
-baseline [19] (dynamic sampling [12]). `optimize(mode="rl")` keeps the 20
-to 80% band [13] and handles overlong rollouts by policy [12].
-`export_environment` writes tasks, world and reward as a `verifiers`
-package. Rows carry logprobs for the importance ratio [21] and `mean_kl`
-reads drift from a reference [22].
+**RL with verifiable rewards.** When a program can check the answer, the
+reward should be that program [5]: `MathEqual`, `CodeExec` against hidden
+tests, `JSONSchema`, and combinations of them. In `mode="rl"` every prompt
+gets two rollouts first. Only prompts where those two disagree are filled
+to k, because a group that all passes or all fails has zero advantage under
+GRPO [19]. That is DAPO's dynamic sampling [12], applied while the rollouts
+are generated instead of after. `optimize(mode="rl")` then keeps the
+prompts the policy solves 20 to 80% of the time [13] and lets you choose
+what happens to rollouts that hit the length cap [12]. `export_environment`
+writes the tasks, the fake world and the reward as a `verifiers` package
+you can hand to a trainer. Rows keep their sampling logprobs so the trainer
+can form the importance ratio [21], and `mean_kl` measures drift from the
+reference model [22].
 
-**Character training.** A constitution is a versioned object [23], [24]:
-`load_spec` hashes its principles into `spec.version`, the judge is checked
-against the spec's own labels, pairs are length-matched [7], and
-`must_not_regress=spec.behaviors()` fails a run that traded one trait for
+**Character training.** Write down how the model should talk as a
+constitution [23], [24]. `load_spec` hashes it into `spec.version`, so an
+edit to one principle is a new version. The judge is checked against the
+labels the spec itself carries before it grades anything. Preference pairs
+are matched on length [7], so the model learns the trait and not "longer
+is better". Put `spec.behaviors()` in `must_not_regress` and
+`delta_report` fails any run that improved one trait by giving up
 another. [docs/character-training.md](docs/character-training.md).
 
-**Evaluation.** pass@1 is a bootstrap over tasks, not rollouts [8], [10],
-[11]. `runs=3` replays an eval and `delta_report` refuses a verdict inside
-twice the re-run standard deviation. `holdout_size` returns the prompts a
-gain needs at 80% power [11]. `decontaminate` applies the 80% n-gram
-coverage rule [16] and an optional embedding pass.
-[docs/evals.md](docs/evals.md).
+**Evaluation.** Intervals are bootstrapped over tasks, not rollouts,
+because rollouts of the same task are not independent [8], [10], [11].
+Run an eval three times with `runs=3` and `delta_report` refuses to call a
+change real when it sits inside twice the run-to-run standard deviation.
+`holdout_size` says how many prompts you need to see a given gain at 80%
+power [11]; most evals are too small. `decontaminate` checks training rows
+against the eval set with the 80% n-gram overlap rule [16], and with
+embeddings when you pass an embedder. [docs/evals.md](docs/evals.md).
 
-**Over-optimization.** Reward is a proxy and a strong optimizer finds the
-gap [17]. `hack_scan` ranks reward-feature correlation within task against
-a shuffle floor; `judge_probes` tries the exploits a policy finds first,
-sycophancy included [18]; `delta_report(proxy=, target=)` fails when the
-proxy rose and the target did not; `HackMonitor` runs the scan inside a
-TRL loop. [docs/reward-hacking.md](docs/reward-hacking.md).
+**Over-optimization.** The reward is a proxy for what you want, and RL
+finds the gap between the two [17]. `hack_scan` looks for the feature that
+predicts reward within a task, against a shuffled baseline, so a judge that
+pays for a phrase or a delimiter shows up before you train on it.
+`judge_probes` tries the tricks a policy finds first, flattery included
+[18]. `delta_report(proxy=, target=)` fails when the training reward went
+up and the metric you care about did not. `HackMonitor` runs the same scan
+inside a TRL training loop and can stop it.
+[docs/reward-hacking.md](docs/reward-hacking.md).
 
 ## Recipes
 
-One post-training run as five steps; every recipe runs in CI.
+Each recipe is one script and a README that says what you learn, what you
+need, and how long it takes. All of them run in CI.
 
 | Step | Recipes |
 |---|---|
@@ -151,15 +185,20 @@ One post-training run as five steps; every recipe runs in CI.
 
 ## Platform
 
+Push a graded run to your While account, train on it, serve the result.
+`push` refuses RL data with no mixed groups, since a trainer would learn
+nothing from it.
+
 ```python
-v1 = data.push("refunds-v1", holdout=0.2, gate=True)  # refuses gradient-free RL data
+v1 = data.push("refunds-v1", holdout=0.2, gate=True)
 run = wai.train(v1["datasetId"], method="grpo", steps=200)  # sft | grpo | dpo | rm
 run.wait()
 model = wai.serve("refunds-v2", run)  # OpenAI-compatible endpoint
 ```
 
-Your own trainer reports through `wai.TrainerCallback`; production traces
-come back as `traces=` and aim the next run at what failed.
+If you train with your own code, `wai.TrainerCallback` reports into the
+same run page. Traces from production come back through `traces=`, which
+points the next simulation at the situations that failed.
 
 ## Documentation
 
@@ -175,8 +214,8 @@ uv run pytest
 uv run ruff check . && uv run mypy
 ```
 
-CI gates coverage at 90% and runs every recipe's `smoke.sh`.
-[CONTRIBUTING.md](CONTRIBUTING.md).
+CI runs the suite on Python 3.10 to 3.13, gates coverage at 90%, and runs
+every recipe's `smoke.sh`. [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Cite
 
