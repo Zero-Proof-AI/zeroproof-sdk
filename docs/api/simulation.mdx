@@ -230,7 +230,16 @@ deterministic agent gives identical runs and a zero re-run band. The
 rows of every run come back in one `SimulationData` (`output=`
 holds them all); `search["eval_runs"]` lists the rows and stop
 reason per run, and `eval_variance(data.rows())` splits by
-`eval_run` on its own.
+`eval_run` on its own. `budget` is a per-run cap: `runs=3,
+budget=100` returns up to 300 rows, and `report()["budget_per_run"]`
+carries the cap under that name. Replayed rows keep the writer of the
+run they replay on `writer_model` and say `lineage.replayed_from_run`,
+so `delta_report` on two runs of one call sees one writer.
+
+With `situations=N` the run stops once every one of the N
+situations has all its rollouts (`stopped_because=
+"situations_exhausted"`), whatever `budget` still allows; a budget
+above `situations x phrasings x repeats` is not spent.
 
 A run
 otherwise draws its tasks from the grid by seed and, above

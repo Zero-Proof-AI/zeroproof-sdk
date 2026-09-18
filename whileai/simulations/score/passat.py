@@ -108,7 +108,14 @@ def _row_config_values(row: dict) -> dict[str, Any]:
             else None
         ),
         "user_model": str(row["user_model"]) if row.get("user_model") else None,
-        "writer_model": str(row["writer_model"]) if row.get("writer_model") else None,
+        # "pinned" (rows replayed by whileai <= 0.75) names no writer: the
+        # situation was written once, by the run it replays, so the stamp
+        # is skipped rather than compared against a model name
+        "writer_model": (
+            str(row["writer_model"])
+            if row.get("writer_model") and str(row["writer_model"]) != "pinned"
+            else None
+        ),
     }
 
 

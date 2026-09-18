@@ -180,6 +180,10 @@ def _pinned_tasks(tasks: Any) -> list[dict]:
                 "assignment": dims,
                 "arm": str(row.get("arm") or "") or "pinned",
                 "plan": plan,
+                # who wrote the situation, so the replayed row keeps the
+                # writer's name and delta_report sees one writer, not
+                # "pinned" against a model name
+                "writer_model": str(row.get("writer_model") or "") or None,
             }
         )
     if not out:

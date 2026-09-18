@@ -153,7 +153,8 @@ another. [docs/character-training.md](docs/character-training.md).
 **Evaluation.** Intervals are bootstrapped over tasks, not rollouts,
 because rollouts of the same task are not independent [8], [10], [11].
 Run an eval three times with `runs=3` and `delta_report` refuses to call a
-change real when it sits inside twice the run-to-run standard deviation.
+change real when it sits inside twice the run-to-run standard deviation
+(`budget` is per run: `runs=3, budget=100` is up to 300 rows).
 `holdout_size` says how many prompts you need to see a given gain at 80%
 power [11]; most evals are too small. `decontaminate` checks training rows
 against the eval set with the 80% n-gram overlap rule [16], and with
