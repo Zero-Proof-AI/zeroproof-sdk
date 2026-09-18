@@ -16,7 +16,7 @@ what it claims, the steps, one command, what happened.
 | [adaptive-clip](adaptive-clip) | [2609.00444](https://arxiv.org/abs/2609.00444) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.57 -> 0.51 (-0.06 [-0.12, -0.01], flat) | 2026-09-17 |
 | [endpoint-sft](endpoint-sft) | [2609.07103](https://arxiv.org/abs/2609.07103) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.29 -> 0.28 (-0.01 [-0.07, +0.05], flat) | 2026-09-17 |
 | [filter-metric](filter-metric) | [2609.13866](https://arxiv.org/abs/2609.13866) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.39 -> 0.46 (+0.07 [+0.02, +0.11], moved) | 2026-09-17 |
-| [gmts-token-select](gmts-token-select) | [2608.30632](https://arxiv.org/abs/2608.30632) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.00 -> 0.00 (+0.00 [+0.00, +0.00], flat) | never run |
+| [gmts-token-select](gmts-token-select) | [2608.30632](https://arxiv.org/abs/2608.30632) | Qwen/Qwen2.5-1.5B-Instruct | pass@1 | 0.49 -> 0.18 (-0.31 [-0.38, -0.24], flat) | 2026-09-18 |
 <!-- table:end -->
 
 The table is generated: `python recipes/papers/check.py --write` reads every

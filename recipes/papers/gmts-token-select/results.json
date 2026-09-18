@@ -5,27 +5,67 @@
   "book": "ch. 6 Policy gradients",
   "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
   "metric": "pass@1",
-  "n_holdout": 0,
+  "n_holdout": 120,
   "k": 4,
   "arms": {
-    "base": {"score": 0.0, "ci": [0.0, 0.0], "steps": 0, "gpu_minutes": 0},
-    "baseline": {"score": 0.0, "ci": [0.0, 0.0], "steps": 0, "gpu_minutes": 0},
-    "recipe": {"score": 0.0, "ci": [0.0, 0.0], "steps": 0, "gpu_minutes": 0}
+    "base": {
+      "score": 0.3625,
+      "ci": [
+        0.29375,
+        0.43333333333333335
+      ],
+      "pass_at_k": 0.575,
+      "steps": 0,
+      "gpu_minutes": 0
+    },
+    "baseline": {
+      "score": 0.4895833333333333,
+      "ci": [
+        0.42083333333333334,
+        0.5666666666666667
+      ],
+      "pass_at_k": 0.675,
+      "steps": 40,
+      "gpu_minutes": 27.6
+    },
+    "recipe": {
+      "score": 0.17916666666666667,
+      "ci": [
+        0.13333333333333333,
+        0.22708333333333333
+      ],
+      "pass_at_k": 0.4083333333333333,
+      "steps": 40,
+      "gpu_minutes": 17.7
+    }
   },
-  "delta": {"recipe_vs_baseline": 0.0, "ci": [0.0, 0.0], "verdict": "flat"},
+  "delta": {
+    "recipe_vs_baseline": -0.3104166666666667,
+    "ci": [
+      -0.38333333333333336,
+      -0.23541666666666666
+    ],
+    "verdict": "flat"
+  },
   "checks": {
-    "run_std": 0.0,
+    "run_std": 0.0115,
     "decontaminated_dropped": 0,
     "over_optimized": false,
-    "length_before": 0.0,
-    "length_after": {"baseline": 0.0, "recipe": 0.0},
-    "hack_scan_top": "",
-    "selection_overlap": {"baseline": 0.0, "recipe": 0.0},
+    "length_before": 700.4666666666667,
+    "length_after": {
+      "baseline": 636.48125,
+      "recipe": 373.64375
+    },
+    "hack_scan_top": "frac:upper",
+    "selection_overlap": {
+      "baseline": 0.703,
+      "recipe": 0.703
+    },
     "seed": 0
   },
   "gpu": "L40S",
-  "usd": 0.0,
-  "verified": "1970-01-01",
+  "usd": 1.51,
+  "verified": "2026-09-18",
   "whileai": "0.64",
-  "run_url": ""
+  "run_url": "https://www.zeroproofai.com/platform/training/run_5198278ad1c4d851"
 }

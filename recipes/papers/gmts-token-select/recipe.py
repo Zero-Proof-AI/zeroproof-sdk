@@ -234,9 +234,14 @@ def gmts_trainer(base_cls):
         `completion_mask.sum()` normalizer counts only what survived.
 
         The score needs the current policy's entropy, which the parent does not
-        expose, so this takes one extra no-grad forward pass per loss call. On
-        this size that is a few percent of a step -- generation dominates -- and
-        it keeps the loss body untouched, which is the trade this file wants.
+        expose, so this takes one extra no-grad forward pass per loss call. That
+        pass is not cheap and it is not "generation dominates": entropy needs the
+        whole next-token distribution, so it materializes a
+        `(rows, tokens, vocab)` float32 tensor for a `log_softmax`, where TRL's
+        own scoring pass gathers one logprob per position and never builds it.
+        Measured at 8 rollouts x 256 tokens, the step runs around 20 seconds and
+        this pass is the bulk of it. The trade bought here is an untouched loss
+        body; a bf16 or fused entropy is the first thing to change at any size.
 
         `ranking` is the arm: "entropy" is the baseline, "gmts" is the recipe.
         """
@@ -788,6 +793,16 @@ def main() -> None:
         default=TOP_FRACTION,
         help="share of the batch's tokens both arms keep; the paper's is 0.20",
     )
+    ap.add_argument(
+        "--lr",
+        type=float,
+        default=1e-4,
+        help=(
+            "learning rate, both arms. The recipe's selection concentrates the kept 20% on "
+            "high-|advantage| answers, which raises the gradient norm about 5x against the "
+            "baseline's; at 1e-4 that is past this setup's stability point. See Climb round 2"
+        ),
+    )
     ap.add_argument("--selftest", action="store_true", help="the ranking and the mask, offline")
     args = ap.parse_args()
 
@@ -848,6 +863,7 @@ def main() -> None:
                 num_generations=args.generations,
                 prompts_per_step=args.prompts_per_step,
                 fraction=args.fraction,
+                learning_rate=args.lr,
                 eval_samples=args.k,
                 eval_base=(i == 0),
             )
