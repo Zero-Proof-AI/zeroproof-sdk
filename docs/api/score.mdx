@@ -705,6 +705,7 @@ delta_report(
     markers: Sequence[str] | None = None,
     by: str | Callable[[dict], Any] | None = None,
     run_std: float | Mapping[str, float | None] | None = None,
+    run_std_runs: int | None = None,
     proxy: str | None = None,
     n_boot: int = 2000,
     seed: int = 0,
@@ -784,7 +785,14 @@ not slipped, not a regression, and a target there reads
 moves it that much on its own. The band is `floor * sqrt(1/n_a +
 1/n_b)` (the delta is a mean of `n_a` runs against a mean of
 `n_b`) times 1.96 for a given floor, which is taken as the eval's
-spread. When both row sets carry two or more `lineage.eval_run`
+spread. A floor that came from re-runs is an estimate, not the spread:
+pass `run_std_runs=` (how many re-runs it was computed from,
+`eval_variance(...)["n_runs"]`) and the band uses the two-sided t
+quantile at `df = run_std_runs - 1` instead (three re-runs: 4.30 x
+floor x sqrt(2) with one run per side, not 1.96; under pure noise the
+1.96 band lets about one delta in five through at df=2). A given
+`run_std` without `run_std_runs` keeps 1.96 and a warning names
+the fix. When both row sets carry two or more `lineage.eval_run`
 values (`simulate(tasks=..., runs=3)`) the report computes each
 metric's floor itself, pooled over the two sides, and uses the t
 quantile at `df = sum(runs - 1)` instead (three runs per side: 2.78 x

@@ -2,6 +2,7 @@
 
     python recipe.py                      # both arms on Modal, writes results.json
     python recipe.py --arm recipe         # one arm
+    python recipe.py --arm base --base-runs 10   # the noise floor only: no training
     python recipe.py --selftest           # the filter, offline, no GPU and no key
 
 GRPO throws away a group of rollouts when the group has no contrast: every
@@ -280,6 +281,57 @@ def _sample(model, tokenizer, questions, *, n, max_new_tokens, batch=8):
     return out
 
 
+def _base_runs(model, tokenizer, holdout, runs, eval_samples, max_new_tokens) -> list[list[dict]]:
+    """`runs` evaluations of the same untrained model on the same holdout:
+    the spread between them is the eval's own noise (rlhf-book ch. 16)."""
+    sys.path.insert(0, "/root")
+    from recipe_mod import graded_rows
+
+    import whileai.simulations as wai
+
+    questions = [t["question"] for t in holdout]
+    out: list[list[dict]] = []
+    for i in range(runs):
+        replies = _sample(
+            model, tokenizer, questions, n=eval_samples, max_new_tokens=max_new_tokens
+        )
+        out.append(graded_rows(holdout, replies))
+        print(f"base run {i + 1}/{runs}: {wai.pass_at(out[-1])}")
+    return out
+
+
+@app.function(
+    image=image,
+    gpu=DEFAULT_GPU,
+    timeout=60 * 60,
+    volumes={"/root/.cache/huggingface": hf_cache},
+)
+def eval_base(
+    holdout: list[dict],
+    runs: int,
+    base_model: str = BASE_MODEL,
+    eval_samples: int = 4,
+    max_completion_length: int = 256,
+) -> dict:
+    """The noise floor on its own: the untrained base evaluated `runs` times,
+    no training. `--arm base --base-runs 10` uses this to refresh `run_std`
+    without re-running either arm."""
+    import time
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    started = time.time()
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model, torch_dtype=torch.bfloat16, device_map="cuda"
+    )
+    base_runs = _base_runs(model, tokenizer, holdout, runs, eval_samples, max_completion_length)
+    return {"base_runs": base_runs, "gpu_minutes": (time.time() - started) / 60.0}
+
+
 @app.function(
     image=image,
     gpu=DEFAULT_GPU,
@@ -303,6 +355,7 @@ def run_arm(
     lora_rank: int = 32,
     eval_samples: int = 4,
     eval_base: bool = False,
+    eval_runs: int = EVAL_RUNS,
 ) -> dict:
     """One arm: eval the base model (optionally), train, eval again."""
     import time
@@ -315,7 +368,6 @@ def run_arm(
 
     sys.path.insert(0, "/root")
     from recipe_mod import (
-        EVAL_RUNS,
         LAMBDA,
         graded_rows,
         make_reward,
@@ -365,14 +417,11 @@ def run_arm(
     questions = [t["question"] for t in holdout]
     base_runs: list[list[dict]] = []
     if eval_base:
-        # Three re-runs of the same eval on the same untrained model: the
-        # spread between them is the noise floor any delta has to clear.
-        for i in range(EVAL_RUNS):
-            replies = _sample(
-                model, tokenizer, questions, n=eval_samples, max_new_tokens=max_completion_length
-            )
-            base_runs.append(graded_rows(holdout, replies))
-            print(f"base run {i + 1}/{EVAL_RUNS}: {wai.pass_at(base_runs[-1])}")
+        # Re-runs of the same eval on the same untrained model: the spread
+        # between them is the noise floor any delta has to clear.
+        base_runs = _base_runs(
+            model, tokenizer, holdout, eval_runs, eval_samples, max_completion_length
+        )
 
     dataset = Dataset.from_list(
         [{"prompt": messages_for(t["question"]), "answer": t["answer"]} for t in train_tasks]
@@ -589,9 +638,11 @@ def selftest_science_bar() -> None:
         fake(0.36),
         target="pass_at_1",
         run_std=float(noise["run_std"]),
+        run_std_runs=int(noise["n_runs"]),
         proxy=PROXY,
     )
     assert "over_optimized" in d, "delta_report is not running the proxy check"
+    assert d["run_std_df"] == EVAL_RUNS - 1, "the band is not carrying run_std's degrees of freedom"
     assert runs[0][0]["markers"].get("shaped_reward") is not None, "rows lost the proxy marker"
     print(
         f"delta_report(proxy={PROXY}): verdict {d['target_verdict']}, "
@@ -607,7 +658,14 @@ def selftest_science_bar() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--arm", choices=["baseline", "recipe", "both"], default="both")
+    ap.add_argument("--arm", choices=["baseline", "recipe", "both", "base"], default="both")
+    ap.add_argument(
+        "--base-runs",
+        type=int,
+        default=EVAL_RUNS,
+        help="re-runs of the untrained base that set the noise floor; with --arm base, "
+        "only these run (no training) and the verdict is re-read against the new band",
+    )
     ap.add_argument("--steps", type=int, default=40)
     ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
@@ -622,6 +680,7 @@ def main() -> None:
         return
 
     import whileai.simulations as wai
+    from whileai.simulations.score.stats import noise_band
 
     train_tasks, holdout = data(args.seed, args.n_train, args.n_holdout)
     # ch. 16: drop any train prompt that is a holdout prompt. `against=` reads
@@ -634,8 +693,10 @@ def main() -> None:
     )
     print(f"decontaminate: {decon['n_contaminated']} of {decon['n']} train prompts dropped")
 
-    arms = ["baseline", "recipe"] if args.arm == "both" else [args.arm]
+    arms = {"both": ["baseline", "recipe"], "base": []}.get(args.arm, [args.arm])
     filters = {"baseline": "score", "recipe": "outcome"}
+    if args.base_runs < 2:  # two runs before a spread exists
+        ap.error("--base-runs is the number of re-runs a run_std comes from, at least 2")
 
     # Start from what is already on disk, so `--arm recipe` refreshes one arm
     # instead of wiping the other one and the delta. Only a both-arm run moves
@@ -670,7 +731,28 @@ def main() -> None:
     gpu_minutes = 0.0
     run_url = ""
 
+    def record_base(base_runs: list[list[dict]]) -> None:
+        # ch. 16: the floor is the sample std over the re-runs, and it is an
+        # estimate from `n_runs` draws, so the band on it is the t quantile
+        # at df = n_runs - 1, not 1.96. Both numbers go to results.json.
+        arm_rows["base"] = base_runs[0]
+        noise = wai.eval_variance(*base_runs)
+        run_std = float(noise["run_std"])
+        checks["run_std"] = run_std
+        checks["run_std_runs"] = int(noise["n_runs"])
+        checks["length_before"] = mean_length(base_runs[0])
+        band = noise_band(run_std, df=int(noise["n_runs"]) - 1)
+        print(
+            f"eval noise over {noise['n_runs']} base re-runs: run_std {run_std:.4f}, "
+            f"band {band:.4f} (t at df={noise['n_runs'] - 1} x sqrt(2) x run_std)"
+        )
+        results["arms"]["base"] = {**summarize(base_runs[0]), "steps": 0, "gpu_minutes": 0}
+
     with modal.enable_output(), app.run():
+        if args.arm == "base":
+            out = eval_base.remote(holdout, args.base_runs, eval_samples=args.k)
+            gpu_minutes += out["gpu_minutes"]
+            record_base(out["base_runs"])
         for i, arm in enumerate(arms):
             out = run_arm.remote(
                 arm,
@@ -682,25 +764,12 @@ def main() -> None:
                 prompts_per_step=args.prompts_per_step,
                 eval_samples=args.k,
                 eval_base=(i == 0),
+                eval_runs=args.base_runs,
             )
             gpu_minutes += out["gpu_minutes"]
             run_url = out["run_url"] or run_url
             if out["base_runs"]:
-                base_runs = out["base_runs"]
-                arm_rows["base"] = base_runs[0]
-                noise = wai.eval_variance(*base_runs)
-                run_std = float(noise["run_std"])
-                checks["run_std"] = run_std
-                checks["length_before"] = mean_length(base_runs[0])
-                print(
-                    f"eval noise over {len(base_runs)} base re-runs: "
-                    f"run_std {run_std:.4f}, noise band {noise['noise_band']:.4f}"
-                )
-                results["arms"]["base"] = {
-                    **summarize(base_runs[0]),
-                    "steps": 0,
-                    "gpu_minutes": 0,
-                }
+                record_base(out["base_runs"])
             arm_rows[arm] = out["after_rows"]
             checks["length_after"][arm] = mean_length(out["after_rows"])
             checks["hack_scan_top"] = out["hack_scan_top"]
@@ -716,23 +785,48 @@ def main() -> None:
             arm_rows["recipe"],
             target="pass_at_1",
             run_std=float(checks.get("run_std") or 0.0),
+            run_std_runs=int(checks.get("run_std_runs") or EVAL_RUNS),
             proxy=PROXY,
         )
         results["delta"] = {
             "recipe_vs_baseline": d["target_delta"],
             "ci": list(d["target_ci95"] or (0.0, 0.0)),
+            "noise_band": d["noise_band"],
             "verdict": "moved" if d["target_verdict"] == "moved" else "flat",
         }
         checks["over_optimized"] = bool(d["over_optimized"])
         results["verified"] = date.today().isoformat()
         results.pop("partial_run", None)
         print(wai.format_delta_report(d))
+    elif args.arm == "base" and "delta" in results:
+        # No arm was re-run, so the delta and its interval stand; only the
+        # band they are read against moved. Same rule as check.py: moved
+        # needs the interval off zero, the delta over the band, and a clean
+        # proxy check.
+        delta = results["delta"]
+        lo, hi = delta.get("ci", [0.0, 0.0])
+        band = noise_band(checks["run_std"], df=checks["run_std_runs"] - 1)
+        clears = abs(float(delta["recipe_vs_baseline"])) >= band
+        moved = clears and not (lo <= 0.0 <= hi) and not checks.get("over_optimized")
+        delta["noise_band"] = band
+        delta["verdict"] = "moved" if moved else "flat"
+        checks["run_std_verified"] = date.today().isoformat()
+        print(
+            f"base re-evaluated {checks['run_std_runs']} times: delta "
+            f"{float(delta['recipe_vs_baseline']):+.3f} [{lo:+.3f}, {hi:+.3f}] against band "
+            f"{band:.3f} -> {delta['verdict']}"
+        )
     else:
         results["partial_run"] = f"{date.today().isoformat()}: {', '.join(arms)} only"
         print(f"one arm only ({', '.join(arms)}): delta and verified left as they were")
 
-    results["usd"] = round(gpu_minutes / 60.0 * usd_per_hour, 2)
-    results["run_url"] = run_url
+    usd = round(gpu_minutes / 60.0 * usd_per_hour, 2)
+    if args.arm == "base":
+        # The arms' cost stands; the re-evaluation adds to it.
+        usd = round(float(results.get("usd") or 0.0) + usd, 2)
+    else:
+        results["run_url"] = run_url
+    results["usd"] = usd
     print(f"wall clock: {gpu_minutes:.1f} GPU minutes, ${results['usd']:.2f} on {DEFAULT_GPU}")
     (HERE / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     print(json.dumps(results, indent=2))

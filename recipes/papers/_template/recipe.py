@@ -90,6 +90,7 @@ def main() -> None:
         "arms": {"base": {**summarize(base_rows), "steps": 0, "gpu_minutes": 0}},
         "checks": {
             "run_std": run_std,
+            "run_std_runs": int(noise["n_runs"]),
             "decontaminated_dropped": int(decon.get("n_contaminated", 0)),
             "over_optimized": False,
             "length_before": mean_length(base_rows),
@@ -112,6 +113,7 @@ def main() -> None:
             arm_rows["recipe"],
             target="pass_at_1",
             run_std=run_std,
+            run_std_runs=int(noise["n_runs"]),
             proxy=PROXY,
         )
         results["delta"] = {

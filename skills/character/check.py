@@ -468,6 +468,7 @@ delta = wai.delta_report(
     target="marker:trait",
     must_not_regress=["on_task", "no_filler"],
     run_std=noise["run_std_by_metric"],
+    run_std_runs=noise["n_runs"],
 )
 print(wai.format_delta_report(delta))
 assert delta["ok"], f"a guarded metric slipped; do not ship v1: {delta.get('warnings')}"

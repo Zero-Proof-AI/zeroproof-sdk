@@ -136,15 +136,20 @@ def _pooled_run_std(before: Sequence[dict], after: Sequence[dict], metric: str) 
 
 
 def _band_args(
-    eval_runs: dict[str, int], run_std_source: str | None
+    eval_runs: dict[str, int], run_std_source: str | None, run_std_runs: int | None = None
 ) -> tuple[int, int, int | None]:
     """What ``noise_band`` needs: how many runs each side's mean averages
-    over, and the degrees of freedom behind ``run_std`` when the report
-    estimated it from those runs itself (``None`` for a given ``run_std``,
-    which is taken as the eval's spread)."""
+    over, and the degrees of freedom behind ``run_std``: ``sum(runs - 1)``
+    when the report estimated it from the two sides' runs itself,
+    ``run_std_runs - 1`` when a given ``run_std`` came with the number of
+    re-runs behind it, ``None`` for a bare given ``run_std``, which is
+    taken as the eval's spread."""
     n_a, n_b = max(1, int(eval_runs["before"])), max(1, int(eval_runs["after"]))
-    df = (n_a - 1) + (n_b - 1) if run_std_source == "eval_run" else None
-    return n_a, n_b, df
+    if run_std_source == "eval_run":
+        return n_a, n_b, (n_a - 1) + (n_b - 1)
+    if run_std_source == "given" and run_std_runs is not None:
+        return n_a, n_b, int(run_std_runs) - 1
+    return n_a, n_b, None
 
 
 def _band_rule(n_a: int, n_b: int, df: int | None, level: float = CI_LEVEL) -> str:
@@ -286,6 +291,7 @@ def delta_report(
     markers: Sequence[str] | None = None,
     by: str | Callable[[dict], Any] | None = None,
     run_std: float | Mapping[str, float | None] | None = None,
+    run_std_runs: int | None = None,
     proxy: str | None = None,
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
@@ -363,7 +369,14 @@ def delta_report(
     moves it that much on its own. The band is ``floor * sqrt(1/n_a +
     1/n_b)`` (the delta is a mean of ``n_a`` runs against a mean of
     ``n_b``) times 1.96 for a given floor, which is taken as the eval's
-    spread. When both row sets carry two or more ``lineage.eval_run``
+    spread. A floor that came from re-runs is an estimate, not the spread:
+    pass ``run_std_runs=`` (how many re-runs it was computed from,
+    ``eval_variance(...)["n_runs"]``) and the band uses the two-sided t
+    quantile at ``df = run_std_runs - 1`` instead (three re-runs: 4.30 x
+    floor x sqrt(2) with one run per side, not 1.96; under pure noise the
+    1.96 band lets about one delta in five through at df=2). A given
+    ``run_std`` without ``run_std_runs`` keeps 1.96 and a warning names
+    the fix. When both row sets carry two or more ``lineage.eval_run``
     values (``simulate(tasks=..., runs=3)``) the report computes each
     metric's floor itself, pooled over the two sides, and uses the t
     quantile at ``df = sum(runs - 1)`` instead (three runs per side: 2.78 x
@@ -407,6 +420,16 @@ def delta_report(
     """
     if not 0 < alpha < 1 or not 0 < power < 1:
         raise ValueError("alpha and power are probabilities strictly between 0 and 1")
+    if run_std_runs is not None:
+        if run_std is None:
+            raise ValueError(
+                "run_std_runs says how many re-runs run_std came from; pass run_std with it"
+            )
+        if int(run_std_runs) < 2:  # noqa: PLR2004  # two runs before a standard deviation exists
+            raise ValueError(
+                "run_std_runs is the number of re-runs run_std was computed from, at least 2"
+            )
+        run_std_runs = int(run_std_runs)
     level = 1.0 - alpha
     balanced: dict[str, Any] | None = None
     if balance_rollouts:
@@ -466,7 +489,7 @@ def delta_report(
     # deviation is ``floor * sqrt(1/n_a + 1/n_b)``, and the band is that
     # times 1.96, or times the t quantile when the floor was estimated from
     # these very runs (rlhf-book ch. 16, appendix C).
-    n_a, n_b, band_df = _band_args(eval_runs, run_std_source)
+    n_a, n_b, band_df = _band_args(eval_runs, run_std_source, run_std_runs)
     noise_rule = _band_rule(n_a, n_b, band_df, level)
     within_noise: list[str] = []
     no_floor: list[str] = []
@@ -534,6 +557,23 @@ def delta_report(
         warnings.append(
             "Two eval runs on a side is a difference, not a distribution, so run_std is rough; "
             f"{MIN_RERUNS} runs per side give a standard deviation worth reading."
+        )
+    elif run_std_runs is not None and run_std_runs < MIN_RERUNS:
+        warnings.append(
+            f"run_std came from {run_std_runs} re-runs, a difference, not a distribution, so it "
+            f"is rough; {MIN_RERUNS} or more re-runs give a standard deviation worth reading."
+        )
+    # A run_std handed in as a number is read as the eval's exact spread and
+    # the band uses 1.96. One estimated from a few re-runs is wider than
+    # that: at df=2 the 1.96 band passes about 19% of pure-noise deltas,
+    # not 5%. Only the caller knows where the number came from.
+    if run_std_source == "given" and run_std_runs is None and headline_run_std is not None:
+        warnings.append(
+            "run_std was given as a number, so the band uses 1.96 and reads it as the eval's "
+            "exact spread. If it came from re-runs, pass run_std_runs=<how many> "
+            "(eval_variance(...)['n_runs']) so the band uses the t quantile at df = runs - 1 "
+            f"and is honest about the estimate: 3 re-runs is {_t_quantile(2, level):.2f}, not "
+            f"{_z_level(level):.2f}."
         )
     # Every metric gets its own interval at ``level``, so the chance that at
     # least one clears zero by luck grows with the number of markers. The
@@ -892,6 +932,10 @@ def delta_report(
         "run_std": headline_run_std,
         "run_std_by_metric": {m: run_std_by_metric.get(m) for m in metrics},
         "run_std_source": run_std_source,
+        #: re-runs a given run_std was computed from, and the band's degrees
+        #: of freedom (None: the floor is read as the eval's exact spread)
+        "run_std_runs": run_std_runs,
+        "run_std_df": band_df,
         "noise_band": headline_noise,
         "noise_rule": noise_rule,
         "eval_runs": eval_runs,
@@ -998,11 +1042,12 @@ def format_delta_report(report: dict[str, Any]) -> str:
     floors = report.get("run_std_by_metric") or {}
     if report.get("run_std") is not None or report.get("run_std_source") is not None:
         runs = report.get("eval_runs") or {}
-        source = (
-            f"{runs.get('before')} eval runs before, {runs.get('after')} after"
-            if report.get("run_std_source") == "eval_run"
-            else "run_std given"
-        )
+        if report.get("run_std_source") == "eval_run":
+            source = f"{runs.get('before')} eval runs before, {runs.get('after')} after"
+        elif report.get("run_std_runs") is not None:
+            source = f"run_std given from {report['run_std_runs']} re-runs"
+        else:
+            source = "run_std given"
         headline = report.get("run_std")
         head = (
             f"run_std {headline:.3f}, a delta under {report['noise_band']:.3f} is noise"
