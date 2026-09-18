@@ -66,6 +66,11 @@ def test_bad_weights_are_refused_with_a_reason(bad):
     import whileai.simulations as wai
 
     with pytest.raises(ValueError) as err:
-        wai.simulate(tools=[{"type": "function", "function": {"name": "t"}}],
-                     system_prompt="p", arm_weights=bad, budget=0, simulator=False)
+        wai.simulate(
+            tools=[{"type": "function", "function": {"name": "t"}}],
+            system_prompt="p",
+            arm_weights=bad,
+            budget=0,
+            simulator=False,
+        )
     assert "arm_weights" in str(err.value)

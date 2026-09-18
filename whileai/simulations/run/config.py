@@ -471,7 +471,9 @@ def resolve_run_config(
             raise ValueError("arm_weights= must be a non-empty dict of arm name -> weight")
         bad = {k for k, v in arm_weights.items() if not isinstance(v, (int, float)) or v < 0}
         if bad:
-            raise ValueError(f"arm_weights= values must be non-negative numbers; bad: {sorted(bad)}")
+            raise ValueError(
+                f"arm_weights= values must be non-negative numbers; bad: {sorted(bad)}"
+            )
         unknown = set(arm_weights) - set(SEARCH_ARMS)
         if unknown:
             raise ValueError(

@@ -34,7 +34,7 @@ the base already passes contributes exactly nothing.
 
 ```python
 fails = {p for p, rs in by_prompt.items() if any(r["reward"] < 1 for r in rs)}
-print(f"failure-capable: {len(fails)}/{len(by_prompt)}")   # this is your ceiling
+print(f"failure-capable: {len(fails)}/{len(by_prompt)}")  # this is your ceiling
 ```
 
 One measured lane had 52 of 219 (23.7%). Its effective sample was 52, not 219,
