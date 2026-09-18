@@ -562,9 +562,10 @@ def _stamp_groups(rows: list[dict]) -> None:
     stable name (sha1 of the ``task_key``: the situation id, else the prompt), ``k`` the
     group size, ``n0``/``n1`` the fail/pass counts so a consumer can drop
     unanimous groups without rescoring, and ``reward_mean``/``reward_std``
-    the group's reward statistics (rlhf-book ch. 6: group-normalized
-    advantages divide by this std, so a trainer can see where it is near
-    zero and choose batch-level normalization or Dr. GRPO instead). A
+    the group's reward statistics (rlhfbook.com/c/11-policy-gradients.html,
+    GRPO: group-normalized advantages divide by this std, so a trainer can
+    see where it is near zero and choose batch-level normalization or Dr.
+    GRPO instead). A
     partial-credit reward counts as a pass above 0.5 and a fail below it;
     exactly 0.5 (an advisory verdict) counts as neither. A run with no
     repeated prompt is an SFT/explore export and gets no group fields.

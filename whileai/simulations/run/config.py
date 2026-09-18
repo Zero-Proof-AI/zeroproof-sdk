@@ -34,6 +34,7 @@ from ..defaults import (
     MAX_COMPLETIONS_PER_REQUEST,
     RL_FAULT_RATE,
     RL_ROLLOUTS_PER_PROMPT,
+    SAMPLING_TEMPERATURE_MAX,
     SATURATION_CAP,
     SFT_PHRASINGS_PER_SITUATION,
     STOP_GRACE_S,
@@ -576,7 +577,7 @@ def resolve_run_config(
     # named defaults in generate/agents.py.
     raw_user_temperature = cfg.pop("user_temperature", None)
     user_temperature = None if raw_user_temperature is None else float(raw_user_temperature)
-    if user_temperature is not None and not 0.0 <= user_temperature <= 2.0:
+    if user_temperature is not None and not 0.0 <= user_temperature <= SAMPLING_TEMPERATURE_MAX:
         raise ValueError(
             f"user_temperature={user_temperature!r} is outside 0..2; it is a sampling "
             "temperature for the simulated user's lines (None keeps the defaults)"
@@ -743,6 +744,27 @@ def resolve_run_config(
         from ..world.sandbox import WorldOptions
 
         world_options = WorldOptions.coerce(world_options)
+    # A tool_condition the world cannot answer would steer cells at a fault
+    # that never fires. "success", a condition in the world's condition_modes,
+    # or a fault mode the world knows (shipped or added through
+    # advanced={"world": {"fault_modes": ...}}) are the values that land.
+    if isinstance(dimensions, dict) and dimensions.get("tool_condition"):
+        from ..world.sandbox import WorldOptions
+
+        world = WorldOptions.coerce(world_options)
+        unknown_conditions = [
+            str(v)
+            for v in dimensions["tool_condition"]
+            if str(v) != "success" and world.fault_mode_for(str(v)) is None
+        ]
+        if unknown_conditions:
+            raise ValueError(
+                f"dimensions= tool_condition values {unknown_conditions} name no fault mode "
+                "the mock "
+                f"world knows; use success, {', '.join(sorted(world.condition_modes))} "
+                f"or a key of fault_modes ({', '.join(sorted(world.fault_modes))}). Add a "
+                'builder with advanced={"world": {"fault_modes": {**FAULT_MODES, name: fn}}}.'
+            )
 
     cap = budget if budget is not None else SATURATION_CAP
     return RunConfig(

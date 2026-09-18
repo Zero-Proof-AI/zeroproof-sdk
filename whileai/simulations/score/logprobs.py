@@ -30,6 +30,10 @@ from .agreement import row_key
 from .hygiene import pearson
 from .stats import task_key
 
+#: A correlation over fewer than three points is an arrangement of the
+#: points, not a measurement (structural).
+_MIN_CORRELATION_POINTS = 3
+
 
 def _num(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -74,8 +78,10 @@ def logprob_report(rows: Sequence[dict]) -> dict[str, Any]:
         if r.get("reward") in (0, 1) and not isinstance(r.get("reward"), bool)
     ]
     corr = (
-        pearson([g[1] for g in graded], [g[0] for g in graded]) if len(graded) >= 3 else None
-    )  # literal: a correlation needs three points (structural)
+        pearson([g[1] for g in graded], [g[0] for g in graded])
+        if len(graded) >= _MIN_CORRELATION_POINTS
+        else None
+    )
     truncated = sum(
         1
         for r in with_lp

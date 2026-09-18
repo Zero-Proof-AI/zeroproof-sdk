@@ -5,6 +5,38 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- A run records what it ran under. `data.report()` (and `data.coverage`)
+  now carries `knobs` (every `RunKnobs` field as resolved), `patience`,
+  `user_temperature` and `world` (the `WorldOptions` as plain data, the
+  callable tables as their names), so a saved run says which knobs it
+  used instead of leaving that to the caller's memory.
+- A fault mode you add reaches the coverage grid. `WorldOptions` gains
+  `condition_modes`, the `tool_condition -> fault mode` table
+  (`WORLD_CONDITION_MODES` by default) that `generate/scenarios.py` used
+  to hardcode; `dimensions={"tool_condition": [...]}` accepts any key of
+  the world's `fault_modes`, and a value the world cannot answer is a
+  `ValueError` naming the fix. `WorldOptions` mapping fields, `FAULT_MODES`,
+  `PAYLOAD_BUILDERS`, `TRACE_STATE_PRIORITY` and `TRAINING_KNOBS` are
+  read-only (`MappingProxyType`); build a new `WorldOptions` to add a mode.
+- The text-gate thresholds (`len(text) < 8`, `<= 60` and forty more) are
+  named fields of `defaults.TEXT_HEURISTICS`, each with what it decides;
+  HTTP codes read `http.HTTPStatus`; the last `# literal:` escapes are
+  gone. `scripts/check_no_hardcoding.py` now requires a phrase after
+  `# literal:` and a `# NAME = value: why` or `#:` doc on a module
+  constant (a plain comment no longer counts), and ruff `PLR2004` is on
+  for the package so a magic number in any comparison fails lint.
+- Book and paper cites in `defaults.py` were checked against the sources.
+  rlhfbook.com chapters are cited by URL slug (its displayed chapter
+  numbers differ from the slugs); the claims the book does not make
+  (95% intervals, length growth as the first over-optimization symptom,
+  "watch the symptoms, do not train on them") are gone, and the
+  tau-bench, judge-sweep, LoRA, SemDeDup, PALADIN and fault-injection
+  numbers now say what the papers say. `ENV_DECONTAMINATION_NGRAM`,
+  `ENV_HOLDOUT_FRACTION`, `MONITOR_SAMPLE_TEMPERATURE` and `MONITOR_K`
+  alias the constants they duplicated; `LOCAL_MODEL_TEMPERATURE` and
+  `MIN_REPLY_TOKENS` live in `defaults.py`. The `advanced` table in
+  `docs/reference.md` is split into experiment knobs and engine
+  internals, with `writer_temperature` and `hard_share` rows.
 - The four "no hardcoding" lanes (run, generate, score, world/ingest) are
   wired together. `simulate(advanced={"world": {...}})` now reaches the
   mock world: the options land on `local_model(world_options=)` and
@@ -37,7 +69,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   4.02 / 5.28 and 45% / 70% / 78% of threads reaching a third user turn at
   6 / 12 / 16, and confirm-before-acting needs that third turn, so at 6 it
   is missing from over half the rows and no selection downstream can
-  recover it (rlhf-book ch. 14). The cost is about three agent calls per
+  recover it (DAPO, arXiv 2503.14476: an all-fail group has no gradient).
+  The cost is about three agent calls per
   row instead of one. What moves: nothing in `simulate()` (`scripts/
   golden.py` is identical on all 13 configurations); a direct
   `local_model(...)` call with no `avg_turns=` now aims for 12 turns
@@ -132,7 +165,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `noise_band(level=0.99, df=4)` is the tabled 4.604, not an extrapolation.
   One default did move: `ScoredData.select_for_rl` used its own band of
   0.3 to 0.7 while `select_for_rl`, `optimize` and `curriculum` used 0.2
-  to 0.8 (rlhf-book ch. 14, N=16; DAPO); it now takes `DIFFICULTY_BAND`
+  to 0.8 (rlhfbook.com/c/14-reasoning.html, N=16; DAPO); it now takes
+  `DIFFICULTY_BAND`
   like the rest, so a task passed 25% or 75% of the time is kept there
   too. `whileai.simulations.environment.DEFAULT_BAND` reads the same
   constant. Module constants that stay local (`CEILING_PASS_RATE`,

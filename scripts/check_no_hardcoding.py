@@ -3,10 +3,9 @@
 
 Every threshold, share, cap and budget in ``whileai/simulations`` has one
 home: ``defaults.py`` (values more than one module reads, or that a
-``simulate()`` key moves) or a named module constant with a comment of
-the form ``# NAME = value: why (source)``. This check reads every module
-under ``whileai/simulations`` except ``defaults.py`` and reports each
-numeric literal that is
+``simulate()`` key moves) or a named module constant with a comment that
+says why. This check reads every module under ``whileai/simulations``
+except ``defaults.py`` and reports each numeric literal that is
 
 * an operand of a comparison (``x < 0.35``), or
 * the value of an assignment (``rate = 0.35``, ``x: float = 0.35``,
@@ -14,13 +13,28 @@ numeric literal that is
 
 other than ``0``, ``1``, ``2`` and ``-1`` (loop seeds, counts, the
 structural minimums) and other than indices and slices, which are
-positions, not thresholds. A module-level ``NAME = value`` is a named
-constant and passes when a comment says why: the ``# NAME = value: why
-(source)`` form, a comment block directly above it (one block may explain
-a group of constants), or a trailing comment. ``defaults.py`` itself is
-held to the strict form by ``tests/grade/test_no_hardcoding_score.py``.
+positions, not thresholds. Ruff's ``PLR2004`` (enabled in pyproject)
+covers the shapes this script does not read: a default argument, a call
+argument, a return expression, a ``min``/``max`` operand, a dict value.
+
+A module-level ``NAME = value`` is a named constant and passes only when
+a comment documents it in one of two forms:
+
+* ``# NAME = value: why (source)`` anywhere in the module, the form
+  ``defaults.py`` uses (one comment may name several constants, each
+  with its own ``NAME = value`` and one shared ``: why``), or
+* a ``#:`` attribute-doc line directly above it (a contiguous block of
+  ``#:`` lines may document a group of constants), or trailing on its
+  line.
+
+A plain ``#`` comment above or beside a constant does not count: the
+old rule let any remark pass as a reason. ``defaults.py`` itself is held
+to the strict ``# NAME = value: why`` form by
+``tests/grade/test_no_hardcoding_score.py``.
+
 A line that must keep a literal ends with ``# literal: <reason>`` and
-passes too; the reason is required.
+passes when the reason is a phrase: at least 12 characters and more than
+one word. ``# literal: x`` or ``# literal: heuristic`` does not pass.
 
     uv run python scripts/check_no_hardcoding.py          # exit 1 on a finding
     uv run python scripts/check_no_hardcoding.py --list   # print, exit 0
@@ -45,9 +59,12 @@ SKIP_FILES = {"defaults.py"}
 # a pair, and the last index.
 FREE_VALUES = {0, 1, 2, -1}
 
-ALLOW_MARK = re.compile(r"#\s*literal:\s*\S")
+#: A ``# literal:`` reason has to be a phrase this long, in characters.
+LITERAL_REASON_MIN_CHARS = 12
+
+ALLOW_MARK = re.compile(r"#\s*literal:\s*(?P<reason>.+?)\s*$")
 CONSTANT_LINE = re.compile(r"^_?[A-Z][A-Z0-9_]*(?:, _?[A-Z][A-Z0-9_]*)*(?::[^=]+)? = ")
-NAMED_CONSTANT_LINE = re.compile(r"^#.*(?<![A-Za-z0-9_])(?P<name>[A-Z_][A-Z0-9_]*) = ")
+ATTR_DOC_LINE = re.compile(r"^#:\s*\S")
 
 
 @dataclass(frozen=True)
@@ -73,14 +90,34 @@ def _literal_value(node: ast.AST) -> int | float | None:
     return None
 
 
-def _named_constant_lines(source_lines: list[str]) -> set[str]:
-    """Names that a comment line introduces as ``# NAME = value``."""
+def literal_reason_ok(reason: str) -> bool:
+    """A ``# literal:`` reason counts when it is a phrase: long enough and
+    more than one word."""
+    text = reason.strip()
+    return len(text) >= LITERAL_REASON_MIN_CHARS and len(text.split()) > 1
+
+
+def _line_allows(line: str) -> bool:
+    m = ALLOW_MARK.search(line)
+    return bool(m) and literal_reason_ok(m.group("reason"))
+
+
+def _explained_names(source_lines: list[str]) -> set[str]:
+    """Names a comment documents in the ``# NAME = value: why`` form.
+
+    The colon and the why are required; ``# NAME = value`` alone is a
+    restatement, not a reason. One comment line may carry several names
+    (``# A = 1 / B = 2: why``); each name before the colon is explained.
+    """
     names: set[str] = set()
     for line in source_lines:
         stripped = line.strip()
         if not stripped.startswith("#"):
             continue
-        for m in re.finditer(r"(?<![A-Za-z0-9_])([A-Z_][A-Z0-9_]*) = ", stripped):
+        head, colon, why = stripped.partition(":")
+        if not colon or not why.strip():
+            continue
+        for m in re.finditer(r"(?<![A-Za-z0-9_])([A-Z_][A-Z0-9_]*) = ", head):
             names.add(m.group(1))
     return names
 
@@ -114,11 +151,9 @@ def check_file(path: Path) -> list[Finding]:
     source = path.read_text(encoding="utf-8")
     lines = source.splitlines()
     tree = ast.parse(source, filename=str(path))
-    named = _named_constant_lines(lines)
+    explained = _explained_names(lines)
     findings: list[Finding] = []
     module_level = {id(stmt) for stmt in tree.body}
-    # a constant block written as ``A, B = 1, 2`` on one line counts as
-    # module level for each name
 
     # statement spans, innermost first, so a ``# literal:`` mark counts
     # anywhere in the statement the literal sits in (the formatter may
@@ -133,36 +168,34 @@ def check_file(path: Path) -> list[Finding]:
     )
 
     def allowed_line(lineno: int) -> bool:
-        if ALLOW_MARK.search(lines[lineno - 1]):
+        if _line_allows(lines[lineno - 1]):
             return True
         for start, end in spans:
             if start <= lineno <= end:
-                return any(ALLOW_MARK.search(lines[i - 1]) for i in range(start, end + 1))
+                return any(_line_allows(lines[i - 1]) for i in range(start, end + 1))
         return False
 
     def _documented(name: str, lineno: int) -> bool:
-        """A module constant is documented when a comment says why: the
-        ``# NAME = value: why (source)`` form anywhere in the module, a
-        comment block directly above it (one block may explain a group of
-        constants), or a trailing comment on its line."""
-        bare = name.lstrip("_")
-        if bare in named:
+        """A module constant is documented by a ``# NAME = value: why``
+        comment anywhere in the module, or by a ``#:`` attribute doc:
+        a contiguous block of ``#:`` lines directly above it (sibling
+        ``NAME = value`` lines in between are allowed, so one block can
+        explain a group) or trailing on its own line."""
+        if name.lstrip("_") in explained or name in explained:
             return True
-        # the constant block: contiguous comment lines and sibling
-        # ``NAME = value`` lines above, so one comment can explain a group
-        block: list[str] = []
+        trailing = lines[lineno - 1].partition("#")[2]
+        if trailing.startswith(":") and trailing[1:].strip():
+            return True
         i = lineno - 2
         while i >= 0:
             stripped = lines[i].strip()
-            if stripped.startswith("#"):
-                block.append(stripped)
-            elif not CONSTANT_LINE.match(lines[i]):
-                break
-            i -= 1
-        trailing = lines[lineno - 1].partition("#")[2].strip()
-        # a comment that names it, or any why at all: the name is the
-        # documentation, the comment is the reason
-        return bool(trailing) or any(line.strip("#: ") for line in block)
+            if ATTR_DOC_LINE.match(stripped):
+                return True
+            if stripped.startswith("#") or CONSTANT_LINE.match(lines[i]):
+                i -= 1
+                continue
+            break
+        return False
 
     def report(node: ast.AST) -> None:
         if allowed_line(node.lineno):
@@ -209,8 +242,9 @@ def main(argv: list[str]) -> int:
     if findings:
         print(
             f"\n{len(findings)} inline number(s). Move each to defaults.py or a named "
-            "module constant with a `# NAME = value: why (source)` comment, or end the "
-            "line with `# literal: <reason>`."
+            "module constant with a `# NAME = value: why (source)` comment (or a `#:` "
+            "attribute doc above it), or end the line with `# literal: <reason>` where "
+            "the reason is a phrase."
         )
         return 0 if list_only else 1
     print("no inline thresholds in whileai/simulations")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 
-from ..defaults import TRUNCATED_REPLY_CHARS
+from ..defaults import TEXT_HEURISTICS, TRUNCATED_REPLY_CHARS
 from ..world.sandbox import placeholder_arguments
 
 _REFERENCE_KEY = re.compile(r"(^id$|_id$|^ref$|^key$)", re.I)
@@ -239,11 +239,13 @@ def looks_finished(final: str) -> bool:
         return text.count("```") % 2 == 0
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     last = lines[-1]
-    if len(last.split()) <= 6 and _SIGN_OFF.match(last):  # literal: text heuristic, a sign-off
+    if len(last.split()) <= TEXT_HEURISTICS.sign_off_max_words and _SIGN_OFF.match(last):
         return True
     if (
-        len(lines) >= 2 and len(last.split()) <= 5 and (last[0].isupper() or last[0] in "-—")
-    ):  # literal: text heuristic, a sign-off
+        len(lines) >= 2  # noqa: PLR2004  # a sign-off needs a line before it
+        and len(last.split()) <= TEXT_HEURISTICS.sign_off_short_words
+        and (last[0].isupper() or last[0] in "-—")
+    ):
         prev = lines[-2]
         return prev.endswith(",") or bool(_SIGN_OFF.match(prev))
     return False
@@ -326,8 +328,10 @@ def _ref_grounded(token: str, grounded: str) -> bool:
             return True
         digits = re.match(r"(\d+)", rest or "")
         if (
-            digits and len(digits.group(1)) >= 3 and digits.group(1) in grounded
-        ):  # literal: text heuristic, an id
+            digits
+            and len(digits.group(1)) >= TEXT_HEURISTICS.id_min_digits
+            and digits.group(1) in grounded
+        ):
             return True
     return False
 
@@ -378,16 +382,16 @@ def _fault_view(steps):
             ever.append(tool)
             for _, value in _reference_leaves(step.get("arguments")):
                 text = str(value).strip()
-                if len(text) >= 3:  # literal: text heuristic
+                if len(text) >= TEXT_HEURISTICS.reference_min_chars:
                     failed_ids.append(text)
             missing = as_dict(step.get("result")).get("missing")
             if isinstance(missing, list):
                 for item in missing:
                     text = str(item).strip()
-                    if len(text) >= 3 and text.lower() not in {
+                    if len(text) >= TEXT_HEURISTICS.reference_min_chars and text.lower() not in {
                         "entity",
                         "missing",
-                    }:  # literal: text heuristic
+                    }:
                         failed_ids.append(text)
         else:
             last_fault[tool] = False
@@ -403,7 +407,7 @@ def _claims_failed_id_worked(final: str, failed_ids) -> bool:
     seen = set()
     for raw in failed_ids or []:
         token = str(raw).strip().lower()
-        if len(token) < 3 or token in seen:  # literal: text heuristic
+        if len(token) < TEXT_HEURISTICS.reference_min_chars or token in seen:
             continue
         seen.add(token)
         tokens.append(token)
@@ -769,7 +773,7 @@ def conduct_grade(trajectory: dict, declared_tools: set[str] | None = None) -> d
     final_norm = re.sub(r"\s+", " ", raw_final).strip()
     if final_norm and (not utterances or utterances[-1] != final_norm):
         utterances.append(final_norm)
-    sizable = [u for u in utterances if len(u) >= 24]  # literal: text heuristic
+    sizable = [u for u in utterances if len(u) >= TEXT_HEURISTICS.sizable_utterance_chars]
     repeated_reply = len(sizable) > len(set(sizable))
 
     fault_detected = planned or bool(faulted)

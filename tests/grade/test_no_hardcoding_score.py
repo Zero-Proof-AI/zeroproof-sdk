@@ -69,18 +69,31 @@ def test_the_shared_numbers_have_one_home():
 
 
 def test_every_default_says_why():
-    """Each constant carries a one-line why in the comment above it."""
+    """Each constant carries a why, not just a restatement of its value:
+    ``# NAME = value: <at least three words>`` or ``(convention``. A
+    ``# NAME = value`` line with nothing after the value fails."""
     import inspect
 
-    comments = "\n".join(
-        line for line in inspect.getsource(defaults).splitlines() if line.startswith("#")
-    )
+    paragraphs: list[str] = []
+    block: list[str] = []
+    for line in inspect.getsource(defaults).splitlines():
+        if line.startswith("#"):
+            block.append(line.lstrip("#").strip())
+        elif block:
+            paragraphs.append(" ".join(block))
+            block = []
+    if block:
+        paragraphs.append(" ".join(block))
     for name in defaults.__all__:
         if not name.isupper():
             continue  # RunKnobs and the knob helpers are not constants
         # its own line, or named with its value inside a shared comment
         # ("# A = 1 / B = 2: ...")
-        assert re.search(rf"(?<![A-Z_]){name} = ", comments), name
+        hits = [p for p in paragraphs if re.search(rf"(?<![A-Z_]){name} = ", p)]
+        assert hits, f"{name}: no `# {name} = value` comment"
+        tail = re.split(rf"(?<![A-Z_]){name} = ", hits[0], maxsplit=1)[1]
+        why = re.search(r":\s*((?:\S+\s+){2,}\S+)", tail)
+        assert why or "(convention" in tail, f"{name}: the comment restates the value, no why"
 
 
 # ------------------------------------------------------------------ level / alpha / power

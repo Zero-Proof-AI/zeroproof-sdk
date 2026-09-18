@@ -603,8 +603,9 @@ the rollouts in flight; a group still short of k at the whistle is stamped
 `data.search["groups"]` reports mixed, stopped, complete, partial, and
 rollouts saved. `data.pass_at` scores stopped unanimous groups as
 unanimous. `repeat_policy="fixed"` restores k rollouts for every prompt;
-`advanced={"probe": n}` changes the probe. rlhf-book ch. 6 (dynamic
-sampling) and ch. 7 (difficulty filtering), applied at generation time.
+`advanced={"probe": n}` changes the probe. DAPO's dynamic sampling
+(arXiv 2503.14476) and difficulty filtering
+(rlhfbook.com/c/14-reasoning.html), applied at generation time.
 
 ## Close the loop: aim the budget with traces
 
@@ -1214,27 +1215,34 @@ Measured at `avg_turns=4`. The default is now `12`, so a row carries more turns 
 | `grade` | `False` | Legacy deterministic conduct score; grade after instead |
 | `llm_grade` | `False` | Extra LLM judge |
 | `output` | | JSONL path |
-| `advanced` | | Keys below |
+| `advanced` | | Keys below. `data.report()` records the resolved values (`knobs`, `patience`, `user_temperature`, `world`) so a saved run says what it ran under |
+
+**Experiment knobs.** What a researcher changes between runs: who plays the user and how patient they are, how the three models sample, what the mock world answers, how hard the situations are, and what the search steers by. `fault_rate=` and `repeats=` (k) sit in the parameter table above; they are the same kind of knob.
 
 | `advanced` key | Default | |
 |---|---|---|
-| `concurrency` | `32` | Parallel rollouts |
-| `stop_grace` | `5` | Seconds to wait for running rollouts and writer waves after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` / `writer_waves_abandoned` |
-| `embedder` | `"hash"` | Prompt selection |
 | `seed` | `0` | Reproducible draws. Bit-for-bit at `concurrency: 1` or with `reproducible=True`, within a process and across processes; otherwise which rows land before the cap depends on thread timing |
+| `concurrency` | `32` | Parallel rollouts |
 | `avg_turns` | `12` | Target conversation length in turns. The person speaks at most `avg_turns // 2` times; `12` leaves room to verify, look up, confirm, and write. |
-| `mutate_graded_failures` | on with `grader=` | `False` grades beside the loop without steering by the verdict: only tool faults make mutation parents. A row the grader fails (reward under 0.5) is otherwise re-rolled and its ask mutated the way a tool fault's is; `search["mutation_aims"]` counts each aim. `True` without `grader=` is an error |
 | `patience` | `"normal"` | How long the person keeps answering the agent's questions. A level name, or a table `{"second": p, "later": q}` (or `(p, q)`) of walk-away chances fitted from your own traces. The first question is always attempted; from the second on the person may walk away (`normal`: 35% then 60%; `short`: 60% then 90%; `endless`: never, the pre-knob behaviour). At any question the person may also leave when it asks for something they could not know. A row the person left ends on the agent's question and carries `ended_by="user_left"`; `search["ended_on_question"]` counts them. |
 | `user_temperature` | `None` | One sampling temperature for every simulated-user line (follow-ups and human-tool answers alike); `None` keeps the two named defaults in `generate/agents.py` (`USER_TURN_TEMPERATURE`, `HUMAN_TOOL_TEMPERATURE`). |
+| `writer_temperature` | `(0.7, 1.0)` | The situation writer's sampling temperature: a number pins it, a `(lo, hi)` band is drawn from per batch. The default band is `WRITER_TEMP_LO..WRITER_TEMP_HI` in `generate/diversity.py`. Validated before any model call, offline too |
 | `world` | `{}` | The mock world's dials as a dict of `WorldOptions` fields: `fault_modes` (add your own builder), `default_fault_mode`, `search_hits`, `exists_share`, name pools and the rest. Validated before any model call; a typo names the fields. |
+| `hard_share` | from mode | A `simulate()` parameter, listed here because it is the difficulty dial the other knobs read: the share of situations drawn from the hard tiers (adversarial, boundary, ambiguous), 0 to 1. `tier_mix_min_rows` and `tier_mix_tolerance` decide when the drawn share is reported as short of it |
+| `pass_threshold` | `0.5` | A reward under this is a graded failure (the search steers by it with `grader=`) |
+| `mutate_graded_failures` | on with `grader=` | `False` grades beside the loop without steering by the verdict: only tool faults make mutation parents. A row the grader fails (reward under 0.5) is otherwise re-rolled and its ask mutated the way a tool fault's is; `search["mutation_aims"]` counts each aim. `True` without `grader=` is an error |
+| `smoothing_alpha` | `1.0` | Laplace smoothing `(s + a) / (n + 2a)` on the group hazard and the mixed rate |
+| `allocation_gain` | `4.0` | How hard a hot trace region pulls cell weight toward itself: a full match at budget share s multiplies the weight by `1 + gain x s` |
+| `allocation_tool_weight` | `0.6` | Match credit for a cell on a hot region's tool |
+| `allocation_condition_weight` | `0.4` | Match credit for a cell on a hot region's tool condition |
+| `gap_weight` | `0.7` | Share of a region's behavior value from its gap score; the rest from its fault rate |
+| `adaptive_verify_explore_floor` | `0.55` | Under `mode="adaptive"`, an explore share below this re-rolls a prompt to peek for a different outcome |
+| `tier_mix_min_rows` | `20` | Rows before the drawn difficulty mix is compared with `hard_share` |
+| `tier_mix_tolerance` | `0.1` | How far below the asked hard share the drawn share may land before the run says so |
+| `stop_grace` | `5` | Seconds to wait for running rollouts and writer waves after a stop; queued ones are cancelled, still-running ones are reported as `rollouts_abandoned` / `writer_waves_abandoned` |
+| `embedder` | `"hash"` | Prompt selection |
 
-Every other number the engine uses is an `advanced` key too, named after
-its field on `whileai.simulations.defaults.RunKnobs`, where a comment
-above each states why the default is what it is (a measurement, an
-rlhf-book chapter, an arXiv id, or "convention, untested"). None of
-these needs touching for a normal run; they are here so nothing in the
-engine is a number you cannot change. A value outside its bounds is a
-`ValueError` that names the floor or ceiling and the default.
+**Engine internals.** You should not need these. Every other number the engine uses is an `advanced` key too, named after its field on `whileai.simulations.defaults.RunKnobs`, where a comment above each states why the default is what it is (a measurement, an rlhfbook.com chapter by URL, an arXiv id, or "convention, untested"). They are here so nothing in the engine is a number you cannot change, and so a report (`data.report()["knobs"]`) can say what a run ran under. A value outside its bounds is a `ValueError` that names the floor or ceiling and the default.
 
 | `advanced` key | Default | |
 |---|---|---|
@@ -1279,27 +1287,18 @@ engine is a number you cannot change. A value outside its bounds is a
 | `writer_context_items` | `8` | Items of each kind (avoid, underexplored, behavior gaps, axis gaps, tools) the writer prompt carries |
 | `writer_context_parents` | `10` | Failing rows the writer mutates from |
 | `family_avoid_items` | `6` | Family-rejected prompts shown to the writer as avoid pressure |
-| `allocation_gain` | `4.0` | How hard a hot trace region pulls cell weight toward itself: a full match at budget share s multiplies the weight by `1 + gain x s` |
-| `allocation_tool_weight` | `0.6` | Match credit for a cell on a hot region's tool |
-| `allocation_condition_weight` | `0.4` | Match credit for a cell on a hot region's tool condition |
 | `region_novelty_smoothing` | `0.5` | Weight on the newest novelty score in a region's running novelty |
 | `gap_min_rows` | `3` | Rows a region needs before one signature counts as stuck |
 | `gap_rich_signatures` | `3` | Distinct signatures at which a region counts as explored |
 | `gap_value_stuck` | `1.0` | Behavior-gap score of a stuck region |
 | `gap_value_rich` | `0.2` | Behavior-gap score of an explored region |
 | `gap_value_unknown` | `0.5` | Behavior-gap score (and starting novelty) of an undecided region |
-| `gap_weight` | `0.7` | Share of a region's behavior value from its gap score; the rest from its fault rate |
-| `adaptive_verify_explore_floor` | `0.55` | Under `mode="adaptive"`, an explore share below this re-rolls a prompt to peek for a different outcome |
-| `pass_threshold` | `0.5` | A reward under this is a graded failure (the search steers by it with `grader=`) |
-| `smoothing_alpha` | `1.0` | Laplace smoothing `(s + a) / (n + 2a)` on the group hazard and the mixed rate |
 | `short_share_floor` | `0.08` | Under this share of short asks the writer is nudged to keep it brief |
 | `long_share_floor` | `0.1` | Under this share of long asks the writer is nudged to use more words |
 | `followup_starved_min` | `8` | `followups_starved` needs at least this many missed follow-ups that are also at least rows / `followup_starved_divisor` |
 | `followup_starved_divisor` | `4` | See `followup_starved_min` |
 | `semantic_duplicate_novelty` | `0.05` | A row under this semantic novelty counts as a duplicate |
 | `idle_judge_share` | `0.1` | An rl pool idle on verdicts for more than this share of the run gets the add-situations note |
-| `tier_mix_min_rows` | `20` | Rows before the drawn difficulty mix is compared with `hard_share` |
-| `tier_mix_tolerance` | `0.1` | How far below the asked hard share the drawn share may land before the run says so |
 | `progress_every_s` | `10.0` | Never more than this long between progress lines |
 | `progress_every_rows` | `10` | Never more than this many finished rollouts between progress lines |
 | `flush_report_rows` | `25` | The streamed-output log line is written every this many rows |

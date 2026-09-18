@@ -193,7 +193,7 @@ def annotator_agreement(rows: Sequence[dict]) -> dict[str, Any]:
             stats = per.setdefault(name, {"labels": 0, "passes": 0})
             stats["labels"] += 1
             stats["passes"] += value
-        if len(by_ann) >= 2:
+        if len(by_ann) >= 2:  # noqa: PLR2004  # agreement needs two annotators
             multi += 1
             values = set(by_ann.values())
             if len(values) == 1:

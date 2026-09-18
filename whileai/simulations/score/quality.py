@@ -25,9 +25,9 @@ DIMENSIONS = ("opener", "ping_pong", "leak", "complexity", "structure")
 #: a dimension score under this fails the dimension (``defaults.PASS_THRESHOLD``)
 FAIL = PASS_THRESHOLD
 
-# The conduct-quality rubric. Each weight is a convention read off the
-# failure mode it names (no measured optimum); ``score_row`` combines
-# them and FAIL is the cut. Named so a report can say which shape moved.
+#: The conduct-quality rubric. Each weight is a convention read off the
+#: failure mode it names (no measured optimum); ``score_row`` combines
+#: them and FAIL is the cut. Named so a report can say which shape moved.
 # MIN_SUBSTANTIAL_CHARS = 12: a spoken line shorter than this is not a beat.
 MIN_SUBSTANTIAL_CHARS = 12
 # TRUNCATED_OPENER_CHARS = 8: an opener under this (or ending on a quote) was cut.
@@ -48,13 +48,13 @@ THIN_TOOLS_BONUS = 0.35
 THIN_FOLLOWUP_BONUS = 0.3
 THIN_FINAL_BONUS = 0.15
 THIN_OPENER_BONUS = 0.1
-# Structure penalties, each the share of a 1.0 score the defect costs:
-# ENDS_ON_USER_PENALTY = 0.6, ENDS_ON_TOOL_PENALTY = 0.55,
-# ENDS_OFF_AGENT_PENALTY = 0.4, EMPTY_FINAL_PENALTY = 0.4,
-# STALE_FINAL_PENALTY = 0.55, FINAL_NOT_IN_MESSAGES_PENALTY = 0.2,
-# FOLLOWUP_LEFT_WORLD_PENALTY = 0.35, FOLLOWUP_ECHO_PENALTY = 0.35,
-# STARTS_ON_AGENT_PENALTY = 0.2. A thread that ends off the agent or whose
-# final_text is not what the agent said loses more than half, so it fails.
+#: Structure penalties, each the share of a 1.0 score the defect costs:
+#: ENDS_ON_USER_PENALTY = 0.6, ENDS_ON_TOOL_PENALTY = 0.55,
+#: ENDS_OFF_AGENT_PENALTY = 0.4, EMPTY_FINAL_PENALTY = 0.4,
+#: STALE_FINAL_PENALTY = 0.55, FINAL_NOT_IN_MESSAGES_PENALTY = 0.2,
+#: FOLLOWUP_LEFT_WORLD_PENALTY = 0.35, FOLLOWUP_ECHO_PENALTY = 0.35,
+#: STARTS_ON_AGENT_PENALTY = 0.2. A thread that ends off the agent or whose
+#: final_text is not what the agent said loses more than half, so it fails.
 ENDS_ON_USER_PENALTY = 0.6
 ENDS_ON_TOOL_PENALTY = 0.55
 ENDS_OFF_AGENT_PENALTY = 0.4
@@ -232,7 +232,7 @@ def _score_opener(text: str) -> tuple[float, str]:
     if not usable_user_message(raw):
         return 0.2, "non-human opener"
     n = len(_words(raw))
-    if n <= 2 and not _IDISH.search(raw) and not _ACTION.search(raw):
+    if n <= 2 and not _IDISH.search(raw) and not _ACTION.search(raw):  # noqa: PLR2004  # a one- or two-word opener is not a request (convention)
         return 0.3, "one-word opener"
     if raw.endswith("'") or len(raw) < TRUNCATED_OPENER_CHARS:
         return 0.55, "truncated opener"
@@ -266,7 +266,7 @@ def _score_ping_pong(beats: list[dict]) -> tuple[float, str]:
         return 0.3, "roles do not alternate"
     if beats[-1]["role"] == "user":
         return 0.4, "ends on user"
-    if n_user >= 2 and n_asst >= 2:
+    if n_user >= 2 and n_asst >= 2:  # noqa: PLR2004  # two turns each side is a conversation
         return 1.0, ""
     return 0.7, ""
 
@@ -296,7 +296,7 @@ def _score_complexity(
         return 0.2, "degenerate reply"
     if stub and not tools and n_user <= 1 and n_words < STUB_OPENER_WORDS:
         return 0.1, "empty or infra stub"
-    if n_words <= 2 and not tools and n_user <= 1:
+    if n_words <= 2 and not tools and n_user <= 1:  # noqa: PLR2004  # a one- or two-word thread is a dead end (convention)
         return 0.15, "one-line dead end"
     if clarify:
         return 0.25, "clarify and stop"
@@ -305,7 +305,7 @@ def _score_complexity(
     score = THIN_BASE
     if tools:
         score += THIN_TOOLS_BONUS
-    if n_user >= 2:
+    if n_user >= 2:  # noqa: PLR2004  # a follow-up is the second user turn
         score += THIN_FOLLOWUP_BONUS
     if final_n >= THIN_WORDS and not stub:
         score += THIN_FINAL_BONUS

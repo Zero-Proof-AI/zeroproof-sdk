@@ -46,7 +46,7 @@ from .quality import _IDISH, _QUESTION_END, _STRONG_ACTION, load_jsonl, write_js
 from .stats import task_key
 
 # DEFAULT_BAND = DIFFICULTY_BAND (0.2, 0.8): keep asks the policy passes
-# between 20% and 80% of the time (rlhf-book ch. 14, difficulty filtering
+# between 20% and 80% of the time (rlhfbook.com/c/14-reasoning.html, difficulty filtering
 # from N=16 samples; DAPO arXiv:2503.14476 drops accuracy 0 and 1 groups;
 # Seed-Thinking, ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a
 # form of it). A reported practice with no published ablation on the
@@ -183,7 +183,7 @@ def is_incomplete_junk(row: dict) -> bool:
     return bool(
         not has_tool
         and _QUESTION_END.search(final)
-        and len(str(row.get("prompt") or "").split()) <= 2
+        and len(str(row.get("prompt") or "").split()) <= 2  # noqa: PLR2004  # a one- or two-word prompt is a stub (convention)
     )
 
 
@@ -308,7 +308,7 @@ def group_signal(
     groups = _group_label_lists(rows)
     n_mixed = n_all_zero = n_all_one = n_single = in_band = 0
     for labels in groups.values():
-        if len(labels) < 2:
+        if len(labels) < 2:  # noqa: PLR2004  # a group of one carries no contrast
             n_single += 1
             continue
         p = sum(labels) / len(labels)
@@ -568,8 +568,9 @@ def _sft_report(
     if 0 < max_k < REJECTION_SAMPLING_MIN_K:
         report["note"] = (
             f"at most {max_k} completion(s) per prompt; rejection-sampling selection "
-            f"wants {REJECTION_SAMPLING_MIN_K} to 30 so the pick is not biased (rlhf-book "
-            "ch. 9; Llama 3 samples 10 to 30). Raise repeats= if you mean to choose among "
+            f"wants {REJECTION_SAMPLING_MIN_K} to 30 so the pick is not biased "
+            "(rlhfbook.com/c/10-rejection-sampling.html; Llama 3 samples 10 to 30). "
+            "Raise repeats= if you mean to choose among "
             "completions rather than filter."
         )
     return report
@@ -920,7 +921,7 @@ def select_for_rl(
     collapsed = {
         prompt
         for prompt, labels in _group_label_lists(kept).items()
-        if original_sizes.get(prompt, 0) >= 2 and len(set(labels)) == 1
+        if original_sizes.get(prompt, 0) >= 2 and len(set(labels)) == 1  # noqa: PLR2004  # a group of one carries no contrast
     }
     if collapsed:
         kept = [row for row in kept if task_key(row) not in collapsed]
@@ -1043,7 +1044,7 @@ def select_for_rl(
                 f"Difficulty was measured from {median_n:g} rollouts per task, so a task's "
                 f"band assignment can be off by about ±{statistics.median(halves):.1f}. "
                 f"Use repeats={DIFFICULTY_BAND_ROLLOUTS} for a firmer band (the count the "
-                "20-80 band is measured from, rlhf-book ch. 14)."
+                "20-80 band is measured from, rlhfbook.com/c/14-reasoning.html)."
             )
     if report["eval_sourced"]:
         report["hygiene_warnings"].append(

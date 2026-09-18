@@ -37,6 +37,8 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from .defaults import MESSAGE_EXAMPLES
+
 SCHEMA_VERSION = "1"
 SCHEMA_KEY = "schema_version"
 KNOWN_VERSIONS = frozenset({"0", SCHEMA_VERSION})
@@ -416,7 +418,7 @@ def check(
         problems = validate(row, kind)
         if problems:
             bad.append(f"{i}:{','.join(problems)}")
-            if len(bad) >= 5:  # literal: examples shown in a message
+            if len(bad) >= MESSAGE_EXAMPLES:
                 break
     if bad:
         raise ValueError(f"schema_invalid in {where}: {'; '.join(bad)}")
@@ -741,7 +743,7 @@ def calibration_of(row: dict) -> Calibration | None:
     mean_kl = _number(raw.get("mean_kl"))
     ci = raw.get("pass_rate_ci95")
     ci95: tuple[float, float] | None = None
-    if isinstance(ci, (list, tuple)) and len(ci) == 2:
+    if isinstance(ci, (list, tuple)) and len(ci) == 2:  # noqa: PLR2004  # an interval is a pair
         lo, hi = _number(ci[0]), _number(ci[1])
         if lo is not None and hi is not None:
             ci95 = (float(lo), float(hi))

@@ -25,7 +25,7 @@ from .scenarios import novelty as min_cosine_distance
 # scan stays cheap in pure Python (convention, untested).
 HASH_DIM = 256
 _DIM = HASH_DIM
-# EMBED_BATCH = 128 texts per HTTP embedding call, EMBED_TIMEOUT_S = 30,
+#: EMBED_BATCH = 128 texts per HTTP embedding call, EMBED_TIMEOUT_S = 30,
 # EMBED_RETRIES = 3 with EMBED_BACKOFF_S * attempt between them: the
 # OpenAI and Ollama embedders share these (convention).
 EMBED_BATCH = 128
@@ -268,15 +268,15 @@ def is_semantic(embedder: Any) -> bool:
     ).startswith("hash")
 
 
-# Batch selection: candidates are k-means clustered (at most MAX_CLUSTERS
-# = 8 clusters, sqrt of the pool, KMEANS_ITERS = 8 Lloyd steps), then a
-# batch is half "typical" picks spread across clusters and half "fill"
-# picks by novelty against everything already run (FILL_SHARE = 0.5),
-# drawn from a k-center spread over CANDIDATE_MULTIPLE = 2 times the
-# batch. Cluster-then-compare-within-cluster is SemDeDup's recipe
-# (2303.09540, k-means then pairwise inside each cluster); the split and
-# the caps are conventions, untested. KMEANS_DEFAULT_ITERS = 40 is the
-# standalone default.
+#: Batch selection: candidates are k-means clustered (at most MAX_CLUSTERS
+#: = 8 clusters, sqrt of the pool, KMEANS_ITERS = 8 Lloyd steps), then a
+#: batch is half "typical" picks spread across clusters and half "fill"
+#: picks by novelty against everything already run (FILL_SHARE = 0.5),
+#: drawn from a k-center spread over CANDIDATE_MULTIPLE = 2 times the
+#: batch. Cluster-then-compare-within-cluster is SemDeDup's recipe
+#: (2303.09540, k-means then pairwise inside each cluster); the split and
+#: the caps are conventions, untested. KMEANS_DEFAULT_ITERS = 40 is the
+#: standalone default.
 MAX_CLUSTERS = 8
 KMEANS_ITERS = 8
 KMEANS_DEFAULT_ITERS = 40

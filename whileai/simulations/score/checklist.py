@@ -40,6 +40,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..defaults import TEXT_HEURISTICS
 from ..world.sandbox import _READ
 from .grading import _acks_fault, _step_faulted, conduct_grade
 
@@ -138,7 +139,7 @@ def _read_values(calls: list[dict]) -> set[str]:
                 walk(v)
         elif isinstance(value, (str, int, float)) and not isinstance(value, bool):
             text = str(value).strip().lower()
-            if len(text) >= 3:  # literal: text heuristic
+            if len(text) >= TEXT_HEURISTICS.reference_min_chars:
                 out.add(text)
 
     for c in calls:

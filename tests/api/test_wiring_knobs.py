@@ -130,6 +130,91 @@ def test_patience_table_and_user_temperature_reach_the_loop_from_simulate(monkey
     assert _cfg().patience == "normal" and _cfg().user_temperature is None
 
 
+def test_the_run_records_its_knobs_and_the_report_shows_them():
+    """The report says what the run ran under: every RunKnobs field plus
+    patience, user_temperature and the world options. Fails on a tree
+    where coverage carries none of them."""
+    from dataclasses import fields
+
+    from whileai.simulations.defaults import RunKnobs
+
+    data = wai.simulate(
+        scripted_agent,
+        budget=2,
+        **offline(
+            advanced={
+                "patience": (0.6, 0.9),
+                "user_temperature": 0.3,
+                "closing_margin": 3.5,
+                "world": {"search_hits": (2, 2)},
+            }
+        ),
+    )
+    report = data.report()
+    assert report["patience"] == (0.6, 0.9)
+    assert report["user_temperature"] == 0.3
+    knobs = report["knobs"]
+    assert set(knobs) == {f.name for f in fields(RunKnobs)}
+    assert knobs["closing_margin"] == 3.5
+    assert knobs["pass_threshold"] == defaults.PASS_THRESHOLD
+    world = report["world"]
+    assert world["search_hits"] == (2, 2)
+    assert world["fault_modes"] == sorted(FAULT_MODES)
+    assert "timeout" in world["condition_modes"]
+    assert not any(callable(v) for v in world.values())
+    # the defaults are recorded too, so a run with no advanced= says so
+    plain = wai.simulate(scripted_agent, budget=2, **offline()).report()
+    assert plain["patience"] == "normal" and plain["user_temperature"] is None
+    assert plain["knobs"]["closing_margin"] == defaults.knob_default("closing_margin")
+
+
+def test_a_fault_mode_added_through_advanced_world_fires_in_a_run():
+    """A fault mode the caller adds reaches the coverage grid: name it as a
+    tool_condition and rows carry it. Fails on a tree where scenarios.py
+    hardcodes the condition-to-mode table."""
+
+    def rate_limited(env, tool, arguments):
+        return {"status": "error", "error": "429 too many requests", "retry_after_s": 30}
+
+    data = wai.simulate(
+        scripted_agent,
+        budget=12,
+        fault_rate=1.0,
+        dimensions={"tool_condition": ["rate_limited"]},
+        **offline(
+            per_round=12,
+            advanced={
+                "prefer_success": False,
+                "world": {"fault_modes": {**FAULT_MODES, "rate_limited": rate_limited}},
+            },
+        ),
+    )
+    modes = {(row.get("faults") or {}).get("*", {}).get("mode") for row in data.trajectories}
+    assert "rate_limited" in modes
+    # the same table steers the shipped conditions: a condition pointed at
+    # a different shipped mode carries that mode
+    data = wai.simulate(
+        scripted_agent,
+        budget=12,
+        fault_rate=1.0,
+        dimensions={"tool_condition": ["timeout"]},
+        **offline(
+            per_round=12,
+            advanced={"prefer_success": False, "world": {"condition_modes": {"timeout": "stale"}}},
+        ),
+    )
+    modes = {(row.get("faults") or {}).get("*", {}).get("mode") for row in data.trajectories}
+    assert modes <= {"stale", None} and "stale" in modes
+    # a condition the world does not know is refused before any rollout
+    with pytest.raises(ValueError, match="tool_condition"):
+        wai.simulate(
+            scripted_agent,
+            budget=2,
+            dimensions={"tool_condition": ["rate_limited"]},
+            **offline(),
+        )
+
+
 def test_patience_and_user_temperature_are_validated_before_any_model_call():
     with pytest.raises(ValueError, match="second"):
         _cfg(patience={"second": 1.5, "later": 0.2})

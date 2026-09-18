@@ -128,7 +128,7 @@ def _pooled_run_std(before: Sequence[dict], after: Sequence[dict], metric: str) 
     variances = []
     for rows in (before, after):
         side = eval_variance(rows, metric=metric, by="eval_run")
-        if side["run_std"] is None or int(side["n_runs"]) < 2:
+        if side["run_std"] is None or int(side["n_runs"]) < 2:  # noqa: PLR2004  # two runs before a run std exists
             return None
         variances.append((float(side["run_std"]) ** 2, int(side["n_runs"]) - 1))
     df = sum(w for _, w in variances)
@@ -450,7 +450,7 @@ def delta_report(
     elif run_std is not None:
         scalar_floor = float(run_std)
         run_std_by_metric = {m: scalar_floor for m in metrics}
-    elif min(eval_runs.values()) >= 2:
+    elif min(eval_runs.values()) >= 2:  # noqa: PLR2004  # two runs before a run std exists
         run_std_by_metric = {m: _pooled_run_std(before, after, m) for m in metrics}
         run_std_source = (
             "eval_run" if any(value is not None for value in run_std_by_metric.values()) else None
@@ -511,7 +511,7 @@ def delta_report(
     warnings: list[str] = []
     not_comparable: list[str] = []
     if target_verdict == "moved_unreplicated" and headline_metric not in no_floor:
-        single = [side for side, n in eval_runs.items() if n < 2]
+        single = [side for side, n in eval_runs.items() if n < 2]  # noqa: PLR2004  # two runs before a run std exists
         where = "each side" if len(single) != 1 else f"the {single[0]} side"
         warnings.append(
             f"One eval run on {where}, so this could be noise. Run each side three times with "
@@ -607,7 +607,7 @@ def delta_report(
                 f"OVER-OPTIMIZED: {proxy_key} up {proxy_result['delta']:+.3f} ({level:.0%} "
                 f"{pspan}) while {headline_name} {headline_for_proxy['delta']:+.3f} "
                 f"({level:.0%} {tspan}): the policy learned something the target does not "
-                "credit (rlhf-book ch. 14)"
+                "credit (rlhfbook.com/c/17-over-optimization.html)"
             )
     headline_noise = results[headline_metric]["noise_band"]
     if headline_noise is not None and target_verdict == "within_eval_noise" and target_result:
@@ -1011,7 +1011,7 @@ def format_delta_report(report: dict[str, Any]) -> str:
         )
         per_metric = ", per metric below" if len(set(floors.values())) > 1 else ""
         lines.append(f"eval noise: {head} ({report['noise_rule']}; {source}{per_metric})")
-    if report.get("n_metrics", 0) >= 2 and report.get("family_error") is not None:
+    if report.get("n_metrics", 0) >= 2 and report.get("family_error") is not None:  # noqa: PLR2004  # a family needs two metrics
         lines.append(
             f"family error: {report['n_metrics']} metrics at {level:.0%}, up to "
             f"{report['family_error']:.0%} "

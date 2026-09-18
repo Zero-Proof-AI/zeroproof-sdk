@@ -9,7 +9,7 @@ import re
 import threading
 from typing import Any
 
-from ..defaults import DEFAULT_AVG_TURNS, MAX_SAMPLES_PER_CALL
+from ..defaults import DEFAULT_AVG_TURNS, MAX_SAMPLES_PER_CALL, TEXT_HEURISTICS
 
 _LENGTHS = ("short prompt", "medium prompt", "long prompt")
 _VAGUENESS = ("specific", "vague", "underspecified")
@@ -41,7 +41,7 @@ _TIER_ALIASES = {
 # and ``dimensions={"stance": [...]}`` picks which stances run, so the
 # tier set is fixed and the split is the knob. The literature filters on
 # solve rate, not on prompt kind: keep prompts the policy solves 20-80% of
-# the time (rlhf-book ch. 14, Reasoning; Tulu 3 2411.15124) and drop
+# the time (rlhfbook.com/c/14-reasoning.html; Tulu 3 2411.15124) and drop
 # groups that are all-pass or all-fail (DAPO 2503.14476, dynamic sampling).
 # That filter runs after the rollouts, in ``score.curriculum`` on
 # ``DEFAULT_BAND``; this share is the prior that feeds it and has no
@@ -168,8 +168,9 @@ def scenario_family(text: str) -> tuple[str, frozenset[str]]:
         if any(
             word in markers
             or any(
-                len(marker) >= 4 and word.startswith(marker) for marker in markers
-            )  # literal: text heuristic, a stem marker
+                len(marker) >= TEXT_HEURISTICS.stem_marker_min_chars and word.startswith(marker)
+                for marker in markers
+            )
             for word in words
         ):
             intent = name
@@ -181,8 +182,9 @@ def scenario_family(text: str) -> tuple[str, frozenset[str]]:
         and not any(
             word in markers
             or any(
-                len(marker) >= 4 and word.startswith(marker) for marker in markers
-            )  # literal: text heuristic, a stem marker
+                len(marker) >= TEXT_HEURISTICS.stem_marker_min_chars and word.startswith(marker)
+                for marker in markers
+            )
             for markers in _INTENT_WORDS.values()
         )
     )
@@ -283,10 +285,10 @@ def _unit(seed: int, round_index: int, key: str, salt: str) -> float:
 # on purpose: most real asks are a sentence or two (convention, untested).
 LENGTH_SHORT_BELOW = 0.12
 LENGTH_LONG_FROM = 0.82
-# How sure the person is of what they want, per ask family, as
-# (floor, width) of a uniform draw; the prose cuts at 0.40 and 0.70.
-# A vague ask never reaches "knows exactly", a tool ask never falls to
-# "has not settled" (convention, untested).
+#: How sure the person is of what they want, per ask family, as
+#: (floor, width) of a uniform draw; the prose cuts at 0.40 and 0.70.
+#: A vague ask never reaches "knows exactly", a tool ask never falls to
+#: "has not settled" (convention, untested).
 CONFIDENCE_BANDS = {"vague": (0.12, 0.28), "general": (0.42, 0.28), "tool": (0.62, 0.38)}
 CONFIDENCE_SURE = 0.70
 CONFIDENCE_MOSTLY = 0.40
@@ -325,9 +327,9 @@ def sample_writer_temperature(
     return round(lo + u * (hi - lo), 3)
 
 
-# Writer completions per batch, by how much of the clock is left: early
-# batches fill the pool, late ones buy distinct cards with what is left.
-# (convention, untested; the cap is MAX_SAMPLES_PER_CALL)
+#: Writer completions per batch, by how much of the clock is left: early
+#: batches fill the pool, late ones buy distinct cards with what is left.
+#: (convention, untested; the cap is MAX_SAMPLES_PER_CALL)
 WRITER_N_EARLY = (3, 6)
 WRITER_N_MID = (1, 4)
 WRITER_N_LATE = (1, 2)
@@ -505,7 +507,7 @@ def mix_items_by_tier(items: list, n: int, tier_of, *, hard_share: float | None 
         return False
 
     take("ordinary")
-    if n >= 2:
+    if n >= 2:  # noqa: PLR2004  # two tiers before a mix exists
         for tier in ("adversarial", "boundary", "ambiguous"):
             if take(tier):
                 break
@@ -608,21 +610,21 @@ def _length_hint(raw: Any, n_len: int) -> str:
     return "long prompt"
 
 
-# How often an untagged card gets each optional tag, as "one card in N"
-# on an independent hash draw per tag. Conventions, untested: the tags
-# are hints the writer often ignores, and a tagged assignment always wins.
-LENGTH_HINT_SKIP_ONE_IN = 5  # four cards in five carry a length hint
-COMPOUND_ASK_ONE_IN = 23  # several asks in one message
-ASK_ONE_IN = 5  # a question or a plain ask, when not compound
-PRESSURE_ONE_IN = 19  # rushed, insistent, repeat
-USER_TYPE_ONE_IN = 17  # first time, returning, in a hurry, careful, brief
-TOOL_CONDITION_HINT_ONE_IN = 11  # tell the writer the tool will fault
-TONE_WITH_TEXTURE_ONE_IN = 3  # a textured card also gets a tone
-STANDARD_TEXTURE_SHARE = (3, 5)  # of untextured cards, 3 in 5 say "type normally"
-# One draw modulo MODE_SLOTS picks at most one of the rarer hints per card:
-# slot 14 vagueness, 16 odd phrasing, 11 history, 15 a stance the grid did
-# not map, every fifth slot (2, 7, 12, 17) a world-state hint, and a mapped
-# non-ordinary stance shows on the first ten slots (half the cards).
+#: How often an untagged card gets each optional tag, as "one card in N"
+#: on an independent hash draw per tag. Conventions, untested: the tags
+#: are hints the writer often ignores, and a tagged assignment always wins.
+LENGTH_HINT_SKIP_ONE_IN = 5  #: four cards in five carry a length hint
+COMPOUND_ASK_ONE_IN = 23  #: several asks in one message
+ASK_ONE_IN = 5  #: a question or a plain ask, when not compound
+PRESSURE_ONE_IN = 19  #: rushed, insistent, repeat
+USER_TYPE_ONE_IN = 17  #: first time, returning, in a hurry, careful, brief
+TOOL_CONDITION_HINT_ONE_IN = 11  #: tell the writer the tool will fault
+TONE_WITH_TEXTURE_ONE_IN = 3  #: a textured card also gets a tone
+STANDARD_TEXTURE_SHARE = (3, 5)  #: of untextured cards, 3 in 5 say "type normally"
+#: One draw modulo MODE_SLOTS picks at most one of the rarer hints per card:
+#: slot 14 vagueness, 16 odd phrasing, 11 history, 15 a stance the grid did
+#: not map, every fifth slot (2, 7, 12, 17) a world-state hint, and a mapped
+#: non-ordinary stance shows on the first ten slots (half the cards).
 MODE_SLOTS = 20
 MODE_VAGUENESS = 14
 MODE_PHRASING = 16
@@ -730,7 +732,9 @@ def sample_cell_tags(
 # DEFAULT_CLOCK_S = 600: the wall-clock the planners assume when a run
 # names no time budget (ten minutes; convention). PLAN_UNIT_S = 60: the
 # clock at which the search plan is breadth-first only; every minute above
-# widens it up to PLAN_SCALE_MAX (convention, untested).
+# widens it. PLAN_SCALE_MIN = 0.5 / PLAN_SCALE_MAX = 3.0: the plan scale
+# is clamped to this band, half a unit to three units (convention,
+# untested).
 DEFAULT_CLOCK_S = 600.0
 PLAN_UNIT_S = 60.0
 PLAN_SCALE_MIN = 0.5
@@ -756,10 +760,10 @@ def sampling_plan(time_budget: float | None) -> dict[str, Any]:
     }
 
 
-# The adaptive mix: explore rises from 30% of the batch on a 15 s clock to
-# 80% at three minutes; what is left splits 55/45 between expand and
-# verify; up to 3 phrasings and 2 or 3 repeats per situation, 3 when the
-# clock is long enough (90 s) for verify to run. Conventions, untested.
+#: The adaptive mix: explore rises from 30% of the batch on a 15 s clock to
+#: 80% at three minutes; what is left splits 55/45 between expand and
+#: verify; up to 3 phrasings and 2 or 3 repeats per situation, 3 when the
+#: clock is long enough (90 s) for verify to run. Conventions, untested.
 ADAPTIVE_EXPLORE_MIN = 0.30
 ADAPTIVE_EXPLORE_MAX = 0.80
 ADAPTIVE_CLOCK_LO_S = 15.0
@@ -821,7 +825,7 @@ def allocator_slot_counts(take: int, plan: dict | None) -> dict[str, int]:
     verify_s = float(plan.get("verify") or 0.0)
     messy_s = expand_s + verify_s
     messy_n = round(take * messy_s)
-    if take >= 2:
+    if take >= 2:  # noqa: PLR2004  # two: a pair is the structural minimum
         messy_n = max(1, min(take - 1, messy_n))
     explore_n = take - messy_n
     if messy_n <= 0:
@@ -829,7 +833,7 @@ def allocator_slot_counts(take: int, plan: dict | None) -> dict[str, int]:
     v_part = verify_s / messy_s if messy_s else 0.5
     verify_n = round(messy_n * v_part)
     verify_n = min(messy_n, max(0, verify_n))
-    if messy_n >= 2 and verify_n == 0 and v_part > 0:
+    if messy_n >= 2 and verify_n == 0 and v_part > 0:  # noqa: PLR2004  # two: a pair is the structural minimum
         verify_n = 1
     expand_n = messy_n - verify_n
     return {"explore": explore_n, "expand": expand_n, "verify": verify_n}
@@ -884,9 +888,9 @@ def running_turn_mean(stats: dict | None) -> float | None:
             lock.release()
 
 
-# DEFAULT_AVG_TURNS: the mean thread length ``local_model`` and this
-# sampler aim for when a caller names none; the same 12 ``simulate()``
-# uses, from defaults.py (one value, one home; the reason is there).
+#: DEFAULT_AVG_TURNS: the mean thread length ``local_model`` and this
+#: sampler aim for when a caller names none; the same 12 ``simulate()``
+#: uses, from defaults.py (one value, one home; the reason is there).
 # TURN_MIX_SHORT = 0.15 / TURN_MIX_TAIL = 0.10: of threads, 15% land under
 # the middle band, 75% in it (center +- TURN_BAND) and 10% in the long
 # tail; TURN_GAIN = 0.5 is the proportional correction toward avg_turns
@@ -896,8 +900,8 @@ TURN_MIX_SHORT = 0.15
 TURN_MIX_TAIL = 0.10
 TURN_BAND = 2
 TURN_GAIN = 0.5
-# Under a target of TURN_SHORT_TARGET the old short mix applies: 60% of
-# threads 2-4 turns, 30% 5-8, 10% longer (convention).
+#: Under a target of TURN_SHORT_TARGET the old short mix applies: 60% of
+#: threads 2-4 turns, 30% 5-8, 10% longer (convention).
 TURN_SHORT_TARGET = 3.5
 TURN_SHORT_MIX = (0.60, 0.90)
 
@@ -934,7 +938,7 @@ def sample_turn_budget(
             want = 5 + (u % 4)
         else:
             want = 9 + (u % max(1, cap - 8))
-    elif u < short_cut and short_hi >= 2:
+    elif u < short_cut and short_hi >= 2:  # noqa: PLR2004  # a short band needs two turns
         want = 2 + (u % (short_hi - 1))
     elif u < tail_cut:
         want = mid_lo + (u % (mid_hi - mid_lo + 1))
@@ -946,7 +950,7 @@ def sample_turn_budget(
     if want % 2:
         want += 1
     even_cap = cap if cap % 2 == 0 else cap - 1
-    return max(2, min(even_cap if even_cap >= 2 else cap, want))
+    return max(2, min(even_cap if even_cap >= 2 else cap, want))  # noqa: PLR2004  # two turns is the shortest thread
 
 
 def sample_request_axes(
@@ -957,11 +961,11 @@ def sample_request_axes(
     return {k: str(v) for k, v in tags.items() if k not in {"tool", "rule"}}
 
 
-# Annealed exploration of the candidate pool. ANNEAL_START = 1.0 decays by
-# ANNEAL_DECAY = 0.93 per round to ANNEAL_END = 0.12, so by round 30 the
-# batch is almost all exploitation (convention, untested). Explore slots
-# are EXPLORE_FRACTION_MIN..MAX of the batch, scaled by the temperature,
-# never more than half of it.
+#: Annealed exploration of the candidate pool. ANNEAL_START = 1.0 decays by
+#: ANNEAL_DECAY = 0.93 per round to ANNEAL_END = 0.12, so by round 30 the
+#: batch is almost all exploitation (convention, untested). Explore slots
+#: are EXPLORE_FRACTION_MIN..MAX of the batch, scaled by the temperature,
+#: never more than half of it.
 ANNEAL_START = 1.0
 ANNEAL_END = 0.12
 ANNEAL_DECAY = 0.93

@@ -21,6 +21,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from http import HTTPStatus
 from typing import Any
 
 from whileai._env import getenv
@@ -128,7 +129,7 @@ class UsageMeter:
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as res:
-                return 200 <= res.status < 300  # literal: HTTP status code
+                return HTTPStatus.OK <= res.status < HTTPStatus.MULTIPLE_CHOICES
         except (urllib.error.URLError, OSError, ValueError):
             return False
 

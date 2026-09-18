@@ -70,7 +70,8 @@ _VALID_STATUSES = ("ok", "missing_reward", "invalid_result", "error", "timeout")
 # reply being the longer one in three quarters of eight or more pairs is
 # flagged as a length confound; LENGTH_CONFOUND_ALL_FROM = 3: in every pair
 # once there are three, since a total confound is one at any size
-# (rlhf-book ch. 8). The numbers are a convention, untested.
+# (length is the confound rlhfbook.com/c/07-reward-models.html tells a
+# judge to ignore). The numbers are a convention, untested.
 LENGTH_CONFOUND_MIN_PAIRS = 8
 LENGTH_CONFOUND_SHARE = 0.75
 LENGTH_CONFOUND_ALL_FROM = 3

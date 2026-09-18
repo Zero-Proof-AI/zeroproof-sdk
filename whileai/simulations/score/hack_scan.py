@@ -57,6 +57,9 @@ from ..defaults import ALPHA, RL_ROLLOUTS_PER_ASK, ROLLOUTS_PER_TASK
 from .hygiene import assistant_turns, is_truncated, reply_length, tool_calls
 from .optimize import _messages
 
+#: Collinear feature names shown in the degenerate-regime note before "and N more".
+_COLLINEAR_SHOWN = 4
+
 # DEFAULT_TOP_K = 200: auto-tier vocabulary, the most common words and
 # word pairs. Enough to hold every delimiter and rubric word seen in the
 # signal sweeps while a pass over a few thousand rollouts stays under a
@@ -415,7 +418,7 @@ def hack_scan(
     for i, g in enumerate(group_of_row):
         members[g].append(i)
     group_size = [len(m) for m in members]
-    multi = [g for g in range(n_groups) if group_size[g] >= 2]
+    multi = [g for g in range(n_groups) if group_size[g] >= 2]  # noqa: PLR2004  # a group of one carries no contrast
     sizes = sorted(group_size[g] for g in multi)
     base["n_groups"] = n_groups
     base["n_groups_multi"] = len(multi)
@@ -620,7 +623,7 @@ def hack_scan(
     # same behavior, which the ranking found), so the trajectory variety
     # has to be missing too.
     collinear = [x["name"] for x in listed if abs(x["rho"]) >= DEGENERATE_RHO]
-    degenerate = len(collinear) >= 2 and base["distinct_per_ask"] < MIN_DISTINCT_PER_ASK
+    degenerate = len(collinear) >= 2 and base["distinct_per_ask"] < MIN_DISTINCT_PER_ASK  # noqa: PLR2004  # collinear needs a pair
     base["degenerate"] = degenerate
     base["collinear"] = collinear
     # e: the reward pays for the endorsed behavior (positive). An endorsed
@@ -641,9 +644,9 @@ def hack_scan(
     if degenerate:
         base["regime"] = "degenerate"
         base["top_feature"] = None
-        shown = ", ".join(f'"{name}"' for name in collinear[:4])
-        if len(collinear) > 4:  # literal: examples shown in a message
-            shown += f", and {len(collinear) - 4} more"
+        shown = ", ".join(f'"{name}"' for name in collinear[:_COLLINEAR_SHOWN])
+        if len(collinear) > _COLLINEAR_SHOWN:
+            shown += f", and {len(collinear) - _COLLINEAR_SHOWN} more"
         warnings.append(
             f"too few distinct trajectories to separate features: {base['distinct_per_ask']} "
             f"distinct rollout(s) per ask at the median leaves {len(collinear)} feature(s) "

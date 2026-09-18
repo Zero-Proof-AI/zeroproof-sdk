@@ -14,6 +14,10 @@ from typing import Any
 
 from .base import Verifier
 
+#: Two floats closer than this are the same number: rounding in a printed
+#: answer, not a wrong answer. (convention, untested)
+NUMERIC_TOLERANCE = 1e-6
+
 _BOXED = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
 _ANSWER_IS = re.compile(r"(?:answer|result|solution)\s*(?:is|=|:)\s*\$?([^\n.]+)", re.I)
 _NUMBER = re.compile(r"-?\d[\d,]*\.?\d*(?:[eE][-+]?\d+)?")
@@ -147,7 +151,5 @@ class MathEqual(Verifier):
             return 0, f"not equal: {got!r} vs {want!r}"
         gf, wf = _to_float(got), _to_float(want)
         if gf is not None and wf is not None:
-            return (
-                1 if abs(gf - wf) <= 1e-6 else 0
-            ), f"numeric {gf} vs {wf}"  # literal: float epsilon, numeric equality
+            return (1 if abs(gf - wf) <= NUMERIC_TOLERANCE else 0), f"numeric {gf} vs {wf}"
         return 0, f"cannot compare {got!r} to {want!r}"

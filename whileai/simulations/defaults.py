@@ -23,8 +23,12 @@ section.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
-from typing import Any
+from types import MappingProxyType
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
 
 # ---------------------------------------------------------------------
 # shared across stages
@@ -43,10 +47,11 @@ DEFAULT_BUDGET = 1000
 DEFAULT_CONCURRENCY = 32
 
 # PASS_THRESHOLD = 0.5: a reward under this is a failure. The outcome
-# label is binary, r in {0, 1} (rlhf-book ch. 7, outcome reward models;
-# ch. 14, verifiable rewards), so 0.5 is its midpoint and a partial
-# rubric score (or the conduct advisory 0.5 for a truncated reply) rounds
-# to the nearer verdict. No source names another cut. The run loop's
+# label is binary, r in {0, 1} (rlhfbook.com/c/07-reward-models.html,
+# outcome reward models; rlhfbook.com/c/14-reasoning.html, verifiable
+# rewards gate on all assertions passing), so 0.5 is its midpoint and a
+# partial rubric score (or the conduct advisory 0.5 for a truncated reply)
+# rounds to the nearer verdict. No source names another cut. The run loop's
 # graded-failure gate, score/ audits and the exporters count fails the
 # same way; import this rather than writing 0.5 again.
 PASS_THRESHOLD = 0.5
@@ -80,6 +85,11 @@ FAULT_STATUSES = frozenset({"error", "timeout", "not_found", "denied", "malforme
 # worked (the run's own vocabulary, #261).
 OK_STATUSES = frozenset({"ok", "success"})
 
+# MESSAGE_EXAMPLES = 5: items a warning or an error names before ", ..."
+# (unknown ids, bad rows, tools with no result shape); enough to spot the
+# pattern without the message becoming the list. (convention)
+MESSAGE_EXAMPLES = 5
+
 # LEAK_MIN_QUOTE_CHARS = 12: the shortest run of characters that counts as
 # quoting the privileged block. Shorter matches are common words.
 # Mirrors ``score.privileged.leak_report(min_len=)``. (convention, untested)
@@ -90,15 +100,20 @@ LEAK_MIN_QUOTE_CHARS = 12
 # ---------------------------------------------------------------------
 
 # RL_ROLLOUTS_PER_PROMPT = 8: k under mode="rl". A grouped update (GRPO,
-# rlhf-book ch. 11) needs enough samples per prompt for the group mean to
-# be a usable baseline. 8 is what Dr. GRPO trains with (arXiv 2503.20783,
-# 8 responses per question) and the agentic-RL recipe in arXiv 2603.21972
-# (G=8); DAPO (arXiv 2503.14476), ProRL (arXiv 2505.24864) and Skywork-OR1
-# (arXiv 2505.22312) use 16. The package differs from the 16 camp on
-# purpose: past K=4 resampling cuts eval variance by less than a sixth
-# more (Miller, arXiv 2411.00640), so 8 is a first look at half the
-# cost; raise repeats= to 16 for a training set on hard prompts, where
-# 8 leaves more zero-variance groups.
+# rlhfbook.com/c/11-policy-gradients.html) needs enough samples per
+# prompt for the group mean to be a usable baseline. 8 is what Dr. GRPO
+# trains with (arXiv 2503.20783, 8 responses per question) and the
+# agentic-RL recipe in arXiv 2603.21972 (G=8, section 4.1); DAPO (arXiv
+# 2503.14476), ProRL (arXiv 2505.24864) and Skywork-OR1 (arXiv
+# 2505.22312) use 16. The package differs from the 16 camp on purpose.
+# The only measured curve is for eval resampling, not group size: Miller
+# (arXiv 2411.00640, section 3.1) shows K=2 samples per question cut the
+# variance of an eval score by a third and K=4 by a half in the
+# uniform-difficulty example, with diminishing returns after; that the
+# next doubling buys under a sixth more is derived from the same 1/K
+# shape, not stated there. So 8 is a first look at half the 16 cost;
+# raise repeats= to 16 for a training set on hard prompts, where 8
+# leaves more zero-variance groups.
 RL_ROLLOUTS_PER_PROMPT = 8
 
 # SFT_PHRASINGS_PER_SITUATION = 3: n under mode="sft". Three wordings of
@@ -121,8 +136,9 @@ DEFAULT_PROBE = 2
 # failure rate: tagged cells are a small slice of the grid (SUCCESS_SHARE
 # in generate/scenarios.py flips nine in ten to success first), so rows
 # with a fault stay under about 10% of a run at 0.5, inside the band
-# training-time injection is stable in (arXiv 2603.21972: above 5-10%
-# per call destabilised a 3B agent; AgentCE-Bench, arXiv 2604.06111,
+# training-time injection is stable in (arXiv 2603.21972, section 4.6: a
+# 3B agent held its test score with tool failures injected at up to 5%
+# per call and degraded at 10%; AgentCE-Bench, arXiv 2604.06111,
 # evaluates p in {0, 0.1, 0.3}). Independent of failure mutation (that is
 # a purposeful-fail arm, this is tool faults). ``fault_rate=`` or
 # ``risk=`` moves it; 0 disables injection. (convention inside the band,
@@ -130,9 +146,10 @@ DEFAULT_PROBE = 2
 DEFAULT_FAULT_RATE = 0.5
 
 # RL_FAULT_RATE = 0.8: the same share under mode="rl". RL raises it because
-# the faulted cells are where a base fails (rlhf-book ch. 14, difficulty
-# filtering) and PALADIN trains on an 80/20 mix of recovery-bearing to
-# clean traces (arXiv 2509.25238), which is the shape 0.8 gives the tagged
+# the faulted cells are where a base fails (rlhfbook.com/c/14-reasoning.html,
+# difficulty filtering) and PALADIN trains on an 80/20 composition of
+# recovery-bearing to clean traces (arXiv 2509.25238, appendix I.4: a
+# dataset mix, not a keep rate), which is the shape 0.8 gives the tagged
 # slice; the per-row rate stays inside the 2603.21972 / 2604.06111 band
 # for the same reason as above. Untested against 0.5 on a training run.
 RL_FAULT_RATE = 0.8
@@ -145,8 +162,8 @@ RL_FAULT_RATE = 0.8
 # 78% of threads reaching a third user turn at avg_turns 6 / 12 / 16.
 # Confirm-before-acting needs that third turn (ask, name the action and
 # ask, yes, act), so at 6 it is missing from over half the rows and no
-# selection downstream can recover it (rlhf-book ch. 14: a criterion every
-# rollout fails carries no gradient). The cost is about three agent calls
+# selection downstream can recover it (DAPO, arXiv 2503.14476: a group
+# whose rollouts all fail has zero advantage and no gradient). The cost is about three agent calls
 # per row instead of one (#299). The chat-assistant means in the
 # literature are lower (SimulatorArena, arXiv 2510.05444: 7.8 and 6.9
 # turns per human thread) but carry no confirm step; the caps sit well
@@ -163,7 +180,8 @@ DEFAULT_MIN_USER_TURNS = 1
 # below it every reply is cut mid-sentence and scores 0. (convention)
 AGENT_MAX_TOKENS_FLOOR = 64
 
-# DEFAULT_SEED = 0
+# DEFAULT_SEED = 0: the seed every draw starts from when simulate() is
+# given none; zero so two runs with no seed argument agree. (convention)
 DEFAULT_SEED = 0
 
 # DEFAULT_POOL_SIZE = 80: prompts the situation writer keeps per round
@@ -179,7 +197,9 @@ DEFAULT_WRITER_FLIGHT = 4
 # (convention, untested)
 DEFAULT_CARDS_PER_WAVE = 8
 
-# DEFAULT_COMPLETIONS_PER_REQUEST = 1
+# DEFAULT_COMPLETIONS_PER_REQUEST = 1: completions one writer request asks
+# for unless advanced completions_per_request raises it; one keeps a
+# request cheap to retry. (convention, untested)
 DEFAULT_COMPLETIONS_PER_REQUEST = 1
 
 # DEFAULT_EXTRA_CARDS = 1: spare cards per wave so a rejected card does not
@@ -295,6 +315,30 @@ TRANSIENT_BACKOFF_S = 0.4
 # with ``n``; the same cap run/ calls MAX_COMPLETIONS_PER_REQUEST (above),
 # so completions_per_request and the writer's ``n`` cannot drift apart.
 MAX_SAMPLES_PER_CALL = MAX_COMPLETIONS_PER_REQUEST
+# MIN_REPLY_TOKENS = 256: no request asks for fewer reply tokens than
+# this; the input is shrunk instead, because a reply cut under 256 tokens
+# is a fragment the junk gate drops anyway. Both HTTP backends read it
+# (convention, untested).
+MIN_REPLY_TOKENS = 256
+
+# SAMPLING_TEMPERATURE_MAX = 2.0: the ceiling every temperature knob is
+# validated against (user_temperature, the hosted trainer's rollout
+# temperature); the OpenAI-compatible chat API's own range is 0 to 2, and
+# above about 1.2 sampling is noise on every model measured (ProRL trains
+# at 1.2, arXiv 2505.24864). (the API's range)
+SAMPLING_TEMPERATURE_MAX = 2.0
+
+# LOCAL_MODEL_TEMPERATURE = 0.8: sampling temperature of a model-backed
+# rollout unless simulate(advanced={"temperature": ...}) says otherwise,
+# recorded on every row under ``sampling``. Inside the 0.7 to 1.0 band
+# rejection sampling is run at (rlhfbook.com/c/10-rejection-sampling.html,
+# "Implementation Details") and under the 1.0 RL rollouts use (DAPO
+# 2503.14476, group size 16); the agent benchmarks that want reproducible
+# scores run at 0 (tau-bench 2406.12045, tau2-bench 2506.07982), which is
+# what ``reproducible=`` and an explicit temperature are for. 0.8 within
+# the band is a convention. The monitor samples its holdout at the same
+# value (MONITOR_SAMPLE_TEMPERATURE).
+LOCAL_MODEL_TEMPERATURE = 0.8
 
 # ---------------------------------------------------------------------
 # generate/: context budgets (agents.py, generator.py)
@@ -317,8 +361,9 @@ CHARS_PER_TOKEN = 3
 
 # ALPHA = 0.05: two-sided false-positive rate behind every interval and
 # verdict. The convention the evaluation literature runs on (Miller 2024,
-# arXiv:2411.00640, section 5, plugs alpha=0.05 into its power formula;
-# rlhf-book ch. 16 reports 95% intervals). Untested against any other value.
+# arXiv:2411.00640, section 5, plugs alpha=0.05 into its power example).
+# rlhfbook.com/c/16-evaluation.html names no level. Untested against any
+# other value.
 ALPHA = 0.05
 # CI_LEVEL = 0.95: the interval every ``ci95`` key carries. ``1 - ALPHA`` so
 # the interval and the verdict agree: a delta whose interval excludes zero
@@ -331,8 +376,9 @@ CI_LEVEL = 1.0 - ALPHA
 Z_95 = 1.96
 # POWER = 0.8: the chance a holdout of the size ``holdout_size`` names
 # detects a real gain. beta = 0.20 is the example Miller 2024 (section 5)
-# and the classical power literature use; rlhf-book ch. 16 says the point
-# of a better eval is statistical power without naming a number.
+# and the classical power literature use; rlhfbook.com/c/16-evaluation.html
+# says the point of a better eval is statistical power when comparing
+# training runs, without naming a number.
 POWER = 0.8
 # BOOTSTRAP_DRAWS = 2000: resamples behind a percentile interval. Efron and
 # Tibshirani put the floor for percentile intervals at 1000; 2000 halves
@@ -346,8 +392,9 @@ BOOTSTRAP_DRAWS = 2000
 MIN_CI_TASKS = 3
 # MIN_RERUNS = 3: re-runs of one eval before ``run_std`` is read as a
 # spread. Two runs give one difference, not a distribution; three is the
-# fewest that give a sample sd with two degrees of freedom (rlhf-book
-# ch. 16 on re-run variance; convention on the count).
+# fewest that give a sample sd with two degrees of freedom
+# (rlhfbook.com/c/16-evaluation.html: a held-constant eval moves 0.25 to
+# 1.5 points between runs; convention on the count).
 MIN_RERUNS = 3
 # BASE_PASS_RATE = 0.6: the before-side pass rate ``holdout_size`` assumes
 # when no rows are given. The centre of the 20-80 difficulty band, where a
@@ -366,21 +413,24 @@ ROLLOUTS_PER_TASK = 4
 # ---------------------------------------------------------------------
 #
 # DIFFICULTY_BAND = (0.2, 0.8): keep tasks the current policy passes between
-# 20% and 80% of the time. rlhf-book ch. 14 ("Common Practices in Training
-# Reasoning Models"): difficulty filtering restricts RL prompts to those
+# 20% and 80% of the time. rlhfbook.com/c/14-reasoning.html ("Common
+# Practices in Training Reasoning Models"): difficulty filtering restricts
+# RL prompts to those
 # the starting model solves 20-80% of the time, measured from N=16
 # samples. DAPO (arXiv:2503.14476) is the online form: groups with
 # accuracy 0 or 1 are dropped from the batch (G=16). The band edges are a
 # reported practice, not an ablation, so every selector takes ``band=``.
 DIFFICULTY_BAND: tuple[float, float] = (0.2, 0.8)
 # DIFFICULTY_BAND_ROLLOUTS = 16: rollouts per task the band is measured
-# from in the sources above (rlhf-book ch. 14 N=16; DAPO G=16). Below it
+# from in the sources above (rlhfbook.com/c/14-reasoning.html N=16; DAPO
+# G=16). Below it
 # a task's band assignment carries a Wilson half-width near 0.3 at k=8.
 DIFFICULTY_BAND_ROLLOUTS = 16
 # REJECTION_SAMPLING_MIN_K = 10: completions per prompt a best-of-N pick
 # wants. Llama 3 (arXiv:2407.21783, section 4.2.2) samples K between 10 and
-# 30 per prompt; rlhf-book ch. 9 repeats the range. Fewer makes the pick a
-# filter, not a choice.
+# 30 per prompt; rlhfbook.com/c/10-rejection-sampling.html ("Implementation
+# Details": 10 to 30 or more completions per prompt) repeats the range.
+# Fewer makes the pick a filter, not a choice.
 REJECTION_SAMPLING_MIN_K = 10
 # RL_ROLLOUTS_PER_ASK = 8: the rollouts per ask ``recommend`` sizes an RL
 # run for; the same quantity as RL_ROLLOUTS_PER_PROMPT (mode="rl" k) under
@@ -393,7 +443,8 @@ RL_ROLLOUTS_PER_ASK = RL_ROLLOUTS_PER_PROMPT
 #
 # DECONTAM_NGRAM = 8: word n-gram behind the near-copy rule. Tulu 3
 # (arXiv:2411.15124) decontaminates on 8-gram overlap between training
-# prompts and evaluation prompts; rlhf-book ch. 16 cites the same rule.
+# prompts and evaluation prompts; rlhfbook.com/c/16-evaluation.html found
+# its own contaminations with the same 8-gram test.
 DECONTAM_NGRAM = 8
 # DECONTAM_OVERLAP = 0.8: share of a row's words one eval text has to
 # cover with shared 8-grams. The Llama 2 rule (80% of tokens). Tulu 3 uses
@@ -405,8 +456,10 @@ DECONTAM_OVERLAP = 0.8
 # SEMANTIC_SIMILARITY = 0.85: cosine at or above which two prompts read as
 # one task to an embedder. Read off BGE-small (unrelated prompts score
 # about 0.55 there, paraphrases above 0.85, #286). SemDeDup
-# (arXiv:2303.09540) removes pairs within eps 0.03 to 0.07 of each other
-# on CLIP and OPT embeddings (cosine 0.93 or higher); that is a duplicate
+# (arXiv:2303.09540) tunes its eps per dataset to hit a target size: the
+# eps 0.03 to 0.07 settings (cosine 0.93 or higher) are its LAION runs on
+# CLIP embeddings, and C4 on OPT embeddings needs different eps for the
+# same fraction kept (its figure A17). Either way that is a duplicate
 # threshold for pretraining text, not a paraphrase threshold for task
 # prompts, so this package sits lower and calibrates against the eval
 # set's own distinct-task similarity at run time.
@@ -417,9 +470,10 @@ SEMANTIC_SIMILARITY = 0.85
 # ---------------------------------------------------------------------
 #
 # MIN_GOLD = 50: human labels before a judge's accuracy number means
-# anything. rlhf-book ch. 7 ("Suggested Experiments"): a 50- to 200-example
-# held-out set is the useful size for tuning a reward model; below 50 the
-# Wilson interval on agreement is about +/-0.1 wide.
+# anything. rlhfbook.com/c/07-reward-models.html ("Suggested
+# Experiments"): a 50- to 200-example held-out set is the size it asks
+# for to evaluate a reward model; below 50 the Wilson interval on
+# agreement is about +/-0.1 wide.
 MIN_GOLD = 50
 # MAX_GOLD_ASK = 200: the most labels the trust report will ask a person
 # for before it says the judge itself is the problem (the top of the same
@@ -431,10 +485,11 @@ MAX_GOLD_ASK = 200
 # 80% agrees with people less than people do with each other.
 MIN_AGREEMENT = 0.8
 # MIN_KAPPA = 0.6: chance-corrected agreement floor. Landis and Koch (1977)
-# call 0.61-0.80 "substantial"; 0.6 is the bottom of that band. A 2025
-# sweep of 21 judges on MT-Bench measured kappa 0.38-0.51 against human
-# preference labels (arXiv:2606.19544), so this floor is demanding on
-# purpose: it asks for agreement beyond what raw accuracy hides.
+# call 0.61-0.80 "substantial"; 0.6 is the bottom of that band. A 2026
+# sweep of 21 judges (arXiv:2606.19544, run March to April 2026) measured
+# Cohen's kappa 0.376 to 0.511 against human preference labels on
+# MT-Bench, so this floor is demanding on purpose: it asks for agreement
+# beyond what raw accuracy hides.
 MIN_KAPPA = 0.6
 # JUDGE_CHECK_SAMPLE = 40: rows a judge check (perturbation, probes, the
 # verifier audit) re-judges by default. Enough that a 10% effect shows as
@@ -444,16 +499,17 @@ JUDGE_CHECK_SAMPLE = 40
 # LENGTH_GAP_FLAG = 0.15: judge pass rate gap between short and long
 # replies with the same human label that reads as length bias. Zheng et
 # al. (arXiv:2306.05685) found a 91% failure rate on a verbosity attack
-# for GPT-3.5 and 9% for GPT-4; a 2025 sweep (arXiv:2606.19544) measured
-# verbosity correlations under 0.011 on current judges. 15 points sits
-# between the two eras: a judge over it is behaving like a 2023 judge.
-# Convention on the exact number.
+# for GPT-3.5 and 9% for GPT-4; the 2026 sweep (arXiv:2606.19544) reports
+# verbosity bias under 0.011 on its own pairwise measure. Those two are
+# not on one scale (an attack failure rate against a bias coefficient),
+# so 0.15 is not read off either: it is a convention, a gap wide enough
+# to show as six flips on a JUDGE_CHECK_SAMPLE of 40.
 LENGTH_GAP_FLAG = 0.15
 # FLIP_FLAG = 0.10: share of verdicts that change on an identical re-judge,
 # on appended filler, or under a probe, before the judge is called
-# exploitable. Test-retest consistency of current judges is 0.89-0.99
-# (arXiv:2606.19544), so a tenth of verdicts moving is far outside the
-# measured range. Convention on the exact number.
+# exploitable. Test-retest consistency of current judges is 0.889 to
+# 0.992 on MT-Bench (arXiv:2606.19544), so a tenth of verdicts moving is
+# far outside the measured range. Convention on the exact number.
 FLIP_FLAG = 0.10
 # POSITION_FLIP_FLAG = 0.2: share of pairs a pairwise judge decides
 # differently when A and B are swapped before its position bias is a
@@ -495,8 +551,9 @@ JUDGE_POLICY_CHARS = 2000
 # shape. Raise it for a judge asked to explain at length.
 JUDGE_MAX_TOKENS = 120
 # JUDGE_TEMPERATURE = 0.0: a judge is read at zero for stable ratings
-# (rlhf-book ch. 7, LLM-as-judge prompt rules; Zheng et al.
-# arXiv:2306.05685 use temperature 0 for judging).
+# (rlhfbook.com/c/07-reward-models.html, LLM-as-a-judge: "a common trick
+# to improve the robustness of LLM-as-a-judge workflows is to use a
+# sampling temperature of 0").
 JUDGE_TEMPERATURE = 0.0
 
 # ---------------------------------------------------------------------
@@ -534,14 +591,31 @@ HACK_THRESHOLD = 0.3
 # stated diff, never a drive-by.
 
 # WORLD_DEFAULT_FAULT_MODE = "timeout": the fault a plan gets when it names
-# none. Timeout is the most common runtime tool failure in the injection
-# benchmarks (first of six perturbation types in arXiv:2605.11928; first of
-# seven in arXiv:2606.01416); which mode a plan carries is decided upstream
-# by the tool_condition axis (generate/scenarios.py), not here.
+# none. Timeout is one of the six transition perturbations (runtime tool
+# errors: timeout, rate limit, auth error, 5xx, malformed, schema drift)
+# in arXiv:2605.11928 and among the orchestration failures arXiv:2606.01416
+# lists; neither ranks them, so the pick is a convention: the one failure
+# every tool can produce. Which mode a plan carries is decided upstream by
+# the tool_condition axis through WORLD_CONDITION_MODES (read by
+# generate/scenarios.py), not here.
 WORLD_DEFAULT_FAULT_MODE = "timeout"
+# WORLD_CONDITION_MODES = {timeout: timeout, ...}: the coverage grid's
+# tool_condition value -> the fault mode the plan carries. The four
+# shipped conditions map to the four shipped modes; a condition that is
+# itself a ``fault_modes`` key (one a caller added through
+# ``WorldOptions(fault_modes=)``) maps to that mode without an entry
+# here. (the run's own vocabulary)
+WORLD_CONDITION_MODES: Mapping[str, str] = MappingProxyType(
+    {
+        "timeout": "timeout",
+        "malformed_result": "malformed",
+        "stale_result": "stale",
+        "permission_denied": "permission_denied",
+    }
+)
 # WORLD_DEFAULT_FAULT_RATE = 1.0: a fault plan without a rate fires on every
 # call. The injection benchmarks fire at 100% per sample so every model is
-# tested at the same trajectory step (arXiv:2605.11928 §4); how often a
+# tested at the same trajectory step (arXiv:2605.11928 §4.3); how often a
 # situation carries a plan at all is ``simulate(fault_rate=)`` (default in
 # generate/scenarios.py, DEFAULT_FAULT_RATE), a separate dial.
 WORLD_DEFAULT_FAULT_RATE = 1.0
@@ -585,7 +659,9 @@ WORLD_CREATED_ID_MODULUS = 100_000
 # WORLD_ISSUED_ID_HEX = 12: hex characters in a world-issued id and in the
 # per-call digest. 48 bits: no collision in any run this package makes.
 WORLD_ISSUED_ID_HEX = 12
-# WORLD_REF_CHARS = 8: characters of the call digest echoed as ``ref``.
+# WORLD_REF_CHARS = 8: characters of the call digest echoed as ``ref``,
+# enough to tell two calls apart in a row and short enough to read.
+# (convention)
 WORLD_REF_CHARS = 8
 # WORLD_EXPRESSION_CHARS = 200: a calculator expression is echoed back cut
 # to this many characters, so a runaway argument cannot bloat a row.
@@ -595,9 +671,10 @@ WORLD_EXPRESSION_CHARS = 200
 WORLD_HINT_CHARS = 40
 # WORLD_SHELL_FLAVORS = 11: one shell call in this many is a permission
 # error, one a failing test run, one a merge conflict, one an ``ls``; the
-# rest pass. About a third of shell calls therefore fail, near the
-# per-call tool error rates the tau-bench family reports for weaker agents
-# (arXiv:2406.12045 reports pass^1 under 50% on retail). Convention.
+# rest pass. About a third of shell calls therefore fail. No benchmark
+# reports a per-call shell failure rate; tau-bench's task-level numbers
+# (gpt-4o pass^1 61.2 on retail and 35.2 on airline, arXiv:2406.12045
+# Table 2) say only that failure is common. Convention.
 WORLD_SHELL_FLAVORS = 11
 # WORLD_CI_FAIL_ONE_IN = 7: one CI listing in this many carries a failed
 # check. Convention, untested.
@@ -621,9 +698,9 @@ TRACE_EXEMPLARS_PER_TOOL = 3
 # number is convention.
 TRACE_EXEMPLAR_MAX_CHARS = 500
 # TRACE_EXEMPLAR_STRING_CHARS = 160: a string inside an exemplar is cut here
-# with an ellipsis; TRACE_EXEMPLAR_LIST_ITEMS = 2 and
-# TRACE_EXEMPLAR_DICT_KEYS = 12 bound the nesting so the 500-char cap is
-# reachable by trimming, not by dropping the whole payload. Convention.
+# with an ellipsis. TRACE_EXEMPLAR_LIST_ITEMS = 2 / TRACE_EXEMPLAR_DICT_KEYS
+# = 12: bound the nesting so the 500-char cap is reachable by trimming,
+# not by dropping the whole payload. (convention)
 TRACE_EXEMPLAR_STRING_CHARS = 160
 TRACE_EXEMPLAR_LIST_ITEMS = 2
 TRACE_EXEMPLAR_DICT_KEYS = 12
@@ -654,14 +731,16 @@ TRACE_EXPLORATION_MAX = 0.6
 # TRACE_STATE_PRIORITY = {new: 1.0, ...}: status weight in the region
 # priority. New and persistent failures draw first; a solved region keeps a small weight so
 # it is re-checked. Convention, untested.
-TRACE_STATE_PRIORITY = {
-    "new": 1.0,
-    "persistent": 0.9,
-    "uncertain": 0.35,
-    "improving": 0.2,
-    "solved": 0.05,
-    "passing": 0.05,
-}
+TRACE_STATE_PRIORITY: Mapping[str, float] = MappingProxyType(
+    {
+        "new": 1.0,
+        "persistent": 0.9,
+        "uncertain": 0.35,
+        "improving": 0.2,
+        "solved": 0.05,
+        "passing": 0.05,
+    }
+)
 # TRACE_SUPPORT_SATURATION = 6: failures at which the support factor
 # reaches 1.0 (it starts at 0.5 with none). Convention, untested.
 TRACE_SUPPORT_SATURATION = 6
@@ -669,9 +748,13 @@ TRACE_SUPPORT_SATURATION = 6
 # rate, so a region that never fails still draws a quarter of the weight a
 # region that always fails does. Convention, untested.
 TRACE_RATE_FLOOR = 0.25
-# TRACE_REPORT_LIST_CAP = 5: names shown per axis in the text report.
+# TRACE_REPORT_LIST_CAP = 5: names shown per axis in the text report,
+# enough to see the leaders without the report becoming the list.
+# (convention, untested)
 TRACE_REPORT_LIST_CAP = 5
-# TRACE_TASK_HASH_CHARS = 200: prompt characters in the split hash.
+# TRACE_TASK_HASH_CHARS = 200: prompt characters in the split hash; two
+# prompts that agree on their first 200 characters are one task for the
+# train/pseudo-production split. (convention, untested)
 TRACE_TASK_HASH_CHARS = 200
 
 # ---------------------------------------------------------------------
@@ -692,7 +775,8 @@ PLATFORM_CREDENTIAL_TTL_S = 3600
 # PLATFORM_ERROR_DETAIL_CHARS = 400: gate error body echoed in the
 # exception. Enough for the gate's one-line reason; convention.
 PLATFORM_ERROR_DETAIL_CHARS = 400
-# PLATFORM_STUDIO_MAX_ROWS = 20000: the studio import endpoint's cap.
+# PLATFORM_STUDIO_MAX_ROWS = 20000: the studio import endpoint's cap; a
+# larger push is refused client side with the number. (the gate's limit)
 PLATFORM_STUDIO_MAX_ROWS = 20_000
 # PLATFORM_HF_DATASET_TIMEOUT_S = 600 / PLATFORM_HF_MODEL_TIMEOUT_S = 900:
 # how long ``hf_publish`` / ``hf_publish_run`` wait for the Hugging Face
@@ -718,9 +802,11 @@ PLATFORM_TRACE_PAGE_SIZE = 200
 # noise floors.
 PLATFORM_HOLDOUT_PROVE_EFFECT = 0.05
 # PLATFORM_REWARD_MODEL_BATCH = 256: rows per scoring request to a hosted
-# reward model; the gate's request cap.
+# reward model; the gate's request cap, so a batch never 413s. (the gate's
+# limit)
 PLATFORM_REWARD_MODEL_BATCH = 256
-# PLATFORM_UNKNOWN_IDS_SHOWN = 3: unknown trace ids named in an error.
+# PLATFORM_UNKNOWN_IDS_SHOWN = 3: unknown trace ids named in an error
+# before ", ..."; enough to spot a typo pattern. (convention)
 PLATFORM_UNKNOWN_IDS_SHOWN = 3
 
 # ---------------------------------------------------------------------
@@ -759,10 +845,11 @@ TRAINING_ERROR_CHARS = 2000
 #   ProRL at 16 (arXiv:2505.24864). 2 is the structural minimum (one
 #   advantage needs a pair); 32 is the hosted trainer's memory cap.
 # learning_rate: RL runs at 1e-6 (DAPO, Dr. GRPO) to 2e-6 (ProRL); SFT one
-#   to two orders below pretraining, 1e-5 to 8e-5 full fine-tune
-#   (rlhfbook.com/c/09-instruction-tuning.html, "Implementation Details"),
-#   2e-4 for a LoRA adapter (LoRA arXiv:2106.09685 tunes at a higher rate
-#   than full fine-tuning). DPO wants "surprisingly low learning rates"
+#   to two orders below pretraining: 1e-5 (OLMo 2) to 5e-5 to 8e-5 (OLMo 3)
+#   full fine-tune (rlhfbook.com/c/09-instruction-tuning.html,
+#   "Implementation Details"; the range stitches two models' settings, it
+#   is not one recipe), 2e-4 for a LoRA adapter (LoRA arXiv:2106.09685
+#   tunes at a higher rate than full fine-tuning). DPO wants "surprisingly low learning rates"
 #   (rlhfbook.com/c/12-direct-alignment.html); the DPO paper used 1e-6
 #   (arXiv:2305.18290, App. B).
 # beta: the KL coefficient. DAPO, Dr. GRPO and CISPO drop it (0.0;
@@ -773,9 +860,13 @@ TRAINING_ERROR_CHARS = 2000
 #   16384 cap (arXiv:2503.14476); the hosted trainer serves up to 4096.
 # temperature: ProRL samples at 1.2 (arXiv:2505.24864); rejection sampling
 #   runs 0.7 to 1.0 (rlhfbook.com/c/10-rejection-sampling.html).
-# clip (host key epsilonHigh): PPO/GRPO clip 0.2 (rlhfbook.com/c/11-
-#   policy-gradients.html); DAPO clip-higher 0.28, ProRL 0.4.
-TRAINING_KNOBS: dict[str, dict[str, Any]] = {
+# clip (host key epsilonHigh): PPO/GRPO clip 0.2
+#   (rlhfbook.com/c/11-policy-gradients.html shows ``eps = 0.2`` only as
+#   an example in its code listing, not as a recommendation); DAPO
+#   clip-higher 0.28, ProRL 0.4.
+# Read-only: the table and every row are MappingProxyType, so a caller
+# cannot widen a range by mutating it.
+_TRAINING_KNOB_TABLE: dict[str, dict[str, Any]] = {
     # lo/hi: accepted range; open_lo/open_hi: the endpoint itself is
     # rejected; range: the words the error uses; ref: the cited value.
     "generations": {
@@ -843,10 +934,14 @@ TRAINING_KNOBS: dict[str, dict[str, Any]] = {
         "why": "the upper clip (host key epsilonHigh); 0.2 PPO, 0.28 DAPO clip-higher, 0.4 ProRL",
     },
 }
+TRAINING_KNOBS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
+    {name: MappingProxyType(row) for name, row in _TRAINING_KNOB_TABLE.items()}
+)
 # TRAINING_LORA_RANK = 16 / TRAINING_LORA_ALPHA = 32: reference adapter
-# shape. LoRA tunes r=4 to 8 on the attention projections and sets alpha
-# to the first r tried (arXiv:2106.09685 §7.1); alpha=2r is the PEFT
-# convention. Advisory: the hosted trainer owns its own values.
+# shape. LoRA sets alpha to the first r tried and does not tune it
+# (arXiv:2106.09685 §4.1) and finds r=4 to 8 on the attention projections
+# enough (§7.1); alpha=2r is the PEFT convention. Advisory: the hosted
+# trainer owns its own values.
 TRAINING_LORA_RANK = 16
 TRAINING_LORA_ALPHA = 32
 # TRAINING_BATCH_PROMPTS = 256: reference prompt batch. OLMo 2 post-trains
@@ -863,27 +958,32 @@ TRAINING_SFT_EPOCHS = 2
 #
 # Reachable through ``HackMonitor(...)`` keywords.
 
-# MONITOR_N_PROMPTS = 32 / MONITOR_K = 4: holdout asks sampled per eval and
-# completions per ask (128 rollouts). At p=0.5 a 32-task bootstrap band is
+# MONITOR_N_PROMPTS = 32 / MONITOR_K = ROLLOUTS_PER_TASK: holdout asks
+# sampled per eval and completions per ask (4, the same k the sizing and
+# pass^k rest on, so 128 rollouts). At p=0.5 a 32-task bootstrap band is
 # about +-0.17, wide enough that only large proxy/gold divergence reads;
 # the size is a cost choice, and ``n_prompts=`` raises it. Convention.
 MONITOR_N_PROMPTS = 32
-MONITOR_K = 4
+MONITOR_K = ROLLOUTS_PER_TASK
 # MONITOR_EVERY = 10: trainer steps between evals. Convention.
 MONITOR_EVERY = 10
-# MONITOR_WINDOW = 3: evals the alarms look back over.
+# MONITOR_WINDOW = 3: evals the alarms look back over; three is the fewest
+# that separate a trend from one noisy eval. (convention, untested)
 MONITOR_WINDOW = 3
 # MONITOR_DELTA = 0.1: proxy gain over the window that counts as climbing.
 # Ten points is well outside the 0.25 to 1.5 point eval noise
 # rlhfbook.com/c/16-evaluation.html reports; convention for the number.
 MONITOR_DELTA = 0.1
-# MONITOR_LENGTH_PCT = 0.25: completion-length growth that counts. Length
-# growth is the first symptom of over-optimization in
-# rlhfbook.com/c/17-over-optimization.html and the bias Dr. GRPO removes
-# (arXiv:2503.20783); a quarter is convention.
+# MONITOR_LENGTH_PCT = 0.25: completion-length growth that counts.
+# rlhfbook.com/c/17-over-optimization.html lists the qualitative
+# signatures (stock phrases, hedging and repetition, sycophancy,
+# over-refusal) and does not name length; length growth is the bias Dr.
+# GRPO removes from the GRPO objective (arXiv:2503.20783), which is why
+# the monitor reads it. A quarter is convention, untested.
 MONITOR_LENGTH_PCT = 0.25
 # MONITOR_BUFFER = 512: completions the reward wrapper keeps for the
-# feature scan; MONITOR_SCAN_MIN = 8 is the fewest it scans (two groups).
+# feature scan. MONITOR_SCAN_MIN = 8: the fewest it scans, two groups of
+# MONITOR_K, so a correlation has something to correlate. (convention)
 MONITOR_BUFFER = 512
 MONITOR_SCAN_MIN = 8
 # MONITOR_SCAN_PERMUTATIONS = 50 / MONITOR_WINDOW_BOOTSTRAPS = 500: the
@@ -892,15 +992,20 @@ MONITOR_SCAN_MIN = 8
 # two decimals; 50 permutations a p-value to 0.02. Convention.
 MONITOR_SCAN_PERMUTATIONS = 50
 MONITOR_WINDOW_BOOTSTRAPS = 500
-# MONITOR_MAX_NEW_TOKENS = 256: completion length sampled on the holdout.
+# MONITOR_MAX_NEW_TOKENS = 256: completion length sampled on the holdout;
+# the same floor as MIN_REPLY_TOKENS, so a holdout reply is never a
+# fragment. (convention, untested)
 MONITOR_MAX_NEW_TOKENS = 256
-# MONITOR_CONCURRENCY = 8: gold judge calls in flight.
+# MONITOR_CONCURRENCY = 8: gold judge calls in flight; a quarter of the
+# rollout concurrency because the eval runs beside training. (convention,
+# untested)
 MONITOR_CONCURRENCY = 8
-# MONITOR_SAMPLE_TEMPERATURE = 0.8 / MONITOR_SAMPLE_TOP_P = 0.95 /
-# MONITOR_SAMPLE_BATCH = 16: how the default sampler draws. The same
-# temperature the rollout engine uses (LOCAL_MODEL_TEMPERATURE) so the
-# holdout is sampled the way the data was.
-MONITOR_SAMPLE_TEMPERATURE = 0.8
+# MONITOR_SAMPLE_TEMPERATURE = LOCAL_MODEL_TEMPERATURE: the default sampler
+# draws at the temperature the rollout engine uses (one value, one home) so
+# the holdout is sampled the way the data was.
+# MONITOR_SAMPLE_TOP_P = 0.95 / MONITOR_SAMPLE_BATCH = 16: its nucleus cut
+# and prompts per generate call (convention, untested).
+MONITOR_SAMPLE_TEMPERATURE = LOCAL_MODEL_TEMPERATURE
 MONITOR_SAMPLE_TOP_P = 0.95
 MONITOR_SAMPLE_BATCH = 16
 
@@ -910,30 +1015,134 @@ MONITOR_SAMPLE_BATCH = 16
 #
 # Reachable through ``build_tasks`` / ``export_environment`` keywords.
 
-# The solve-rate band (0.2, 0.8) an environment keeps prompts in lives in
-# score/optimize.py as DEFAULT_BAND (one home); environment.py imports it.
-# DAPO's dynamic sampling drops prompts at accuracy 0 and 1
-# (arXiv:2503.14476); the 20 to 80 band is the same rule with a margin for
-# k=8 noise.
-# ENV_HOLDOUT_FRACTION = 0.2: tasks held out. 80/20 convention.
-ENV_HOLDOUT_FRACTION = 0.2
-# ENV_DECONTAMINATION_NGRAM = 8: n-gram size for train-vs-holdout overlap;
-# rlhfbook.com/c/16-evaluation.html ("Contamination") found its overlaps
-# with 8-gram matching.
-ENV_DECONTAMINATION_NGRAM = 8
-# ENV_DECONTAMINATION_EXAMPLES = 3: overlaps shown in the report.
+# The solve-rate band (0.2, 0.8) an environment keeps prompts in is
+# DIFFICULTY_BAND above (one home); score/optimize.py and environment.py
+# both alias it as DEFAULT_BAND. DAPO's dynamic sampling drops prompts at
+# accuracy 0 and 1 (arXiv:2503.14476); the 20 to 80 band is the same rule
+# with a margin for k=8 noise.
+# ENV_HOLDOUT_FRACTION = TRACE_PSEUDO_PRODUCTION_FRACTION: tasks held out,
+# the same 80/20 split the trace lane uses (one value, one home).
+ENV_HOLDOUT_FRACTION = TRACE_PSEUDO_PRODUCTION_FRACTION
+# ENV_DECONTAMINATION_NGRAM = DECONTAM_NGRAM: n-gram size for
+# train-vs-holdout overlap, the same 8-gram test as the decontamination
+# in score/ (one value, one home).
+ENV_DECONTAMINATION_NGRAM = DECONTAM_NGRAM
+# ENV_DECONTAMINATION_EXAMPLES = 3: overlaps shown in the report before
+# ", ..."; enough to see what kind of text leaked. (convention)
 ENV_DECONTAMINATION_EXAMPLES = 3
-# ENV_MAX_TURNS_FALLBACK = 10: turn cap when a spec carries none.
+# ENV_MAX_TURNS_FALLBACK = 10: turn cap when a spec carries none; under
+# DEFAULT_AVG_TURNS because an exported task carries no simulated user
+# and the cap only stops a runaway loop. (convention, untested)
 ENV_MAX_TURNS_FALLBACK = 10
 # ENV_EVAL_EXAMPLES = 5 / ENV_EVAL_ROLLOUTS = 3: the verifiers smoke eval
-# written into the exported pyproject.
+# written into the exported pyproject: five tasks, three rollouts each,
+# enough to prove the package installs and grades, not to measure it.
+# (convention)
 ENV_EVAL_EXAMPLES = 5
 ENV_EVAL_ROLLOUTS = 3
 
+# ---------------------------------------------------------------------
+# text heuristics
+# ---------------------------------------------------------------------
+#
+# TEXT_HEURISTICS = TextHeuristics(): the character and word counts the
+# English lexicon gates in generate/ and score/ turn on ("a clause is
+# eight characters or more", "a sign-off is six words or fewer"). They
+# describe the hosted writer's habits and the package's own English
+# scrubbers, not the customer's domain; every one is a convention,
+# untested, and named here so none is a bare number at its call site.
+# A run in another language sets ``user_model=`` to a writer that does
+# not produce the habits these gates catch.
 
-def knob(default: Any, *, lo: float | None = None, hi: float | None = None) -> Any:
+
+@dataclass(frozen=True)
+class TextHeuristics:
+    """The text-gate thresholds, one field each, with what each decides.
+
+    Frozen: a caller who wants another value builds a new instance and
+    passes it to the function that takes ``heuristics=``; nothing reads
+    these through ambient state.
+    """
+
+    # --- generate/agents.py: the simulated user's lines ------------------
+    #: a tool parameter label longer than this is a sentence, not a hint
+    detail_label_max_chars: int = 24
+    #: a polite user line longer than this is filler the persona drops
+    polite_filler_min_chars: int = 40
+    #: this many double quotes in a user line reads as pasted code or JSON
+    code_quote_marks: int = 4
+    #: a bare yes/no answer to a confirm question is at most this long
+    confirm_reply_max_chars: int = 60
+    #: a reply that is only an identifier still needs this many characters
+    id_reply_min_chars: int = 3
+    #: a follow-up shorter than this is a fragment, not a turn
+    followup_min_chars: int = 8
+    #: a user line with fewer distinct words than this cannot repeat one
+    history_min_words: int = 5
+    #: a user line with fewer letter words than this cannot echo the agent
+    echo_min_words: int = 4
+    # --- generate/explore.py: mutations of an ask --------------------------
+    #: an ask needs this many words before one can be deleted
+    mutation_min_words: int = 4
+    #: an ask needs this many words before two can be swapped
+    swap_min_words: int = 3
+    #: only words with this many letters are swapped (not "a", "the")
+    swap_min_word_chars: int = 5
+    # --- generate/generator.py: the situation writer's output -------------
+    #: a policy or brief sentence shorter than this is a heading, not a rule
+    sentence_min_chars: int = 8
+    #: a brief chunk this long that recurs in a card is a copied brief
+    repeated_chunk_chars: int = 28
+    #: a word needs this many letters before a typo is planted in it
+    word_min_letters: int = 5
+    #: what "short" means for a user opener, in words, inclusive
+    short_words: tuple[int, int] = (3, 16)
+    #: what "long" means for a user opener: at least this many words
+    long_min_words: int = 40
+    #: a "curt" opener over this many words is not curt
+    curt_max_words: int = 22
+    #: a policy clause shorter than this is a label, not a rule
+    policy_clause_min_chars: int = 24
+    #: a usable situation card is this many characters, inclusive
+    card_chars: tuple[int, int] = (8, 300)
+    # --- generate/scenarios.py, generate/diversity.py ---------------------
+    #: a policy clause shorter than this is dropped when a rule is split
+    clause_min_chars: int = 8
+    #: a stem marker shorter than this matches too many words by prefix
+    stem_marker_min_chars: int = 4
+    # --- score/: grading, checklist, preflight --------------------------
+    #: a last line of at most this many words can be a sign-off
+    sign_off_max_words: int = 6
+    #: a short capitalized last line under this many words is a sign-off
+    sign_off_short_words: int = 5
+    #: an identifier in a reply needs this many digits to be checked
+    id_min_digits: int = 3
+    #: a reference value shorter than this is a word, not an identifier
+    reference_min_chars: int = 3
+    #: an agent utterance this long counts toward the answer's size
+    sizable_utterance_chars: int = 24
+    #: a word this long that ends in "s" is stemmed to its singular
+    plural_min_chars: int = 5
+    #: a coverage-gap word shorter than this is a stop word
+    gap_word_min_chars: int = 3
+    #: a tool-name word shorter than this ("to", "by") is not matched to an ask
+    tool_word_min_chars: int = 3
+    # --- verify/, run/spec.py, world/sandbox.py ---------------------------
+    #: a gold line shorter than this is not matched against a traceback
+    gold_line_min_chars: int = 8
+    #: a spec argument without spaces and under this long is a slug
+    slug_max_chars: int = 64
+    #: a domain noun this long that ends in "s" (not "ss") is singularized
+    plural_noun_min_chars: int = 4
+
+
+TEXT_HEURISTICS = TextHeuristics()
+
+
+def knob(default: _T, *, lo: float | None = None, hi: float | None = None) -> _T:
     """A :class:`RunKnobs` field with its bounds. ``lo`` and ``hi`` are
-    inclusive; ``None`` is open."""
+    inclusive; ``None`` is open. Typed as the default's own type so the
+    dataclass field reads as ``int`` or ``float`` to a checker."""
     return field(default=default, metadata={"lo": lo, "hi": hi})
 
 
@@ -1124,7 +1333,7 @@ class RunKnobs:
     # (n + 2a), for the group hazard and the mixed rate; a = 1 is the
     # uniform prior on a rate, one pseudo-observation each way. Why
     # unanimous groups are stopped at all: they carry no gradient (DAPO,
-    # arXiv 2503.14476; rlhf-book ch. 14). No paper states a prior for
+    # arXiv 2503.14476; rlhfbook.com/c/14-reasoning.html). No paper states a prior for
     # the decision; this is the engine's own, untested against a = 0.5.
     smoothing_alpha: float = knob(1.0, lo=0.0)
 
@@ -1168,12 +1377,18 @@ def knob_names() -> tuple[str, ...]:
     return tuple(f.name for f in fields(RunKnobs))
 
 
-def knob_default(name: str) -> Any:
+def knob_default(name: str) -> int | float | None:
+    """The default of the ``advanced`` key ``name`` (a :class:`RunKnobs`
+    field), or ``None`` for a field with no default. ``KeyError`` for a
+    name that is not a knob."""
     spec = RunKnobs.__dataclass_fields__[name]
     return None if spec.default is MISSING else spec.default
 
 
 def knob_bounds(name: str) -> tuple[float | None, float | None]:
+    """``(lo, hi)`` the key ``name`` is validated against, inclusive;
+    ``None`` on either side is open. ``KeyError`` for a name that is not
+    a knob."""
     meta = RunKnobs.__dataclass_fields__[name].metadata
     return meta.get("lo"), meta.get("hi")
 
@@ -1187,7 +1402,9 @@ def resolve_knobs(cfg: dict[str, Any]) -> RunKnobs:
         if spec.name not in cfg:
             continue
         raw = cfg.pop(spec.name)
-        kind = int if spec.type in ("int", int) else float
+        # ``from __future__ import annotations`` leaves the field type as
+        # the string it was written as, so compare against the string.
+        kind = int if spec.type == "int" else float
         try:
             if isinstance(raw, bool):
                 raise TypeError
@@ -1272,13 +1489,16 @@ __all__ = [
     "JUDGE_TEMPERATURE",
     "LEAK_MIN_QUOTE_CHARS",
     "LENGTH_GAP_FLAG",
+    "LOCAL_MODEL_TEMPERATURE",
     "MAX_COMPLETIONS_PER_REQUEST",
     "MAX_GOLD_ASK",
     "MAX_SAMPLES_PER_CALL",
+    "MESSAGE_EXAMPLES",
     "MIN_AGREEMENT",
     "MIN_CI_TASKS",
     "MIN_GOLD",
     "MIN_KAPPA",
+    "MIN_REPLY_TOKENS",
     "MIN_RERUNS",
     "MONITOR_BUFFER",
     "MONITOR_CONCURRENCY",
@@ -1325,6 +1545,7 @@ __all__ = [
     "RL_ROLLOUTS_PER_ASK",
     "RL_ROLLOUTS_PER_PROMPT",
     "ROLLOUTS_PER_TASK",
+    "SAMPLING_TEMPERATURE_MAX",
     "SATURATION_CAP",
     "SCENARIO_ID_CHARS",
     "SEMANTIC_SIMILARITY",
@@ -1332,6 +1553,7 @@ __all__ = [
     "SHORT_HASH_CHARS",
     "STOP_GRACE_S",
     "SYSTEM_PROMPT_HEAD_CHARS",
+    "TEXT_HEURISTICS",
     "TIER_MIX_MIN_ROWS",
     "TIER_MIX_TOLERANCE",
     "TOOL_SCHEMA_SPAN_CHARS",
@@ -1366,6 +1588,7 @@ __all__ = [
     "TRANSIENT_TRIES",
     "TRUNCATED_REPLY_CHARS",
     "WORLD_CI_FAIL_ONE_IN",
+    "WORLD_CONDITION_MODES",
     "WORLD_CREATED_ID_MODULUS",
     "WORLD_DATE_YEARS",
     "WORLD_DEFAULT_FAULT_MODE",
@@ -1384,6 +1607,7 @@ __all__ = [
     "WORLD_TEMPLATE_HITS",
     "Z_95",
     "RunKnobs",
+    "TextHeuristics",
     "knob",
     "knob_bounds",
     "knob_default",
