@@ -146,6 +146,12 @@ def main() -> int:
         return emit(publish=False, version=str(current))
 
     latest = prior[-1]
+    # The list above can lag a release by up to fifteen minutes. A bump merged
+    # right behind another would read as a skipped step; walk forward over
+    # versions the publish job has already tagged before judging the gap.
+    while tagged(".".join(map(str, next_allowed(latest)))):
+        latest = next_allowed(latest)
+        print(f"tagged, not yet listed: {'.'.join(map(str, latest))}")
     if current.release < latest:
         fail(f"{current} is older than the published {'.'.join(map(str, latest))}")
 
