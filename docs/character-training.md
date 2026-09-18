@@ -118,7 +118,7 @@ cannot fail here.
 
 ## The rows from one run
 
-The live run in the example (hosted Qwen3-4B student, hosted Phi-4 judge)
+The live run in the example (hosted Qwen3-4B-Instruct student, hosted Phi-4 judge)
 is public: [while-ai/character-training-model-spec](https://huggingface.co/datasets/while-ai/character-training-model-spec)
 on Hugging Face, splits `train` (60), `holdout` (144) and `eval` (35, the
 spec's labeled replies with `gold_reward`). Grade the `eval` split with
