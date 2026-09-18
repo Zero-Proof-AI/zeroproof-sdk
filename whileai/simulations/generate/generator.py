@@ -55,6 +55,13 @@ _MIN_CELLS_PER_CALL = 2
 # (``advanced={"extra_cards": n}``, at most _MAX_EXTRA_CARDS).
 _EXTRAS_PER_CALL = 1
 _MAX_EXTRA_CARDS = 4
+# _OPEN_ENDED_EXTRA_FLOOR = 0.05: an open-ended arm weight at or above this
+# earns at least one extra card per request even when the rounded share is
+# zero, so a pinned-low arm is not silently off (convention).
+_OPEN_ENDED_EXTRA_FLOOR = 0.05
+# _LOWERCASE_MAX_UPPER_SHARE = 0.2: a card asked to type in lowercase
+# fails the texture check above this share of capital letters (convention).
+_LOWERCASE_MAX_UPPER_SHARE = 0.2
 # _WRITER_TIMEOUT = 30 s per writer call: a card batch on a warm endpoint
 # takes a few seconds; a cold start is the scene thread's problem, not
 # the writer's (convention).
@@ -97,7 +104,7 @@ def writer_policy_digest(policy: str, *, max_chars: int = _WRITER_POLICY_MAX_CHA
             re.sub(r"\s+", " ", part).strip(" \t#-*•")
             for part in re.split(r"\n+|(?<=[.!?])\s+", text)
         ]
-        raw = [part for part in raw if len(part) >= 8]
+        raw = [part for part in raw if len(part) >= 8]  # literal: text heuristic
         if not raw:
             raw = [re.sub(r"\s+", " ", text)]
         take = min(8, len(raw))
@@ -238,7 +245,7 @@ def scene_leaked(message: str, brief: str = "") -> bool:
         return True
     for sentence in re.split(r"[\n;.]", str(brief or "")):
         chunk = re.sub(r"^\w+:\s*", "", sentence.strip().lower())
-        if len(chunk) >= 28 and chunk in text:
+        if len(chunk) >= 28 and chunk in text:  # literal: text heuristic, a repeated chunk
             return True
     return False
 
@@ -294,7 +301,7 @@ def _inject_typo(text: str) -> str:
     words = text.split()
     for i, word in enumerate(words):
         idx = [j for j, ch in enumerate(word) if ch.isalpha()]
-        if len(idx) < 5:
+        if len(idx) < 5:  # literal: text heuristic
             continue
         chars = list(word)
         a, b = idx[1], idx[2]
@@ -401,9 +408,11 @@ def message_realizes_tags(message: str, tags: dict | None = None, *, ask_family:
     tags = dict(tags or {})
     words = _word_count(text)
     length = str(tags.get("length") or "")
-    if "short" in length and not (3 <= words <= 16):
+    if "short" in length and not (
+        3 <= words <= 16
+    ):  # literal: text heuristic, what 'short' means in words
         return False
-    if "long" in length and words < 40:
+    if "long" in length and words < 40:  # literal: text heuristic, what 'long' means in words
         return False
     tone = str(tags.get("tone") or "")
     if tone in {"frustrated", "impatient"} and _CALM_OPENER.search(text):
@@ -413,13 +422,19 @@ def message_realizes_tags(message: str, tags: dict | None = None, *, ask_family:
     if tone == "impatient" and not (_IMPATIENT.search(text) or _FRUSTRATED.search(text)):
         return False
     if tone == "curt" and (
-        words > 22 or re.search(r"\b(please|thanks|thank you|just wanted)\b", text, re.I)
+        words > 22
+        or re.search(
+            r"\b(please|thanks|thank you|just wanted)\b", text, re.I
+        )  # literal: text heuristic
     ):
         return False
     texture = str(tags.get("texture") or "")
     if texture == "lowercase":
         letters = [c for c in text if c.isalpha()]
-        if letters and sum(c.isupper() for c in letters) / len(letters) > 0.2:
+        if (
+            letters
+            and sum(c.isupper() for c in letters) / len(letters) > _LOWERCASE_MAX_UPPER_SHARE
+        ):
             return False
     if texture == "standard":
         first_alpha = next((c for c in text if c.isalpha()), "")
@@ -781,7 +796,9 @@ def _format_scene_brief(text: str, *, policy: str = "") -> str:
         val = re.sub(r"\s+", " ", cleaned).strip()
         if val:
             lines.append(val)
-    clauses = [c.strip() for c in re.split(r"[.\n]", str(policy or "")) if len(c.strip()) > 24]
+    clauses = [
+        c.strip() for c in re.split(r"[.\n]", str(policy or "")) if len(c.strip()) > 24
+    ]  # literal: text heuristic, a policy clause
     kept: list[str] = []
     for line in lines:
         if any(clause.lower() in line.lower() for clause in clauses):
@@ -889,7 +906,9 @@ def amplify_seeds(
         for line in lines:
             text = line.strip().strip("-*\u2022 \t\"'")
             key = _norm(text)
-            if 8 <= len(text) <= 300 and key and key not in seen:
+            if (
+                8 <= len(text) <= 300 and key and key not in seen
+            ):  # literal: text heuristic, a usable card
                 seen.add(key)
                 kept.append(text)
                 if len(kept) >= target:
@@ -1775,7 +1794,7 @@ region_id exactly and placing the human's words in message."""
         weights = self.arm_weights or SEARCH_ARMS
         oe = float(weights.get("open_ended") or 0.10)
         n_extra = min(self.extra_cards, max(0, round(oe * max(len(mixed), 1))))
-        if n_extra == 0 and self.extra_cards > 0 and oe >= 0.05:
+        if n_extra == 0 and self.extra_cards > 0 and oe >= _OPEN_ENDED_EXTRA_FLOOR:
             n_extra = 1
         extra_plan = mix_items_by_tier(
             [

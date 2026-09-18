@@ -147,5 +147,7 @@ class MathEqual(Verifier):
             return 0, f"not equal: {got!r} vs {want!r}"
         gf, wf = _to_float(got), _to_float(want)
         if gf is not None and wf is not None:
-            return (1 if abs(gf - wf) <= 1e-6 else 0), f"numeric {gf} vs {wf}"
+            return (
+                1 if abs(gf - wf) <= 1e-6 else 0
+            ), f"numeric {gf} vs {wf}"  # literal: float epsilon, numeric equality
         return 0, f"cannot compare {got!r} to {want!r}"

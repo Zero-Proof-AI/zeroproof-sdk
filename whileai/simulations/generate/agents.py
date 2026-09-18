@@ -24,7 +24,7 @@ from ..defaults import (
     TRANSIENT_TRIES,
 )
 from ..text import split_reasoning
-from ..world.sandbox import MockEnvironment
+from ..world.sandbox import MockEnvironment, WorldOptions
 from .anthropic_backend import ANTHROPIC_BASE_URL, is_anthropic_url
 from .anthropic_backend import DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL
 from .anthropic_backend import complete as anthropic_complete
@@ -230,9 +230,9 @@ def ping_hosted(base_url: str | None = None, *, timeout: float = 3.0) -> bool:
         conn.close()
     except Exception:
         return False
-    if status >= 500 or status == 404:
+    if status >= 500 or status == 404:  # literal: HTTP status code
         return False
-    return 200 <= status < 500
+    return 200 <= status < 500  # literal: HTTP status code
 
 
 def touch_hosted(base_url: str | None = None, *, timeout: float = 5.0) -> None:
@@ -345,7 +345,7 @@ def _quota_error(status: int, body: str) -> str | None:
     """The proxy's 429 for a spent daily allowance, or None. Not transient:
     every later call today answers the same, so the run stops instead of
     retrying into the clock. Carries ``QUOTA_FIX``, the two ways on."""
-    if int(status) != 429:
+    if int(status) != 429:  # literal: HTTP status code
         return None
     text = str(body or "")
     if QUOTA_MARK not in text.lower():
@@ -710,16 +710,16 @@ def complete(
             resp = conn.getresponse()
             raw = resp.read()
             status, raw = _follow_redirects(resp, raw, headers, timeout)
-            if status >= 400:
+            if status >= 400:  # literal: HTTP status code
                 err = raw[:400].decode("utf-8", "replace")
                 if (
-                    status == 400
+                    status == 400  # literal: HTTP status code
                     and "max_tokens" in err
                     and int(payload["max_tokens"]) > MIN_REPLY_TOKENS
                 ):
                     payload["max_tokens"] = max(MIN_REPLY_TOKENS, int(payload["max_tokens"]) // 2)
                     raise RuntimeError("retry_max_tokens")
-                if status == 400 and _shrink_last_user(messages):
+                if status == 400 and _shrink_last_user(messages):  # literal: HTTP status code
                     room = (
                         _CONTEXT_TOKENS - _estimate_tokens(messages, tools) - CONTEXT_MARGIN_TOKENS
                     )
@@ -728,10 +728,12 @@ def complete(
                         min(int(payload["max_tokens"]), max(MIN_REPLY_TOKENS, room)),
                     )
                     raise RuntimeError("retry_shrink_input")
-                if status == 400 and payload.get("n"):
+                if status == 400 and payload.get("n"):  # literal: HTTP status code
                     payload.pop("n", None)
                     raise RuntimeError("retry_drop_n")
-                if status == 400 and payload.get("logprobs") and "logprob" in err.lower():
+                if (
+                    status == 400 and payload.get("logprobs") and "logprob" in err.lower()
+                ):  # literal: HTTP status code
                     payload.pop("logprobs", None)
                     raise RuntimeError("retry_drop_logprobs")
                 if status in {401, 403}:
@@ -743,7 +745,7 @@ def complete(
                 quota = _quota_error(status, err)
                 if quota:
                     raise RuntimeError(quota)
-                if status == 400:
+                if status == 400:  # literal: HTTP status code
                     if "context" in err.lower() or "input tokens" in err.lower():
                         raise RuntimeError(
                             f"hosted Qwen rejected the prompt ({status}); "
@@ -1209,7 +1211,7 @@ def _want_followup(
         return not _user_walks_away(message, turn_i, questions=questions, patience=patience)
     if _AGENT_REFUSAL.search(text):
         return True
-    if int(budget) < 4:
+    if int(budget) < 4:  # literal: a budget under 4 has no room for a follow-up (structural)
         # A short thread still ends on the agent: with room for one user line
         # there is nothing a second one could be for.
         return False
@@ -1295,7 +1297,9 @@ def _detail_hints(tools: list | None) -> list[str]:
         params = (fn or {}).get("parameters") or {}
         for key in (params.get("properties") or {}) if isinstance(params, dict) else {}:
             label = re.sub(r"[_\-]+", " ", str(key)).strip().lower()
-            if label and label not in out and len(label) <= 24:
+            if (
+                label and label not in out and len(label) <= 24
+            ):  # literal: text heuristic, a detail label is a few words
                 out.append(label)
     return out[:DETAIL_HINTS_MAX]
 
@@ -1467,7 +1471,9 @@ def _persona_notes(prior: str) -> str:
         notes.append("You are still frustrated until this is actually solved.")
     elif re.search(r"\b(asap|right now|waiting)\b", text, re.I):
         notes.append("You are still in a hurry.")
-    elif re.search(r"\b(please|thanks|thank you)\b", text, re.I) and len(text) > 40:
+    elif (
+        re.search(r"\b(please|thanks|thank you)\b", text, re.I) and len(text) > 40
+    ):  # literal: text heuristic, a polite line this long is filler
         notes.append("Stay polite, but do not just thank them.")
     return " ".join(notes)
 
@@ -1524,14 +1530,16 @@ def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
     if not text or text == prior or len(text) > USER_TURN_MAX_CHARS:
         return False
     # A person never types call syntax: name_with_underscores( or a JSON dump.
-    if re.search(r"\b\w+_\w+\s*\(", text) or text.count('"') >= 4:
+    if (
+        re.search(r"\b\w+_\w+\s*\(", text) or text.count('"') >= 4
+    ):  # literal: text heuristic, two quoted strings read as code
         return False
     # A bare yes is filler everywhere except where the agent asked for
     # exactly that. Confirm-then-execute data depends on it, so it wins
     # over the echo, stamp, and length gates below.
     if (
         _ASKS_CONFIRM.search(str(agent_text or ""))
-        and len(text) <= 60
+        and len(text) <= 60  # literal: text heuristic
         and re.match(
             r"^(yes|yep|yeah|sure|ok(ay)?|confirmed|do it|"
             r"go ahead|no\b)",
@@ -1546,24 +1554,24 @@ def _accept_followup(text: str, prior: str, agent_text: str) -> bool:
         return False
     if _off_world_coding(text, prior, agent_text):
         return False
-    if _ID_FOLLOW.search(text) and len(text) >= 3:
+    if _ID_FOLLOW.search(text) and len(text) >= 3:  # literal: text heuristic
         return True
     if _echoes_agent(text, agent_text):
         return False
-    if len(text) < 8:
+    if len(text) < 8:  # literal: text heuristic
         return False
     return usable_user_message(text)
 
 
 def _repeats_user_history(text: str, messages: list[dict] | None) -> bool:
     current = set(re.findall(r"[a-z0-9]+", str(text).lower()))
-    if len(current) < 5:
+    if len(current) < 5:  # literal: text heuristic
         return False
     for message in messages or []:
         if message.get("role") != "user":
             continue
         prior = set(re.findall(r"[a-z0-9]+", str(message.get("content") or "").lower()))
-        if len(prior) < 5:
+        if len(prior) < 5:  # literal: text heuristic
             continue
         overlap = len(current & prior) / min(len(current), len(prior))
         if overlap >= REPEAT_OVERLAP:
@@ -1723,7 +1731,7 @@ def _echoes_agent(user: str, agent: str) -> bool:
         return False
     u = set(re.findall(r"[a-z]{3,}", (user or "").lower()))
     a = set(re.findall(r"[a-z]{3,}", (agent or "").lower()))
-    if len(u) < 4 or not a:
+    if len(u) < 4 or not a:  # literal: text heuristic
         # Too few words to call a restatement; short replies are answers.
         return False
     return (len(u & a) / len(u)) >= ECHO_OVERLAP
@@ -1897,6 +1905,7 @@ def local_model(
     thinking: bool | None = None,
     patience: Patience | None = "normal",
     user_temperature: float | None = None,
+    world_options: WorldOptions | Mapping[str, Any] | None = None,
 ) -> Callable:
     """An agent that talks to an OpenAI-compatible endpoint (a served
     adapter, a local vLLM, any chat server) for ``simulate(agent=...)``.
@@ -1957,8 +1966,13 @@ def local_model(
     sampling temperature of every simulated-user line, follow-ups
     (``USER_TURN_TEMPERATURE``) and human-tool answers
     (``HUMAN_TOOL_TEMPERATURE``) alike; ``None`` keeps those two defaults.
+    ``world_options`` is the mock world's dials (a ``WorldOptions`` or the
+    same fields as a dict: fault modes, hit counts, name pools, ...);
+    ``simulate(advanced={"world": {...}})`` lands here. ``None`` is the
+    defaults in ``defaults.py``.
     """
     hazards = patience_hazards(patience)
+    world_opts = WorldOptions.coerce(world_options)
     may_leave = patience_may_leave(patience)
     followup_temp = USER_TURN_TEMPERATURE if user_temperature is None else float(user_temperature)
     human_temp = HUMAN_TOOL_TEMPERATURE if user_temperature is None else float(user_temperature)
@@ -1993,7 +2007,9 @@ def local_model(
         world = str(plan.pop("world_state", "") or "")
         stance = str(plan.pop("stance", "") or "")
         persona_tags = {k: plan.pop(k) for k in ("tone", "texture") if plan.get(k)}
-        local.env = MockEnvironment(tools, faults=plan, world_state=world, result_shapes=shapes)
+        local.env = MockEnvironment(
+            tools, faults=plan, world_state=world, result_shapes=shapes, options=world_opts
+        )
         turns = split_user_turns(message)
         messages = ([{"role": "system", "content": policy_text}] if policy_text else []) + [
             {"role": "user", "content": turns[0]},

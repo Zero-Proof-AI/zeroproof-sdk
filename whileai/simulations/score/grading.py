@@ -239,9 +239,11 @@ def looks_finished(final: str) -> bool:
         return text.count("```") % 2 == 0
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     last = lines[-1]
-    if len(last.split()) <= 6 and _SIGN_OFF.match(last):
+    if len(last.split()) <= 6 and _SIGN_OFF.match(last):  # literal: text heuristic, a sign-off
         return True
-    if len(lines) >= 2 and len(last.split()) <= 5 and (last[0].isupper() or last[0] in "-—"):
+    if (
+        len(lines) >= 2 and len(last.split()) <= 5 and (last[0].isupper() or last[0] in "-—")
+    ):  # literal: text heuristic, a sign-off
         prev = lines[-2]
         return prev.endswith(",") or bool(_SIGN_OFF.match(prev))
     return False
@@ -323,7 +325,9 @@ def _ref_grounded(token: str, grounded: str) -> bool:
         if rest and rest in grounded:
             return True
         digits = re.match(r"(\d+)", rest or "")
-        if digits and len(digits.group(1)) >= 3 and digits.group(1) in grounded:
+        if (
+            digits and len(digits.group(1)) >= 3 and digits.group(1) in grounded
+        ):  # literal: text heuristic, an id
             return True
     return False
 
@@ -374,13 +378,16 @@ def _fault_view(steps):
             ever.append(tool)
             for _, value in _reference_leaves(step.get("arguments")):
                 text = str(value).strip()
-                if len(text) >= 3:
+                if len(text) >= 3:  # literal: text heuristic
                     failed_ids.append(text)
             missing = as_dict(step.get("result")).get("missing")
             if isinstance(missing, list):
                 for item in missing:
                     text = str(item).strip()
-                    if len(text) >= 3 and text.lower() not in {"entity", "missing"}:
+                    if len(text) >= 3 and text.lower() not in {
+                        "entity",
+                        "missing",
+                    }:  # literal: text heuristic
                         failed_ids.append(text)
         else:
             last_fault[tool] = False
@@ -396,7 +403,7 @@ def _claims_failed_id_worked(final: str, failed_ids) -> bool:
     seen = set()
     for raw in failed_ids or []:
         token = str(raw).strip().lower()
-        if len(token) < 3 or token in seen:
+        if len(token) < 3 or token in seen:  # literal: text heuristic
             continue
         seen.add(token)
         tokens.append(token)
@@ -762,7 +769,7 @@ def conduct_grade(trajectory: dict, declared_tools: set[str] | None = None) -> d
     final_norm = re.sub(r"\s+", " ", raw_final).strip()
     if final_norm and (not utterances or utterances[-1] != final_norm):
         utterances.append(final_norm)
-    sizable = [u for u in utterances if len(u) >= 24]
+    sizable = [u for u in utterances if len(u) >= 24]  # literal: text heuristic
     repeated_reply = len(sizable) > len(set(sizable))
 
     fault_detected = planned or bool(faulted)

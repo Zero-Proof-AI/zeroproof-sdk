@@ -138,7 +138,7 @@ def _read_values(calls: list[dict]) -> set[str]:
                 walk(v)
         elif isinstance(value, (str, int, float)) and not isinstance(value, bool):
             text = str(value).strip().lower()
-            if len(text) >= 3:
+            if len(text) >= 3:  # literal: text heuristic
                 out.add(text)
 
     for c in calls:

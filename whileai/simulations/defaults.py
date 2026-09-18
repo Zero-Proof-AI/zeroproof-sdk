@@ -63,8 +63,9 @@ PASS_REWARD = 1.0
 SHORT_HASH_CHARS = 16
 
 # MAX_COMPLETIONS_PER_REQUEST = 8: writer completions one request may ask
-# for (the ``n`` of a chat call). Mirrors
-# ``generate.generator._MAX_COMPLETIONS``; the two must agree.
+# for (the ``n`` of a chat call). vLLM prefills once for all of them and
+# above eight a busy endpoint dropped the request (hosted pool). The
+# generate/ section reads it as MAX_SAMPLES_PER_CALL (one value, one home).
 # (convention, untested)
 MAX_COMPLETIONS_PER_REQUEST = 8
 
@@ -115,28 +116,44 @@ SFT_PHRASINGS_PER_SITUATION = 3
 # measured optimum.
 DEFAULT_PROBE = 2
 
-# RL_FAULT_RATE = 0.8: share of fault-tagged cells that keep their fault
-# plan under mode="rl", above the 0.5 explore default
-# (generate.scenarios.DEFAULT_FAULT_RATE). This is not a per-call failure
-# rate: tagged cells are a small slice of the grid, so rows with a fault
-# stay under about 10% at 0.5, which is the band training-time injection
-# is stable in (arXiv 2603.21972: above 5-10% destabilised a 3B agent;
-# AgentCE-Bench, arXiv 2604.06111, evaluates p in {0, 0.1, 0.3}). RL
-# raises it because the faulted cells are where a base fails
-# (rlhf-book ch. 14, difficulty filtering); PALADIN trains on an 80/20
-# mix of recovery-bearing to clean traces (arXiv 2509.25238), which is
-# the shape 0.8 gives the tagged slice. Untested against 0.5 on a
-# training run.
+# DEFAULT_FAULT_RATE = 0.5: the share of fault-tagged grid cells that keep
+# their sandbox fault plan outside mode="rl". This is not a per-call
+# failure rate: tagged cells are a small slice of the grid (SUCCESS_SHARE
+# in generate/scenarios.py flips nine in ten to success first), so rows
+# with a fault stay under about 10% of a run at 0.5, inside the band
+# training-time injection is stable in (arXiv 2603.21972: above 5-10%
+# per call destabilised a 3B agent; AgentCE-Bench, arXiv 2604.06111,
+# evaluates p in {0, 0.1, 0.3}). Independent of failure mutation (that is
+# a purposeful-fail arm, this is tool faults). ``fault_rate=`` or
+# ``risk=`` moves it; 0 disables injection. (convention inside the band,
+# untested against other shares)
+DEFAULT_FAULT_RATE = 0.5
+
+# RL_FAULT_RATE = 0.8: the same share under mode="rl". RL raises it because
+# the faulted cells are where a base fails (rlhf-book ch. 14, difficulty
+# filtering) and PALADIN trains on an 80/20 mix of recovery-bearing to
+# clean traces (arXiv 2509.25238), which is the shape 0.8 gives the tagged
+# slice; the per-row rate stays inside the 2603.21972 / 2604.06111 band
+# for the same reason as above. Untested against 0.5 on a training run.
 RL_FAULT_RATE = 0.8
 
-# DEFAULT_AVG_TURNS = 12: target conversation length. The person speaks at
-# most avg_turns // 2 times, which leaves room to verify, look up,
-# confirm and write. The cap (generate.agents.default_max_turns, 40 on an
-# 8k context) sits above what published agent data reaches: tau-bench
-# stops a task at 30 agent actions (arXiv 2406.12045) and APIGen-MT
-# trajectories top out at 29 turns (arXiv 2504.03601). The mean of 12 is
-# a convention, untested against source traces; fit it from traces=
-# when you have them.
+# DEFAULT_AVG_TURNS = 12: target thread length (user and agent turns
+# together) for simulate(), local_model() and the turn sampler alike. The
+# person speaks at most avg_turns // 2 times, so 12 leaves six user turns:
+# room to verify, look up, confirm and write. Measured on this package
+# (#299, 4000 rows): mean user depth 2.13 / 4.02 / 5.28 and 45% / 70% /
+# 78% of threads reaching a third user turn at avg_turns 6 / 12 / 16.
+# Confirm-before-acting needs that third turn (ask, name the action and
+# ask, yes, act), so at 6 it is missing from over half the rows and no
+# selection downstream can recover it (rlhf-book ch. 14: a criterion every
+# rollout fails carries no gradient). The cost is about three agent calls
+# per row instead of one (#299). The chat-assistant means in the
+# literature are lower (SimulatorArena, arXiv 2510.05444: 7.8 and 6.9
+# turns per human thread) but carry no confirm step; the caps sit well
+# above (tau-bench stops at 30 agent actions, arXiv 2406.12045; APIGen-MT
+# trajectories top out at 29 turns, arXiv 2504.03601). local_model()
+# used to default to 6 on its own; it now reads this constant. Fit it from
+# traces= when you have them.
 DEFAULT_AVG_TURNS = 12.0
 
 # DEFAULT_MIN_USER_TURNS = 1: the person always speaks at least once.
@@ -275,10 +292,9 @@ TRANSIENT_TRIES = 3
 # doubled each try (0.4, 0.8, 1.6 s) (convention, untested).
 TRANSIENT_BACKOFF_S = 0.4
 # MAX_SAMPLES_PER_CALL = 8: the most completions one request asks for
-# with ``n``; vLLM prefills once for all of them, and above eight a busy
-# endpoint dropped the request (convention from the hosted pool;
-# run/config.py caps completions_per_request at the same number inline).
-MAX_SAMPLES_PER_CALL = 8
+# with ``n``; the same cap run/ calls MAX_COMPLETIONS_PER_REQUEST (above),
+# so completions_per_request and the writer's ``n`` cannot drift apart.
+MAX_SAMPLES_PER_CALL = MAX_COMPLETIONS_PER_REQUEST
 
 # ---------------------------------------------------------------------
 # generate/: context budgets (agents.py, generator.py)

@@ -60,7 +60,7 @@ def _looks_like_spec_path(text: str) -> bool:
         return True
     if Path(raw).suffix.lower() in {".json", ".yaml", ".yml"}:
         return True
-    return " " not in raw and len(raw) < 64
+    return " " not in raw and len(raw) < 64  # literal: text heuristic, a slug
 
 
 RUBRIC_FILES = ("rubric.md", "rubric.txt")

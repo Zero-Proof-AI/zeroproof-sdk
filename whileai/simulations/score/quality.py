@@ -25,6 +25,50 @@ DIMENSIONS = ("opener", "ping_pong", "leak", "complexity", "structure")
 #: a dimension score under this fails the dimension (``defaults.PASS_THRESHOLD``)
 FAIL = PASS_THRESHOLD
 
+# The conduct-quality rubric. Each weight is a convention read off the
+# failure mode it names (no measured optimum); ``score_row`` combines
+# them and FAIL is the cut. Named so a report can say which shape moved.
+# MIN_SUBSTANTIAL_CHARS = 12: a spoken line shorter than this is not a beat.
+MIN_SUBSTANTIAL_CHARS = 12
+# TRUNCATED_OPENER_CHARS = 8: an opener under this (or ending on a quote) was cut.
+TRUNCATED_OPENER_CHARS = 8
+# PING_PONG_ASSISTANT_TURNS = 4: one user turn against this many agent
+# turns is a monologue, not a conversation.
+PING_PONG_ASSISTANT_TURNS = 4
+# STUB_OPENER_WORDS = 8: an opener under this with an infra-stub reply is empty.
+STUB_OPENER_WORDS = 8
+# THIN_WORDS = 12: the word count at which an opener or a final reply is a real one.
+THIN_WORDS = 12
+# THIN_BASE = 0.2 plus the bonuses: what a thread earns for using tools
+# (THIN_TOOLS_BONUS = 0.35), a second user turn (THIN_FOLLOWUP_BONUS = 0.3),
+# a substantive final reply (THIN_FINAL_BONUS = 0.15) and a real opener
+# (THIN_OPENER_BONUS = 0.1); the five sum to 1.0.
+THIN_BASE = 0.2
+THIN_TOOLS_BONUS = 0.35
+THIN_FOLLOWUP_BONUS = 0.3
+THIN_FINAL_BONUS = 0.15
+THIN_OPENER_BONUS = 0.1
+# Structure penalties, each the share of a 1.0 score the defect costs:
+# ENDS_ON_USER_PENALTY = 0.6, ENDS_ON_TOOL_PENALTY = 0.55,
+# ENDS_OFF_AGENT_PENALTY = 0.4, EMPTY_FINAL_PENALTY = 0.4,
+# STALE_FINAL_PENALTY = 0.55, FINAL_NOT_IN_MESSAGES_PENALTY = 0.2,
+# FOLLOWUP_LEFT_WORLD_PENALTY = 0.35, FOLLOWUP_ECHO_PENALTY = 0.35,
+# STARTS_ON_AGENT_PENALTY = 0.2. A thread that ends off the agent or whose
+# final_text is not what the agent said loses more than half, so it fails.
+ENDS_ON_USER_PENALTY = 0.6
+ENDS_ON_TOOL_PENALTY = 0.55
+ENDS_OFF_AGENT_PENALTY = 0.4
+EMPTY_FINAL_PENALTY = 0.4
+STALE_FINAL_PENALTY = 0.55
+FINAL_NOT_IN_MESSAGES_PENALTY = 0.2
+FOLLOWUP_LEFT_WORLD_PENALTY = 0.35
+FOLLOWUP_ECHO_PENALTY = 0.35
+STARTS_ON_AGENT_PENALTY = 0.2
+# SHORT_FOLLOWUP_WORDS = 8: a follow-up this short (or an id) is never an echo.
+SHORT_FOLLOWUP_WORDS = 8
+# QUALITY_BUCKETS = (0.50, 0.70, 0.85): the report histogram's edges.
+QUALITY_BUCKETS = (0.50, 0.70, 0.85)
+
 _DESK_OPENER = re.compile(
     r"^hello,?\s+i am writing because\b|"
     r"^thank you for (your patience|contacting|reaching out)\b|"
@@ -115,7 +159,7 @@ def _tool_names(row: dict, messages: list[dict]) -> set[str]:
 
 
 def _substantial(text: str) -> bool:
-    return len(_norm(text)) >= 12
+    return len(_norm(text)) >= MIN_SUBSTANTIAL_CHARS
 
 
 def _same_beat(prev: dict, content: str, has_tools: bool) -> bool:
@@ -190,7 +234,7 @@ def _score_opener(text: str) -> tuple[float, str]:
     n = len(_words(raw))
     if n <= 2 and not _IDISH.search(raw) and not _ACTION.search(raw):
         return 0.3, "one-word opener"
-    if raw.endswith("'") or len(raw) < 8:
+    if raw.endswith("'") or len(raw) < TRUNCATED_OPENER_CHARS:
         return 0.55, "truncated opener"
     return 1.0, ""
 
@@ -211,7 +255,7 @@ def _score_ping_pong(beats: list[dict]) -> tuple[float, str]:
     n_asst = sum(1 for b in beats if b["role"] == "assistant")
     if stacked:
         return 0.0, "stacked assistant variants"
-    if n_user == 1 and n_asst >= 4:
+    if n_user == 1 and n_asst >= PING_PONG_ASSISTANT_TURNS:
         return 0.0, "one user and 4+ assistant turns"
     if n_asst == 0:
         return 0.1, "no agent turn"
@@ -250,7 +294,7 @@ def _score_complexity(
     clarify = n_user <= 1 and not tools and _QUESTION_END.search(final)
     if _DEGENERATE.search(final):
         return 0.2, "degenerate reply"
-    if stub and not tools and n_user <= 1 and n_words < 8:
+    if stub and not tools and n_user <= 1 and n_words < STUB_OPENER_WORDS:
         return 0.1, "empty or infra stub"
     if n_words <= 2 and not tools and n_user <= 1:
         return 0.15, "one-line dead end"
@@ -258,15 +302,15 @@ def _score_complexity(
         return 0.25, "clarify and stop"
     if strong and not tools:
         return 0.3, "actionable ask unused tools"
-    score = 0.2
+    score = THIN_BASE
     if tools:
-        score += 0.35
+        score += THIN_TOOLS_BONUS
     if n_user >= 2:
-        score += 0.3
-    if final_n >= 12 and not stub:
-        score += 0.15
-    if n_words >= 12:
-        score += 0.1
+        score += THIN_FOLLOWUP_BONUS
+    if final_n >= THIN_WORDS and not stub:
+        score += THIN_FINAL_BONUS
+    if n_words >= THIN_WORDS:
+        score += THIN_OPENER_BONUS
     score = min(1.0, score)
     if score < FAIL:
         return score, "thin conversation"
@@ -284,43 +328,43 @@ def _score_structure(
     score = 1.0
     last_role = messages[-1].get("role") if messages else None
     if last_role == "user":
-        score -= 0.6
+        score -= ENDS_ON_USER_PENALTY
         notes.append("ends on user")
     elif last_role == "tool":
-        score -= 0.55
+        score -= ENDS_ON_TOOL_PENALTY
         notes.append("ends on tool")
     elif last_role != "assistant":
-        score -= 0.4
+        score -= ENDS_OFF_AGENT_PENALTY
         notes.append("does not end on agent")
     last_spoken = assistant_texts[-1] if assistant_texts else ""
     if not _norm(final):
-        score -= 0.4
+        score -= EMPTY_FINAL_PENALTY
         notes.append("empty final_text")
     elif last_spoken and _norm(final) != _norm(last_spoken):
         stale = any(_norm(final) == _norm(t) for t in assistant_texts[:-1])
-        score -= 0.55
+        score -= STALE_FINAL_PENALTY
         notes.append("stale final_text" if stale else "final_text mismatch")
     elif last_spoken and _norm(final) == _norm(last_spoken):
         pass
     elif _norm(final) and not last_spoken:
-        score -= 0.2
+        score -= FINAL_NOT_IN_MESSAGES_PENALTY
         notes.append("final_text not in messages")
     for i, follow in enumerate(user_texts[1:], start=1):
         prior_agent = (
             assistant_texts[min(i - 1, len(assistant_texts) - 1)] if assistant_texts else ""
         )
         if not usable_user_message(follow):
-            score -= 0.35
+            score -= FOLLOWUP_LEFT_WORLD_PENALTY
             notes.append("follow-up left world")
             break
-        if _ID_FOLLOW.search(follow) or len(_words(follow)) <= 8:
+        if _ID_FOLLOW.search(follow) or len(_words(follow)) <= SHORT_FOLLOWUP_WORDS:
             continue
         if prior_agent and _echoes_agent(follow, prior_agent):
-            score -= 0.35
+            score -= FOLLOWUP_ECHO_PENALTY
             notes.append("follow-up echoes agent")
             break
     if beats and beats[0]["role"] != "user":
-        score -= 0.2
+        score -= STARTS_ON_AGENT_PENALTY
         notes.append("starts on agent")
     return max(0.0, min(1.0, score)), notes[0] if notes else ""
 
@@ -398,12 +442,13 @@ def summarize(rows: Sequence[dict], *, top: int = 3) -> dict[str, Any]:
                 misses += 1
         fail_rates[dim] = round(misses / n, 3)
     buckets = {"<0.50": 0, "0.50-0.69": 0, "0.70-0.84": 0, ">=0.85": 0}
+    low, mid, high = QUALITY_BUCKETS
     for q in values:
-        if q < 0.50:
+        if q < low:
             buckets["<0.50"] += 1
-        elif q < 0.70:
+        elif q < mid:
             buckets["0.50-0.69"] += 1
-        elif q < 0.85:
+        elif q < high:
             buckets["0.70-0.84"] += 1
         else:
             buckets[">=0.85"] += 1

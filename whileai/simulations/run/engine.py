@@ -241,9 +241,9 @@ def _finish_reason(raw: dict, steps: list, final_text: str) -> str:
 def _clock_text(seconds: float) -> str:
     """Seconds as a short human span: ``45s``, ``1m40s``, ``1h4m``."""
     total = max(0, int(seconds))
-    if total < 60:
+    if total < 60:  # literal: seconds per minute
         return f"{total}s"
-    if total < 3600:
+    if total < 3600:  # literal: seconds per hour
         minutes, rest = divmod(total, 60)
         return f"{minutes}m{rest}s" if rest else f"{minutes}m"
     hours, rest = divmod(total, 3600)
@@ -254,9 +254,9 @@ def _clock_text(seconds: float) -> str:
 def _left_text(seconds: float) -> str:
     """The same span, rounded, for an estimate nobody should read to the
     second: whole minutes over a minute, whole seconds under it."""
-    if seconds < 60:
+    if seconds < 60:  # literal: seconds per minute
         return f"{max(1, round(seconds))}s"
-    if seconds < 3600:
+    if seconds < 3600:  # literal: seconds per hour
         return f"{max(1, round(seconds / 60))}m"
     return _clock_text(seconds)
 
@@ -691,6 +691,10 @@ class Run:
             runner_kw["logprobs"] = c.logprobs
         if c.user_model:
             runner_kw["user_model"] = c.user_model
+        if c.user_temperature is not None:
+            runner_kw["user_temperature"] = float(c.user_temperature)
+        if c.world_options is not None:
+            runner_kw["world_options"] = c.world_options
         # Who plays the user: the agent's own model unless user_model= names
         # another. Callable and HTTP agents take one message and never get a
         # simulated user, so they carry no tag.
@@ -2549,7 +2553,7 @@ class Run:
             self.region_sigs.setdefault(rid, set()).add(t["behavior_signature"])
             if mutation_worthy(t):
                 self.region_fails[rid] = self.region_fails.get(rid, 0) + 1
-            sel = job[3] if len(job) > 3 else {}
+            sel = job[3] if len(job) > 3 else {}  # literal: job tuple arity
             nov = sel.get("novelty") if isinstance(sel, dict) else None
             if nov is not None:
                 prev = self.region_novelty.get(rid, float(nov))
@@ -2676,7 +2680,7 @@ class Run:
             if not want_verify:
                 continue
             meta = job[2] if len(job) > 2 else {}
-            sel = job[3] if len(job) > 3 else {}
+            sel = job[3] if len(job) > 3 else {}  # literal: job tuple arity
             self.verify_queue.append(
                 (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})
             )
@@ -2959,7 +2963,7 @@ class Run:
 
     def _queue_verify(self, prompt: str, job: tuple, count: int) -> None:
         meta = job[2] if len(job) > 2 else {}
-        sel = job[3] if len(job) > 3 else {}
+        sel = job[3] if len(job) > 3 else {}  # literal: job tuple arity
         for _ in range(max(0, int(count))):
             self.verify_queue.append(
                 (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})

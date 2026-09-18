@@ -9,7 +9,7 @@ import re
 import threading
 from typing import Any
 
-from ..defaults import MAX_SAMPLES_PER_CALL
+from ..defaults import DEFAULT_AVG_TURNS, MAX_SAMPLES_PER_CALL
 
 _LENGTHS = ("short prompt", "medium prompt", "long prompt")
 _VAGUENESS = ("specific", "vague", "underspecified")
@@ -167,7 +167,9 @@ def scenario_family(text: str) -> tuple[str, frozenset[str]]:
     for name, markers in _INTENT_WORDS.items():
         if any(
             word in markers
-            or any(len(marker) >= 4 and word.startswith(marker) for marker in markers)
+            or any(
+                len(marker) >= 4 and word.startswith(marker) for marker in markers
+            )  # literal: text heuristic, a stem marker
             for word in words
         ):
             intent = name
@@ -178,7 +180,9 @@ def scenario_family(text: str) -> tuple[str, frozenset[str]]:
         if word not in _FAMILY_STOP
         and not any(
             word in markers
-            or any(len(marker) >= 4 and word.startswith(marker) for marker in markers)
+            or any(
+                len(marker) >= 4 and word.startswith(marker) for marker in markers
+            )  # literal: text heuristic, a stem marker
             for markers in _INTENT_WORDS.values()
         )
     )
@@ -465,6 +469,11 @@ def conversation_features(
     return out
 
 
+# TIER_COVER_FROM = 8: from this many picks every tier gets at least one
+# item, so a slice never reads as a single stance (convention, untested).
+TIER_COVER_FROM = 8
+
+
 def mix_items_by_tier(items: list, n: int, tier_of, *, hard_share: float | None = None) -> list:
     """Breadth-first across tiers, then fill to ``hard_share``.
 
@@ -500,7 +509,7 @@ def mix_items_by_tier(items: list, n: int, tier_of, *, hard_share: float | None 
         for tier in ("adversarial", "boundary", "ambiguous"):
             if take(tier):
                 break
-    if n >= 8:
+    if n >= TIER_COVER_FROM:
         have = {tier_of(item) for item in picked}
         for tier in _TIERS:
             if len(picked) >= n:
@@ -726,6 +735,9 @@ DEFAULT_CLOCK_S = 600.0
 PLAN_UNIT_S = 60.0
 PLAN_SCALE_MIN = 0.5
 PLAN_SCALE_MAX = 3.0
+# SHAPE_LEN_CLOCK_S = 120: under two minutes of clock the shape mining
+# stops at two-field shapes; above it, three (convention, untested).
+SHAPE_LEN_CLOCK_S = 120.0
 
 
 def sampling_plan(time_budget: float | None) -> dict[str, Any]:
@@ -739,7 +751,7 @@ def sampling_plan(time_budget: float | None) -> dict[str, Any]:
         "scale": scale,
         "shape_limit": max(8, round(12 * scale)),
         "enum_cap": max(200, round(200 * scale)),
-        "max_shape_len": 2 if seconds < 120 else 3,
+        "max_shape_len": 2 if seconds < SHAPE_LEN_CLOCK_S else 3,
         "ordinary_share": ORDINARY_SHARE,
     }
 
@@ -872,13 +884,9 @@ def running_turn_mean(stats: dict | None) -> float | None:
             lock.release()
 
 
-# DEFAULT_AVG_TURNS = 6: the mean thread length (user and agent turns
-# together) ``local_model`` and this sampler aim for when a caller names
-# none. ``simulate()`` sets its own in run/config.py (12) and passes it
-# through. Human threads with an assistant averaged 7.8 and 6.9 turns on
-# SimulatorArena's two tasks (2510.05444); tau-bench sets no cap
-# (2406.12045). Six sits under the measured means (convention).
-DEFAULT_AVG_TURNS = 6.0
+# DEFAULT_AVG_TURNS: the mean thread length ``local_model`` and this
+# sampler aim for when a caller names none; the same 12 ``simulate()``
+# uses, from defaults.py (one value, one home; the reason is there).
 # TURN_MIX_SHORT = 0.15 / TURN_MIX_TAIL = 0.10: of threads, 15% land under
 # the middle band, 75% in it (center +- TURN_BAND) and 10% in the long
 # tail; TURN_GAIN = 0.5 is the proportional correction toward avg_turns
@@ -987,6 +995,11 @@ def explore_slot_count(batch_size: int, round_index: int) -> int:
     return max(0, min(need // 2, round(need * frac)))
 
 
+# ANNEAL_OFF_TEMPERATURE = 0.01: below this annealing temperature no
+# off-batch candidate is accepted; the explore slot is closed (convention).
+ANNEAL_OFF_TEMPERATURE = 0.01
+
+
 def accept_anneal_candidate(
     novelty: float, *, temperature: float, rng: random.Random | None = None
 ) -> bool:
@@ -998,7 +1011,7 @@ def accept_anneal_candidate(
     closer about 15% of the time. The earlier form had the sign flipped
     and took duplicates almost always.
     """
-    if temperature <= 0.01:
+    if temperature <= ANNEAL_OFF_TEMPERATURE:
         return False
     rng = rng or random.Random()
     uplift = max(0.0, float(novelty) - NOVELTY_PIVOT)

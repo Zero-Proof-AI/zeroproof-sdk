@@ -59,6 +59,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from .defaults import PASS_THRESHOLD
 from .schema import check, stamp
 from .score.privileged import leak_report
 from .score.quality import load_jsonl, write_jsonl
@@ -579,8 +580,8 @@ def _stamp_groups(rows: list[dict]) -> None:
         gid = hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
         rewards = [_numeric(m.get("reward")) for m in members]
         numeric = [v for v in rewards if v is not None]
-        n0 = sum(1 for v in numeric if v < 0.5)
-        n1 = sum(1 for v in numeric if v > 0.5)
+        n0 = sum(1 for v in numeric if v < PASS_THRESHOLD)
+        n1 = sum(1 for v in numeric if v > PASS_THRESHOLD)
         mean = sum(numeric) / len(numeric) if numeric else None
         std = (
             (sum((v - mean) ** 2 for v in numeric) / len(numeric)) ** 0.5
@@ -706,8 +707,8 @@ def export_training(
     # the caller to notice after training (rlhf-book ch. 9: rejection
     # sampling keeps the passes).
     rewards = [_numeric(r.get("reward")) for r in rows]
-    n_fail = sum(1 for v in rewards if v is not None and v < 0.5)
-    n_pass = sum(1 for v in rewards if v is not None and v >= 0.5)
+    n_fail = sum(1 for v in rewards if v is not None and v < PASS_THRESHOLD)
+    n_pass = sum(1 for v in rewards if v is not None and v >= PASS_THRESHOLD)
     report["rewards"] = {
         "n_pass": n_pass,
         "n_fail": n_fail,

@@ -145,7 +145,7 @@ def _reference_spellings(reference: Any) -> list[str]:
         # multi-line gold (code tests): a traceback echoes single lines
         for line in text.splitlines():
             line = line.strip()
-            if len(line) >= 8:
+            if len(line) >= 8:  # literal: text heuristic
                 found.add(line)
 
     walk(reference)

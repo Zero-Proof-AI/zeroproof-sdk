@@ -416,7 +416,7 @@ def check(
         problems = validate(row, kind)
         if problems:
             bad.append(f"{i}:{','.join(problems)}")
-            if len(bad) >= 5:
+            if len(bad) >= 5:  # literal: examples shown in a message
                 break
     if bad:
         raise ValueError(f"schema_invalid in {where}: {'; '.join(bad)}")

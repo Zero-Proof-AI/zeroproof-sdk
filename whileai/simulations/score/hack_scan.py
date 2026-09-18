@@ -642,7 +642,7 @@ def hack_scan(
         base["regime"] = "degenerate"
         base["top_feature"] = None
         shown = ", ".join(f'"{name}"' for name in collinear[:4])
-        if len(collinear) > 4:
+        if len(collinear) > 4:  # literal: examples shown in a message
             shown += f", and {len(collinear) - 4} more"
         warnings.append(
             f"too few distinct trajectories to separate features: {base['distinct_per_ask']} "

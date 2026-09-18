@@ -61,7 +61,7 @@ def punctuation_free(a: str) -> str:
 
 def token_delete(a: str, i: int) -> str:
     words = a.split()
-    if len(words) < 4:
+    if len(words) < 4:  # literal: text heuristic
         return a
     index = (i * 7 + len(words) // 2) % len(words)
     return " ".join(words[:index] + words[index + 1 :])
@@ -69,7 +69,7 @@ def token_delete(a: str, i: int) -> str:
 
 def token_swap(a: str, i: int) -> str:
     words = a.split()
-    if len(words) < 3:
+    if len(words) < 3:  # literal: text heuristic
         return a
     index = (i * 5 + len(words) // 3) % (len(words) - 1)
     words[index], words[index + 1] = words[index + 1], words[index]
@@ -78,7 +78,9 @@ def token_swap(a: str, i: int) -> str:
 
 def typo_transpose(a: str, i: int) -> str:
     words = a.split()
-    eligible = [index for index, word in enumerate(words) if len(word.strip(".,!?")) >= 5]
+    eligible = [
+        index for index, word in enumerate(words) if len(word.strip(".,!?")) >= 5
+    ]  # literal: text heuristic
     if not eligible:
         return a
     index = eligible[i % len(eligible)]

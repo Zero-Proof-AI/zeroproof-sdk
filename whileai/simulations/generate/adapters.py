@@ -369,6 +369,8 @@ def resolve(
     timeout: float | None = None,
     max_tokens: int | None = None,
     user_model: str | None = None,
+    user_temperature: float | None = None,
+    world_options: Any = None,
 ) -> tuple[Any, str]:
     if isinstance(target, ConnectedAgent):
         return target.run, target.transport
@@ -389,6 +391,10 @@ def resolve(
             loop_kw["max_tokens"] = int(max_tokens)
         if user_model:
             loop_kw["user_model"] = user_model
+        if user_temperature is not None:
+            loop_kw["user_temperature"] = float(user_temperature)
+        if world_options is not None:
+            loop_kw["world_options"] = world_options
         return local_model(
             url,
             spec_model,

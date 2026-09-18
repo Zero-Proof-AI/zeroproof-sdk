@@ -31,6 +31,9 @@ from whileai._env import getenv
 # resolution).
 FLUSH_EVERY_S = 15.0
 FLUSH_EVERY_CALLS = 50
+# DROPPED_BEFORE_TAKE = 3: after this many dropped reports the meter takes
+# the flush lock itself instead of waiting for the next call (convention).
+DROPPED_BEFORE_TAKE = 3
 
 
 def _api_url() -> str:
@@ -108,7 +111,7 @@ class UsageMeter:
             self._in += tokens_in
             self._out += tokens_out
         self.dropped += 1
-        if self.dropped >= 3:
+        if self.dropped >= DROPPED_BEFORE_TAKE:
             self._take()
         return False
 
@@ -125,7 +128,7 @@ class UsageMeter:
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as res:
-                return 200 <= res.status < 300
+                return 200 <= res.status < 300  # literal: HTTP status code
         except (urllib.error.URLError, OSError, ValueError):
             return False
 

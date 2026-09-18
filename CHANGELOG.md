@@ -5,6 +5,49 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- The four "no hardcoding" lanes (run, generate, score, world/ingest) are
+  wired together. `simulate(advanced={"world": {...}})` now reaches the
+  mock world: the options land on `local_model(world_options=)` and
+  `MockEnvironment(options=)`, so a fault mode you add answers the agent's
+  tool calls inside a run. `advanced={"patience": {"second": p, "later":
+  q}}` (or `(p, q)`) and `advanced={"user_temperature": t}` reach the
+  simulated user from `simulate()`; `patience_hazards` is the one
+  validator, so a bad table fails before any model call. `grade()`,
+  `grade_llm()` and `wai.grade_llm()` take `payload_chars=` and
+  `max_tokens=` and pass them to the judge. One value, one home:
+  `DEFAULT_FAULT_RATE` (0.5) moves from `generate/scenarios.py` to
+  `defaults.py` beside `RL_FAULT_RATE` (0.8) with the per-call bands they
+  sit inside (arXiv 2603.21972, 2604.06111; PALADIN 2509.25238 for the
+  80/20 rl mix); `MAX_SAMPLES_PER_CALL` is `MAX_COMPLETIONS_PER_REQUEST`;
+  `RL_ROLLOUTS_PER_ASK` is `RL_ROLLOUTS_PER_PROMPT`; the exporters' pass
+  and fail counts read `PASS_THRESHOLD`; `leak_report(min_len=)` defaults
+  to `LEAK_MIN_QUOTE_CHARS`. `scripts/check_no_hardcoding.py` runs in the
+  lint CI job: a numeric literal in a comparison or an assignment under
+  `whileai/simulations` (other than 0, 1, 2, -1 and indices) fails the
+  build unless it is a named module constant with a why, or the line
+  ends with `# literal: <reason>`. Closing its findings named the conduct
+  rubric's weights (`score/quality.py`), the length-confound flags
+  (`score/judging.py`) and a dozen smaller thresholds, and marked HTTP
+  status codes, time units, float epsilons and text heuristics as the
+  literals they are.
+- `avg_turns` has one default: `DEFAULT_AVG_TURNS = 12` in `defaults.py`,
+  read by `simulate()`, `local_model()`, `resolve()` and the turn sampler.
+  Before, `simulate()` said 12 and `local_model()` said 6, undocumented.
+  The reason is 12 (#299, measured on 4000 rows): mean user depth 2.13 /
+  4.02 / 5.28 and 45% / 70% / 78% of threads reaching a third user turn at
+  6 / 12 / 16, and confirm-before-acting needs that third turn, so at 6 it
+  is missing from over half the rows and no selection downstream can
+  recover it (rlhf-book ch. 14). The cost is about three agent calls per
+  row instead of one. What moves: nothing in `simulate()` (`scripts/
+  golden.py` is identical on all 13 configurations); a direct
+  `local_model(...)` call with no `avg_turns=` now aims for 12 turns
+  instead of 6, and `sample_turn_budget(avg_turns=None)` centres on 12.
+  Pass `avg_turns=6` for the old length.
+- `tests/generate/test_successive.py::test_unanimous_prompts_stop_when_fresh_prompts_split_more_often`
+  runs with `reproducible=True`. Its assertions read the allocator's
+  choices, which follow the order rows land, and at `concurrency=4` that
+  order was the thread scheduler's; pinned, the run is bit-for-bit the
+  same in any test order.
 - Every number the mock world, trace ingest, platform client, training
   client, hack monitor and environment export ship with is now a named
   default in `whileai/simulations/defaults.py`, one line each with the

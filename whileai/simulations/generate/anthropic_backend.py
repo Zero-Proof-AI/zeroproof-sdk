@@ -286,17 +286,17 @@ def _raise_for_status(status: int, body: str, model: str, *, tries: int) -> None
     detail = _error_message(status, body)
     if status in {401, 403}:
         raise RuntimeError(f"Anthropic rejected the API key ({status}): {detail} Check {KEY_ENV}.")
-    if status == 404:
+    if status == 404:  # literal: HTTP status code
         raise RuntimeError(
             f"Anthropic has no model {model!r} (404): {detail} "
             "Use a model id from console.anthropic.com."
         )
-    if status == 429:
+    if status == 429:  # literal: HTTP status code
         raise RuntimeError(
             f"Anthropic rate-limited {model} (429) after {tries} tries: {detail} "
             "Lower concurrency= or wait for the limit to reset."
         )
-    if status >= 500:
+    if status >= 500:  # literal: HTTP status code
         raise RuntimeError(
             f"Anthropic returned {status} for {model} after {tries} tries: {detail} Retry later."
         )
@@ -326,13 +326,17 @@ def _one_call(
     for _ in range(8):
         response = requests.post(url, headers=headers, json=payload, timeout=timeout)
         status = int(response.status_code)
-        if status < 400:
+        if status < 400:  # literal: HTTP status code
             return reply_from_response(response.json())
         body = response.text or ""
-        if status == 400 and "max_tokens" in body and int(payload.get("max_tokens") or 0) > 256:
+        if (
+            status == 400 and "max_tokens" in body and int(payload.get("max_tokens") or 0) > 256
+        ):  # literal: HTTP status code; a reply under 256 tokens is not worth retrying shorter
             payload["max_tokens"] = max(256, int(payload["max_tokens"]) // 2)
             continue
-        if (status == 429 or status >= 500) and transient < TRANSIENT_TRIES:
+        if (
+            status == 429 or status >= 500
+        ) and transient < TRANSIENT_TRIES:  # literal: HTTP status code
             time.sleep(_retry_after(response.headers, transient))
             transient += 1
             continue

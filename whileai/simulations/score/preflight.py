@@ -187,7 +187,9 @@ def _policy_mentions(name: str, policy: str) -> bool:
     if not nouns:
         return bool(re.search(rf"\b{re.escape(verb)}", low))
     nouns_seen = all(
-        re.search(rf"\b{re.escape(n[:-1] if len(n) > 4 and n.endswith('s') else n)}", low)
+        re.search(
+            rf"\b{re.escape(n[:-1] if len(n) > 4 and n.endswith('s') else n)}", low
+        )  # literal: text heuristic, a plural
         for n in nouns
     )
     verb_seen = any(re.search(rf"\b{re.escape(v)}", low) for v in _VERB_SYNONYMS.get(verb, (verb,)))
@@ -233,7 +235,7 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
         warnings.append(
             f"{len(missing_shapes)} of {len(tools)} tools declare no result "
             f"shape ({', '.join(missing_shapes[:5])}"
-            f"{', ...' if len(missing_shapes) > 5 else ''}): grounding is "
+            f"{', ...' if len(missing_shapes) > 5 else ''}): grounding is "  # literal: examples shown in a message
             "harder and grounding-style scaffolds can convert fabrication "
             "into refusal instead of correct service; add a `returns` key "
             "to each tool (an example result or a JSON schema)"
@@ -626,14 +628,16 @@ _GAP_STOP = frozenset(
 
 def _stem(word: str) -> str:
     """``refunds`` and ``orders`` overlap ``refund`` and ``order``."""
-    return word[:-1] if len(word) > 4 and word.endswith("s") else word
+    return (
+        word[:-1] if len(word) > 4 and word.endswith("s") else word
+    )  # literal: text heuristic, a plural
 
 
 def _content_words(text: str) -> set[str]:
     return {
         _stem(word)
         for word in _GAP_WORD.findall(str(text or "").lower())
-        if len(word) >= 3 and word not in _GAP_STOP
+        if len(word) >= 3 and word not in _GAP_STOP  # literal: text heuristic
     }
 
 
@@ -877,7 +881,9 @@ def coverage_gap(
     ]
     if untested_rules:
         shown = ", ".join(_short_rule(rule) for rule in untested_rules[:3])
-        more = f", and {len(untested_rules) - 3} more" if len(untested_rules) > 3 else ""
+        more = (
+            f", and {len(untested_rules) - 3} more" if len(untested_rules) > 3 else ""
+        )  # literal: examples shown in a message
         summary_bits.append(f"untested: {shown}{more}")
     if untested_tools:
         summary_bits.append("no ask reaches " + ", ".join(untested_tools))

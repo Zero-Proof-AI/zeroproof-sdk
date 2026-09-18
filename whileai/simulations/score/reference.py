@@ -42,7 +42,7 @@ def _post(url: str, key: str, body: dict, timeout: float) -> dict:
     if key:
         headers["Authorization"] = f"Bearer {key}"
     res = requests.post(url, headers=headers, json=body, timeout=timeout)
-    if res.status_code >= 400:
+    if res.status_code >= 400:  # literal: HTTP status code
         raise RuntimeError(f"{url} -> {res.status_code}: {res.text[:300]}")
     return res.json()
 
@@ -235,7 +235,7 @@ def reference_logprobs(
                 total, count, turns = future.result()
             except Exception as exc:  # one bad row must not lose the batch
                 skipped += 1
-                if len(errors) < 5:
+                if len(errors) < 5:  # literal: examples shown in a message
                     errors.append(f"{type(exc).__name__}: {str(exc)[:200]}")
                 continue
             if turns == 0:

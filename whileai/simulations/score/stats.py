@@ -146,7 +146,7 @@ _T975 = {
 def _betacf(a: float, b: float, x: float) -> float:
     """Continued fraction for the incomplete beta function (Lentz's
     method, as in Numerical Recipes 6.4)."""
-    tiny = 1e-300
+    tiny = 1e-300  # literal: float epsilon
     qab, qap, qam = a + b, a + 1.0, a - 1.0
     c, d = 1.0, 1.0 - qab * x / qap
     d = 1.0 / (d if abs(d) > tiny else tiny)
@@ -164,7 +164,7 @@ def _betacf(a: float, b: float, x: float) -> float:
         c = 1.0 + aa / (c if abs(c) > tiny else tiny)
         step = d * c
         h *= step
-        if abs(step - 1.0) < 3e-16:
+        if abs(step - 1.0) < 3e-16:  # literal: float epsilon
             break
     return h
 
@@ -190,6 +190,13 @@ def _t_cdf(t: float, df: int) -> float:
     return 1.0 - tail if t >= 0 else tail
 
 
+# _T_BRACKET_HI = 1000: the upper end of the bisection bracket for a t
+# quantile (no level anyone asks for needs a larger t at df >= 1);
+# _T_TOLERANCE = 1e-10: the bracket width at which the inversion stops.
+_T_BRACKET_HI = 1000.0
+_T_TOLERANCE = 1e-10
+
+
 def _t_quantile(df: int, level: float = CI_LEVEL) -> float:
     """The two-sided t quantile at ``df`` degrees of freedom and ``level``:
     the table to 30 at the default level, the Cornish-Fisher expansion in
@@ -202,14 +209,14 @@ def _t_quantile(df: int, level: float = CI_LEVEL) -> float:
         z = Z_95
         return z + (z**3 + z) / (4 * n) + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * n * n)
     target = (1 + level) / 2
-    lo, hi = 0.0, 1000.0
+    lo, hi = 0.0, _T_BRACKET_HI
     for _ in range(200):
         mid = (lo + hi) / 2
         if _t_cdf(mid, n) < target:
             lo = mid
         else:
             hi = mid
-        if hi - lo < 1e-10:
+        if hi - lo < _T_TOLERANCE:
             break
     return (lo + hi) / 2
 
@@ -323,7 +330,7 @@ def _independence_ratio(rates: Sequence[float]) -> float | None:
     mean = _mean(rates)
     within = mean * (1 - mean)
     between = sum((r - mean) ** 2 for r in rates) / len(rates)
-    if within <= 0 or within - between <= 1e-12:
+    if within <= 0 or within - between <= 1e-12:  # literal: float epsilon
         return None
     return within / (within - between)
 
@@ -923,7 +930,9 @@ def compare_runs(
         n = len(diffs)
         extreme = 0
         for _ in range(n_boot):
-            flipped = _mean([d if rng.random() < 0.5 else -d for d in diffs])
+            flipped = _mean(
+                [d if rng.random() < 0.5 else -d for d in diffs]
+            )  # literal: a fair coin
             if abs(flipped) >= observed - 1e-12:
                 extreme += 1
         p_value = (extreme + 1) / (n_boot + 1)

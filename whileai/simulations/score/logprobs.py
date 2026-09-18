@@ -73,7 +73,9 @@ def logprob_report(rows: Sequence[dict]) -> dict[str, Any]:
         for r in with_lp
         if r.get("reward") in (0, 1) and not isinstance(r.get("reward"), bool)
     ]
-    corr = pearson([g[1] for g in graded], [g[0] for g in graded]) if len(graded) >= 3 else None
+    corr = (
+        pearson([g[1] for g in graded], [g[0] for g in graded]) if len(graded) >= 3 else None
+    )  # literal: a correlation needs three points (structural)
     truncated = sum(
         1
         for r in with_lp

@@ -391,7 +391,9 @@ def _item_noun(tool: str) -> str:
     tokens = [t for t in re.split(r"[^a-z0-9]+", str(tool).lower()) if t]
     rest = tokens[1:] or tokens
     noun = rest[-1] if rest else ""
-    if len(noun) > 3 and noun.endswith("s") and not noun.endswith("ss"):
+    if (
+        len(noun) > 3 and noun.endswith("s") and not noun.endswith("ss")
+    ):  # literal: text heuristic, a plural
         noun = noun[:-1]
     return noun
 
@@ -695,7 +697,7 @@ def _invented_shell(tool: str, arguments: dict, n: int, digest: str, o: WorldOpt
             ),
             "stderr": "",
         }
-    if "ls" in command or flavor == 3:
+    if "ls" in command or flavor == 3:  # literal: shell flavor index
         return {
             "command": command,
             "exit_code": 0,

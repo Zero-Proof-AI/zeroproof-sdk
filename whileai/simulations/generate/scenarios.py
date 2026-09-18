@@ -177,14 +177,8 @@ ALPHA, BETA, GAMMA, DELTA = 0.35, 0.35, 0.2, 0.1
 # measured: the middle of both scales (convention).
 _DEFAULT_NOVELTY = 0.5
 _DEFAULT_BEHAVIOR_VALUE = 0.5
-# DEFAULT_FAULT_RATE = 0.5: the share of fault-tagged cells that keep a
-# sandbox plan. Half of tagged cells inject; tagged cells are a small
-# slice of all rows, so row-level faults stay modest (under 10% of rows
-# from this dial alone). Independent of failure_mutation: this is
-# sandbox/tool faults, not a purposeful-fail arm. ``simulate(advanced=
-# {"fault_rate": r})`` or ``risk=`` moves it, 0 disables injection; the rl
-# mode raises it to 0.8 in run/config.py (convention, untested).
-DEFAULT_FAULT_RATE = 0.5
+# DEFAULT_FAULT_RATE (0.5) and RL_FAULT_RATE (0.8) live in defaults.py with
+# the per-call bands they sit inside; run/config.py reads them from there.
 
 
 def _tool_names(tools: list[dict]) -> list[str]:
@@ -325,11 +319,15 @@ def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
                 continue
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw) if s.strip()]
         chunks = (
-            sentences if (len(sentences) >= 2 and all(len(s) >= 8 for s in sentences)) else [raw]
+            sentences
+            if (len(sentences) >= 2 and all(len(s) >= 8 for s in sentences))
+            else [raw]  # literal: text heuristic, a clause
         )
         for chunk in chunks:
             semis = [s.strip(" \t-•") for s in re.split(r";\s+", chunk) if s.strip()]
-            if len(semis) >= 2 and all(len(s) >= 8 for s in semis):
+            if len(semis) >= 2 and all(
+                len(s) >= 8 for s in semis
+            ):  # literal: text heuristic, a clause
                 expanded.extend(semis)
             else:
                 expanded.append(chunk)
@@ -338,13 +336,13 @@ def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
     for part in expanded:
         clause = re.sub(r"\s+", " ", part).strip()
         clause = re.sub(r"^(?:#{1,6}\s+|\d+[.)]\s+|[-*•]\s+)", "", clause).strip()
-        if _ROLE_START.match(clause) or len(clause) < 8:
+        if _ROLE_START.match(clause) or len(clause) < 8:  # literal: text heuristic, a clause
             continue
         if len(clause) > _MAX_CLAUSE:
             # Long compound rules are the risky ones. Keep the head as
             # the coverage label instead of dropping the rule entirely.
             cut = clause[:_MAX_CLAUSE].rsplit(" ", 1)[0].strip(" ,;:")
-            if len(cut) < 8:
+            if len(cut) < 8:  # literal: text heuristic, a clause
                 continue
             clause = cut
         key = clause.lower()
