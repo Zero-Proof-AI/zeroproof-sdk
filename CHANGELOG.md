@@ -3,6 +3,17 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Releases are cut by one command, `gh workflow run release.yml`, which
+  runs `.github/scripts/release.py` on main under a concurrency group:
+  next hundredth, both pyprojects, `uv lock`, and a fresh `## Unreleased`
+  header above the version just cut. That header is the fix for today's
+  collisions, where a PR merged a minute after a cut filed its entry under
+  a version that had already shipped without it. CI now refuses a PR that
+  bumps the version alongside code, or drops the header. CLAUDE.md and
+  CONTRIBUTING.md carry the rule.
+
 ## 0.81 (2026-09-18)
 
 - `export_environment(reward=<verifier>)` finds the name your module bound
