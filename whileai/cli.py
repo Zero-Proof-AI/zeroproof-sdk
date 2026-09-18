@@ -1,13 +1,50 @@
-"""``whileai`` command line: login, signup, logout, status, init-evals."""
+"""The `whileai` command: accounts, and the platform objects a coding agent
+manages from a terminal.
+
+    whileai login | signup --email | status | logout
+    whileai init-evals
+    whileai agents
+    whileai agent refund-bot
+    whileai runs refund-bot
+    whileai verdict refund-bot [--behavior refunds]
+    whileai promote refund-bot v4
+    whileai keys
+    whileai live refund-bot --day 2026-09-17 --version v3 --replies 2400 --flagged 98
+
+Platform commands print JSON (``--json``) or a short table, and exit 1 on
+an API error with the reason on stderr. They are thin calls into
+``whileai.platform``; nothing here talks to anything else.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from collections.abc import Callable
+from typing import Any
 
 from . import auth
 from .init_evals import add_arguments as init_evals_args
+
+
+def _platform():
+    from . import platform
+
+    return platform
+
+
+def _fail(err: Exception) -> int:
+    print(f"error: {err}", file=sys.stderr)
+    return 1
+
+
+def _emit(payload: Any, as_json: bool, table: Callable[[], None]) -> int:
+    if as_json:
+        print(json.dumps(payload, indent=2, default=str))
+    else:
+        table()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,21 +77,36 @@ def main(argv: list[str] | None = None) -> int:
     )
     init_evals_args(p_init)
 
-    p_purge = sub.add_parser(
-        "purge", help="delete an agent's traces, datasets and record, or empty datasets"
+    def platform_parser(name: str, help_text: str):
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument("--json", action="store_true", help="print the API's JSON")
+        p.add_argument("--api-key", help="use this key instead of the saved one")
+        return p
+
+    platform_parser("agents", "list the agents tracked on your account")
+    p_agent = platform_parser("agent", "one tracked agent: record, behaviors, verdict")
+    p_agent.add_argument("id")
+    p_runs = platform_parser("runs", "the training runs of one agent, newest first")
+    p_runs.add_argument("id")
+    p_verdict = platform_parser(
+        "verdict", "does the candidate beat the served version, and is it real"
     )
-    p_purge.add_argument("--agent", help="agent slug to remove with everything under it")
-    p_purge.add_argument(
-        "--empty", action="store_true", help="delete datasets with no stored bytes"
+    p_verdict.add_argument("id")
+    p_verdict.add_argument(
+        "--behavior", help="which behavior's test (default: the latest run's target)"
     )
-    p_purge.add_argument(
-        "--max-rows",
-        type=int,
-        default=0,
-        help="with --empty: also delete sets with this many rows or fewer",
-    )
-    p_purge.add_argument("--dry-run", action="store_true", help="count, delete nothing")
-    p_purge.add_argument("--yes", action="store_true", help="skip the confirmation")
+    p_promote = platform_parser("promote", "make a version the served one")
+    p_promote.add_argument("id")
+    p_promote.add_argument("version")
+    platform_parser("keys", "list the API keys on your account (names and prefixes)")
+    p_live = platform_parser("live", "report one day of traffic on the served version")
+    p_live.add_argument("id")
+    p_live.add_argument("--day", required=True, help="YYYY-MM-DD")
+    p_live.add_argument("--version", required=True, help="the version that served that day")
+    p_live.add_argument("--replies", type=int, required=True)
+    p_live.add_argument("--flagged", type=int, default=0, help="replies that failed a check")
+    p_live.add_argument("--p50", type=float, default=None, help="median latency in seconds")
+    p_live.add_argument("--cost", type=float, default=None, help="USD spent that day")
 
     args = parser.parse_args(argv)
 
@@ -67,16 +119,14 @@ def main(argv: list[str] | None = None) -> int:
                 open_browser=not args.no_browser,
             )
         except auth.LoginError as err:
-            print(f"error: {err}", file=sys.stderr)
-            return 1
+            return _fail(err)
         return 0 if key or args.no_wait else 2
 
     if args.command == "signup":
         try:
             auth.signup(args.email, name=args.name)
         except auth.LoginError as err:
-            print(f"error: {err}", file=sys.stderr)
-            return 1
+            return _fail(err)
         return 0
 
     if args.command == "init-evals":
@@ -106,33 +156,99 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
-    if args.command == "purge":
-        from .simulations.ingest.platform import delete_empty_datasets, purge_agent
+    return _platform_command(args)
 
-        if not args.agent and not args.empty:
-            print("error: pass --agent <slug> and/or --empty", file=sys.stderr)
-            return 1
-        plan: dict = {}
-        if args.agent:
-            plan["agent"] = purge_agent(args.agent, dry_run=True)
-        if args.empty:
-            plan["empty"] = delete_empty_datasets(max_rows=args.max_rows, dry_run=True)
-        print(json.dumps(plan, indent=2))
-        if args.dry_run:
-            return 0
-        if not args.yes:
-            answer = input("Delete all of the above? This cannot be undone. [y/N] ").strip().lower()
-            if answer not in ("y", "yes"):
-                print("Nothing deleted.")
-                return 2
-        done: dict = {}
-        if args.agent:
-            done["agent"] = purge_agent(args.agent)
-        if args.empty:
-            done["empty"] = delete_empty_datasets(max_rows=args.max_rows)
-        print(json.dumps(done, indent=2))
-        return 0
 
+def _platform_command(args: argparse.Namespace) -> int:
+    platform = _platform()
+    key = args.api_key
+    try:
+        if args.command == "agents":
+            agents = platform.tracked_agents(api_key=key)
+
+            def table():
+                if not agents:
+                    print("no tracked agents yet: track one with whileai.platform.track(...)")
+                for a in agents:
+                    print(f"{a.id:24} {a.model or '-':28} serving {a.serving or '-'}")
+
+            return _emit([a.model_dump() for a in agents], args.json, table)
+
+        tracked = platform.Tracked(getattr(args, "id", ""), api_key=key)
+
+        if args.command == "agent":
+            dash = tracked.dashboard()
+            behaviors = tracked.behaviors()
+
+            def table():
+                a = dash.agent
+                print(
+                    f"{a.id}  model {a.model or '-'}  serving {a.serving or '-'}  candidate {a.candidate or '-'}"
+                )
+                for b in behaviors:
+                    n = f" n={b.n}" if b.n else ""
+                    print(f"  {b.name:24} test {b.test_version or '-'}{n}")
+                print(str(dash.verdict))
+
+            payload = {
+                "agent": dash.agent.model_dump(),
+                "behaviors": [b.model_dump() for b in behaviors],
+                "verdict": dash.verdict.model_dump(),
+            }
+            return _emit(payload, args.json, table)
+
+        if args.command == "runs":
+            runs = tracked.runs()
+
+            def table():
+                if not runs:
+                    print("no runs yet")
+                for r in runs:
+                    targets = ",".join(r.get("targets") or []) or "-"
+                    print(
+                        f"{r.get('version', '-'):10} {r.get('method') or '-':6} {r.get('status') or '-':10} targets {targets}  {str(r.get('createdAt', ''))[:10]}"
+                    )
+
+            return _emit(runs, args.json, table)
+
+        if args.command == "verdict":
+            verdict = tracked.verdict(args.behavior)
+            return _emit(verdict.model_dump(), args.json, lambda: print(str(verdict)))
+
+        if args.command == "promote":
+            out = tracked.promote(args.version)
+            return _emit(out, args.json, lambda: print(f"{args.id}: {args.version} is now serving"))
+
+        if args.command == "keys":
+            out = platform._request("GET", "/keys", api_key=platform._key(key))
+
+            def table():
+                for k in out.get("keys") or []:
+                    print(
+                        f"{k.get('name', '-'):20} {k.get('key', '-'):20} {k.get('tier', '-'):6} {str(k.get('createdAt', ''))[:10]}"
+                    )
+                print(
+                    f"{len(out.get('keys') or [])} of {out.get('limit', 5)}; create or revoke under Account on the platform"
+                )
+
+            return _emit(out, args.json, table)
+
+        if args.command == "live":
+            out = tracked.live(
+                args.day,
+                version=args.version,
+                replies=args.replies,
+                flagged=args.flagged,
+                p50_s=args.p50,
+                cost_usd=args.cost,
+            )
+            return _emit(
+                out, args.json, lambda: print(f"{args.id}: {args.day} recorded for {args.version}")
+            )
+    except platform.PlatformError as err:
+        return _fail(err)
+    except ValueError as err:  # pydantic validation
+        return _fail(err)
     return 1
 
 

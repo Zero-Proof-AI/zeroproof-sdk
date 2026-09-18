@@ -187,6 +187,21 @@ need, and how long it takes. All of them run in CI.
 ## Platform
 
 Push a graded run to your While account, train on it, serve the result.
+
+From a terminal, for a coding agent that manages the account:
+
+```bash
+whileai login                    # or: whileai signup --email you@example.com
+whileai agents                   # what is tracked, what each one serves
+whileai agent refund-bot         # record, behaviors, verdict
+whileai runs refund-bot          # the version table
+whileai verdict refund-bot       # does the candidate beat the served version, and is it real
+whileai promote refund-bot v4    # usually the person's button on the platform
+whileai live refund-bot --day 2026-09-17 --version v3 --replies 2400 --flagged 98
+whileai keys                     # names and prefixes; create or revoke under Account
+```
+
+Every command takes `--json`. They are thin calls into `whileai.platform`.
 `push` refuses RL data with no mixed groups, since a trainer would learn
 nothing from it.
 
