@@ -60,6 +60,14 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ..defaults import (
+    FLIP_FLAG,
+    JUDGE_CHECK_SAMPLE,
+    LENGTH_GAP_FLAG,
+    MAX_GOLD_ASK,
+    MIN_AGREEMENT,
+    MIN_KAPPA,
+)
 from .agreement import (
     GOLD_KIND_KEY,
     MIN_GOLD,
@@ -73,11 +81,28 @@ from .stats import task_key, wilson_interval
 
 GOLD_KEY = "gold_reward"
 FILLER = " Let me know if there is anything else I can help with."
-LENGTH_GAP_FLAG = 0.15
-FLIP_FLAG = 0.10
-#: the floors ``ok`` needs: Wilson lower bound of agreement, and kappa
-MIN_AGREEMENT = 0.8
-MIN_KAPPA = 0.6
+# FILLER_REPEATS = 3: the neutral sentence is appended three times (about
+# 170 characters), enough to move a reply across the median length of
+# most lanes without adding a claim (convention).
+FILLER_REPEATS = 3
+# The floors ``ok`` needs (``MIN_AGREEMENT`` 0.8, ``MIN_KAPPA`` 0.6) and
+# the flags (``LENGTH_GAP_FLAG`` 0.15, ``FLIP_FLAG`` 0.10) live in
+# ``defaults`` with their sources; ``judge_trust`` takes each as a keyword.
+# HALVES_GAP_FLAG = 0.15: agreement gap between the two task halves that
+# reads as a rubric fit to its examples. Same size as LENGTH_GAP_FLAG so
+# the two rubric-shape flags fire at one sensitivity (convention).
+HALVES_GAP_FLAG = 0.15
+# HALVES_MIN_ROWS = 10: labeled rows each half needs before the gap is
+# read; under ten one row moves a half by ten points (convention).
+HALVES_MIN_ROWS = 10
+# LENGTH_MIN_ROWS_PER_LABEL = 6: rows of one gold label before the
+# short/long split is read; a median split of fewer leaves under three a
+# side (convention).
+LENGTH_MIN_ROWS_PER_LABEL = 6
+# LABEL_SEARCH_MAX = 1000: the most labels the "label more" search will
+# consider before giving up; past it the Wilson bound has converged to
+# within 0.03 of the point estimate and more labels cannot lift it.
+LABEL_SEARCH_MAX = 1000
 #: what ``grade(trust=)`` accepts
 TRUST_MODES = ("warn", "require", "off")
 NO_HUMAN_GOLD_NOTE = (
@@ -165,13 +190,16 @@ def _half(task: str) -> int:
     return int(hashlib.sha256(task.encode("utf-8")).hexdigest()[:8], 16) % 2
 
 
-def length_sensitivity(labeled: Sequence[dict], *, gold: str = GOLD_KEY) -> dict[str, Any]:
-    """Judge pass rate on short vs long replies, within each gold label."""
+def length_sensitivity(
+    labeled: Sequence[dict], *, gold: str = GOLD_KEY, length_gap_flag: float = LENGTH_GAP_FLAG
+) -> dict[str, Any]:
+    """Judge pass rate on short vs long replies, within each gold label;
+    ``flagged`` when the widest gap reaches ``length_gap_flag``."""
     out: dict[str, Any] = {}
     max_gap = 0.0
     for label in (1, 0):
         rows = [r for r in labeled if _label(r, gold) == label]
-        if len(rows) < 6:
+        if len(rows) < LENGTH_MIN_ROWS_PER_LABEL:
             out[f"gold_{label}"] = {"n": len(rows), "note": "too few rows"}
             continue
         lengths = sorted(reply_length(r) for r in rows)
@@ -193,17 +221,17 @@ def length_sensitivity(labeled: Sequence[dict], *, gold: str = GOLD_KEY) -> dict
             "gap_long_minus_short": gap,
         }
     out["max_gap"] = max_gap
-    out["flagged"] = max_gap >= LENGTH_GAP_FLAG
+    out["flagged"] = max_gap >= length_gap_flag
     return out
 
 
 def _padded(row: dict) -> dict:
     out = dict(row)
-    out["final_text"] = str(row.get("final_text") or "") + FILLER * 3
+    out["final_text"] = str(row.get("final_text") or "") + FILLER * FILLER_REPEATS
     messages = [dict(m) for m in (row.get("messages") or []) if isinstance(m, dict)]
     for m in reversed(messages):
         if str(m.get("role") or "") == "assistant":
-            m["content"] = str(m.get("content") or "") + FILLER * 3
+            m["content"] = str(m.get("content") or "") + FILLER * FILLER_REPEATS
             break
     if messages:
         out["messages"] = messages
@@ -300,9 +328,10 @@ def judge_probes(
     *,
     probes: str | Sequence[str] = "all",
     rubric: str | None = None,
-    sample: int = 40,
+    sample: int = JUDGE_CHECK_SAMPLE,
     seed: int = 0,
     concurrency: int = 8,
+    flip_flag: float = FLIP_FLAG,
 ) -> dict[str, Any]:
     """Try the reward hacks a policy finds first on the judge, on purpose.
 
@@ -318,7 +347,8 @@ def judge_probes(
     no row is ``skipped`` with the reason.
 
     Returns per-probe counts and rates, ``exploitable_by`` (probes at or
-    over ``FLIP_FLAG``), and one warning per exploit.
+    over ``flip_flag``, ``FLIP_FLAG`` by default), and one warning per
+    exploit.
     """
     from .judging import run_judge
 
@@ -362,7 +392,7 @@ def judge_probes(
             rate = (up / fail_before) if fail_before else None
         else:
             rate = (pass_after / n) if n else None
-        flagged = rate is not None and rate >= FLIP_FLAG
+        flagged = rate is not None and rate >= flip_flag
         out["probes"][name] = {
             "n": n,
             "kind": "additive" if name in ADDITIVE_PROBES else "replacement",
@@ -393,11 +423,13 @@ def perturbation(
     rows: Sequence[dict],
     judge: Callable[[dict], Any],
     *,
-    sample: int = 40,
+    sample: int = JUDGE_CHECK_SAMPLE,
     seed: int = 0,
     concurrency: int = 8,
+    flip_flag: float = FLIP_FLAG,
 ) -> dict[str, Any]:
-    """Re-judge a sample as-is (consistency) and with filler (length)."""
+    """Re-judge a sample as-is (consistency) and with filler (length);
+    a flip rate at or over ``flip_flag`` is flagged."""
     from .judging import run_judge
 
     picked = _pick(rows, sample, seed)
@@ -438,8 +470,8 @@ def perturbation(
         "filler_flip_rate": length,
         "filler_flips_up": pad_up,
         "filler_flips_down": pad_down,
-        "flagged_consistency": consistency is not None and consistency >= FLIP_FLAG,
-        "flagged_length": length is not None and length >= FLIP_FLAG,
+        "flagged_consistency": consistency is not None and consistency >= flip_flag,
+        "flagged_length": length is not None and length >= flip_flag,
         "errors": sum(1 for r in again.rows + padded.rows if r.get("judge_status") != "ok"),
     }
 
@@ -449,7 +481,7 @@ def judge_trust(
     judge: Callable[[dict], Any] | None = None,
     *,
     gold: str = GOLD_KEY,
-    sample: int = 40,
+    sample: int = JUDGE_CHECK_SAMPLE,
     seed: int = 0,
     concurrency: int = 8,
     probes: str | Sequence[str] | None = None,
@@ -457,8 +489,16 @@ def judge_trust(
     min_agreement: float = MIN_AGREEMENT,
     min_kappa: float = MIN_KAPPA,
     allow_model_gold: bool = False,
+    length_gap_flag: float = LENGTH_GAP_FLAG,
+    flip_flag: float = FLIP_FLAG,
 ) -> dict[str, Any]:
     """The judge-trust report. See the module docstring.
+
+    The floors and flags are keywords with their defaults in
+    ``whileai.simulations.defaults``: ``min_agreement`` (0.8, the
+    human-human agreement of MT-Bench, arXiv:2306.05685), ``min_kappa``
+    (0.6, Landis and Koch "substantial"), ``length_gap_flag`` (0.15) and
+    ``flip_flag`` (0.10).
 
     ``rows`` carry the judge's ``reward``; rows that also carry ``gold``
     (0/1, default ``gold_reward``) feed the agreement, held-out, and
@@ -493,7 +533,7 @@ def judge_trust(
     }
     gold_kind = agree.get("gold_kind")
     trusted = gold_kind == "human" or allow_model_gold
-    length = length_sensitivity(labeled, gold=gold)
+    length = length_sensitivity(labeled, gold=gold, length_gap_flag=length_gap_flag)
     queue = [
         {
             "task": _task(r),
@@ -506,7 +546,9 @@ def judge_trust(
         if _label(r, gold) != _label(r, "reward")
     ]
     perturb = (
-        perturbation(rows, judge, sample=sample, seed=seed, concurrency=concurrency)
+        perturbation(
+            rows, judge, sample=sample, seed=seed, concurrency=concurrency, flip_flag=flip_flag
+        )
         if judge
         else None
     )
@@ -519,6 +561,7 @@ def judge_trust(
             sample=sample,
             seed=seed,
             concurrency=concurrency,
+            flip_flag=flip_flag,
         )
         if judge and probes
         else None
@@ -545,12 +588,12 @@ def judge_trust(
             point = float(agree.get("agreement") or 0.0)
             need = int(agree["n"])
             if point > min_agreement:
-                while need < 1000:
+                while need < LABEL_SEARCH_MAX:
                     ci = wilson_interval(round(point * need), need)
                     if ci is not None and ci[0] >= min_agreement:
                         break
                     need += 1
-            if point > min_agreement and need <= 200:
+            if point > min_agreement and need <= MAX_GOLD_ASK:
                 # The judge agrees often enough; the sample is what is short.
                 # Say how many labels the bound needs at this agreement rate,
                 # or a perfect judge on 14 labels reads as "change the judge". At
@@ -577,7 +620,7 @@ def judge_trust(
             )
     if halves["a"]["agreement"] is not None and halves["b"]["agreement"] is not None:
         gap = abs(halves["a"]["agreement"] - halves["b"]["agreement"])
-        if gap >= 0.15 and min(halves["a"]["n"], halves["b"]["n"]) >= 10:
+        if gap >= HALVES_GAP_FLAG and min(halves["a"]["n"], halves["b"]["n"]) >= HALVES_MIN_ROWS:
             warnings.append(
                 f"agreement differs by {gap:.0%} between task halves; the rubric may be fit to "
                 "the examples it was tuned on"

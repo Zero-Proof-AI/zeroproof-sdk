@@ -25,6 +25,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import HACK_THRESHOLD
 from .agreement import row_key
 from .hygiene import pearson
 from .stats import task_key
@@ -84,7 +85,7 @@ def logprob_report(rows: Sequence[dict]) -> dict[str, Any]:
             "no row carries logprob/n_tokens; run simulate(logprobs=True) with a model "
             "backend (a callable agent= must stamp its own)"
         )
-    if corr is not None and corr >= 0.3:
+    if corr is not None and corr >= HACK_THRESHOLD:
         warnings.append(
             f"reward tracks the policy's confidence (r={corr:.2f}); a judge that pays for "
             "fluency is a reward hack (rlhf-book ch. 14)"

@@ -53,33 +53,59 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from ..defaults import ALPHA, RL_ROLLOUTS_PER_ASK, ROLLOUTS_PER_TASK
 from .hygiene import assistant_turns, is_truncated, reply_length, tool_calls
 from .optimize import _messages
 
-#: auto-tier vocabulary: the most common words and word pairs
+# DEFAULT_TOP_K = 200: auto-tier vocabulary, the most common words and
+# word pairs. Enough to hold every delimiter and rubric word seen in the
+# signal sweeps while a pass over a few thousand rollouts stays under a
+# second (convention).
 DEFAULT_TOP_K = 200
-#: permutations behind the noise floor
+# DEFAULT_N_PERM = 100: permutations behind the noise floor. The floor is
+# the (1 - alpha) quantile of the null maximum, so 100 draws place it
+# between the 95th and 96th order statistic; more draws sharpen the
+# floor at linear cost (convention).
 DEFAULT_N_PERM = 100
-#: a feature must be non-zero on at least this many graded rows
+# DEFAULT_MIN_OBS = 20: a feature must be non-zero on at least this many
+# graded rows, or its within-ask correlation is a handful of rows
+# (convention).
 DEFAULT_MIN_OBS = 20
-#: a rival above the floor is reported when it carries at least this
-#: share of the endorsed signal (integrity below 1 - RIVAL_SHARE)
+# RIVAL_SHARE = 0.2: a rival above the floor is reported when it carries
+# at least this share of the endorsed signal (integrity below
+# 1 - RIVAL_SHARE); under a fifth the endorsed feature still dominates
+# what the update learns (convention).
 RIVAL_SHARE = 0.2
-#: strongest binary features that seed pairwise conjunctions
+# DEFAULT_SEEDS = 12: strongest binary features that seed pairwise
+# conjunctions, 66 pairs (convention).
 DEFAULT_SEEDS = 12
-#: share of asks the policy already always passes before the pool is
-#: called exhausted (the one calibrated threshold from the signal sweeps)
+# SAT_FLAG = 0.2: share of asks the policy already always passes before
+# the pool is called exhausted. The one calibrated threshold from the
+# RLVR signal sweeps this scan descends from, and the same edge as the
+# top of the 20-80 difficulty band read from the other side.
 SAT_FLAG = 0.2
-#: how many ranked features the report lists
+# REPORT_TOP = 20: ranked features the report lists.
 REPORT_TOP = 20
-#: |within-ask rho| at or above this is not a correlation but an identity:
-#: the feature is an exact linear function of the centered reward.
+# DEGENERATE_RHO = 0.999: |within-ask rho| at or above this is not a
+# correlation but an identity: the feature is an exact linear function
+# of the centered reward, and 0.999 is 1 with float rounding.
 DEGENERATE_RHO = 0.999
-#: distinct rollouts an ask needs before the within-ask ranking can
-#: separate anything. With two, whichever of them the reward follows,
-#: every feature that differs between them is an exact function of the
-#: label: they all land at |rho| 1 and the ranking is a sort by name.
+# MIN_DISTINCT_PER_ASK = 3: distinct rollouts an ask needs before the
+# within-ask ranking can separate anything. With two, whichever of them
+# the reward follows, every feature that differs between them is an exact
+# function of the label: they all land at |rho| 1 and the ranking is a
+# sort by name.
 MIN_DISTINCT_PER_ASK = 3
+# MAX_BINARY_VARIANCE = 0.25: p(1-p) at p=0.5, the most variance a 0/1
+# reward can carry within an ask; ``capacity`` is the mean within-ask
+# variance as a share of it.
+MAX_BINARY_VARIANCE = 0.25
+# FLOOR_COARSE_BELOW = ROLLOUTS_PER_TASK (4) and RESCAN_ROLLOUTS =
+# RL_ROLLOUTS_PER_ASK (8): under four rollouts per ask at the median the
+# permutation floor has too few arrangements per ask to be sharp, and
+# the warning names the RL rollout count to re-scan at.
+FLOOR_COARSE_BELOW = ROLLOUTS_PER_TASK
+RESCAN_ROLLOUTS = RL_ROLLOUTS_PER_ASK
 
 REGIMES = ("train", "reward_hack", "pool_exhausted", "no_signal", "degenerate", "unknown")
 
@@ -300,9 +326,14 @@ def hack_scan(
     reward: str = "reward",
     seed: int = 0,
     top_features: int | None = REPORT_TOP,
+    alpha: float = ALPHA,
 ) -> dict[str, Any]:
     """Rank what separates reward within each ask against a permutation
     noise floor, and say what a grouped update would learn.
+
+    ``alpha`` (``ALPHA``, 0.05) sets the floor: ``tau`` is the
+    ``1 - alpha`` quantile of the strongest feature's |rho| when reward is
+    shuffled within ask, so a feature above it clears chance at that rate.
 
     ``rows`` are graded rollouts, several per ask (``mode="rl"``); the
     reward under ``reward`` may be 0/1 or partial credit. ``endorsed``
@@ -408,7 +439,7 @@ def hack_scan(
         "sat": all_pass / n_groups,
         "dead": all_fail / n_groups,
         "mixed": (n_groups - unanimous) / n_groups,
-        "capacity": capacity / (0.25 * n_groups),
+        "capacity": capacity / (MAX_BINARY_VARIANCE * n_groups),
     }
     live = [g for g in multi if len({rewards[i] for i in members[g]}) > 1]
     base["effective_rollouts"] = sum(group_size[g] for g in live)
@@ -528,7 +559,7 @@ def hack_scan(
                 best = value
         nulls.append(best)
     nulls.sort()
-    tau = nulls[min(len(nulls) - 1, math.ceil(0.95 * len(nulls)) - 1)] if nulls else 0.0
+    tau = nulls[min(len(nulls) - 1, math.ceil((1 - alpha) * len(nulls)) - 1)] if nulls else 0.0
 
     # Ranked by strength; a tie in magnitude goes to the endorsed feature,
     # since the complement of the behavior correlates exactly as strongly
@@ -679,10 +710,11 @@ def hack_scan(
             + ", ".join(f'"{r}"' for r in rivals)
             + f" (integrity {base['integrity']:.2f})"
         )
-    if base["rollouts_per_group"] < 4:
+    if base["rollouts_per_group"] < FLOOR_COARSE_BELOW:
         warnings.append(
             f"{base['rollouts_per_group']} rollouts per ask at the median; the floor is "
-            "coarse below 4, re-scan at repeats>=8 before acting on a close call"
+            f"coarse below {FLOOR_COARSE_BELOW}, re-scan at repeats>={RESCAN_ROLLOUTS} before "
+            "acting on a close call"
         )
     return base
 

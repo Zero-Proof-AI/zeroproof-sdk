@@ -29,10 +29,13 @@ from collections.abc import Callable, Mapping, Sequence
 from statistics import NormalDist
 from typing import Any
 
+from ..defaults import ALPHA, BASE_PASS_RATE, CI_LEVEL, MIN_RERUNS, POWER
 from .passat import answer_counts, pass_at
 from .stats import (
     DEFAULT_BOOT,
-    _t975,
+    MIN_HOLDOUT_TASKS,
+    _t_quantile,
+    _z_level,
     compare_runs,
     detectable_effect,
     eval_variance,
@@ -46,12 +49,42 @@ from .stats import (
 
 GROUP_KEYS = ("delta", "ci95", "verdict", "mean_a", "mean_b", "n_used", "n_paired", "paired")
 
-#: A before side passing this share of tasks has little room left to show
-#: an improvement; the report flags ``ceiling``.
+# CEILING_PASS_RATE = 0.9: a before side passing this share of its tasks
+# has at most 10 points of room, under the noise band of most agent evals
+# (run_std 0.02-0.04 measured across our lanes gives a band of 0.06-0.11),
+# so the report flags ``ceiling``. Convention on the exact share.
 CEILING_PASS_RATE = 0.9
-#: Below this many paired tasks with room to move (and under half of
-#: them), the same flag.
+# CEILING_MIN_TASKS_WITH_ROOM = 20: below this many paired tasks that are
+# not already passed every time (and when they are under half of the
+# pairs), the same flag: 20 tasks at k=4 can prove a gain of about 0.2 at
+# 80% power (``detectable_effect``), which is more than a training round
+# moves. Convention on the count.
 CEILING_MIN_TASKS_WITH_ROOM = 20
+# CEILING_ROOM_SHARE = 0.5: the "under half" above.
+CEILING_ROOM_SHARE = 0.5
+# FAMILY_ERROR_MIN_METRICS = 4: metrics before the family-wise warning is
+# worth a line. At 4 metrics ``1 - 0.95**4`` is 19%, the first count where
+# the chance of one false flag is near one in five (convention).
+FAMILY_ERROR_MIN_METRICS = 4
+# DEGENERATE_CHECK_DRAWS = 10: bootstrap draws for the degenerate-guard
+# probe, which only asks whether every row scored the same value and
+# never reads the interval. Kept small so the probe is free.
+DEGENERATE_CHECK_DRAWS = 10
+# GROUP_SEED_OFFSET = 100: the per-group comparisons draw from ``seed +
+# GROUP_SEED_OFFSET + i`` so they never share a stream with the per-metric
+# comparisons at ``seed + i`` (a headline and a group would otherwise
+# resample identically). Any offset past the metric count works.
+GROUP_SEED_OFFSET = 100
+# TRUNCATED_SHARE_GAP = 0.05: the two arms' token-cap cut shares may
+# differ by this before the report warns that one side was cut more
+# often. Five points is the smallest gap that has moved a pass rate on
+# our lanes (a cut reply is a failed reply). Convention, untested.
+TRUNCATED_SHARE_GAP = 0.05
+# GRADED_SHARE_WARN = 0.95: below this share of graded rows on either side
+# the report says the rates are over survivors. One in twenty rows lost
+# to the judge is where the selection bound (dropped / (1 - dropped))
+# passes 5 points, the size of a typical training gain. Convention.
+GRADED_SHARE_WARN = 0.95
 
 _VERDICT_WORDS = {
     "b_better": "moved",
@@ -114,9 +147,9 @@ def _band_args(
     return n_a, n_b, df
 
 
-def _band_rule(n_a: int, n_b: int, df: int | None) -> str:
+def _band_rule(n_a: int, n_b: int, df: int | None, level: float = CI_LEVEL) -> str:
     """The band as a reader can check it: the quantile, then the run counts."""
-    q = "1.96" if df is None else f"t(df={df})={_t975(df):.2f}"
+    q = f"{_z_level(level):.2f}" if df is None else f"t(df={df})={_t_quantile(df, level):.2f}"
     return f"{q} x run_std x sqrt(1/{n_a} + 1/{n_b})"
 
 
@@ -140,6 +173,7 @@ def _by_group(
     metric: str,
     n_boot: int,
     seed: int,
+    level: float = CI_LEVEL,
 ) -> dict[str, dict[str, Any]]:
     """The target metric compared within each group of rows. A group needs
     rows on both sides; rows with no group value are left out."""
@@ -156,7 +190,12 @@ def _by_group(
     out: dict[str, dict[str, Any]] = {}
     for i, name in enumerate(sorted(set(groups_a) & set(groups_b))):
         r = compare_runs(
-            groups_a[name], groups_b[name], metric=metric, n_boot=n_boot, seed=seed + 100 + i
+            groups_a[name],
+            groups_b[name],
+            metric=metric,
+            n_boot=n_boot,
+            seed=seed + GROUP_SEED_OFFSET + i,
+            level=level,
         )
         slim = {k: r.get(k) for k in GROUP_KEYS}
         slim["rows_a"] = len(groups_a[name])
@@ -165,10 +204,17 @@ def _by_group(
     return out
 
 
-#: With no re-run band to read the gap against, a difference in answered
-#: share this large between the arms is material on its own.
+# ANSWERED_GAP_POINTS = 0.10: with no re-run band to read the gap against,
+# a difference in answered share this large between the arms fails the
+# comparison on its own. Ten points is above the widest re-run band
+# measured on our lanes (0.11 at run_std 0.04), so a gap over it cannot
+# be re-run noise. Convention on the exact number (#297).
 ANSWERED_GAP_POINTS = 0.10
-#: The two-proportion test has to clear this before a gap counts at all.
+# ANSWERED_P_MAX = 0.01: the two-proportion z test has to clear this
+# before a gap counts at all. Stricter than ALPHA because the test runs
+# on every report without being asked for, and a false "not comparable"
+# blocks a reader from a real delta; at 0.01 it fires on chance once in a
+# hundred reports (convention).
 ANSWERED_P_MAX = 0.01
 
 
@@ -244,8 +290,21 @@ def delta_report(
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
     balance_rollouts: bool = False,
+    alpha: float = ALPHA,
+    power: float = POWER,
+    ceiling_pass_rate: float = CEILING_PASS_RATE,
+    answered_gap_points: float = ANSWERED_GAP_POINTS,
+    answered_alpha: float = ANSWERED_P_MAX,
 ) -> dict[str, Any]:
     """Compare ``after`` to ``before`` on pass@1 and every shared marker.
+
+    ``alpha`` is the false-positive rate every verdict runs at: each
+    interval is at ``1 - alpha`` (``ci95`` at the default), the re-run
+    band uses the same quantile, and ``family_error`` is ``1 - (1 -
+    alpha) ** n_metrics``. ``power`` feeds the sizing line
+    (``detectable_effect``, ``holdout_size``). ``ceiling_pass_rate``,
+    ``answered_gap_points`` and ``answered_alpha`` are the flags' thresholds
+    (``CEILING_PASS_RATE``, ``ANSWERED_GAP_POINTS``, ``ANSWERED_P_MAX``).
 
     The two sides should have the same number of rollouts per task. When
     a run lost rollouts (``data.report()["rollouts_lost"]``), one arm can
@@ -346,6 +405,9 @@ def delta_report(
     (#297). ``not_comparable`` lists every such cause under one prefix,
     ``NOT COMPARABLE:``.
     """
+    if not 0 < alpha < 1 or not 0 < power < 1:
+        raise ValueError("alpha and power are probabilities strictly between 0 and 1")
+    level = 1.0 - alpha
     balanced: dict[str, Any] | None = None
     if balance_rollouts:
         before, after, balanced = _balance_rollouts(before, after, seed=seed)
@@ -357,7 +419,9 @@ def delta_report(
     metrics = ["pass_at_1", *[f"marker:{m}" for m in names]]
     results: dict[str, dict[str, Any]] = {}
     for i, metric in enumerate(metrics):
-        results[metric] = compare_runs(before, after, metric=metric, n_boot=n_boot, seed=seed + i)
+        results[metric] = compare_runs(
+            before, after, metric=metric, n_boot=n_boot, seed=seed + i, level=level
+        )
 
     def _key(name: str) -> str:
         return name if name == "pass_at_1" or name.startswith("marker:") else f"marker:{name}"
@@ -368,7 +432,7 @@ def delta_report(
     for m in sorted(guarded):
         if m not in results:
             continue
-        sides = [metric_summary(rows, m, n_boot=10) for rows in (before, after)]
+        sides = [metric_summary(rows, m, n_boot=DEGENERATE_CHECK_DRAWS) for rows in (before, after)]
         if all(s.get("degenerate") for s in sides):
             degenerate_guards.append(m)
     eval_runs = {"before": len(_eval_runs(before)), "after": len(_eval_runs(after))}
@@ -403,14 +467,16 @@ def delta_report(
     # times 1.96, or times the t quantile when the floor was estimated from
     # these very runs (rlhf-book ch. 16, appendix C).
     n_a, n_b, band_df = _band_args(eval_runs, run_std_source)
-    noise_rule = _band_rule(n_a, n_b, band_df)
+    noise_rule = _band_rule(n_a, n_b, band_df, level)
     within_noise: list[str] = []
     no_floor: list[str] = []
     for m in metrics:
         r = results[m]
         metric_run_std = run_std_by_metric.get(m)
         noise = (
-            noise_band(metric_run_std, n_a, n_b, df=band_df) if metric_run_std is not None else None
+            noise_band(metric_run_std, n_a, n_b, df=band_df, level=level)
+            if metric_run_std is not None
+            else None
         )
         r["run_std"] = metric_run_std
         r["noise_band"] = noise
@@ -464,23 +530,24 @@ def delta_report(
             "same value): this guard cannot fail, so it catches nothing. Check that the marker "
             "fires at all."
         )
-    if run_std_source == "eval_run" and min(eval_runs.values()) < 3:
+    if run_std_source == "eval_run" and min(eval_runs.values()) < MIN_RERUNS:
         warnings.append(
             "Two eval runs on a side is a difference, not a distribution, so run_std is rough; "
-            "three runs per side give a standard deviation worth reading."
+            f"{MIN_RERUNS} runs per side give a standard deviation worth reading."
         )
-    # Every metric gets its own 95% interval, so the chance that at least one
-    # clears zero by luck grows with the number of markers. The target is
-    # pre-specified and keeps its 5%; the improved/slipped lists do not, and a
-    # false flag in must_not_regress fails an otherwise good run.
-    # ``1 - 0.95**n`` is the chance under independent metrics; markers that
-    # move together share their luck, so it is an upper bound on the real
-    # family-wise rate, and the warning says so.
+    # Every metric gets its own interval at ``level``, so the chance that at
+    # least one clears zero by luck grows with the number of markers. The
+    # target is pre-specified and keeps its ``alpha``; the improved/slipped
+    # lists do not, and a false flag in must_not_regress fails an otherwise
+    # good run. ``1 - level**n`` is the chance under independent metrics;
+    # markers that move together share their luck, so it is an upper bound
+    # on the real family-wise rate, and the warning says so.
     n_metrics = len(metrics)
-    family_error = 1.0 - 0.95**n_metrics
-    if n_metrics >= 4 and (improved or slipped or regressions):
+    family_error = 1.0 - level**n_metrics
+    if n_metrics >= FAMILY_ERROR_MIN_METRICS and (improved or slipped or regressions):
         warnings.append(
-            f"{n_metrics} metrics were each tested at 95%, so up to about a {family_error:.0%} "
+            f"{n_metrics} metrics were each tested at {level:.0%}, so up to about a "
+            f"{family_error:.0%} "
             "chance that at least one clears zero by luck (an upper bound: it treats the "
             "metrics as independent, and markers that move together share their luck); the "
             "target is pre-specified and unaffected, so treat a single unexpected entry in "
@@ -489,7 +556,7 @@ def delta_report(
     # ceiling: an eval the before side already passes cannot show a gain
     mean_a = results["pass_at_1"].get("mean_a")
     ceiling = False
-    if mean_a is not None and mean_a >= CEILING_PASS_RATE:
+    if mean_a is not None and mean_a >= ceiling_pass_rate:
         ceiling = True
         warnings.append(
             f"The before run already passes {mean_a:.2f} of tasks, so there is little room to "
@@ -499,7 +566,7 @@ def delta_report(
         means_a, means_b = task_means(before), task_means(after)
         shared = set(means_a) & set(means_b)
         with_room = sum(1 for t in shared if means_a[t] < 1.0)
-        if with_room < CEILING_MIN_TASKS_WITH_ROOM and with_room * 2 < len(shared):
+        if with_room < CEILING_MIN_TASKS_WITH_ROOM and with_room < CEILING_ROOM_SHARE * len(shared):
             ceiling = True
             warnings.append(
                 f"The before run already passes {len(shared) - with_room} of {len(shared)} paired "
@@ -537,9 +604,10 @@ def delta_report(
             tspan = f"{tci[0]:+.3f}..{tci[1]:+.3f}" if tci else "n/a"
             pspan = f"{pci[0]:+.3f}..{pci[1]:+.3f}" if pci else "n/a"
             warnings.append(
-                f"OVER-OPTIMIZED: {proxy_key} up {proxy_result['delta']:+.3f} (95% {pspan}) while "
-                f"{headline_name} {headline_for_proxy['delta']:+.3f} (95% {tspan}): the policy "
-                "learned something the target does not credit (rlhf-book ch. 14)"
+                f"OVER-OPTIMIZED: {proxy_key} up {proxy_result['delta']:+.3f} ({level:.0%} "
+                f"{pspan}) while {headline_name} {headline_for_proxy['delta']:+.3f} "
+                f"({level:.0%} {tspan}): the policy learned something the target does not "
+                "credit (rlhf-book ch. 14)"
             )
     headline_noise = results[headline_metric]["noise_band"]
     if headline_noise is not None and target_verdict == "within_eval_noise" and target_result:
@@ -550,13 +618,13 @@ def delta_report(
     for m in regressions:
         r = results[m]
         warnings.append(
-            f"REGRESSION {m}: {r['delta']:+.3f} (95% {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f}), "
-            "named in must_not_regress"
+            f"REGRESSION {m}: {r['delta']:+.3f} ({level:.0%} {r['ci95'][0]:+.3f}.."
+            f"{r['ci95'][1]:+.3f}), named in must_not_regress"
         )
     for m in slipped:
         r = results[m]
         warnings.append(
-            f"{m} dropped {r['delta']:+.3f} (95% {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f})"
+            f"{m} dropped {r['delta']:+.3f} ({level:.0%} {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f})"
         )
     headline = target_result if target_result else results["pass_at_1"]
     headline_key = target_key if target_result else "pass_at_1"
@@ -567,21 +635,27 @@ def delta_report(
     # delta seen here would have needed (#257).
     n_paired = int(headline.get("n_paired") or 0)
     k_eval = int(pass_at(before).config.get("k") or 1)
-    base_rate = float(mean_a) if mean_a is not None else 0.6
-    can_prove = detectable_effect(n_paired, base=base_rate, k=k_eval) if n_paired >= 2 else None
+    base_rate = float(mean_a) if mean_a is not None else BASE_PASS_RATE
+    can_prove = (
+        detectable_effect(n_paired, base=base_rate, k=k_eval, power=power, alpha=alpha)
+        if n_paired >= MIN_HOLDOUT_TASKS
+        else None
+    )
     tasks_needed: int | None = None
     delta_seen: float | None = None
     raw_delta = headline.get("delta")
     if isinstance(raw_delta, (int, float)) and 0 < raw_delta < 1:
         delta_seen = float(raw_delta)
-        tasks_needed = holdout_size(delta_seen, base=base_rate, k=k_eval)["n_tasks"]
+        tasks_needed = holdout_size(delta_seen, base=base_rate, k=k_eval, power=power, alpha=alpha)[
+            "n_tasks"
+        ]
     verdict_word = (
         target_verdict if target_result else _verdict_word(results["pass_at_1"], replicated)
     )
     if verdict_word == "no_change_detected" and can_prove is not None:
         line = (
             f"{n_paired} paired tasks at k={k_eval} can prove a gain of about "
-            f"+{can_prove:.2f} at 80% power"
+            f"+{can_prove:.2f} at {power:.0%} power"
         )
         if tasks_needed is not None and delta_seen is not None:
             line += (
@@ -625,13 +699,15 @@ def delta_report(
     groups_down: list[str] = []
     if by is not None:
         group_metric = target_key if target_key in results else "pass_at_1"
-        groups = _by_group(before, after, by=by, metric=group_metric, n_boot=n_boot, seed=seed)
+        groups = _by_group(
+            before, after, by=by, metric=group_metric, n_boot=n_boot, seed=seed, level=level
+        )
         groups_down = [g for g, r in groups.items() if r.get("verdict") == "a_better"]
         for g in groups_down:
             r = groups[g]
             warnings.append(
                 f"{group_metric} moved the wrong way for {g}: {r['delta']:+.3f} "
-                f"(95% {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f}, {r['rows_b']} rows)"
+                f"({level:.0%} {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f}, {r['rows_b']} rows)"
             )
         if not groups:
             warnings.append(
@@ -670,7 +746,10 @@ def delta_report(
             f"Before allowed {cfg_a['max_tokens']} reply tokens and after {cfg_b['max_tokens']}; "
             "re-run one side so both use the same agent_max_tokens=."
         )
-    if _both("truncated_share") and abs(cfg_a["truncated_share"] - cfg_b["truncated_share"]) > 0.05:
+    if (
+        _both("truncated_share")
+        and abs(cfg_a["truncated_share"] - cfg_b["truncated_share"]) > TRUNCATED_SHARE_GAP
+    ):
         warnings.append(
             f"The token cap cut {cfg_a['truncated_share']:.0%} of before rows and "
             f"{cfg_b['truncated_share']:.0%} of after rows; a side that is cut more often is "
@@ -723,7 +802,10 @@ def delta_report(
                 f"({bias_bar:.3f}); read a delta near that size as unproven, or re-grade the "
                 "dropped rows"
             )
-    elif _both("graded_share") and min(cfg_a["graded_share"], cfg_b["graded_share"]) < 0.95:
+    elif (
+        _both("graded_share")
+        and min(cfg_a["graded_share"], cfg_b["graded_share"]) < GRADED_SHARE_WARN
+    ):
         warnings.append(
             f"only {min(cfg_a['graded_share'], cfg_b['graded_share']):.1%} of rows on one side "
             "carry a verdict; both rates are over the rows that survived grading, not the rows "
@@ -747,8 +829,8 @@ def delta_report(
         if headline_noise is not None:
             gap_bar, bar_name = headline_noise, f"the re-run band {headline_noise:.3f}"
         else:
-            gap_bar, bar_name = ANSWERED_GAP_POINTS, f"{ANSWERED_GAP_POINTS:.0%} with no run_std"
-        if answered_p is not None and answered_p < ANSWERED_P_MAX:
+            gap_bar, bar_name = answered_gap_points, f"{answered_gap_points:.0%} with no run_std"
+        if answered_p is not None and answered_p < answered_alpha:
             fails = answered_gap > gap_bar
             if fails:
                 ok = False
@@ -797,6 +879,8 @@ def delta_report(
         "target_delta": target_result["delta"] if target_result else None,
         "target_ci95": target_result["ci95"] if target_result else None,
         "n_metrics": n_metrics,
+        "alpha": alpha,
+        "level": level,
         #: chance at least one of the metrics clears zero by luck alone
         "family_error": round(family_error, 4),
         "n_paired_tasks": results["pass_at_1"]["n_paired"],
@@ -889,12 +973,13 @@ def _balance_rollouts(
 def format_delta_report(report: dict[str, Any]) -> str:
     """The block a person reads: headline, then one line per metric."""
     lines: list[str] = []
+    level = float(report.get("level") or CI_LEVEL)
     if report.get("target"):
         r = report["metrics"].get(report["target"])
         if r and r.get("delta") is not None and r.get("ci95"):
             lines.append(
                 f"{report['target']}: {report['target_verdict']} "
-                f"({r['delta']:+.3f}, 95% {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f}, "
+                f"({r['delta']:+.3f}, {level:.0%} {r['ci95'][0]:+.3f}..{r['ci95'][1]:+.3f}, "
                 f"{r['n_paired']} paired tasks)"
             )
         else:
@@ -904,7 +989,7 @@ def format_delta_report(report: dict[str, Any]) -> str:
         if p and p.get("delta") is not None and p.get("ci95"):
             lines.append(
                 f"proxy {report['proxy']}: {report['proxy_verdict']} "
-                f"({p['delta']:+.3f}, 95% {p['ci95'][0]:+.3f}..{p['ci95'][1]:+.3f})"
+                f"({p['delta']:+.3f}, {level:.0%} {p['ci95'][0]:+.3f}..{p['ci95'][1]:+.3f})"
                 + ("  OVER-OPTIMIZED" if report.get("over_optimized") else "")
             )
         else:
@@ -928,7 +1013,8 @@ def format_delta_report(report: dict[str, Any]) -> str:
         lines.append(f"eval noise: {head} ({report['noise_rule']}; {source}{per_metric})")
     if report.get("n_metrics", 0) >= 2 and report.get("family_error") is not None:
         lines.append(
-            f"family error: {report['n_metrics']} metrics at 95%, up to {report['family_error']:.0%} "
+            f"family error: {report['n_metrics']} metrics at {level:.0%}, up to "
+            f"{report['family_error']:.0%} "
             "chance that one clears zero on luck alone (upper bound, independent metrics)"
         )
     graded = {

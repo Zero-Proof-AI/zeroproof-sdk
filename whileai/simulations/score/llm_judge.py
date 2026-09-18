@@ -8,6 +8,14 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import (
+    JUDGE_FINAL_TEXT_CHARS,
+    JUDGE_MAX_TOKENS,
+    JUDGE_PAYLOAD_CHARS,
+    JUDGE_POLICY_CHARS,
+    JUDGE_SITUATION_CHARS,
+    JUDGE_TEMPERATURE,
+)
 from ..generate.agents import complete, parse_backend_spec
 
 DEFAULT_JUDGE_SPEC = "openai:gpt-4o-mini"
@@ -58,7 +66,16 @@ def _tool_names(tools: Sequence | None) -> list[str]:
     return names
 
 
-def _render_payload(trajectory: dict, *, policy: str = "", tools: Sequence | None = None) -> str:
+def _render_payload(
+    trajectory: dict,
+    *,
+    policy: str = "",
+    tools: Sequence | None = None,
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+) -> str:
+    """The judge's user message, capped at ``payload_chars`` (the same
+    field caps as ``grade_llm``: ``JUDGE_SITUATION_CHARS``,
+    ``JUDGE_FINAL_TEXT_CHARS``, ``JUDGE_POLICY_CHARS``)."""
     steps = []
     for step in trajectory.get("steps") or []:
         if not isinstance(step, dict):
@@ -82,15 +99,15 @@ def _render_payload(trajectory: dict, *, policy: str = "", tools: Sequence | Non
     # payload loses step 14, never the final answer or the rules.
     blob = {
         "tools": _tool_names(tools),
-        "user_request": str(trajectory.get("prompt", ""))[:4000],
-        "final_text": str(trajectory.get("final_text", ""))[:2000],
+        "user_request": str(trajectory.get("prompt", ""))[:JUDGE_SITUATION_CHARS],
+        "final_text": str(trajectory.get("final_text", ""))[:JUDGE_FINAL_TEXT_CHARS],
         "conduct_score": conduct.get("reward"),
         "conduct_reason": conduct.get("reason"),
     }
     if policy.strip():
-        blob["agent_policy"] = policy.strip()[:2000]
+        blob["agent_policy"] = policy.strip()[:JUDGE_POLICY_CHARS]
     blob["steps"] = steps
-    return json.dumps(blob, default=str)[:8000]
+    return json.dumps(blob, default=str)[:payload_chars]
 
 
 def _parse_score(text: str) -> tuple[float | None, str | None]:
@@ -131,19 +148,21 @@ def judge_one(
     backend_spec: str | None = None,
     api_key: str | None = None,
     timeout: float = 45,
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+    max_tokens: int = JUDGE_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Score one trajectory. Returns llm_reward/llm_reason or both None."""
     spec = backend_spec or DEFAULT_JUDGE_SPEC
     url, model = parse_backend_spec(spec)
-    payload = _render_payload(trajectory, policy=policy, tools=tools)
+    payload = _render_payload(trajectory, policy=policy, tools=tools, payload_chars=payload_chars)
     try:
         reply = complete(
             url,
             model,
             [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": payload}],
             api_key=api_key,
-            temperature=0.0,  # a judge is read at zero (rlhf-book ch. 5), like grade_llm
-            max_tokens=120,
+            temperature=JUDGE_TEMPERATURE,  # a judge is read at zero (rlhf-book ch. 7)
+            max_tokens=max_tokens,
             timeout=timeout,
         )
     except OSError:

@@ -36,6 +36,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..defaults import ROLLOUTS_PER_TASK
 from ..text import split_reasoning
 
 JUDGE_NOISE_NOTE = (
@@ -364,7 +365,7 @@ def pass_at(
     rows: Sequence[dict] | Any,
     *,
     k: int | None = None,
-    min_k: int = 4,
+    min_k: int = ROLLOUTS_PER_TASK,
     unanimous_short: bool = False,
 ) -> PassAt:
     """pass@1, pass^k and pass@k from graded rows, grouped by task.
@@ -387,9 +388,11 @@ def pass_at(
     than ``k`` graded repeats are left out of pass^k and pass@k (counted
     in ``n_groups_at_k``). pass@1 always averages every group.
 
-    Below ``min_k`` repeats the ``k``-way numbers are ``None`` with a
-    ``note`` instead of a number too noisy to act on. Pass ``k=`` to
-    choose the draw size yourself.
+    Below ``min_k`` repeats (``ROLLOUTS_PER_TASK``, 4: the smallest k
+    tau-bench and tau2-bench report a pass^k on, arXiv:2406.12045 and
+    arXiv:2506.07982) the ``k``-way numbers are ``None`` with a ``note``
+    instead of a number too noisy to act on. Pass ``k=`` to choose the
+    draw size yourself.
 
     ``unanimous_short=True`` counts a unanimous group shorter than ``k``
     as if it stayed unanimous (pass^k and pass@k equal to its pass rate,

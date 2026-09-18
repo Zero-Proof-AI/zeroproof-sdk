@@ -10,6 +10,14 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import (
+    JUDGE_FINAL_TEXT_CHARS,
+    JUDGE_MAX_TOKENS,
+    JUDGE_PAYLOAD_CHARS,
+    JUDGE_POLICY_CHARS,
+    JUDGE_SITUATION_CHARS,
+    JUDGE_TEMPERATURE,
+)
 from ..generate.agents import (
     complete,
     default_agent_spec,
@@ -27,10 +35,22 @@ SAME_MODEL_AUDIT = (
     "Pass backend_spec= for a different model."
 )
 
-# Why-before-score. 4B needs room for a one-sentence reason.
-JUDGE_MAX_TOKENS = 120
-JUDGE_TEMPERATURE = 0.0
+# JUDGE_MAX_TOKENS and JUDGE_TEMPERATURE live in ``defaults`` (why-before-
+# score needs room for one sentence; a judge is read at zero). Imported
+# here because ``pairwise`` and the tests read them off this module.
 JUDGE_NAME = "grade_llm"
+# AUDIT_MIN_FINDING_ROWS = 2: disagreements of one kind before the audit
+# names it as a finding; one row is an anecdote (convention).
+AUDIT_MIN_FINDING_ROWS = 2
+# AUDIT_REASON_DISAGREE_RATE = 0.5: share of rows under one grader reason
+# the auditor has to overturn before that rule is called wrong; below
+# half the rule is right more often than not (the meaning of "wrong",
+# not a tuned number).
+AUDIT_REASON_DISAGREE_RATE = 0.5
+# AUDIT_EXAMPLES = 3: auditor sentences kept per grader reason.
+AUDIT_EXAMPLES = 3
+# WARMUP_MAX_TOKENS = 4: the warm-up request asks for one word.
+WARMUP_MAX_TOKENS = 4
 
 
 def judge_version(spec: str, prompt: str | None = None) -> str:
@@ -180,7 +200,21 @@ def _tool_names(tools: Sequence | None) -> list[str]:
     return names
 
 
-_PAYLOAD_CHARS = 8000
+#: the judge payload cap; ``defaults.JUDGE_PAYLOAD_CHARS`` (8000 chars, about
+#: 2000 tokens, the budget an 8k-window hosted judge leaves for evidence).
+#: Every render takes ``payload_chars=`` to move it per call.
+_PAYLOAD_CHARS = JUDGE_PAYLOAD_CHARS
+# STEP_CAPS = (800, 300, 80): the widths each step's strings are cut to,
+# tried in order until the payload fits. 800 keeps a whole tool result on
+# most steps; 300 keeps the head of it; 80 keeps the tool name and the
+# status. Measured on the paired eval in #290; convention on the values.
+STEP_CAPS: tuple[int, ...] = (800, 300, 80)
+# REPLY_ONLY_MIN_CHARS = 400 and REPLY_ONLY_SHARE = 3: the reply-only
+# fallback shows the final reply at a third of the payload cap and never
+# under 400 characters, so a verdict on the reply alone still reads the
+# claim it makes (convention).
+REPLY_ONLY_MIN_CHARS = 400
+REPLY_ONLY_SHARE = 3
 
 
 def _step_fault_like(step: dict) -> bool:
@@ -199,9 +233,9 @@ def _judge_only(privileged: Any) -> dict[str, Any]:
         return {}
     out: dict[str, Any] = {}
     if privileged.get("principle"):
-        out["principle"] = str(privileged["principle"])[:2000]
+        out["principle"] = str(privileged["principle"])[:JUDGE_POLICY_CHARS]
     if privileged.get("reference"):
-        out["reference"] = str(privileged["reference"])[:2000]
+        out["reference"] = str(privileged["reference"])[:JUDGE_POLICY_CHARS]
     hidden = privileged.get("hidden_state")
     if isinstance(hidden, dict) and hidden:
         out["hidden_state"] = hidden
@@ -281,7 +315,7 @@ def _fit_payload(blob: dict, limit: int) -> str:
 
     blob = dict(blob)
     blob["payload_reduced"] = True
-    for cap in (800, 300, 80):
+    for cap in STEP_CAPS:
         blob["steps"] = [_shrink_step(x, cap) for x in (blob.get("steps") or [])]
         text = json.dumps(blob, default=str)
         if len(text) <= limit:
@@ -341,7 +375,10 @@ def _fit_payload(blob: dict, limit: int) -> str:
             "payload_reduced": True,
             "note": "trajectory too large to render; judging the final reply only",
             "tools": blob.get("tools"),
-            "final_text": _cut(str(blob.get("final_text") or ""), max(400, limit // 3)),
+            "final_text": _cut(
+                str(blob.get("final_text") or ""),
+                max(REPLY_ONLY_MIN_CHARS, limit // REPLY_ONLY_SHARE),
+            ),
         },
         default=str,
     )
@@ -353,7 +390,13 @@ def _render_payload(
     policy: str = "",
     tools: Sequence | None = None,
     privileged: Any = None,
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
 ) -> str:
+    """The judge's user message as JSON, inside ``payload_chars``
+    (``JUDGE_PAYLOAD_CHARS``): the situation to ``JUDGE_SITUATION_CHARS``,
+    the reply and the policy to ``JUDGE_FINAL_TEXT_CHARS`` and
+    ``JUDGE_POLICY_CHARS``, then structure reduced by ``_fit_payload``
+    until it fits."""
     steps = []
     for step in trajectory.get("steps") or []:
         if not isinstance(step, dict):
@@ -374,13 +417,13 @@ def _render_payload(
     # agent finally said and the rules it was under more than step 14.
     blob: dict[str, Any] = {
         "tools": _tool_names(tools),
-        "situation": str(trajectory.get("prompt", ""))[:4000],
+        "situation": str(trajectory.get("prompt", ""))[:JUDGE_SITUATION_CHARS],
         "world_state": trajectory.get("world_state"),
         "injected_faults": trajectory.get("faults"),
-        "final_text": str(trajectory.get("final_text", ""))[:2000],
+        "final_text": str(trajectory.get("final_text", ""))[:JUDGE_FINAL_TEXT_CHARS],
     }
     if str(policy or "").strip():
-        blob["agent_policy"] = str(policy).strip()[:2000]
+        blob["agent_policy"] = str(policy).strip()[:JUDGE_POLICY_CHARS]
     judge_only = _judge_only(privileged)
     if judge_only:
         # before steps for the same reason as final_text: it must survive
@@ -388,7 +431,7 @@ def _render_payload(
         blob["judge_only"] = judge_only
     blob["steps"] = steps
     text = json.dumps(blob, default=str)
-    if len(text) <= _PAYLOAD_CHARS:
+    if len(text) <= payload_chars:
         return text
     # Long-horizon trajectory. A blind slice cuts mid-JSON and hides the
     # ending; keep the evidence instead: opening step, every fault-like
@@ -408,7 +451,7 @@ def _render_payload(
     if skipped:
         kept.append({"skipped_steps": skipped})
     blob["steps"] = kept
-    return _fit_payload(blob, _PAYLOAD_CHARS)
+    return _fit_payload(blob, payload_chars)
 
 
 def _normalize_fault(mode: str) -> str | None:
@@ -466,11 +509,14 @@ def _user_message(
     tools: Sequence | None = None,
     fault_lead: bool = True,
     privileged: Any = None,
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
 ) -> str:
     # The fault lead states our default rubric (honest miss is a 1). A
     # caller-supplied judge prompt is the rubric; do not argue with it.
     lead = _injected_fault_lead(trajectory) if fault_lead else ""
-    body = _render_payload(trajectory, policy=policy, tools=tools, privileged=privileged)
+    body = _render_payload(
+        trajectory, policy=policy, tools=tools, privileged=privileged, payload_chars=payload_chars
+    )
     return (lead + body) if lead else body
 
 
@@ -596,8 +642,8 @@ def warm_judge(
             model,
             [{"role": "user", "content": "Reply with the single word: ready"}],
             api_key=api_key,
-            temperature=0.0,
-            max_tokens=4,
+            temperature=JUDGE_TEMPERATURE,
+            max_tokens=WARMUP_MAX_TOKENS,
             timeout=timeout,
         )
     except Exception as exc:
@@ -619,10 +665,14 @@ def grade_one(
     prompt: str | None = None,
     timeout: float = 120,
     use_privileged: bool = False,
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+    max_tokens: int = JUDGE_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Score one trajectory. Returns reward 0/1 and a one-sentence reason.
     ``use_privileged`` shows the judge the row's ``privileged`` block
-    (principle, reference, hidden state) as ``judge_only``."""
+    (principle, reference, hidden state) as ``judge_only``.
+    ``payload_chars`` caps what the judge is shown and ``max_tokens`` its
+    reply."""
     spec = backend_spec or default_judge_spec()
     url, model = parse_backend_spec(spec)
     custom = str(prompt or "").strip()
@@ -631,7 +681,12 @@ def grade_one(
     if use_privileged:
         system = system + JUDGE_PRIVILEGED
     payload = _user_message(
-        trajectory, policy=policy, tools=tools, fault_lead=not custom, privileged=privileged
+        trajectory,
+        policy=policy,
+        tools=tools,
+        fault_lead=not custom,
+        privileged=privileged,
+        payload_chars=payload_chars,
     )
     try:
         reply = complete(
@@ -640,7 +695,7 @@ def grade_one(
             [{"role": "system", "content": system}, {"role": "user", "content": payload}],
             api_key=api_key,
             temperature=JUDGE_TEMPERATURE,
-            max_tokens=JUDGE_MAX_TOKENS,
+            max_tokens=max_tokens,
             timeout=timeout,
         )
     except OSError:
@@ -659,6 +714,8 @@ def audit_one(
     backend_spec: str | None = None,
     api_key: str | None = None,
     timeout: float = 120,
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+    max_tokens: int = JUDGE_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Fairness pass on an existing 0/1. Does not overwrite reward.
 
@@ -667,7 +724,7 @@ def audit_one(
     than only counted.
     """
     existing = trajectory.get("reward")
-    payload = _user_message(trajectory, policy=policy, tools=tools)
+    payload = _user_message(trajectory, policy=policy, tools=tools, payload_chars=payload_chars)
     user = f'{{"existing_label": {json.dumps(existing)}}}\n{payload}'
     spec = backend_spec or default_judge_spec()
     url, model = parse_backend_spec(spec)
@@ -675,10 +732,13 @@ def audit_one(
         reply = complete(
             url,
             model,
-            [{"role": "system", "content": AUDIT_SYSTEM}, {"role": "user", "content": user[:8000]}],
+            [
+                {"role": "system", "content": AUDIT_SYSTEM},
+                {"role": "user", "content": user[:payload_chars]},
+            ],
             api_key=api_key,
-            temperature=0.0,
-            max_tokens=JUDGE_MAX_TOKENS,
+            temperature=JUDGE_TEMPERATURE,
+            max_tokens=max_tokens,
             timeout=timeout,
         )
     except Exception as exc:  # unreachable judge, bad reply, anything
@@ -723,8 +783,15 @@ def apply_grade_llm(
     warmup_timeout: float = JUDGE_WARMUP_TIMEOUT,
     use_privileged: bool = False,
     trust: str = "warn",
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+    max_tokens: int = JUDGE_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Write ``reward`` 0/1 and a one-sentence ``reason``. Search does not read this.
+
+    ``payload_chars`` (``JUDGE_PAYLOAD_CHARS``, 8000) caps the evidence
+    each row's judge call is shown and ``max_tokens``
+    (``JUDGE_MAX_TOKENS``, 120) the judge's reply; both are recorded in
+    every row's ``judge_meta`` evidence.
 
     The judge is warmed once (``warm_judge``) before rows fan out; the report
     carries ``warmup`` with how long that took. ``use_privileged`` shows the
@@ -780,6 +847,8 @@ def apply_grade_llm(
             api_key=api_key,
             prompt=prompt,
             use_privileged=use_privileged,
+            payload_chars=payload_chars,
+            max_tokens=max_tokens,
         )
 
     warmup: dict[str, Any] | None = None
@@ -800,7 +869,8 @@ def apply_grade_llm(
         "model": judge_model,
         "prompt_sha": version.rsplit("@", 1)[-1],
         "temperature": JUDGE_TEMPERATURE,
-        "max_tokens": JUDGE_MAX_TOKENS,
+        "max_tokens": max_tokens,
+        "payload_chars": payload_chars,
     }
     if use_privileged:
         evidence["privileged"] = True
@@ -916,6 +986,8 @@ def audit_grades(
     api_key: str | None = None,
     concurrency: int = 16,
     limit: int | None = None,
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+    max_tokens: int = JUDGE_MAX_TOKENS,
 ) -> dict[str, Any]:
     """A second, independent judge over labels that already exist.
 
@@ -970,7 +1042,15 @@ def audit_grades(
     started = time.monotonic()
 
     def one(row: dict) -> dict[str, Any]:
-        return audit_one(row, policy=policy, tools=tools, backend_spec=spec, api_key=api_key)
+        return audit_one(
+            row,
+            policy=policy,
+            tools=tools,
+            backend_spec=spec,
+            api_key=api_key,
+            payload_chars=payload_chars,
+            max_tokens=max_tokens,
+        )
 
     warmup = warm_judge(spec, api_key=api_key)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(concurrency))) as pool:
@@ -1012,7 +1092,7 @@ def audit_grades(
         entry["audited"] += 1
         if v.get("agreed") is False:
             entry["disagreed"] += 1
-            if len(entry["examples"]) < 3:
+            if len(entry["examples"]) < AUDIT_EXAMPLES:
                 entry["examples"].append(v.get("audit_reason", ""))
     for entry in by_reason.values():
         entry["disagree_rate"] = round(entry["disagreed"] / max(1, entry["audited"]), 3)
@@ -1024,14 +1104,14 @@ def audit_grades(
     false_pass = [d for d in disagreements if d["graded"] == 1 and d["auditor"] == 0]
     false_fail = [d for d in disagreements if d["graded"] == 0 and d["auditor"] == 1]
     findings: list[str] = []
-    if len(false_pass) >= 2:
+    if len(false_pass) >= AUDIT_MIN_FINDING_ROWS:
         findings.append(
             f"{len(false_pass)} of {audited} audited rows PASSED the grader and failed the "
             "auditor: the rubric has a hole those rows walk through, and they would train "
             "the behavior you are trying to remove. Read them first: "
             + "; ".join(d["audit_reason"][:90] for d in false_pass[:3])
         )
-    if len(false_fail) >= 2:
+    if len(false_fail) >= AUDIT_MIN_FINDING_ROWS:
         findings.append(
             f"{len(false_fail)} of {audited} audited rows FAILED the grader and passed the "
             "auditor: the rubric may be firing on behavior that is fine, which costs "
@@ -1041,8 +1121,8 @@ def audit_grades(
         f"{entry['disagreed']} of {entry['audited']} rows the grader scored "
         f"{reason!r} look wrong to the auditor; check that rule"
         for reason, entry in sorted(by_reason.items(), key=lambda kv: -kv[1]["disagreed"])
-        if entry["disagreed"] >= 2
-        and entry["disagree_rate"] >= 0.5
+        if entry["disagreed"] >= AUDIT_MIN_FINDING_ROWS
+        and entry["disagree_rate"] >= AUDIT_REASON_DISAGREE_RATE
         and reason != "(no reason given)"
     ]
     errors = [v["error"] for v in verdicts if v.get("error")]

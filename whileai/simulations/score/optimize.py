@@ -26,6 +26,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from ..defaults import (
+    DIFFICULTY_BAND,
+    DIFFICULTY_BAND_ROLLOUTS,
+    REJECTION_SAMPLING_MIN_K,
+    RL_ROLLOUTS_PER_ASK,
+    TRUNCATED_REPLY_CHARS,
+)
 from .grading import (
     _DEGENERATE,
     _HARNESS_LEAK,
@@ -38,12 +45,32 @@ from .passat import pass_at
 from .quality import _IDISH, _QUESTION_END, _STRONG_ACTION, load_jsonl, write_jsonl
 from .stats import task_key
 
-# Public drop tags. optimize_rl uses these strings in the report.
-# The difficulty band: keep asks the policy passes between 20% and 80% of
-# the time (rlhf-book ch. 7, offline difficulty filtering; Seed-Thinking,
-# ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a form of it).
-# A heuristic with no published ablation, so it stays configurable.
-DEFAULT_BAND: tuple[float, float] = (0.2, 0.8)
+# DEFAULT_BAND = DIFFICULTY_BAND (0.2, 0.8): keep asks the policy passes
+# between 20% and 80% of the time (rlhf-book ch. 14, difficulty filtering
+# from N=16 samples; DAPO arXiv:2503.14476 drops accuracy 0 and 1 groups;
+# Seed-Thinking, ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a
+# form of it). A reported practice with no published ablation on the
+# edges, so every selector takes ``band=``.
+DEFAULT_BAND: tuple[float, float] = DIFFICULTY_BAND
+# SFT_TARGET_DEFAULT = 800 and SELECTION_SURPLUS = 3: ``recommend`` sizes
+# an SFT run for 800 selected rows (curated agent SFT lands at 500 to
+# 2,000: FireAct 500, LIMA 1,000, AgentTuning 1,866) from three times as
+# many candidates, so the selector chooses rather than keeps everything
+# (the surplus is convention).
+SFT_TARGET_DEFAULT = 800
+SELECTION_SURPLUS = 3
+# BUDGET_ROUNDING = 100: a recommended row budget is rounded up to the
+# next hundred, a number a person can say (convention).
+BUDGET_ROUNDING = 100
+# MIXED_RATE_FLOOR = 0.02: the lowest mixed-group rate ``recommend`` will
+# size for; below it the ask count explodes and the honest answer is a
+# harder grid, which the reasoning says (convention).
+MIXED_RATE_FLOOR = 0.02
+# MIXED_RATE_DEFAULT = 0.5: the mixed-group rate assumed before one is
+# measured; a struggling agent mixes on half its asks, a competent one on
+# a cold-start grid measured 4% (field test, 48x8, hosted Qwen), so this
+# is the optimistic end and the docstring says to probe first.
+MIXED_RATE_DEFAULT = 0.5
 
 # How asks inside the band are ordered within a fault kind: ``"spread"``
 # takes them round-robin across pass rates, ``"middle"`` ranks the ones
@@ -145,7 +172,7 @@ def is_incomplete_junk(row: dict) -> bool:
     # A reply cut at the cap is junk unless ``select_for_rl(truncated=)``
     # already claimed it (``overlong``): keep and penalize decide its fate,
     # not this gate, or the report counts a row the output never carries.
-    if len(final) > 600 and not looks_finished(final) and not row.get("overlong"):
+    if len(final) > TRUNCATED_REPLY_CHARS and not looks_finished(final) and not row.get("overlong"):
         return True
     messages = _messages(row)
     if not messages:
@@ -538,11 +565,12 @@ def _sft_report(
             per_prompt[key] = per_prompt.get(key, 0) + 1
     max_k = max(per_prompt.values(), default=0)
     report["completions_per_prompt_max"] = max_k
-    if 0 < max_k < 10:
+    if 0 < max_k < REJECTION_SAMPLING_MIN_K:
         report["note"] = (
             f"at most {max_k} completion(s) per prompt; rejection-sampling selection "
-            "wants 10 to 30 so the pick is not biased (rlhf-book ch. 9). Raise "
-            "repeats= if you mean to choose among completions rather than filter."
+            f"wants {REJECTION_SAMPLING_MIN_K} to 30 so the pick is not biased (rlhf-book "
+            "ch. 9; Llama 3 samples 10 to 30). Raise repeats= if you mean to choose among "
+            "completions rather than filter."
         )
     return report
 
@@ -922,7 +950,7 @@ def select_for_rl(
     def _score(prompt: str) -> tuple:
         p = _pass_rate(prompt)
         in_band = lo <= p <= hi
-        middle = abs(p - 0.5) if order == "middle" else 0.0
+        middle = abs(p - (lo + hi) / 2) if order == "middle" else 0.0
         return (0 if in_band else 1, middle, _stable_key(prompt))
 
     fault_buckets: dict[str, list[str]] = {}
@@ -1010,11 +1038,12 @@ def select_for_rl(
     ]
     if tasks and halves:
         median_n = statistics.median(t["n"] for t in tasks)
-        if median_n < 16:
+        if median_n < DIFFICULTY_BAND_ROLLOUTS:
             report["hygiene_warnings"].append(
                 f"Difficulty was measured from {median_n:g} rollouts per task, so a task's "
                 f"band assignment can be off by about ±{statistics.median(halves):.1f}. "
-                "Use repeats=16 for a firmer band."
+                f"Use repeats={DIFFICULTY_BAND_ROLLOUTS} for a firmer band (the count the "
+                "20-80 band is measured from, rlhf-book ch. 14)."
             )
     if report["eval_sourced"]:
         report["hygiene_warnings"].append(
@@ -1132,7 +1161,7 @@ def recommend(
     system_prompt: str | None = None,
     mode: str = "sft",
     target: int | None = None,
-    mixed_rate: float = 0.5,
+    mixed_rate: float = MIXED_RATE_DEFAULT,
 ) -> dict[str, Any]:
     """How much data this agent needs, from its own grid. No guessing.
 
@@ -1160,13 +1189,13 @@ def recommend(
     cells = len(scenario_regions(list(tools or []), policy, mode=str(mode).lower()))
     reasoning = [f"covering grid: {cells} cells for this agent"]
     if kind == "sft":
-        goal = int(target or 800)
+        goal = int(target or SFT_TARGET_DEFAULT)
         by_grid = cells * SATURATION_COPIES
-        raw = max(by_grid, 3 * goal)
-        raw = int(-(-raw // 100) * 100)
+        raw = max(by_grid, SELECTION_SURPLUS * goal)
+        raw = int(-(-raw // BUDGET_ROUNDING) * BUDGET_ROUNDING)
         reasoning += [
             f"saturation wants {SATURATION_COPIES} visits per cell = {by_grid} rows",
-            f"selection wants about 3x its target of {goal} to choose from",
+            f"selection wants about {SELECTION_SURPLUS}x its target of {goal} to choose from",
             f"generate {raw}, select {goal} diverse 1-labeled rows",
             "time_budget off: a sized run stops on rows, not the clock",
         ]
@@ -1178,14 +1207,14 @@ def recommend(
             "simulate_kwargs": {"mode": "sft", "budget": raw, "time_budget": None},
             "reasoning": reasoning,
         }
-    goal = int(target or 800)
-    k = 8
+    goal = int(target or SFT_TARGET_DEFAULT)
+    k = RL_ROLLOUTS_PER_ASK
     # Whole-group selection keeps only asks whose k rollouts disagree.
     # The surviving fraction is the agent's, not ours: a struggling agent
     # mixes on half its asks; a competent agent on a cold-start grid
     # measured 4% (field test, 48x8, hosted Qwen). Probe first: 12 asks,
     # grade, group_signal, then pass the measured rate back in here.
-    rate = min(1.0, max(0.02, float(mixed_rate)))
+    rate = min(1.0, max(MIXED_RATE_FLOOR, float(mixed_rate)))
     # Expected mixed rows = situations * k * rate, so situations =
     # goal / (k * rate). Rounding k * rate to an integer first (the old
     # form) collapsed to 1 below rate 1/16 and under-provisioned by 3x

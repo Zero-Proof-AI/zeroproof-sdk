@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from ..defaults import PASS_THRESHOLD
 from ..generate.agents import _ID_FOLLOW, _echoes_agent
 from ..generate.generator import (
     _ACK_ONLY,
@@ -21,7 +22,8 @@ from ..generate.generator import (
 from .grading import _DEGENERATE, _INFRA_STUB
 
 DIMENSIONS = ("opener", "ping_pong", "leak", "complexity", "structure")
-FAIL = 0.5
+#: a dimension score under this fails the dimension (``defaults.PASS_THRESHOLD``)
+FAIL = PASS_THRESHOLD
 
 _DESK_OPENER = re.compile(
     r"^hello,?\s+i am writing because\b|"

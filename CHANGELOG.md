@@ -5,6 +5,42 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Every number a `score/` verdict rests on now has one home and one knob.
+  `whileai/simulations/defaults.py` holds the values more than one module
+  read (`ALPHA` 0.05, `CI_LEVEL` 0.95, `POWER` 0.8, `BOOTSTRAP_DRAWS` 2000,
+  `MIN_CI_TASKS` 3, `MIN_RERUNS` 3, `PASS_THRESHOLD` 0.5, `DIFFICULTY_BAND`
+  (0.2, 0.8), `DIFFICULTY_BAND_ROLLOUTS` 16, `REJECTION_SAMPLING_MIN_K` 10,
+  `DECONTAM_NGRAM` 8, `DECONTAM_OVERLAP` 0.8, `SEMANTIC_SIMILARITY` 0.85,
+  the judge floors `MIN_GOLD` 50, `MIN_AGREEMENT` 0.8, `MIN_KAPPA` 0.6,
+  `LENGTH_GAP_FLAG` 0.15, `FLIP_FLAG` 0.10, `POSITION_FLIP_FLAG` 0.2, the
+  judge payload caps `JUDGE_PAYLOAD_CHARS` 8000 / `JUDGE_SITUATION_CHARS`
+  4000 / `JUDGE_FINAL_TEXT_CHARS` 2000 / `JUDGE_POLICY_CHARS` 2000 /
+  `JUDGE_MAX_TOKENS` 120 / `JUDGE_TEMPERATURE` 0, `TRUNCATED_REPLY_CHARS`
+  600 and `HACK_THRESHOLD` 0.3), each with a one-line why and its source
+  (rlhf-book chapter, arXiv id, or "convention, untested"). The values are
+  unchanged; `scripts/golden.py` reports all 13 configurations identical.
+  New knobs, each defaulting to the shared constant: `noise_band(level=)`,
+  `compare_runs(level=)` (the report gains `level`), `delta_report(alpha=,
+  power=, ceiling_pass_rate=, answered_gap_points=, answered_alpha=)` (the
+  report gains `alpha` and `level`; the family-wise rate, the sizing line
+  and every printed interval follow them), `hack_scan(alpha=)`,
+  `judge_pairs(position_flip_flag=, prefers_rejected_flag=)`,
+  `pairwise_judge(max_tokens=, request_chars=)`, `judge_trust(length_gap_flag=,
+  flip_flag=)` (and on `length_sensitivity`, `perturbation`,
+  `judge_probes`), `audit_grades(fn_warn=)`, `dataset_report(hard_share_floor=)`,
+  and `payload_chars=` / `max_tokens=` on `grade_one`, `apply_grade_llm`,
+  `audit_one`, `audit_grades` and `llm_judge.judge_one` (recorded in every
+  row's `judge_meta` evidence). The t quantile behind a re-run band at a
+  level other than 95% is a numeric inversion of Student's t (stdlib), so
+  `noise_band(level=0.99, df=4)` is the tabled 4.604, not an extrapolation.
+  One default did move: `ScoredData.select_for_rl` used its own band of
+  0.3 to 0.7 while `select_for_rl`, `optimize` and `curriculum` used 0.2
+  to 0.8 (rlhf-book ch. 14, N=16; DAPO); it now takes `DIFFICULTY_BAND`
+  like the rest, so a task passed 25% or 75% of the time is kept there
+  too. `whileai.simulations.environment.DEFAULT_BAND` reads the same
+  constant. Module constants that stay local (`CEILING_PASS_RATE`,
+  `ANSWERED_GAP_POINTS`, `DEAD_TOOL_R_MIN`, `HARD_SHARE_FLOOR`, the hack
+  scan's floor settings and the rest) carry the same comment format.
 - Every default in the situation and user side of the engine
   (`whileai/simulations/generate/`) is now a named constant with a
   one-line comment saying why it is that number and where the number
