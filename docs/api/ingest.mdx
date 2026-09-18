@@ -154,6 +154,9 @@ holdout counts), `sft`, and `more` (prompts that need more runs).
 Read it before `cut()` when you want to know what you would get.
 `format_cuts()` prints it as the three lines the traces page shows.
 
+The report carries the `filter` it was read for, so the next line
+`format_cuts()` prints cuts the same traces this counted.
+
 ### datasets
 
 ```python
@@ -196,6 +199,9 @@ The answer, the counts behind it, and the line to run next::
     3 prompts are worth training on
     9 runs · 3 train · none held out
     next: wai.cut(agent="my-agent", kind="rl")
+
+The agent comes from the report's own `filter` — the line printed cuts
+what was counted — and `agent=` overrides it.
 
 ### hf_publish
 
