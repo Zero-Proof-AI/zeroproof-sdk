@@ -76,7 +76,9 @@ image_vllm = _with_files(_vllm_base)
 # 0.19 monkeypatch below is skipped there.
 _base_new = (
     # vLLM >= 0.26 compiles kernels at start and needs nvcc: CUDA devel base.
-    modal.Image.from_registry("nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.12")
+    # CUDA 13 to match the torch that vLLM 0.29 pins; causal-conv1d compiles
+    # against it and refuses a 12.x toolkit.
+    modal.Image.from_registry("nvidia/cuda:13.0.3-devel-ubuntu22.04", add_python="3.12")
     # apt on the ubuntu base stops at tzdata's "Geographic area:" prompt without this
     .env({"DEBIAN_FRONTEND": "noninteractive", "TZ": "UTC"})
     .apt_install("postgresql", "postgresql-contrib")
@@ -84,6 +86,11 @@ _base_new = (
         "vllm==0.29.0",
         "transformers==5.17.0",
         "trl==1.13.0",
+        # Qwen3.5's gated delta net: without this transformers falls back to the
+        # reference kernels, which took 138 GB for one micro-batch of 2 on an H200.
+        # causal-conv1d is a CUDA extension that does not build in the image; its
+        # reference fallback is slow but not the memory problem.
+        "flash-linear-attention",
         "peft==0.21.0",
         "datasets>=3.6.0",
         "accelerate>=1.8.1",

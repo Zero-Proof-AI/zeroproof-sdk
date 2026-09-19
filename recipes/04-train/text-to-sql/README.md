@@ -227,6 +227,17 @@ training file.
   `_guard_vllm_weight_sync` every LoRA weight either crashed the run or was
   silently skipped (training a policy vLLM never saw). The guard prints any
   name it cannot place.
+- **A 9B with linear attention needs three things to fit beside vLLM on one
+  GPU.** Qwen3.5-9B (gated delta net) went out of memory on an H100 and on an
+  H200 before it fit: (1) `flash-linear-attention` in the image, or
+  transformers falls back to reference kernels that took 138 GB for one
+  micro-batch of 2 (`causal-conv1d` does not build in the image; its
+  fallback is slow, not large); (2) a vLLM share that covers the weights
+  plus a KV cache, `--vllm-mem 0.40` for a 9B (0.25 leaves no room and the
+  engine says "No available memory for the cache blocks"); (3) `--micro-batch 1
+  --grad-ckpt`. Gradient checkpointing is safe on `--stack new` because vLLM
+  generates, not the HF path that broke on TRL 0.19. The cost: 12.7 min a
+  step at 512 samples, so a 50-step round is about 11 hours on one H100.
 - **Check what the SDK sent the model, not just what came back.** Before
   0.51, `simulate(tasks=...)` with a prompt-only agent drafted a tool surface
   for the situation writer and sent those schemas to the policy too. Qwen
