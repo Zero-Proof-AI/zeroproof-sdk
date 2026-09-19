@@ -187,6 +187,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - `post.md` for the four existing paper recipes (filter-metric moved; adaptive-clip,
   endpoint-sft and gmts-token-select flat), each under 280 characters, numbers copied
   from their Result tables.
+- README badges are all live. Coverage is the number CI measured on the last
+  green main, published to the `badges` branch by `.github/scripts/badge.py`
+  and rendered through a shields endpoint; the version badge reads the
+  release tag, which shields refreshes in five minutes where its PyPI badge
+  lagged by twelve hours; the license badge reads the repo.
 
 ## 0.82 (2026-09-18)
 

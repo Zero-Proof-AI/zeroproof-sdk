@@ -11,11 +11,11 @@
 
 <p align="center">
   <a href="https://github.com/whilehq/whileai-sdk/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/whilehq/whileai-sdk/ci.yml?branch=main&label=ci&labelColor=0b1220&color=5cb08a" alt="CI"></a>
-  <a href="https://pypi.org/project/whileai/"><img src="https://img.shields.io/pypi/v/whileai?labelColor=0b1220&color=5cb08a" alt="PyPI"></a>
+  <a href="https://pypi.org/project/whileai/"><img src="https://img.shields.io/github/v/tag/whilehq/whileai-sdk?sort=date&label=pypi&labelColor=0b1220&color=5cb08a" alt="PyPI"></a>
   <a href="https://pypi.org/project/whileai/"><img src="https://img.shields.io/pypi/pyversions/whileai?labelColor=0b1220&color=3f8f6b" alt="Python"></a>
   <a href="https://pepy.tech/project/whileai"><img src="https://img.shields.io/pepy/dt/whileai?labelColor=0b1220&color=3f8f6b" alt="Downloads"></a>
-  <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-%E2%89%A5%2090%25%20gated-5cb08a?labelColor=0b1220" alt="Coverage gate"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-3f8f6b?labelColor=0b1220" alt="License"></a>
+  <a href="https://github.com/whilehq/whileai-sdk/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/whilehq/whileai-sdk/badges/coverage.json&labelColor=0b1220" alt="Coverage"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/whilehq/whileai-sdk?labelColor=0b1220&color=3f8f6b" alt="License"></a>
 </p>
 
 Building RL and SFT datasets for agents is hard. `whileai` is the library
