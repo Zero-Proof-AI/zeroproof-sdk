@@ -98,7 +98,9 @@ NEEDS_KEY = re.compile(
     re.I,
 )
 
-FENCE = re.compile(r"^(?P<indent>[ \t]*)```(?P<info>[^\n]*)$")
+# Three backticks or more, closed by the same count, so a ````markdown block
+# that quotes a ```python fence is one block of markdown, not a python block.
+FENCE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>`{3,})(?P<info>[^`\n]*)$")
 # simulate() prints a progress meter while it runs. A reader watches it go by
 # and quotes what is left, so the comparison drops it too.
 PROGRESS = re.compile(r"^\s*\d+/\d+ rollouts,.*$", re.M)
@@ -185,9 +187,10 @@ def parse(page: Path) -> list[Block]:
             i += 1
             continue
         indent, lang = m.group("indent"), language(m.group("info"))
+        fence = m.group("fence")
         body: list[str] = []
         i += 1
-        while i < len(lines) and lines[i].strip() != "```":
+        while i < len(lines) and lines[i].strip() != fence:
             fenced[i] = True
             body.append(lines[i].removeprefix(indent))
             i += 1

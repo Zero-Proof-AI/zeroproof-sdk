@@ -38,6 +38,18 @@ pre-commit install      # optional: ruff and whitespace hooks on commit
 
 CI runs the suite on Python 3.10 through 3.13, every recipe's `smoke.sh`, ruff, mypy, ty, line coverage, a plain-pip install of the built wheel into a clean venv, and a version-scheme check.
 
+## The code in the docs runs
+
+`uv run python scripts/check_doc_snippets.py` executes every ```` ```python ```` block under `docs/` against the installed package and CI runs it on every PR (the job `the code in the docs runs`). A page is one program: its blocks run in order, in one namespace, in a scratch directory, with no keys set and anything credential-shaped stripped from the environment. Where a page quotes a block's output in the fence right after it, the quoted text has to match what the block printed. Each block gets 180 seconds; a failure names the page and the line of the opening fence.
+
+Three things are not run:
+
+- `docs/api/` and `docs/recipes/`, which are generated (from docstrings by `gen_api_docs.py`, from the recipe READMEs by `gen_recipe_docs.py`). Recipe blocks assume a clone and are covered by the recipe smoke job, so fix a recipe's README rather than its page.
+- A block that needs a key, when a sentence or `export` line above it on the page names the variable (`WHILEAI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MODAL_TOKEN_ID`, `TYPESAFE_API_KEY`). A block that reaches for a key the page never mentions fails.
+- A block that is a sketch rather than a program (a signature, the shape of a return value, a live training run), listed in `scripts/doc_snippets/skips.json` by page and a substring of its code, with a reason. The list sits off the page because Mintlify renders a fence info string as a filename badge and an HTML comment breaks its MDX parser.
+
+Names a guide leaves to the reader (`agent`, `TOOLS`, `POLICY`, `scored`) come from a fixture under `scripts/doc_snippets/` that mirrors the page's path below `docs/` and runs before its first block; most fixtures are one line, `from _common import *`. Check one page with `--page docs/evals.md -v`, or a released wheel with `--python /path/to/venv/bin/python`.
+
 ## License
 
 Apache-2.0
