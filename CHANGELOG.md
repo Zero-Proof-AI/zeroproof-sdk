@@ -19,6 +19,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   with no docstring, stops cutting first sentences at "ch.", and no longer
   repeats the page description in the body. The index opens with the
   offline program and the line it prints; the style page gains frontmatter.
+- README badges are all live. Coverage is the number CI measured on the last
+  green main, published to the `badges` branch by `.github/scripts/badge.py`
+  and rendered through a shields endpoint; the version badge reads the
+  release tag, which shields refreshes in five minutes where its PyPI badge
+  lagged by twelve hours; the license badge reads the repo.
 
 ## 0.83 (2026-09-19)
 

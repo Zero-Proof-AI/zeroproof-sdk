@@ -72,6 +72,8 @@ jobs:
   coverage:
     name: line coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the README's coverage badge, published from main below
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -86,10 +88,20 @@ jobs:
       # is raised whenever that number moves a whole point: 90.49% at
       # 882201c (19707 statements, 1874 missed). Raise it in the same PR
       # that raises coverage; never lower it to make a red job green.
-      - run: uv run pytest -q --cov=whileai --cov-report=term
+      - run: uv run pytest -q --cov=whileai --cov-report=term --cov-report=json
               --cov-fail-under=90
         env:
           COVERAGE_CORE: sysmon
+      # The README's coverage badge is the number this job just measured, not
+      # a hand-typed floor. Published only from main, so a PR's coverage never
+      # shows on the README. See .github/scripts/badge.py.
+      - name: publish the coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pct=$(python3 -c "import json; t = json.load(open('coverage.json'))['totals']['percent_covered']; print('%.1f%%' % t)")
+          python3 .github/scripts/badge.py coverage "$pct"
 
   build:
     name: build is installable
