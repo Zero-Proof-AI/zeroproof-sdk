@@ -24,6 +24,10 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   (`"gpt-4.1-mini"`) and an unknown provider name the five forms. A URL, a
   callable and a backend object are unchanged, and a bad role leaves no
   half-applied settings.
+- The 30 recipes are on the docs site at `/recipes`, one page per recipe
+  generated from `recipes/**/README.md` by `scripts/gen_recipe_docs.py`,
+  with an index grouped by step and a clone-the-repo note on every page;
+  `docs.yml` checks the pages stay in sync with the READMEs (#492).
 
 ## 0.88 (2026-09-19)
 
