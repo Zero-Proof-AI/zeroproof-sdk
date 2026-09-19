@@ -5,6 +5,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.83 (2026-09-19)
+
 - Docs: the site now says what `CONSTITUTION.md` says. The Mintlify
   description and the landing page lead with the post-training library,
   not with training data for tool-calling agents; the landing page has a
