@@ -58,6 +58,13 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   and rendered through a shields endpoint; the version badge reads the
   release tag, which shields refreshes in five minutes where its PyPI badge
   lagged by twelve hours; the license badge reads the repo.
+- `tools=` takes `@wai.tool` functions everywhere, not only in `simulate`
+  and `seeded_agent`: `world`, `local_model` and `hosted_model`,
+  `evaluate`, `coverage_gap`, `preflight`, `dataset_report`, `recommend`,
+  `trace_report`, `build_tasks` and `export_environment` normalise the
+  same list. Every hand-written schema dict is gone from the docs site;
+  the pages say dicts still work.
+
 
 ## 0.83 (2026-09-19)
 

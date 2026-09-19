@@ -61,6 +61,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 
 from ..defaults import DIFFICULTY_BAND, JUDGE_COMPARE_CONCURRENCY, MIN_AGREEMENT, MIN_KAPPA
+from ..tools import schemas as _tool_schemas
 from .hygiene import coverage_warnings
 
 log = logging.getLogger("whileai.simulations")
@@ -650,6 +651,8 @@ def evaluate(
     print(scored.warnings, wai.pass_at(scored.rows).pass_at_1)
     ```
     """
+    if tools and not all(isinstance(t, str) for t in tools):
+        tools = _tool_schemas(tools)
     if grader is not None and judge is not None:
         raise ValueError("pass judge= or grader=, not both")
     judge = judge if judge is not None else grader

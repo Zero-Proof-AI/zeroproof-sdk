@@ -33,6 +33,7 @@ from ..defaults import (
     RL_ROLLOUTS_PER_ASK,
     TRUNCATED_REPLY_CHARS,
 )
+from ..tools import schemas as _tool_schemas
 from .grading import (
     _DEGENERATE,
     _HARNESS_LEAK,
@@ -1179,6 +1180,7 @@ def recommend(
     Returns the numbers plus ``simulate_kwargs`` ready to splat, and
     ``reasoning`` lines that show the arithmetic.
     """
+    tools = _tool_schemas(tools)
     from ..generate.coverage import SATURATION_COPIES
     from ..generate.scenarios import scenario_regions
 

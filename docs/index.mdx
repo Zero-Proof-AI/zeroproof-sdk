@@ -25,24 +25,16 @@ The loop, offline, no key, about twenty seconds on a laptop:
 ```python
 import whileai as wai
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_order",
-            "description": "Look up an order by id.",
-            "parameters": {
-                "type": "object",
-                "properties": {"order_id": {"type": "string"}},
-                "required": ["order_id"],
-            },
-        },
-    }
-]
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""  # the function is the tool; its signature is the schema
+    ...
+
 
 data = wai.simulate(
-    wai.seeded_agent(TOOLS),  # a stand-in agent that misbehaves on a labeled share of rows
-    tools=TOOLS,
+    wai.seeded_agent([get_order]),  # a stand-in agent that misbehaves on a labeled share of rows
+    tools=[get_order],
     system_prompt="Help customers with orders.",
     simulator=False,  # template situation writer: no model, no network
     mode="rl",
