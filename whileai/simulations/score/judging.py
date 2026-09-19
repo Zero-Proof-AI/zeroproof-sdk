@@ -57,10 +57,10 @@ import concurrent.futures
 import json
 import logging
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 
-from ..defaults import DIFFICULTY_BAND
+from ..defaults import DIFFICULTY_BAND, JUDGE_COMPARE_CONCURRENCY, MIN_AGREEMENT, MIN_KAPPA
 from .hygiene import coverage_warnings
 
 log = logging.getLogger("whileai.simulations")
@@ -259,6 +259,40 @@ class ScoredData:
 
     def __iter__(self) -> Iterator[dict]:
         return iter(self.rows)
+
+    def compare_judges(
+        self,
+        judges: Mapping[str, Any] | Sequence[Any],
+        *,
+        gold: str = "gold_reward",
+        allow_model_gold: bool = False,
+        concurrency: int = JUDGE_COMPARE_CONCURRENCY,
+        floors: tuple[float, float] = (MIN_AGREEMENT, MIN_KAPPA),
+    ):
+        """Grade these rows with several judges and rank them against the gold labels.
+
+        ``judges`` maps a name to a spec string (``"typesafe:jev-latest"``),
+        a backend object, a ``wai.Judge`` or any judge callable. Each grades
+        its own copy of the rows under this run's system prompt and tools,
+        then is scored the way ``judge_trust`` scores one judge: agreement
+        with a Wilson interval, kappa, leak rate, unsure and unjudged
+        counts, seconds per row. Returns a ``JudgeComparison`` that prints
+        as a table ranked by kappa; ``whileai.judge_comparison.compare_judges``
+        has the full account and takes a bare row list.
+        """
+        from whileai.judge_comparison import compare_judges
+
+        profile = self.profile
+        return compare_judges(
+            self.rows,
+            judges,
+            gold=gold,
+            allow_model_gold=allow_model_gold,
+            concurrency=concurrency,
+            policy=str(getattr(profile, "policy", "") or "") if profile else "",
+            tools=list(getattr(profile, "tools", None) or []) if profile else None,
+            floors=floors,
+        )
 
     def __len__(self) -> int:
         return len(self.rows)
