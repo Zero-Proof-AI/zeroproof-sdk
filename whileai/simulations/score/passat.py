@@ -348,6 +348,11 @@ class PassAt:
             tail += f"; {self.note}"
         return f"{head} {tail})"
 
+    def _repr_html_(self) -> str:
+        """The same line, as a notebook cell (style.md rule 5)."""
+        escaped = str(self).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<pre>{escaped}</pre>"
+
 
 def _nothing_to_score(rows: Sequence[dict]) -> str:
     """Why no row carried a binary reward.

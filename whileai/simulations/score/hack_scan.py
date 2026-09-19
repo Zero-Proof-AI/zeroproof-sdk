@@ -53,6 +53,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from ...report import Report
 from ..defaults import ALPHA, RL_ROLLOUTS_PER_ASK, ROLLOUTS_PER_TASK
 from .hygiene import assistant_turns, is_truncated, reply_length, tool_calls
 from .optimize import _messages
@@ -330,12 +331,13 @@ def hack_scan(
     seed: int = 0,
     top_features: int | None = REPORT_TOP,
     alpha: float = ALPHA,
-) -> dict[str, Any]:
+) -> HackScanReport:
     """Rank the features that separate reward within each ask, against a permutation noise floor, and say what a grouped update would learn.
 
     Reach for it before an RL run, and again after, to check that the
     reward tracks the behavior you meant rather than a shortcut. It
-    returns a dict: ``regime`` (``train``, ``reward_hack``,
+    returns a ``HackScanReport``, a dict that prints itself: ``regime``
+    (``train``, ``reward_hack``,
     ``pool_exhausted``, ``no_signal``, ``degenerate``, ``unknown``),
     ``tau`` (the floor), ``features`` ranked by |within-ask correlation|
     with the pooled correlation beside each, ``top_feature``,
@@ -421,7 +423,7 @@ def hack_scan(
     }
     if n == 0:
         warnings.append(f"no row carries a numeric {reward!r}; grade first")
-        return base
+        return HackScanReport(base)
 
     # groups
     rewards = [v for r in graded if (v := _reward(r, reward)) is not None]
@@ -524,7 +526,7 @@ def hack_scan(
             else "one rollout per ask: within-ask correlation needs repeats "
             "(mode='rl', repeats>=4); only the pooled column is filled"
         )
-        return base
+        return HackScanReport(base)
 
     rho = {f.name: _rho_within(f, rc, sr, n) for f in feats}
 
@@ -629,7 +631,7 @@ def hack_scan(
             "patterns (feature names are like tool:<name>, marker:<name>, contains:<term>) "
             "or add a features= extractor that emits them"
         )
-        return base
+        return HackScanReport(base)
     # Degeneracy: an ask that holds only a couple of distinct rollouts
     # forces every feature that separates them to be an exact function of
     # the label, so they all tie at |rho| 1 and the ranking's tie-break is
@@ -739,7 +741,21 @@ def hack_scan(
             f"coarse below {FLOOR_COARSE_BELOW}, re-scan at repeats>={RESCAN_ROLLOUTS} before "
             "acting on a close call"
         )
-    return base
+    return HackScanReport(base)
+
+
+class HackScanReport(Report):
+    """What ``hack_scan`` found, as an object that prints itself.
+
+    Still the dict it always was: ``report["regime"]`` and
+    ``report["warnings"]`` read the same. ``print(report)`` is now the
+    block ``format_hack_scan`` writes, not the dict literal.
+    """
+
+    _summary_keys = ("regime", "integrity")
+
+    def __str__(self) -> str:
+        return format_hack_scan(self)
 
 
 def format_hack_scan(report: dict[str, Any], *, top: int = 12) -> str:

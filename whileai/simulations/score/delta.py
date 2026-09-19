@@ -29,6 +29,7 @@ from collections.abc import Callable, Mapping, Sequence
 from statistics import NormalDist
 from typing import Any
 
+from ...report import Report
 from ..defaults import ALPHA, BASE_PASS_RATE, CI_LEVEL, MIN_RERUNS, POWER
 from .passat import answer_counts, pass_at
 from .stats import (
@@ -332,13 +333,14 @@ def delta_report(
     ceiling_pass_rate: float = CEILING_PASS_RATE,
     answered_gap_points: float = ANSWERED_GAP_POINTS,
     answered_alpha: float = ANSWERED_P_MAX,
-) -> dict[str, Any]:
+) -> DeltaReport:
     """Compare an ``after`` run to a ``before`` run on pass@1 and every shared marker, and say whether the change is real.
 
     Reach for it after a change (a prompt edit, a trained adapter, a model
     swap): both sides are graded rows, ideally on the same pinned tasks
     (``simulate(tasks=before)``) with the same rollouts per task. It
-    returns a dict. The keys a caller reads first: ``headline_verdict``
+    returns a ``DeltaReport``, a dict that prints itself. The keys a
+    caller reads first: ``headline_verdict``
     (``PASS`` only for a gain the report supports, ``NO DIFFERENCE`` for
     an interval over zero, ``NOT COMPARABLE (causes)`` when the arms
     cannot be compared, ``FAIL`` for a regression, a failed guard, or
@@ -346,8 +348,9 @@ def delta_report(
     comparable arms; it does not say the change helped), ``metrics`` (one
     entry per metric with its delta, interval and verdict), ``warnings``
     (each naming its fix), ``not_comparable``, ``n_paired_tasks`` and
-    ``n_unpaired_tasks``. ``format_delta_report(report)`` prints it with
-    ``headline_verdict`` on the first line.
+    ``n_unpaired_tasks``. ``print(report)`` writes it with
+    ``headline_verdict`` on the first line
+    (``format_delta_report(report)`` is the same string).
 
     Arguments that matter:
 
@@ -1009,56 +1012,58 @@ def delta_report(
                 f"weights the environment moved with them, so pin {knob} to a fixed model to "
                 "rule it out"
             )
-    return {
-        "ok": ok,
-        "not_comparable": not_comparable,
-        "target": target_key,
-        "target_verdict": target_verdict,
-        #: the verdict format_delta_report prints: the target's, else pass@1's
-        "headline_verdict": verdict_word,
-        "target_delta": target_result["delta"] if target_result else None,
-        "target_ci95": target_result["ci95"] if target_result else None,
-        "n_metrics": n_metrics,
-        "alpha": alpha,
-        "level": level,
-        #: chance at least one of the metrics clears zero by luck alone
-        "family_error": round(family_error, 4),
-        "n_paired_tasks": results["pass_at_1"]["n_paired"],
-        "n_unpaired_tasks": results["pass_at_1"]["n_only_a"] + results["pass_at_1"]["n_only_b"],
-        "improved": improved,
-        "regressions": regressions,
-        "slipped": slipped,
-        "within_noise": within_noise,
-        "run_std": headline_run_std,
-        "run_std_by_metric": {m: run_std_by_metric.get(m) for m in metrics},
-        "run_std_source": run_std_source,
-        #: re-runs a given run_std was computed from, and the band's degrees
-        #: of freedom (None: the floor is read as the eval's exact spread)
-        "run_std_runs": run_std_runs,
-        "run_std_df": band_df,
-        "noise_band": headline_noise,
-        "noise_rule": noise_rule,
-        "eval_runs": eval_runs,
-        "replicated": replicated,
-        "ceiling": ceiling,
-        "detectable_effect": can_prove,
-        "tasks_needed": tasks_needed,
-        "degenerate_guards": degenerate_guards,
-        "proxy": proxy_key,
-        "proxy_verdict": proxy_verdict,
-        "proxy_delta": proxy_result["delta"] if proxy_result else None,
-        "proxy_ci95": proxy_result["ci95"] if proxy_result else None,
-        "over_optimized": over_optimized,
-        "metrics": results,
-        "warnings": warnings,
-        "config": config,
-        "balanced": balanced,
-        "by": (
-            by if isinstance(by, str) else (getattr(by, "__name__", "callable") if by else None)
-        ),
-        "groups": groups,
-        "groups_down": groups_down,
-    }
+    return DeltaReport(
+        {
+            "ok": ok,
+            "not_comparable": not_comparable,
+            "target": target_key,
+            "target_verdict": target_verdict,
+            #: the verdict format_delta_report prints: the target's, else pass@1's
+            "headline_verdict": verdict_word,
+            "target_delta": target_result["delta"] if target_result else None,
+            "target_ci95": target_result["ci95"] if target_result else None,
+            "n_metrics": n_metrics,
+            "alpha": alpha,
+            "level": level,
+            #: chance at least one of the metrics clears zero by luck alone
+            "family_error": round(family_error, 4),
+            "n_paired_tasks": results["pass_at_1"]["n_paired"],
+            "n_unpaired_tasks": results["pass_at_1"]["n_only_a"] + results["pass_at_1"]["n_only_b"],
+            "improved": improved,
+            "regressions": regressions,
+            "slipped": slipped,
+            "within_noise": within_noise,
+            "run_std": headline_run_std,
+            "run_std_by_metric": {m: run_std_by_metric.get(m) for m in metrics},
+            "run_std_source": run_std_source,
+            #: re-runs a given run_std was computed from, and the band's degrees
+            #: of freedom (None: the floor is read as the eval's exact spread)
+            "run_std_runs": run_std_runs,
+            "run_std_df": band_df,
+            "noise_band": headline_noise,
+            "noise_rule": noise_rule,
+            "eval_runs": eval_runs,
+            "replicated": replicated,
+            "ceiling": ceiling,
+            "detectable_effect": can_prove,
+            "tasks_needed": tasks_needed,
+            "degenerate_guards": degenerate_guards,
+            "proxy": proxy_key,
+            "proxy_verdict": proxy_verdict,
+            "proxy_delta": proxy_result["delta"] if proxy_result else None,
+            "proxy_ci95": proxy_result["ci95"] if proxy_result else None,
+            "over_optimized": over_optimized,
+            "metrics": results,
+            "warnings": warnings,
+            "config": config,
+            "balanced": balanced,
+            "by": (
+                by if isinstance(by, str) else (getattr(by, "__name__", "callable") if by else None)
+            ),
+            "groups": groups,
+            "groups_down": groups_down,
+        }
+    )
 
 
 def _balance_rollouts(
@@ -1112,6 +1117,21 @@ def _balance_rollouts(
         "tasks_trimmed": tasks_trimmed,
     }
     return trimmed_a, trimmed_b, info
+
+
+class DeltaReport(Report):
+    """What ``delta_report`` (``wai.compare``) measured, as an object that
+    prints itself.
+
+    Still the dict it always was: ``report["metrics"]``,
+    ``report["verdict"]`` and ``report["warnings"]`` read the same.
+    ``print(report)`` is now the block ``format_delta_report`` writes.
+    """
+
+    _summary_keys = ("ok", "verdict")
+
+    def __str__(self) -> str:
+        return format_delta_report(self)
 
 
 def format_delta_report(report: dict[str, Any]) -> str:

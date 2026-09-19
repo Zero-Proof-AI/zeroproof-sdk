@@ -352,7 +352,7 @@ delta_report(
     ceiling_pass_rate: float = 0.9,
     answered_gap_points: float = 0.1,
     answered_alpha: float = 0.01,
-) -> dict[str, Any]
+) -> DeltaReport
 ```
 
 Defined in [`whileai/simulations/score/delta.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/delta.py).
@@ -639,7 +639,7 @@ hack_scan(
     seed: int = 0,
     top_features: int | None = 20,
     alpha: float = 0.05,
-) -> dict[str, Any]
+) -> HackScanReport
 ```
 
 Defined in [`whileai/simulations/score/hack_scan.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/hack_scan.py).
@@ -868,7 +868,7 @@ judge_trust(
     length_gap_flag: float = 0.15,
     flip_flag: float = 0.1,
     max_skipped_share: float = 0.1,
-) -> dict[str, Any]
+) -> JudgeTrustReport
 ```
 
 Defined in [`whileai/simulations/score/judge_trust.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/judge_trust.py).
@@ -2094,7 +2094,7 @@ One line per fact, the summary first.
 ### leak_report
 
 ```python
-leak_report(rows: Any, min_len: int = 12) -> dict[str, Any]
+leak_report(rows: Any, min_len: int = 12) -> LeakReport
 ```
 
 Defined in [`whileai/simulations/score/privileged.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/privileged.py).
