@@ -208,6 +208,15 @@ training file.
   `repeats` times. Sampling 601 prompts ran 6.5 hours and never finished.
   `rollout.py --timeout 900 --concurrency 16` finishes; the rule is timeout
   >= max_tokens / per-request tokens per second.
+- **Pinned prompts do not need the situation writer.** With
+  `--agent "vllm:..."` the engine drafts scene briefs and result shapes with
+  the same model even when every prompt is pinned (`degraded` says
+  `scene_brief_unavailable`, the run says `same_model`), and a model that
+  writes 2,000-4,000 tokens a reply spends a large share of the server on
+  it. `rollout.py --no-writer` passes `simulator=False`; a four-prompt probe
+  went 177 s to 133 s. Sample long runs in chunks (`--limit 75`, then 150,
+  ...): rows already on disk are skipped, so a killed run resumes, and each
+  chunk prints its rate (whilehq/whileai-sdk#470).
 - **Newer checkpoints, newer stack, and the weight sync is where it breaks.**
   Qwen3.5-* (`Qwen3_5ForConditionalGeneration`) need vLLM >= 0.26 and
   transformers 5: `--stack new` in the trainer, `--vllm 0.29.0` in
