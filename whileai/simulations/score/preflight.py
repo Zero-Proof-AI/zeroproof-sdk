@@ -226,7 +226,7 @@ def preflight(
     grid keeps its own cap (``RULE_AXIS_CAP_GRID``); ``cells`` is counted
     on the same axis ``rules`` shows.
     """
-    tools = _tool_schemas(tools)
+    tools = _tool_schemas(tools) or []
     from ..generate.scenarios import build_dimensions, rule_axis, scenario_regions
 
     tools = list(tools or [])
@@ -855,7 +855,7 @@ def coverage_gap(
     print(gap["untested_rules"], gap["untested_tools"])
     ```
     """
-    tools = _tool_schemas(tools)
+    tools = _tool_schemas(tools) or []
     from ..generate.scenarios import build_dimensions, rule_axis
 
     tool_list = list(tools or [])
