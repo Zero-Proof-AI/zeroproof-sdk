@@ -5,6 +5,32 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- The front door, step one of the style migration (`docs/reference/style.md`).
+  `import whileai as wai` is now the library: `simulate`, `Judge`, `select`,
+  `pass_at`, `judge_trust`, `compare`, `decontaminate`, `hack_scan`,
+  `preflight`, `export`, `verify`, all loaded on first use so the import
+  stays under 200 ms and never touches the network. Everything that talks
+  to withwhile.com is one namespace, `whileai.platform`: `login`, `push`,
+  `pull`, `datasets`, `train`, `serve`, `models`, `track`. The old
+  top-level names (`send_traces`, `login`, ...) still import.
+- Where a model string and a key go, answered by an object: `wai.OpenAI`,
+  `wai.Anthropic`, `wai.Endpoint(url=)`, `wai.Ollama`, `wai.Hosted`. Each
+  prints the model and which key it uses. `wai.configure(agent=, judge=,
+  simulator=, api_key=)` sets the process once; `with wai.context(...)`
+  overrides inside a block; a keyword on the call still wins; the
+  environment is read only after all three. `print(wai.settings)` says
+  what each role resolves to. A key given on a backend is kept for that
+  provider (`resolve_completion_key`, `resolve_api_key` read settings first).
+- `wai.Judge(rubric=, model=)`: the LLM judge as an object. Callable under
+  the judge contract, so it drops into `data.grade`, `run_judge`,
+  `evaluate` and `judge_trust`; a `Rubric` object is scored item by item.
+- `Selection`: `optimize` as an object. `scored.select(mode="rl")`,
+  `data.select(mode=)` and `wai.select(...)` return a list of rows that
+  also carries `.report`, prints what each gate dropped and why, and has
+  `.export(path)` and `.push(name)` with the run's system prompt and tools
+  already filled in. `data.select()` with no mode keeps its old SFT
+  behaviour and now returns a `Selection` (still a list).
+- README and the getting-started docs open with the new program.
 - Getting started, from a tester who got lost: the README now opens with
   "Your model, your key" (the model as a spec string, the environment
   variable each provider reads, where requests go, and the three things

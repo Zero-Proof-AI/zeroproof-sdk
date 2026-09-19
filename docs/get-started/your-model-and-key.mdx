@@ -4,13 +4,21 @@ sidebarTitle: "Your model and your key"
 description: "How to name the model the agent runs on, which environment variable each provider reads, where the requests go, and the three things that reach While only when you ask."
 ---
 
+The shortest answer is a backend object: `wai.OpenAI("gpt-4.1-mini",
+api_key="sk-...")`, `wai.Anthropic(...)`, `wai.Endpoint(model, url=)`,
+`wai.Ollama(...)`, `wai.Hosted()`. Its repr says where the call goes and
+which key it uses, `wai.configure(agent=, judge=, api_key=)` sets it once
+for the process, and `print(wai.settings)` shows what each role resolves
+to. That page is [Connect your agent](/get-started/connect-your-agent).
+This page is the string form underneath, for configs and command lines.
+
 The agent is the first argument of `simulate()`. Pass the model as a
 string, and the key comes from that provider's usual environment
 variable. Every request goes straight to that provider. The situation
 writer runs on the same model, so no While key is involved.
 
 ```python
-import whileai.simulations as wai
+import whileai as wai
 
 data = wai.simulate(
     "openai:gpt-4.1-mini",  # the agent; key from OPENAI_API_KEY

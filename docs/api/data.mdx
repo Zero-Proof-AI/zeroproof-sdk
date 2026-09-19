@@ -264,16 +264,33 @@ Run-level coverage summary (same as `data.coverage`).
 #### SimulationData.select
 
 ```python
-select(self, target: int = 1000) -> list[dict]
+select(
+    self,
+    mode: str | None = None,
+    target: int = 1000,
+    band: tuple[float, float] | None = None,
+    endorsed: Sequence[str] = (),
+    truncated: str = 'drop',
+)
 ```
 
-The rows recommended for training, not everything generated.
+The rows worth training on, as a `Selection` that prints its report.
 
-Diverse pass-labeled demonstrations via `select_for_sft`: one of
-each distinct way of being right before any repeats, junk and
-duplicate prompts dropped. Requires graded rows — grade in-loop
-(`grade=True`, `grader=`) or afterwards with `grade()`.
-The selection report lands in `search["selection"]`.
+With no `mode`: diverse pass-labeled demonstrations via
+`select_for_sft`, one of each distinct way of being right before
+any repeats, junk and duplicate prompts dropped. With
+`mode="rl"` or `"sft"`: `optimize`, the full gate sequence
+(difficulty band, unanimous groups, duplicates, truncation, hack
+scan), with `band`, `endorsed` and `truncated` as there.
+Requires graded rows — grade in-loop (`grade=True`, `grader=`)
+or afterwards with `grade()`. The report lands in
+`search["selection"]` and on the result's `.report`.
+
+``python
+rows = data.select(mode="rl")
+print(rows)              # what each gate dropped and why
+rows.export("train.jsonl")
+``
 
 #### SimulationData.training_set
 

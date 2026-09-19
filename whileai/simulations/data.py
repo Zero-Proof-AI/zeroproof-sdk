@@ -495,6 +495,8 @@ class SimulationData:
                 tools=sorted(str(t) for t in self.declared_tools),
                 scale=scale,
             )
+            # so scored.select() can export with this run's prompt and tools
+            scored.profile = self.profile
             note = trust_after_grade(scored.rows, mode=trust)["note"]
             if note:
                 log.warning(note)
@@ -654,15 +656,34 @@ class SimulationData:
         self._rewrite(path)
         return summarize_quality(self.trajectories)
 
-    def select(self, *, target: int = DEFAULT_SELECT_TARGET) -> list[dict]:
-        """The rows recommended for training, not everything generated.
+    def select(
+        self,
+        *,
+        mode: str | None = None,
+        target: int = DEFAULT_SELECT_TARGET,
+        band: tuple[float, float] | None = None,
+        endorsed: Sequence[str] = (),
+        truncated: str = "drop",
+    ):
+        """The rows worth training on, as a ``Selection`` that prints its report.
 
-        Diverse pass-labeled demonstrations via ``select_for_sft``: one of
-        each distinct way of being right before any repeats, junk and
-        duplicate prompts dropped. Requires graded rows — grade in-loop
-        (``grade=True``, ``grader=``) or afterwards with ``grade()``.
-        The selection report lands in ``search["selection"]``.
+        With no ``mode``: diverse pass-labeled demonstrations via
+        ``select_for_sft``, one of each distinct way of being right before
+        any repeats, junk and duplicate prompts dropped. With
+        ``mode="rl"`` or ``"sft"``: ``optimize``, the full gate sequence
+        (difficulty band, unanimous groups, duplicates, truncation, hack
+        scan), with ``band``, ``endorsed`` and ``truncated`` as there.
+        Requires graded rows — grade in-loop (``grade=True``, ``grader=``)
+        or afterwards with ``grade()``. The report lands in
+        ``search["selection"]`` and on the result's ``.report``.
+
+        ```python
+        rows = data.select(mode="rl")
+        print(rows)              # what each gate dropped and why
+        rows.export("train.jsonl")
+        ```
         """
+        from ..selection import Selection, select
         from .score.optimize import _binary_label
 
         if not any(_binary_label(t) is not None for t in self.trajectories if isinstance(t, dict)):
@@ -671,9 +692,17 @@ class SimulationData:
                 "none carry one. Pass grade=True or grader= to "
                 "simulate(), or call grade() first."
             )
-        selected, report = select_for_sft(self.trajectories, target=target)
-        self.search["selection"] = report
-        return selected
+        policy = str(self.profile.policy or "") if self.profile else ""
+        tools = list(self.profile.tools) if self.profile else []
+        if mode is None:
+            selected, report = select_for_sft(self.trajectories, target=target)
+            self.search["selection"] = report
+            return Selection(selected, report=report, mode="sft", system_prompt=policy, tools=tools)
+        picked = select(
+            self, mode=mode, target=target, band=band, endorsed=endorsed, truncated=truncated
+        )
+        self.search["selection"] = picked.report
+        return picked
 
     def training_set(
         self,
