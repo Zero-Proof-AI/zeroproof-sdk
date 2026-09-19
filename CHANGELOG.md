@@ -5,6 +5,16 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Reports print themselves, step two of the style migration
+  (`docs/reference/style.md` rule 5). `judge_trust`, `hack_scan`,
+  `compare` (`delta_report`) and `leak_report` return a `Report`: still
+  the dict they always were, so every key, `.get`, `json.dumps` and `==`
+  against a plain dict read the same, but `print(report)` is now the
+  block instead of a dict literal. The `format_*` twins are unchanged and
+  still take a dict. `PassAt` gained `_repr_html_` so it renders in a
+  notebook. The ratchet gained two pins: the size of the `whileai`
+  front door (29) and the number of front-door calls still returning a
+  bare dict or tuple (3: `decontaminate`, `export`, `preflight`).
 - Docs design: `docs/reference/design.md` is the standard for how the docs
   look (five principles tied to the constitution, the Tutorial, Concept,
   Reference and API page templates, how a measurement and a signature are
@@ -39,16 +49,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   280 characters, the metric with its interval and the links.
 - Docs: the constitution is a page under Concepts on the docs site, and the
   README's Documentation section links `CONSTITUTION.md`.
-- Reports print themselves, step two of the style migration
-  (`docs/reference/style.md` rule 5). `judge_trust`, `hack_scan`,
-  `compare` (`delta_report`) and `leak_report` return a `Report`: still
-  the dict they always were, so every key, `.get`, `json.dumps` and `==`
-  against a plain dict read the same, but `print(report)` is now the
-  block instead of a dict literal. The `format_*` twins are unchanged and
-  still take a dict. `PassAt` gained `_repr_html_` so it renders in a
-  notebook. The ratchet gained two pins: the size of the `whileai`
-  front door (29) and the number of front-door calls still returning a
-  bare dict or tuple (3: `decontaminate`, `export`, `preflight`).
 - The front door, step one of the style migration (`docs/reference/style.md`).
   `import whileai as wai` is now the library: `simulate`, `Judge`, `select`,
   `pass_at`, `judge_trust`, `compare`, `decontaminate`, `hack_scan`,
