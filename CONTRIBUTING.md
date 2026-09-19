@@ -19,6 +19,9 @@ python -m build && python -m twine check dist/*   # if you touched packaging or 
 
 ## Coding standard
 
+[CONSTITUTION.md](CONSTITUTION.md) is what the library is and what we
+believe; read it once.
+
 Read [`docs/reference/style.md`](docs/reference/style.md) before adding
 a public name. The short form: `import whileai as wai` is the one
 prefix; a judge, verifier, selector or trainer is an object whose

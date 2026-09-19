@@ -1,0 +1,1 @@
+Reproduced <first author> et al. (<arXiv id>) with whileai on one GPU in <n> min: <metric> <baseline> -> <recipe> (<delta> [<lo>, <hi>], <moved|flat>) on <n> held-out tasks, base <model>. Recipe: https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers/<slug> Paper: https://arxiv.org/abs/<id>
