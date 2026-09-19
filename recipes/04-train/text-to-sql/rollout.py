@@ -148,6 +148,11 @@ def main() -> int:
         "--max-tokens", type=int, default=4096, help="agent reply budget (whileai >= 0.47)"
     )
     ap.add_argument("--timeout", type=float, default=300, help="seconds per agent call")
+    ap.add_argument(
+        "--no-writer",
+        action="store_true",
+        help="simulator=False: no scene briefs or result shapes; the prompts are pinned",
+    )
     ap.add_argument("--limit", type=int, default=0, help="first N tasks only (smoke)")
     args = ap.parse_args()
 
@@ -198,6 +203,10 @@ def main() -> int:
         temperature=args.temperature,
         concurrency=args.concurrency,
         budget=len(todo) * args.k,
+        # Pinned prompts need no situation writer. With agent="vllm:..." the
+        # engine otherwise drafts scene briefs and result shapes on the same
+        # server, which doubled a 2,400-row run (whilehq/whileai-sdk#470).
+        **({"simulator": False} if args.no_writer else {}),
     )
     try:
         # a reasoning model thinks for 1-3k tokens before the query (whileai >= 0.47)
