@@ -17,6 +17,17 @@ uv run ty check             # faster mypy pass; mypy stays the gate until ty is 
 python -m build && python -m twine check dist/*   # if you touched packaging or imports
 ```
 
+## Coding standard
+
+Read [`docs/reference/style.md`](docs/reference/style.md) before adding
+a public name. The short form: `import whileai as wai` is the one
+prefix; a judge, verifier, selector or trainer is an object whose
+constructor takes the configuration and whose call takes the rows; a
+public call takes at most eight parameters; a report prints itself
+(`__str__`, `_repr_html_`), so there is no `format_*` twin; public
+names are the verb a scientist says. `tests/api/test_style_ratchet.py`
+fails a PR that adds one of the retired shapes.
+
 ## Shipping a release
 
 ```bash
