@@ -1,11 +1,11 @@
 # Who protects the held-out set — the ids, or the text?
 
-`decontaminate()` applies four rules in order. The first, `same_task`, compares
-`scenario_id` / `task_id` rather than words. On a holdout that `simulate()` wrote,
-that one rule catches **98–100%** of contaminated rows. Strip the ids — which is what
-every evaluation set you did not write with `simulate()` looks like — and the same call
-on the same rows catches **18–30%**. The report does not say which of those two
-situations you are in.
+On a held-out set that `simulate()` wrote, `decontaminate()` catches 98–100% of
+contaminated training rows, and on an evaluation set carrying no ids it catches 18–30%.
+The rows are identical and so is the call. The difference is one rule — `same_task`,
+which compares `scenario_id` / `task_id` rather than words and skips any row that has
+none — and every evaluation set you did not write with `simulate()` is in the second
+case. The report does not say which of the two you are in.
 
 What you will learn: which rule is actually carrying your decontamination pass, why an
 external eval set is a different regime from an SDK-native one, and what
