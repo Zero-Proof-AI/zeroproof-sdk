@@ -84,6 +84,10 @@ _base_new = (
         "vllm==0.29.0",
         "transformers==5.17.0",
         "trl==1.13.0",
+        # Qwen3.5's gated delta net: without these transformers falls back to the
+        # reference kernels, which took 138 GB for one micro-batch of 2 on an H200.
+        "flash-linear-attention",
+        "causal-conv1d",
         "peft==0.21.0",
         "datasets>=3.6.0",
         "accelerate>=1.8.1",
