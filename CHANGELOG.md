@@ -5,6 +5,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.85 (2026-09-19)
+
 - `scored.compare_judges(judges=)` (and on `SimulationData`): several
   judges, the same rows, one table. `judges` maps a name to a spec string
   (`"typesafe:jev-latest"`, `"anthropic:claude-haiku-4-5"`), a backend
