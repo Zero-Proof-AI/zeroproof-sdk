@@ -436,3 +436,15 @@ wai.profile(row["datasetId"])  # profiled before you train on it
 ```
 
 Every push is one commit tagged `zp-<id>`, so `load_dataset(repo, split, revision="zp-ds_...")` pins the exact push; the repo's `whileai.json` maps each split to its While dataset with history. Worked example: [`recipes/05-export/hugging-face`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/05-export/hugging-face).
+
+## Rows without OpenTelemetry
+
+A loop that calls a model `k` times a prompt and scores it has rows, not
+spans. `whileai.send_runs(rows, agent="refunds")` writes the OTLP envelope
+for you: each row is `{scenario_id, prompt, final_text, reward}`, repeats of
+one prompt group by `scenario_id` (or by the prompt text when there is none),
+and `reward` is judged against `pass_at` (1.0 by default). A row without a
+reward stays ungraded. It is the inverse of `rows_from_otel`, so an agent
+that emits no OpenTelemetry still lands on the traces page and `wai.cuts()`
+can answer what is worth training on. `send_traces` remains the call for
+OTLP bytes you already have.
