@@ -649,6 +649,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 ## 0.70 (2026-09-18)
 
 - README: the wordmark links to withwhile.com, matching the repo homepage.
+- `whileai.send_runs(rows, agent=...)`: the rows your eval loop already has,
+  sent as traces. The inverse of `rows_from_otel` — you hand over
+  `{scenario_id, prompt, final_text, reward}` and the OTLP envelope is written
+  for you, so an agent that emits no OpenTelemetry still lands on the traces
+  page and `wai.cuts()` can answer what is worth training on. Repeats of one
+  prompt group by `scenario_id`, or by the prompt text when there is none;
+  `reward` is judged against `pass_at` (1.0 by default) and a row without one
+  stays ungraded.
 
 ## 0.69 (2026-09-18)
 

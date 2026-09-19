@@ -74,6 +74,7 @@ _LAZY: dict[str, tuple[str, str | None]] = {
     "resolve_api_key": ("whileai.auth", "resolve_api_key"),
     "LoginError": ("whileai.auth", "LoginError"),
     "send_traces": ("whileai.ingest", "send_traces"),
+    "send_runs": ("whileai.ingest", "send_runs"),
     "ingest_traces": ("whileai.ingest", "ingest_traces"),
     "list_traces": ("whileai.ingest", "list_traces"),
     "otel_env": ("whileai.ingest", "otel_env"),
