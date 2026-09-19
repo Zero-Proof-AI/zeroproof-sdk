@@ -5,6 +5,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.88 (2026-09-19)
+
 - `select()` drops a row whose reply quotes its own privileged context
   (the reference answer, the principle, the hidden world state) before any
   other gate, in both modes, and the printed report says
