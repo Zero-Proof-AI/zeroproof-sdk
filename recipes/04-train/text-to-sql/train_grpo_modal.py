@@ -76,7 +76,9 @@ image_vllm = _with_files(_vllm_base)
 # 0.19 monkeypatch below is skipped there.
 _base_new = (
     # vLLM >= 0.26 compiles kernels at start and needs nvcc: CUDA devel base.
-    modal.Image.from_registry("nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.12")
+    # CUDA 13 to match the torch that vLLM 0.29 pins; causal-conv1d compiles
+    # against it and refuses a 12.x toolkit.
+    modal.Image.from_registry("nvidia/cuda:13.0.3-devel-ubuntu22.04", add_python="3.12")
     # apt on the ubuntu base stops at tzdata's "Geographic area:" prompt without this
     .env({"DEBIAN_FRONTEND": "noninteractive", "TZ": "UTC"})
     .apt_install("postgresql", "postgresql-contrib")
