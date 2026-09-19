@@ -240,6 +240,16 @@ def main() -> int:
             f"  agent errors {data.search['agent_errors']}; first: {data.search.get('first_agent_error')}",
             flush=True,
         )
+    # why a run took longer than rows / throughput: re-rolls and lost rows
+    for key in ("lost", "rerolled", "cap_lifted", "degraded"):
+        val = data.search.get(key) if isinstance(data.search, dict) else None
+        if val is None:
+            val = getattr(data, key, None)
+        if val:
+            print(f"  {key}: {val}", flush=True)
+    if getattr(data, "warnings", None):
+        for w in list(data.warnings)[:3]:
+            print(f"  warning: {str(w)[:200]}", flush=True)
     return 0
 
 
