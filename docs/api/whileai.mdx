@@ -1384,6 +1384,12 @@ agree on the same rows. Only binary `reward` (or `qwen_reward`)
 rows count; partial and unjudged rows are skipped, the same rule
 `group_signal` uses.
 
+The intervals resample tasks, never rows (rlhf-book ch. 16), so they
+need at least `MIN_CI_TASKS` (3) tasks. Under that, `ci95` is
+`None` and the `note` says why and what to change. Ten rows that
+all carry one `task_id` are one task, not ten, and get no interval;
+when they are ten separate items, give each its own `task_id`.
+
 * `rows`: graded rows, or the `SimulationData` holding them.
 * `k`: the draw size for the k-way numbers. It defaults to the
   smallest group of two or more repeats, so every such group

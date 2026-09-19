@@ -380,7 +380,7 @@ it in places.
 | `pass_pow_k` | `pass^k (pass_pow_k)` | all k repeats pass. Not `pass_hat_k` |
 | `pass_at_k` | `pass@k` | at least one of k passes |
 | `headroom` | `headroom` | `pass_at_k - pass_at_1`, a property |
-| `ci95` | `[lo..hi]` | task-bootstrap interval on pass@1 |
+| `ci95` | `[lo..hi]` | task-bootstrap interval on pass@1. `None` under three tasks, and `note` then says so and names the fix |
 | `pass_pow_k_ci95`, `pass_at_k_ci95` | `[lo..hi]` | the same for the k-way numbers |
 | `k`, `n_groups`, `n_rows` | `(N groups, k=4)` | draw size, tasks, graded rows |
 | `n_groups_at_k`, `n_groups_imputed` | not printed | tasks the k-way numbers used |

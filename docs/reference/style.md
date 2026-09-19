@@ -107,6 +107,15 @@ object's job. No public call returns a `(rows, report)` tuple or a bare
 dict the user has to know the keys of. *(PassAt already prints
 `pass@1 0.67 [0.55..0.78]`; do that everywhere.)*
 
+A number the call could not compute says **why, and the fix, next to the
+number it is missing from**. `None` alone is a silence the reader fills in
+with confidence: a mean printed with no interval and no reason reads as a
+result, which is the one thing the constitution says it is not (belief 1,
+"a mean alone is not a result"). This is rule 10 for a value rather than an
+exception, and it is the same sentence: what happened, and the one call or
+field that changes it. Every report already has the place to put it
+(`note`, `notes`, `warning`); the rule is that it is filled.
+
 A report that was a dict first becomes a `whileai.report.Report`, which
 *is* a dict: every key, `.get`, `json.dumps` and `==` against a plain dict
 keep working, and `__str__` is the block the `format_*` twin writes. That
