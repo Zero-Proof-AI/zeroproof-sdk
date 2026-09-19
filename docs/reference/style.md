@@ -1,0 +1,169 @@
+# Style: how the language reads
+
+`whileai` is a scientific SDK. The code a user writes with it should read
+the way PyTorch and DSPy read: a few nouns, a few verbs, objects that carry
+their configuration, and one line per idea. This page is the coding
+standard for every public name in the package. New code follows it. Old
+code is brought under it one PR at a time, and the ratchet in
+`tests/api/test_style_ratchet.py` refuses any PR that moves the other way.
+
+The two models we copy:
+
+- **PyTorch.** One universal noun (the tensor), and every op returns one.
+  Stateful things are objects: `nn.Module` holds config in `__init__` and
+  does its one job in `forward`; `optim.SGD(params, lr=)` then `.step()`.
+  Namespaces are few and orthogonal: `torch`, `torch.nn`, `torch.optim`.
+  Usability over cleverness, Python first, explicit over implicit
+  ([PyTorch design philosophy](https://pytorch.org/docs/stable/community/design.html)).
+- **DSPy.** Fifteen names at `dspy.*`. `dspy.configure(lm=)` once, then
+  modules: `dspy.Predict(signature)`, `dspy.Evaluate(devset=, metric=)`,
+  `optimizer.compile(program, trainset=)`. Behaviour is declared
+  (`"question -> answer"`), not toggled with flags.
+
+## The target front page
+
+This is what the first twelve lines of the README should be. It is the bar
+every public call is measured against.
+
+```python
+import whileai as wai
+
+wai.configure(agent="openai:gpt-4.1-mini", judge="anthropic:claude-haiku-4-5")
+
+data = wai.simulate(tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=8)
+scored = data.grade(wai.verify.MathEqual())  # any judge object or callable
+print(scored.pass_at())  # pass@1 0.67 [0.55..0.78] ...
+
+trust = wai.judge_trust(scored, gold=LABELS)  # kappa vs people, length bias
+rows = scored.select(mode="rl")  # 20..80% band, drop unanimous groups
+rows.export("trl")  # or rows.push("my-agent-rl-v1")
+```
+
+Today the same program is `import whileai.simulations as wai`, a
+`(rows, report)` tuple out of `optimize`, and `format_*` twins to print
+anything. The rules below are the delta.
+
+## Rules
+
+Each rule names the PyTorch or DSPy habit it copies, then what it means
+here. "Public" means any name in an `__all__` or documented under
+`docs/api/`.
+
+**1. One import, one prefix.** `import whileai as wai`. The top level
+holds the loop verbs (`simulate`, `grade`, `judge_trust`, `select`,
+`train`, `serve`), the nouns they pass around (`Rows`, `Report`, `Judge`,
+`Verifier`), `configure`, and the sub-namespaces `wai.verify`, `wai.data`,
+`wai.platform`. Under thirty names. Everything else lives one dot down,
+grouped by stage, never by implementation file. `whileai.simulations` is
+the legacy path and gains no new names. *(torch / torch.nn / torch.optim;
+dspy.\* is fifteen names.)*
+
+**2. Objects carry configuration; calls carry data.** Anything a user sets
+up once and applies many times is a class: judges, verifiers, selectors,
+trainers, exporters. The constructor takes the configuration; one verb
+method, or `__call__`, takes the rows. `Verifier` already does this. A
+function is for a pure transform over rows with no reusable setup.
+*(nn.Module.\_\_init\_\_ then forward; dspy.Evaluate(devset=, metric=)(program).)*
+
+```python
+# no
+scored = grade(rows, model="...", rubric=r, temperature=0, field="answer", n=3, ...)
+# yes
+judge  = wai.Judge(model="...", rubric=r, temperature=0)
+scored = data.grade(judge)
+```
+
+**3. Eight parameters.** A public function, method or constructor takes
+at most eight, keyword-only past the first. If it needs more, it is two
+things: split the object, or accept a typed options object. `simulate`
+takes forty-three today; that is the ratchet's starting line, not a
+licence. *(optim.AdamW has eight; dspy.Predict has three.)*
+
+**4. One noun flows through every stage.** `Rows` (today `SimulationData`
+and `ScoredData`) is the tensor. Every stage takes it and returns it, or
+returns a `Report`. What you do to rows is a method on rows:
+`data.grade()`, `scored.select()`, `rows.export()`, `rows.push()`,
+`rows.decontaminate(eval_set)`. A stage that only works on rows is not a
+free function with rows as the first argument. `attach_*` and `stamp_*`
+mutate rows in place, so they become methods and stop being free
+functions. *(every torch op returns a tensor; x.mean(), x.to().)*
+
+**5. Results are objects that print themselves.** A measurement returns a
+dataclass with `__str__` for the terminal and `_repr_html_` for a
+notebook. There is no `format_x` twin for a `x_report`; printing is the
+object's job. No public call returns a `(rows, report)` tuple or a bare
+dict the user has to know the keys of. *(PassAt already prints
+`pass@1 0.67 [0.55..0.78]`; do that everywhere.)*
+
+**6. Public names are the verb a scientist says.** `simulate`, `grade`,
+`select`, `compare`, `train`, `serve`, `push`. Implementation words are
+private: `run_judge`, `normalize_judge_result`, `resolve_topology`,
+`stamp_stage`, `build_*`, `load_*` get a leading underscore or move under
+a namespace the user never imports from. A name that needs a suffix to
+say what it returns (`*_rows`, `*_of`) is two names doing one job.
+
+**7. Declare behaviour; do not toggle it.** A mode is one argument with a
+small set of values (`mode="rl"`), or an object. It is never three booleans
+that interact (`grade=`, `llm_grade=`, `simulator=False`). If two flags
+have to be read together to know what happens, replace them with one
+value. *(dspy signatures: `"question -> answer"`.)*
+
+**8. Settings once, override per call.** `wai.configure(agent=, judge=,
+api_key=)` sets the session. A `with wai.context(judge=...)` block scopes
+an override. A kwarg on the call wins over both. No public call reads an
+environment variable the user did not name in the docs. *(dspy.configure
+and dspy.context.)*
+
+**9. Every default is named, sourced and tunable from the call.** The
+existing rule, kept: a number lives in `defaults.py` with a `# NAME =
+value: why (source)` comment, and the call that uses it exposes it as a
+kwarg. `scripts/check_no_hardcoding.py` enforces the first half; the
+ratchet enforces the second on new calls. *(every torch.optim default is in
+the signature and the docstring.)*
+
+**10. Errors and warnings name the fix.** A `ValueError` says the kwarg,
+the bound and the value. A warning says the one call that changes the
+outcome. No warning is emitted twice for the same cause in one run.
+
+**11. Typed, importable, cheap.** Every public signature is fully typed
+and `py.typed` ships. `import whileai` takes under 200 ms, makes no
+network call, and pulls in nothing beyond `requests` and `pydantic`; numpy
+and torch are imported inside the functions that need them.
+
+**12. Docstrings teach then prove.** Line one says what the call computes.
+Then the parameters in prose, the return type, and a `Reference` line with
+the numbered source from the README. A method with no source says
+"convention, untested". The example in the docstring runs offline.
+
+## What the ratchet checks
+
+`tests/api/test_style_ratchet.py` pins today's counts and fails when any
+grows:
+
+| Count | Rule | Today |
+|---|---|---|
+| names in `whileai.simulations.__all__` | 1 | 212 |
+| public calls or constructors with more than 8 parameters (record dataclasses exempt) | 3 | 27 |
+| public names starting `format_` | 5 | 13 |
+| public names starting `attach_` or `stamp_` | 4 | 6 |
+| public names starting `build_`, `load_`, `run_` or ending `_of`, `_rows` | 6 | 17 |
+
+Lower a number in the test when you retire a name. Never raise one. A PR
+that has to raise one says why in the body and gets a second reviewer.
+
+## Migration
+
+The path from today's surface to the front page above, in the order that
+pays off first:
+
+1. `whileai/__init__.py` re-exports the loop verbs and nouns; README and
+   docs switch to `import whileai as wai`. Nothing is removed.
+2. `optimize` returns a `Selection` object with `.rows` and `__str__`;
+   `SimulationData.select()` wraps it. `format_*` functions become
+   `__str__` on their report and are deprecated with a one-release warning.
+3. `Judge(model=, rubric=, ...)` absorbs the sixteen kwargs of `grade`.
+4. `configure()` and `context()` land; per-call `agent=`/`judge=` keep
+   working.
+5. `simulate` keeps its signature for one release behind a `Simulation`
+   object that holds the forty kwargs in named groups (`world=`,
+   `sampling=`, `budget=`).

@@ -104,12 +104,14 @@ from ..generate.generator import (
     write_scene_brief,
 )
 from ..generate.scenarios import (
+    RULE_CAP,
     SEARCH_ARMS,
     complete_yields,
     intent_for_tool,
     keep_fault_plan,
     reallocate_search_arms,
     retarget_regions,
+    rule_axis,
 )
 from ..ingest.traces import (
     behavior_state,
@@ -423,6 +425,7 @@ class Run:
         self._start_scene_thread()
         self._build_runner()
         self._build_generator()
+        self._note_rule_axis_cap()
         self._init_loop_state()
         self._seed_pool()
         if c.out_path is not None:
@@ -836,6 +839,28 @@ class Run:
             self.user_model = (
                 parse_backend_spec(c.user_model)[1] if c.user_model else self.agent_model
             )
+
+    def _note_rule_axis_cap(self) -> None:
+        """Say, once per run, when the policy has more clauses than the
+        grid's rule axis holds: the rows cover the first ``RULE_CAP``
+        clauses and none of the rest, and nothing else in the run says so
+        (#391). A caller who set ``dimensions={"rule": [...]}`` chose the
+        axis, so the note is theirs to skip."""
+        dims = self.c.dimensions
+        if isinstance(dims, Mapping) and dims.get("rule"):
+            return
+        rules, total = rule_axis(self.policy, cap=RULE_CAP)
+        if total <= len(rules):
+            return
+        note = (
+            f"The policy has {total} clauses and the grid's rule axis holds {RULE_CAP} "
+            f"(RULE_AXIS_CAP_GRID; ZP_RULE_CAP overrides), so the rows cover the first "
+            f"{RULE_CAP} clauses in document order and none of the other {total - len(rules)}. "
+            "Pass dimensions={'rule': [...]} with the clauses that matter, or split the "
+            "policy and run each part."
+        )
+        self.data.warnings.append(note)
+        log.warning(note)
 
     def _build_generator(self) -> None:
         c = self.c

@@ -349,6 +349,25 @@ SAMPLING_TEMPERATURE_MAX = 2.0
 LOCAL_MODEL_TEMPERATURE = 0.8
 
 # ---------------------------------------------------------------------
+# generate/: the rule axis (scenarios.py; read by score/preflight.py)
+# ---------------------------------------------------------------------
+
+# RULE_AXIS_CAP_GRID = 16: policy clauses that become cells of the
+# generation grid's rule axis. The pairwise covering array grows with its
+# largest axis, so the grid stays bounded; the environment variable
+# ZP_RULE_CAP overrides it for one process. Clauses past the cap are
+# dropped in document order and the run says how many (#391).
+# (convention, untested)
+RULE_AXIS_CAP_GRID = 16
+# RULE_AXIS_CAP_REPORT = None: ``coverage_gap`` and ``preflight`` report
+# over a suite that already exists, so there is no grid to bound and every
+# clause is on the axis. A 68 KB production prompt had about 160
+# imperative clauses; the first 16 were banner text ("Read it.") and the
+# report said "14 of 16 covered" (#391). ``rule_cap=`` on either call
+# sets a number.
+RULE_AXIS_CAP_REPORT = None
+
+# ---------------------------------------------------------------------
 # generate/: context budgets (agents.py, generator.py)
 # ---------------------------------------------------------------------
 
@@ -519,6 +538,19 @@ LENGTH_GAP_FLAG = 0.15
 # 0.992 on MT-Bench (arXiv:2606.19544), so a tenth of verdicts moving is
 # far outside the measured range. Convention on the exact number.
 FLIP_FLAG = 0.10
+# MAX_SKIPPED_SHARE = 0.10: share of a judge_trust gold sample the judge may
+# leave out of the agreement count (a reward that is not exactly 0 or 1,
+# so ``judge_agreement`` skips the row) before ``ok`` is false. The rows
+# that survive a skip are not a random half: a Rubric of principles
+# scores the mean of its criteria, so the skipped rows are the ones the
+# judge was unsure about and the kept rows are the ones most likely to
+# agree with anyone, which biases agreement upward by construction (#345:
+# 40 of 80 labeled rows skipped, PASS at 100%). Held-out judge accuracy
+# is measured over the whole labeled set or not at all
+# (rlhfbook.com/c/07-reward-models.html, "Suggested Experiments"); one in
+# ten is the same tolerance FLIP_FLAG gives a re-judge. Convention on the
+# exact number; ``judge_trust(max_skipped_share=)`` moves it.
+MAX_SKIPPED_SHARE = 0.10
 # POSITION_FLIP_FLAG = 0.2: share of pairs a pairwise judge decides
 # differently when A and B are swapped before its position bias is a
 # warning. Zheng et al. (arXiv:2306.05685, Table 2) measured 65%
@@ -1520,6 +1552,7 @@ __all__ = [
     "MAX_COMPLETIONS_PER_REQUEST",
     "MAX_GOLD_ASK",
     "MAX_SAMPLES_PER_CALL",
+    "MAX_SKIPPED_SHARE",
     "MESSAGE_EXAMPLES",
     "MIN_AGREEMENT",
     "MIN_CI_TASKS",
@@ -1574,6 +1607,8 @@ __all__ = [
     "RL_ROLLOUTS_PER_ASK",
     "RL_ROLLOUTS_PER_PROMPT",
     "ROLLOUTS_PER_TASK",
+    "RULE_AXIS_CAP_GRID",
+    "RULE_AXIS_CAP_REPORT",
     "SAMPLING_TEMPERATURE_MAX",
     "SATURATION_CAP",
     "SCENARIO_ID_CHARS",
