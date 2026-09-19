@@ -10,6 +10,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   Jev, the hosted judge, Claude through `anthropic:` or Bedrock, and the
   policy judging itself; `python run.py report` reprints the published run
   offline and the smoke path runs three toy judges with no key.
+- Paper recipe `recipes/papers/zero-rl-format-reward`: SimpleRL-Zoo
+  (2503.18892) on Qwen3.5-4B-Base, GRPO + vLLM colocated on one H100.
+  Reward the answer instead of the `\boxed{}` format: pass@1 0.63 -> 0.72
+  (+0.094 [+0.052, +0.139], moved) on 160 MATH-500 tasks, the strict reward
+  itself down on the recipe arm (proxy row). Each arm's rows cache to
+  `.cache/` and `--reuse` rebuilds the delta without a GPU.
 
 ## 0.86 (2026-09-19)
 
