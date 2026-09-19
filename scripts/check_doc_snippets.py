@@ -20,7 +20,9 @@ are compared against nothing: a page quotes the output of its own code, and a
 library warning is not that. The run still names every block that warned, so a
 warning arriving from a release cannot pass unseen. The report lines the
 package itself prints (`warning: ...` inside a selection report) are stdout and
-stay checked.
+stay checked. A block written as a session (`>>> call`, then what it printed or
+raised) is checked line by line the same way, with an exception rendered as
+the page shows it (`ValueError: message`) and whitespace normalised.
 
 A guide is allowed to write `agent`, `TOOLS` or `POLICY` without defining them:
 that is the reader's part, and spelling it out in every block would bury the
@@ -293,6 +295,30 @@ def watch():
 
 threading.Thread(target=watch, daemon=True).start()
 
+
+def run_session(b, ns, rec):
+    # A block written as a session (`>>> call` then what it printed or raised)
+    # is checked as one: each line runs in the page's namespace, an exception
+    # is rendered the way the page shows it (`ValueError: message`, no
+    # traceback header), and whitespace is normalised because the page wraps
+    # a long message at the margin and the interpreter does not.
+    import doctest
+    got, want = [], []
+    for ex in doctest.DocTestParser().get_examples(b["code"]):
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                exec(compile(ex.source, "<%s:%s>" % (b["page"], b["line"]), "single"), ns)
+        except Exception as e:  # what the page shows under the call
+            out.write("%s: %s\n" % (type(e).__name__, e))
+        got.append(out.getvalue())
+        want.append(ex.want)
+    if " ".join("".join(got).split()) != " ".join("".join(want).split()):
+        rec["status"] = "mismatch"
+        rec["detail"] = "page shows:\n    %s\n  session printed:\n    %s" % (
+            "".join(want).strip() or "(nothing)", "".join(got).strip() or "(nothing)")
+
+
 for b in blocks:
     buf, errbuf = io.StringIO(), io.StringIO()
     rec = {"line": b["line"], "status": "ok", "detail": "", "stdout": "", "stderr": ""}
@@ -303,7 +329,10 @@ for b in blocks:
         # rather than dropped, so the run can still name every block that
         # warned the reader.
         with redirect_stdout(buf), redirect_stderr(errbuf):
-            exec(compile(b["code"], "<%s:%s>" % (b["page"], b["line"]), "exec"), ns)
+            if b["code"].lstrip().startswith(">>> "):
+                run_session(b, ns, rec)
+            else:
+                exec(compile(b["code"], "<%s:%s>" % (b["page"], b["line"]), "exec"), ns)
     except BaseException:
         rec["status"] = "failed"
         rec["detail"] = traceback.format_exc(limit=6).strip()[-1200:]
@@ -384,6 +413,11 @@ def run_page(page: Path, blocks: list[Block], python: str, verbose: bool) -> lis
                         else "did not run: the page's process ended without reporting"
                     )
                     results.append(Result(b, "failed", why))
+                    continue
+                if rec["status"] == "mismatch":
+                    results.append(
+                        Result(b, "mismatch", rec["detail"], rec["stdout"], rec.get("stderr", ""))
+                    )
                     continue
                 if rec["status"] == "failed":
                     if NEEDS_KEY.search(rec["detail"]):

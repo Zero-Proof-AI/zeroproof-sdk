@@ -40,7 +40,7 @@ CI runs the suite on Python 3.10 through 3.13, every recipe's `smoke.sh`, ruff, 
 
 ## The code in the docs runs
 
-`uv run python scripts/check_doc_snippets.py` executes every ```` ```python ```` block under `docs/` against the installed package and CI runs it on every PR (the job `the code in the docs runs`). A page is one program: its blocks run in order, in one namespace, in a scratch directory, with no keys set and anything credential-shaped stripped from the environment. Where a page quotes a block's output in the fence right after it, the quoted text has to match what the block printed. Each block gets 180 seconds; a failure names the page and the line of the opening fence.
+`uv run python scripts/check_doc_snippets.py` executes every ```` ```python ```` block under `docs/` against the installed package and CI runs it on every PR (the job `the code in the docs runs`). A page is one program: its blocks run in order, in one namespace, in a scratch directory, with no keys set and anything credential-shaped stripped from the environment. Where a page quotes a block's output in the fence right after it, the quoted text has to match what the block printed; a block written as a session (`>>> call` followed by what it printed or raised) is checked line by line, with an exception compared as `ValueError: message`. Each block gets 180 seconds; a failure names the page and the line of the opening fence.
 
 Three things are not run:
 
