@@ -5,6 +5,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Docs design: `docs/reference/design.md` is the standard for how the docs
+  look (five principles tied to the constitution, the Tutorial, Concept,
+  Reference and API page templates, how a measurement and a signature are
+  presented, what never appears), with an appendix of prose issues and a
+  review of withwhile.com against the same rules. The theme follows it:
+  ink dark background, Inter 600 headings, JetBrains Mono code with
+  tabular figures (`docs/style.css`), `vitesse-dark` code blocks in both
+  modes to match the site, breadcrumbs, last-modified timestamps, a footer
+  with the library, reference and project links, and agent instructions on
+  every page served as markdown. The API generator now prefixes classes
+  with `class`, links each name to the file that defines it, marks names
+  with no docstring, stops cutting first sentences at "ch.", and no longer
+  repeats the page description in the body. The index opens with the
+  offline program and the line it prints; the style page gains frontmatter.
+
 ## 0.83 (2026-09-19)
 
 - Docs: the site now says what `CONSTITUTION.md` says. The Mintlify
