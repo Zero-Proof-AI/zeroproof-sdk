@@ -1,0 +1,301 @@
+"""Does decontaminate() actually protect a held-out set?
+
+Ground truth is human-labelled, not written by me:
+  QQP  label=1 -> a genuine paraphrase leak, across a wide range of lexical overlap
+  PAWS label=0 -> high word overlap, DIFFERENT meaning: a row that must NOT be dropped
+  PAWS label=1 -> high word overlap, same meaning: a leak that should be dropped
+
+A contaminated train row carries a task id that is NOT the holdout's, which is the
+case whenever rows arrive from another team, a vendor or the Hub: the same_task rule
+has nothing to match on and the text rules are all there is.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import re
+from collections import defaultdict
+
+import whileai as wai
+
+WORD = re.compile(r"[a-z0-9]+")
+
+
+def toks(s: str) -> list[str]:
+    return WORD.findall(s.lower())
+
+
+def jaccard(a: str, b: str) -> float:
+    sa, sb = set(toks(a)), set(toks(b))
+    return len(sa & sb) / len(sa | sb) if (sa | sb) else 0.0
+
+
+def build(n_pairs: int, seed: int = 0):
+    from datasets import load_dataset
+
+    rng = random.Random(seed)
+
+    qqp = load_dataset("nyu-mll/glue", "qqp", split="train[:60000]")
+    paws = load_dataset(
+        "google-research-datasets/paws", "labeled_final", split="train[:30000]"
+    )
+
+    def clean(s):
+        return " ".join((s or "").split())
+
+    qdup = [
+        (clean(r["question1"]), clean(r["question2"]))
+        for r in qqp
+        if r["label"] == 1 and len(toks(r["question1"])) >= 6
+    ]
+    qnon = [
+        (clean(r["question1"]), clean(r["question2"]))
+        for r in qqp
+        if r["label"] == 0 and len(toks(r["question1"])) >= 6
+    ]
+    pdup = [
+        (clean(r["sentence1"]), clean(r["sentence2"])) for r in paws if r["label"] == 1
+    ]
+    pnon = [
+        (clean(r["sentence1"]), clean(r["sentence2"])) for r in paws if r["label"] == 0
+    ]
+
+    rng.shuffle(qdup)
+    rng.shuffle(qnon)
+    rng.shuffle(pdup)
+    rng.shuffle(pnon)
+    n_ctl = max(40, n_pairs // 4)
+    # reserve control text from a slice that never enters the main holdout pool
+    reserve = [q for q, _ in qnon[n_pairs : n_pairs + 3 * n_ctl]]
+    qdup, qnon = qdup[:n_pairs], qnon[:n_pairs]
+    pdup, pnon = pdup[: n_pairs // 2], pnon[: n_pairs // 2]
+
+    holdout, train = [], []
+    tid = 0
+
+    def add(h_text, t_text, kind, leak):
+        nonlocal tid
+        holdout.append({"prompt": h_text, "task_id": f"hold-{tid}", "answer": ""})
+        train.append(
+            {
+                "prompt": t_text,
+                "task_id": f"train-{tid}",  # deliberately a different namespace
+                "kind": kind,
+                "leak": leak,
+                "jac": jaccard(h_text, t_text),
+                "pair_of": f"hold-{tid}",
+            }
+        )
+        tid += 1
+
+    # true leaks: the holdout question, re-asked in other words
+    for a, b in qdup:
+        add(a, b, "qqp_dup", True)
+    for a, b in pdup:
+        add(a, b, "paws_dup", True)
+    # true negatives: a DIFFERENT question that happens to share words
+    for a, b in qnon:
+        add(a, b, "qqp_nondup", False)
+    for a, b in pnon:
+        add(a, b, "paws_nondup", False)
+
+    # --- controls, so a reviewer can tell a real miss from a broken harness.
+    # Control text comes from `reserve`, which is disjoint from every pair
+    # above, so the only way a control row matches the holdout is the one
+    # the control is testing.
+    a_ctl, b_ctl, c_ctl = reserve[:n_ctl], reserve[n_ctl : 2 * n_ctl], reserve[2 * n_ctl :]
+
+    # positive control A: a byte-identical copy MUST be caught (recall 1.0)
+    for q in a_ctl:
+        add(q, q, "ctl_identical", True)
+    # positive control B: case + whitespace only; the docstring says exact
+    # matches after normalization, so this must also be caught
+    for q in b_ctl:
+        add(q, "  " + q.upper() + " ", "ctl_case", True)
+    # negative control: holdout and train are unrelated questions -> FP ~ 0.
+    # The two halves are disjoint, so no control train text is ever a holdout
+    # text; anything dropped here is the rule firing on nothing.
+    half = len(c_ctl) // 2
+    for q, u in zip(c_ctl[:half], c_ctl[half:]):
+        add(q, u, "ctl_unrelated", False)
+
+    return holdout, train
+
+
+def dropped_ids(train, kept):
+    kept_ids = {r["task_id"] for r in kept}
+    return {r["task_id"] for r in train if r["task_id"] not in kept_ids}
+
+
+def rate_with_interval(flags: list[bool]):
+    """Proportion + 95% interval from the SDK's own pass_at, cross-checked
+    against an independent bootstrap. 'caught' is the reward."""
+    if not flags:
+        return {"rate": None, "lo": None, "hi": None, "n": 0, "via": "empty"}
+    rows = [
+        {"task_key": f"t{i}", "task_id": f"t{i}", "reward": 1.0 if f else 0.0}
+        for i, f in enumerate(flags)
+    ]
+    p = wai.pass_at(rows, k=1)
+    lo, hi = p.ci95
+    b = _boot(flags)
+    return {
+        "rate": p.pass_at_1,
+        "lo": lo,
+        "hi": hi,
+        "n": len(flags),
+        "via": "wai.pass_at",
+        "boot_lo": b["lo"],
+        "boot_hi": b["hi"],
+    }
+
+
+def _boot(flags, n_boot=4000, seed=0, note=""):
+    """Independent bootstrap cross-check of the SDK's ci95.
+
+    Resampling a Bernoulli sample is a Binomial draw, so this is one
+    vectorised draw rather than n_boot passes over the flags.
+    """
+    import numpy as np
+
+    n = len(flags)
+    if n == 0:
+        return {"rate": None, "lo": None, "hi": None, "n": 0, "via": "boot", "note": note}
+    point = sum(flags) / n
+    draws = np.random.default_rng(seed).binomial(n, point, size=n_boot) / n
+    lo, hi = np.quantile(draws, [0.025, 0.975])
+    return {
+        "rate": point,
+        "lo": float(lo),
+        "hi": float(hi),
+        "n": n,
+        "via": "boot",
+        "note": note,
+    }
+
+
+BUCKETS = [(0.0, 0.3), (0.3, 0.5), (0.5, 0.7), (0.7, 0.85), (0.85, 1.01)]
+
+
+MAIN_KINDS = ("qqp_dup", "paws_dup", "qqp_nondup", "paws_nondup")
+
+
+def summarize(train, dropped, label):
+    out = {"arm": label, "overall": {}, "by_bucket": {}, "by_kind": {}, "controls": {}}
+    # headline numbers use the human-labelled pairs only; controls are
+    # harness checks and would flatter the recall if mixed in
+    main = [r for r in train if r["kind"] in MAIN_KINDS]
+    leaks = [r for r in main if r["leak"]]
+    cleans = [r for r in main if not r["leak"]]
+    out["overall"]["recall"] = rate_with_interval(
+        [r["task_id"] in dropped for r in leaks]
+    )
+    out["overall"]["false_positive"] = rate_with_interval(
+        [r["task_id"] in dropped for r in cleans]
+    )
+    for lo, hi in BUCKETS:
+        sel = [r for r in leaks if lo <= r["jac"] < hi]
+        selc = [r for r in cleans if lo <= r["jac"] < hi]
+        key = f"{lo:.2f}-{hi:.2f}"
+        out["by_bucket"][key] = {
+            "recall": rate_with_interval([r["task_id"] in dropped for r in sel]),
+            "false_positive": rate_with_interval(
+                [r["task_id"] in dropped for r in selc]
+            ),
+        }
+    by = defaultdict(list)
+    for r in train:
+        by[r["kind"]].append(r["task_id"] in dropped)
+    for k, v in sorted(by.items()):
+        tgt = out["controls"] if k.startswith("ctl_") else out["by_kind"]
+        tgt[k] = rate_with_interval(v)
+    return out
+
+
+def run_all(pairs: int, seed: int, semantic: bool, verbose: bool = True) -> dict:
+    holdout, train = build(pairs, seed)
+    if verbose:
+        print(
+            f"holdout={len(holdout)} train={len(train)} "
+            f"leaks={sum(r['leak'] for r in train)} "
+            f"clean={sum(not r['leak'] for r in train)}"
+        )
+
+    arms = {}
+
+    def run(label, **kw):
+        kept, rep = wai.decontaminate(train, against=[holdout], **kw)
+        d = dropped_ids(train, kept)
+        arms[label] = summarize(train, d, label)
+        arms[label]["report"] = {
+            k: v for k, v in rep.items() if isinstance(v, (int, float, str))
+        }
+        r = arms[label]["overall"]
+        c = arms[label]["controls"]
+        if not verbose:
+            return
+        print(
+            f"{label:28s} recall={r['recall']['rate']:.3f} "
+            f"[{r['recall']['lo']:.3f},{r['recall']['hi']:.3f}]  "
+            f"FP={r['false_positive']['rate']:.3f} "
+            f"[{r['false_positive']['lo']:.3f},{r['false_positive']['hi']:.3f}]"
+            f"   ctl id/case/unrel="
+            f"{c['ctl_identical']['rate']:.2f}/{c['ctl_case']['rate']:.2f}/"
+            f"{c['ctl_unrelated']['rate']:.2f}"
+        )
+
+    run("default (n=8, overlap=0.8)")
+    run("overlap=0 (any 8-gram)", overlap=0.0)
+    run("n=5, overlap=0.8", n=5)
+    run("n=5, overlap=0.0", n=5, overlap=0.0)
+    run("n=3, overlap=0.0", n=3, overlap=0.0)
+
+    if semantic:
+        from sentence_transformers import SentenceTransformer
+
+        m = SentenceTransformer("BAAI/bge-small-en-v1.5")
+        cache: dict[str, list[float]] = {}
+
+        def emb(texts):
+            texts = list(texts)
+            missing = [t for t in texts if t not in cache]
+            if missing:
+                vecs = m.encode(
+                    missing,
+                    normalize_embeddings=True,
+                    batch_size=256,
+                    show_progress_bar=False,
+                ).tolist()
+                cache.update(zip(missing, vecs))
+            return [cache[t] for t in texts]
+
+        for thr in (0.85, 0.80, 0.75, 0.70):
+            run(f"semantic bge@{thr}", embedder=emb, similarity=thr)
+
+    return {
+        "n_pairs": pairs,
+        "seed": seed,
+        "whileai": wai.__version__,
+        "n_holdout": len(holdout),
+        "n_train": len(train),
+        "arms": arms,
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pairs", type=int, default=1500)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--semantic", action="store_true")
+    ap.add_argument("--out", default="results.json")
+    a = ap.parse_args()
+    res = run_all(a.pairs, a.seed, a.semantic)
+    with open(a.out, "w") as f:
+        json.dump(res, f, indent=2)
+    print("wrote", a.out)
+
+
+if __name__ == "__main__":
+    main()
