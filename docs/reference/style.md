@@ -1,4 +1,8 @@
-# Style: how the language reads
+---
+title: "Style: how the language reads"
+sidebarTitle: "Style"
+description: "The coding standard for every public name: PyTorch and DSPy ergonomics, one import, objects carry configuration, calls carry data, reports print themselves."
+---
 
 `whileai` is a scientific SDK ([CONSTITUTION.md](https://github.com/whilehq/whileai-sdk/blob/main/CONSTITUTION.md)
 says what that means). The code a user writes with it should read

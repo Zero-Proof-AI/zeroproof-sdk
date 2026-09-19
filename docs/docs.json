@@ -17,13 +17,49 @@
   "appearance": {
     "default": "light"
   },
+  "background": {
+    "color": {
+      "light": "#FFFFFF",
+      "dark": "#0B1220"
+    }
+  },
   "fonts": {
     "heading": {
-      "family": "Inter"
+      "family": "Inter",
+      "weight": 600
     },
     "body": {
       "family": "Inter"
     }
+  },
+  "styling": {
+    "eyebrows": "breadcrumbs",
+    "codeblocks": {
+      "theme": "vitesse-dark"
+    }
+  },
+  "metadata": {
+    "timestamp": true
+  },
+  "search": {
+    "prompt": "Search calls, knobs and guides"
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "claude",
+      "chatgpt",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "markdown": {
+    "instructions": [
+      "Install with `pip install whileai`; import as `import whileai as wai`.",
+      "Run the offline path first (`simulator=False`, `wai.seeded_agent`, a callable judge); no key is needed for it.",
+      "Report every pass rate with its interval and n, as `scored.pass_at` prints it."
+    ]
   },
   "navbar": {
     "links": [
@@ -84,6 +120,7 @@
               "reference/overview",
               "reference/five-calls",
               "reference/style",
+              "reference/design",
               "reference/what-to-run",
               "reference/parameters",
               "reference/development"
@@ -135,7 +172,72 @@
   "footer": {
     "socials": {
       "github": "https://github.com/whilehq/whileai-sdk"
-    }
+    },
+    "links": [
+      {
+        "header": "Library",
+        "items": [
+          {
+            "label": "Quickstart",
+            "href": "https://docs.withwhile.com/get-started/quickstart"
+          },
+          {
+            "label": "Evals",
+            "href": "https://docs.withwhile.com/evals"
+          },
+          {
+            "label": "The five calls",
+            "href": "https://docs.withwhile.com/reference/five-calls"
+          },
+          {
+            "label": "Recipes",
+            "href": "https://github.com/whilehq/whileai-sdk/tree/main/recipes"
+          }
+        ]
+      },
+      {
+        "header": "Reference",
+        "items": [
+          {
+            "label": "API",
+            "href": "https://docs.withwhile.com/api/index"
+          },
+          {
+            "label": "Parameters",
+            "href": "https://docs.withwhile.com/reference/parameters"
+          },
+          {
+            "label": "Style",
+            "href": "https://docs.withwhile.com/reference/style"
+          },
+          {
+            "label": "Design",
+            "href": "https://docs.withwhile.com/reference/design"
+          }
+        ]
+      },
+      {
+        "header": "Project",
+        "items": [
+          {
+            "label": "Constitution",
+            "href": "https://github.com/whilehq/whileai-sdk/blob/main/CONSTITUTION.md"
+          },
+          {
+            "label": "Changelog",
+            "href": "https://github.com/whilehq/whileai-sdk/blob/main/CHANGELOG.md"
+          },
+          {
+            "label": "PyPI",
+            "href": "https://pypi.org/project/whileai/"
+          },
+          {
+            "label": "rlhfbook.com",
+            "href": "https://rlhfbook.com"
+          }
+        ]
+      }
+    ]
   },
   "seo": {
     "indexing": "all"

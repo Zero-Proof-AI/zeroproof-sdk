@@ -1,0 +1,35 @@
+/*
+ * Brand tokens, plus the two things docs.json cannot set: the mono font and
+ * tabular figures in tables. docs/reference/design.md says why each line is
+ * here. Element and #content-area selectors only; Mintlify's own class names
+ * are not stable.
+ */
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap");
+
+:root {
+  --wai-ink: #0b1220;
+  --wai-body: #4b5563;
+  --wai-muted: #6b7280;
+  --wai-line: #e5e7eb;
+  --wai-surface: #f4f6f9;
+  --wai-green: #5cb08a;
+  --wai-green-deep: #3f8f6b;
+  --wai-tint: #f0faf5;
+  --wai-tint-strong: #d7f0e3;
+  --wai-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Code is JetBrains Mono, ligatures off so `->` and `!=` copy as typed. */
+#content-area code,
+#content-area pre,
+#content-area kbd,
+#content-area samp {
+  font-family: var(--wai-mono);
+  font-variant-ligatures: none;
+}
+
+/* Numbers in a column line up: 0.67 [0.55..0.78] under 0.19 [0.00..0.38]. */
+#content-area table,
+#content-area code {
+  font-variant-numeric: tabular-nums;
+}
