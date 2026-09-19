@@ -117,6 +117,7 @@ each README names the version it ran against. Index in
 | [`can-the-judge-be-trusted`](community/can-the-judge-be-trusted) | a gold label a machine can compute, what `judge_agreement` and `judge_trust` measure, why a judge's errors matter by shape more than by rate | `WHILEAI_API_KEY`; `--dry-run` needs nothing | about 25 minutes of warm A10G, seconds offline |
 | [`hosted-grpo-vs-sft`](community/hosted-grpo-vs-sft) | what the hosted `sft`, `grpo` and `dpo` methods consume, hosted SFT and GRPO on the same rows against one base, pulling the adapter back into PEFT form | `WHILEAI_API_KEY`; `--dry-run` needs nothing | two hosted runs under $1, seconds offline |
 | [`how-much-contamination-survives`](community/how-much-contamination-survives) | how much human-labelled paraphrase contamination (QQP, PAWS) the lexical `decontaminate()` rule removes (about 9%) and the `embedder=` pass removes (about 90%), at what false-positive cost, with controls under every arm | `datasets` and one Hub download; `--dry-run` needs nothing | ten minutes of CPU, seconds offline |
+| [`who-protects-the-holdout`](community/who-protects-the-holdout) | which `decontaminate()` rule carries the protection on a `simulate()` holdout (`same_task`, 98 to 100%) and what is left when the eval set has no ids (18 to 30%); why `contamination_rate: 0.0` does not certify an external holdout | nothing | under a minute |
 
 ## Where the main README's pieces live
 

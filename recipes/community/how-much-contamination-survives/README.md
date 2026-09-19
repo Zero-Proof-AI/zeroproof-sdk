@@ -189,7 +189,7 @@ separate experiment. What it measures is **exposure**: after the default pass, ~
 holdout tasks that had a paraphrase in the training set still have one.
 
 It also does not say how much of a `simulate()` holdout the `same_task` rule protects
-on its own. [`who-protects-the-holdout`](https://github.com/whilehq/whileai-sdk/pull/489) measures that.
+on its own. [`who-protects-the-holdout`](../who-protects-the-holdout/) measures that.
 
 ## Next
 

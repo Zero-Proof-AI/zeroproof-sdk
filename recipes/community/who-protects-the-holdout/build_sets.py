@@ -3,11 +3,14 @@
 import json
 import random
 import re
+from pathlib import Path
 
 from datasets import load_dataset
 
 import whileai as wai
 
+OUT = Path(__file__).resolve().parent / "out"  # gitignored; inflation_modal.py reads from here
+OUT.mkdir(exist_ok=True)
 SEED = 0
 N_HOLDOUT, N_CLEAN, N_LEAK = 200, 800, 60
 random.seed(SEED)
@@ -117,7 +120,7 @@ for name, kw in [("default", {}), ("semantic", {"embedder": embed, "similarity":
     arms[name]["surviving_leak_prompts"] = sorted(
         r["leaked_from"] for r in rows if r["origin"] == "leak"
     )
-    json.dump(rows, open(f"train_{name}.json", "w"))
+    (OUT / f"train_{name}.json").write_text(json.dumps(rows))
     print(
         f"[{name}] kept={len(rows)} leaks_caught={caught}/{N_LEAK} "
         f"recall={caught / N_LEAK:.3f} clean_dropped={fp} rules={arms[name]['by_rule']}"
@@ -131,7 +134,7 @@ json.dump(
         "seed": SEED,
         "leaked_prompts": sorted(h["prompt"] for h in leak_src),
     },
-    open("sets_meta.json", "w"),
+    (OUT / "sets_meta.json").open("w"),
     indent=2,
 )
 print("\nheld-out rows carry scenario_id?", any("scenario_id" in h for h in holdout))

@@ -12,6 +12,7 @@ from pathlib import Path
 import modal
 
 HERE = Path(__file__).resolve().parent
+OUT = HERE / "out"  # written by build_sets.py; gitignored
 BASE = "Qwen/Qwen2.5-1.5B-Instruct"
 
 image = (
@@ -25,9 +26,9 @@ image = (
         "accelerate==1.8.1",
     )
     .env({"HF_HOME": "/root/.cache/huggingface", "TOKENIZERS_PARALLELISM": "false"})
-    .add_local_file(str(HERE / "train_default.json"), "/root/train_default.json")
-    .add_local_file(str(HERE / "train_semantic.json"), "/root/train_semantic.json")
-    .add_local_file(str(HERE / "sets_meta.json"), "/root/sets_meta.json")
+    .add_local_file(str(OUT / "train_default.json"), "/root/train_default.json")
+    .add_local_file(str(OUT / "train_semantic.json"), "/root/train_semantic.json")
+    .add_local_file(str(OUT / "sets_meta.json"), "/root/sets_meta.json")
 )
 app = modal.App("wai-contamination-inflation")
 hf_cache = modal.Volume.from_name("whileai-hf-cache", create_if_missing=True)
@@ -96,7 +97,7 @@ def run_all(epochs: int = 3, lr: float = 1e-4, base_repeats: int = 3):
     import torch
     from datasets import Dataset
     from peft import LoraConfig
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
     from trl import SFTConfig, SFTTrainer
 
     meta = json.load(open("/root/sets_meta.json"))
@@ -141,6 +142,10 @@ def run_all(epochs: int = 3, lr: float = 1e-4, base_repeats: int = 3):
             for r in rows
         ]
         model = fresh()
+        # TRL wraps the model in LoRA before it seeds, so the adapter init must be
+        # pinned here, right before the trainer is built, for two arms to differ
+        # only in their data.
+        set_seed(0)
         trainer = SFTTrainer(
             model=model,
             train_dataset=Dataset.from_dict({"text": texts}),
@@ -188,5 +193,6 @@ def run_all(epochs: int = 3, lr: float = 1e-4, base_repeats: int = 3):
 @app.local_entrypoint()
 def main(epochs: int = 3, lr: float = 1e-4):
     res = run_all.remote(epochs=epochs, lr=lr)
-    Path(HERE / "results_raw.json").write_text(json.dumps(res))
-    print("saved results_raw.json")
+    OUT.mkdir(exist_ok=True)
+    (OUT / "results_raw.json").write_text(json.dumps(res))
+    print(f"saved {OUT / 'results_raw.json'}")

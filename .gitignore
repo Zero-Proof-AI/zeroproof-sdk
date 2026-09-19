@@ -110,3 +110,4 @@ recipes/02-measure/compare-judges/out/
 recipes/papers/*/.cache/
 # community recipe outputs
 recipes/community/how-much-contamination-survives/out/
+recipes/community/who-protects-the-holdout/out/
