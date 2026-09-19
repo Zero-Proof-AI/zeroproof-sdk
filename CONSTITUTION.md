@@ -44,8 +44,18 @@ service for hosted training and serving. The library needs no account.
    reader can guess the next line. Rigor lives behind a default, never
    behind a flag. (`docs/reference/style.md`, the ratchet test.)
 6. **Plain words, then the mechanism, then the proof.** Every page, every
-   docstring, every README section in that order. Book vocabulary stays in
-   the docstring that cites the chapter, never in a public name.
+   docstring, every README section in that order. The first thing a reader
+   sees is the loop as five lines, one per step, each the step's name and
+   one sentence saying why the step exists in the reader's own words
+   ("Measure. One run proves nothing. Ask whether a change is real or
+   noise before you ship it or train on it."). Nothing goes in front of
+   that list: a manufactured hook ("Break it. Score it. Prove it.") and a
+   paragraph about the problem both read worse than the list, and were
+   cut the same day they shipped. Book vocabulary (interval, rollout,
+   band, gradient) stays in the docstring that cites the chapter, never in
+   a lead sentence or a public name. The step names are Simulate, Grade,
+   Measure, Select, Train. Measure is evaluation with intervals and Select
+   is data curation; they are not merged, and neither is renamed to Eval.
 7. **Mass experimentation.** A PhD or an engineer runs many experiments
    from one import, on their own compute, and every run leaves a record
    that a person can decide from.
@@ -61,7 +71,7 @@ service for hosted training and serving. The library needs no account.
 | Replicated papers | `recipes/papers/README.md`: one paper, one recipe, one command, one `post.md` |
 | Sourced defaults | `scripts/check_no_hardcoding.py` in CI; `tests/api/test_readme_defaults.py` |
 | Ergonomics | `docs/reference/style.md`; `tests/api/test_style_ratchet.py` pins the retired shapes |
-| Docs order | `docs/` on Mintlify; the docs routine's one PR a day |
+| Docs order | `docs/` on Mintlify; the docs routine's one PR a day; the five-line loop list on the website home (`components/quickstart.tsx` in whilehq/website) is the reference wording |
 | Bring your own keys | `wai.configure(agent=, judge=, api_key=)`, backend objects whose repr names the key source; the Modal and Prime Intellect researcher routines run on their own accounts twice a day |
 
 ## Who reads this
