@@ -5,6 +5,28 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Coding standard. `docs/reference/style.md` sets the ergonomics every
+  public name is held to, copied from PyTorch and DSPy: one import
+  (`import whileai as wai`), objects carry configuration and calls carry
+  data, at most eight parameters on a public call, one rows object
+  through every stage, reports that print themselves instead of
+  `format_*` twins, verbs a scientist says, settings once with per-call
+  override. The page ends with the target front-page program and the
+  migration order. `tests/api/test_style_ratchet.py` pins today's
+  counts of the retired shapes (212 flat exports, 13 `format_*`, the
+  calls over eight parameters) and fails a PR that raises any of them.
+  CLAUDE.md and CONTRIBUTING.md point at it.
+- Docs audit, three pages against 0.82. `concepts/engine.mdx` named
+  `persona` as a coverage axis and left out `stance`; the six are `tool`,
+  `rule`, `stance`, `world_state`, `tool_condition` and `history`
+  (`COVERAGE_AXES`). The same page twice said every row keeps temperature
+  and per-token logprobs, which needs `logprobs=True` on a model backend.
+  `concepts/faq.mdx` promised endpoints for Llama and Nemotron, but an
+  adapter is servable only on `SERVED_BASES` (`Qwen/Qwen3-4B`,
+  `microsoft/phi-4`), and said the SDK drafts the policy from your
+  sentence, when the sentence is the policy and `draft_tools` drafts the
+  tools. `character-training.md` was accurate; its two quoted outputs
+  re-run byte-identical and its dataset splits still measure 60/144/35.
 - The rubric judge is told which tools were called instead of being asked
   to notice which were not (#346). The judge payload carries
   `tools_called` (the tool of every step that returned a result, in
@@ -29,18 +51,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `INCONCLUSIVE: 40 of 80 labeled rows skipped (50%, over
   MAX_SKIPPED_SHARE 10%); usable n=40` in place of the verdict. Under the
   floor the count is still said next to `n`.
-
-- Docs audit, three pages against 0.82. `concepts/engine.mdx` named
-  `persona` as a coverage axis and left out `stance`; the six are `tool`,
-  `rule`, `stance`, `world_state`, `tool_condition` and `history`
-  (`COVERAGE_AXES`). The same page twice said every row keeps temperature
-  and per-token logprobs, which needs `logprobs=True` on a model backend.
-  `concepts/faq.mdx` promised endpoints for Llama and Nemotron, but an
-  adapter is servable only on `SERVED_BASES` (`Qwen/Qwen3-4B`,
-  `microsoft/phi-4`), and said the SDK drafts the policy from your
-  sentence, when the sentence is the policy and `draft_tools` drafts the
-  tools. `character-training.md` was accurate; its two quoted outputs
-  re-run byte-identical and its dataset splits still measure 60/144/35.
 
 ## 0.82 (2026-09-18)
 
