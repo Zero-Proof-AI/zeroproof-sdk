@@ -33,11 +33,77 @@ from typing import Any
 
 ROLES = ("agent", "judge", "simulator")
 
+#: The spec forms the engine reads, provider -> the shape to type. The
+#: engine's ``parse_backend_spec`` is the implementation; this is the
+#: vocabulary the front door checks a string against, so a typo is refused
+#: by the call that took it. ``tests/api/test_facade.py`` pins the two
+#: together, so a provider added there has to be added here.
+SPEC_FORMS = {
+    "openai": "openai:<model>",
+    "anthropic": "anthropic:<model>",
+    "vllm": "vllm:<model>@<url>",
+    "ollama": "ollama:<model>",
+    "typesafe": "typesafe:<model> (judge only)",
+}
 
-def spec_of(value: Any) -> Any:
+#: Per role, the words that name a route rather than a model.
+#: ``simulator="hosted"`` (or ``"default"``) is the writer default written
+#: out, which ``run.config.writer_spec_for`` reads as "the hosted writer".
+ROLE_SENTINELS = {"simulator": ("hosted", "default")}
+
+
+def spec_problem(value: str, *, kwarg: str = "") -> str | None:
+    """The one sentence that fixes ``value``, or ``None`` when the engine
+    can read it.
+
+    A model is named ``provider:model``. The two near misses are the
+    spelling DSPy and LiteLLM use, ``provider/model``
+    (``dspy.LM("openai/gpt-4o-mini")``), and the bare model name an
+    OpenAI user types. Both used to be accepted here and to fail several
+    calls later, from a call the user did not write, so this says which
+    string to type instead.
+    """
+    text = value.strip()
+    named = f"{kwarg}={value!r}" if kwarg else repr(value)
+    forms = ", ".join(SPEC_FORMS.values())
+    tail = f"pass {forms}, an http(s) URL, or a callable"
+    if not text:
+        return f"{named} names no model; {tail}, or leave it unset for the model While hosts"
+    if text.startswith(("http://", "https://")):
+        return None
+    if text.lower() in ROLE_SENTINELS.get(kwarg, ()):
+        return None
+    provider, colon, _model = text.partition(":")
+    if colon and provider in SPEC_FORMS:
+        return None
+    slashed, slash, rest = text.partition("/")
+    if slash and slashed in SPEC_FORMS and rest:
+        # ``openai`` is also a Hugging Face org (``openai/gpt-oss-120b``),
+        # so name the vllm reading too rather than assume the typo.
+        return (
+            f"{named} separates the provider from the model with a slash, the spelling DSPy "
+            f"and LiteLLM use; whileai uses a colon, so pass "
+            f"{kwarg + '=' if kwarg else ''}{f'{slashed}:{rest}'!r}"
+            f" (or 'vllm:{text}@<url>' if that is a repo id on a server you run)"
+        )
+    if colon:
+        return f"{named} names no provider whileai reaches ({provider!r} is not one); {tail}"
+    return f"{named} names no provider, so nothing says where the call goes; {tail}"
+
+
+def spec_of(value: Any, *, kwarg: str = "") -> Any:
     """The backend spec string for ``value``: a backend object's ``.spec``,
-    a string as given, a callable as given, ``None`` for "the default"."""
-    if value is None or isinstance(value, str) or callable(value):
+    a string as given, a callable as given, ``None`` for "the default".
+
+    A string is checked against ``SPEC_FORMS`` first, so a misspelled
+    model is refused by the call that took it (rule 10).
+    """
+    if isinstance(value, str):
+        problem = spec_problem(value, kwarg=kwarg)
+        if problem:
+            raise ValueError(problem)
+        return value
+    if value is None or callable(value):
         return value
     spec = getattr(value, "spec", None)
     if spec is None or isinstance(spec, str):
@@ -90,13 +156,22 @@ def current() -> Settings:
     return stack[-1] if stack else _base
 
 
+def _check(**roles: Any) -> None:
+    """Refuse every bad spec before any of them is applied, so a typo in
+    ``judge=`` does not leave ``agent=`` set."""
+    for role, value in roles.items():
+        if value is not None:
+            spec_of(value, kwarg=role)
+
+
 def _absorb(target: Settings, role: str, value: Any) -> None:
     """Record a backend (or spec string) under ``role``, and its key if it has one."""
     provider = getattr(value, "provider", None)
     key = getattr(value, "api_key", None)
+    spec = spec_of(value, kwarg=role)
     if provider and key:
         target.keys[str(provider)] = str(key)
-    setattr(target, role, spec_of(value))
+    setattr(target, role, spec)
 
 
 def configure(
@@ -115,7 +190,12 @@ def configure(
     * ``judge``: the grader; never the same model as the agent by default.
     * ``simulator``: the writer of user messages; the agent's model unless set.
     * ``api_key``: the While account key.
+
+    A spec string is checked here: ``agent="openai/gpt-4.1-mini"`` (the
+    DSPy spelling) or ``agent="gpt-4.1-mini"`` raises and names the string
+    to type, instead of failing later inside ``simulate``.
     """
+    _check(agent=agent, judge=judge, simulator=simulator)
     if agent is not None:
         _absorb(_base, "agent", agent)
     if judge is not None:
@@ -148,6 +228,7 @@ def context(
     with wai.context(judge=wai.OpenAI("gpt-4.1")):
         strict = data.grade(wai.Judge(rubric=RUBRIC))
     """
+    _check(agent=agent, judge=judge, simulator=simulator)
     scoped = replace(current(), keys=dict(current().keys))
     if agent is not None:
         _absorb(scoped, "agent", agent)

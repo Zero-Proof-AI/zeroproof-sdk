@@ -7,6 +7,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 - TrainerCallback forwards TRL's `completions/clipped_ratio` as `clip_ratio`,
   the length-cap share the platform's Rollouts tile draws.
+- A misspelled model string is refused by the call that took it, and the
+  message names the string to type. `wai.configure(agent=)`, `wai.context`,
+  `wai.Judge(model=)` and `simulate(agent=)` check a spec against the five
+  providers the engine reads: `openai:`, `anthropic:`, `vllm:`, `ollama:`,
+  `typesafe:`. The DSPy and LiteLLM spelling
+  (`agent="openai/gpt-4.1-mini"`) used to be stored and to fail several
+  calls later with "cannot detect a transport"; it now raises on its own
+  line and names `agent="openai:gpt-4.1-mini"`. A bare model name
+  (`"gpt-4.1-mini"`) and an unknown provider name the five forms. A URL, a
+  callable and a backend object are unchanged, and a bad role leaves no
+  half-applied settings.
 
 ## 0.88 (2026-09-19)
 
