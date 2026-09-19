@@ -118,6 +118,7 @@ pip install whileai datasets sentence-transformers
 cd recipes/community/how-much-contamination-survives
 python run.py --pairs 600 --seed 0                # lexical arms, ~1 min
 python run.py --pairs 400 --seed 0 --semantic     # adds the embedder arms, ~4 min
+python run.py --dry-run --limit 40                # offline: no download, no key
 ```
 
 | flag | default | what it does |
@@ -125,7 +126,15 @@ python run.py --pairs 400 --seed 0 --semantic     # adds the embedder arms, ~4 m
 | `--pairs` | 1500 | labelled pairs drawn per class; 600 is plenty for these intervals |
 | `--seed` | 0 | shuffles which pairs are drawn; 0/1/2 were used above |
 | `--semantic` | off | adds the `embedder=` arms (downloads bge-small, ~130MB) |
+| `--limit` | none | caps `--pairs`, for a smoke run |
+| `--dry-run` | off | template pairs instead of the labelled sets: no `datasets`, no network |
 | `--out` | results.json | where to write the arm-by-arm numbers |
+
+**`--dry-run` is a harness check, not an experiment.** It swaps in template-generated
+pairs so the code path and the three controls run with no download — the controls still
+read 1.00 / 1.00 / 0.00, which is what it is there to verify. Its recall numbers are
+artefacts of the templates and mean nothing; every number quoted on this page comes from
+the labelled sets.
 
 To reproduce the whole table: `for s in 0 1 2; do python run.py --pairs 600 --seed $s --out lex.s$s.json; done`
 

@@ -32,15 +32,55 @@ def jaccard(a: str, b: str) -> float:
     return len(sa & sb) / len(sa | sb) if (sa | sb) else 0.0
 
 
-def build(n_pairs: int, seed: int = 0):
-    from datasets import load_dataset
+def _synthetic_pairs(n_pairs: int, rng: random.Random):
+    """Stand-in pairs for --dry-run, so the code path runs with no download.
 
+    These are templates, not human-labelled data: they exercise the harness
+    and the controls, and their recall numbers mean nothing. Use the real
+    run for any number you intend to quote.
+    """
+    subj = ["order", "refund", "invoice", "shipment", "account", "booking"]
+    verb = ["cancel", "track", "update", "split", "escalate", "reissue"]
+    dup, non = [], []
+    for _ in range(n_pairs):
+        s, v = rng.choice(subj), rng.choice(verb)
+        n = rng.randint(1000, 9999)
+        dup.append(
+            (
+                f"How do I {v} the {s} numbered {n} for this customer?",
+                f"What is the way to {v} {s} {n} on behalf of a customer?",
+            )
+        )
+        non.append(
+            (
+                f"How do I {v} the {s} numbered {n} for this customer?",
+                f"How do I {rng.choice(verb)} the {rng.choice(subj)} numbered "
+                f"{rng.randint(1000, 9999)} for this customer?",
+            )
+        )
+    return dup, non
+
+
+def build(n_pairs: int, seed: int = 0, dry_run: bool = False):
     rng = random.Random(seed)
 
+    if dry_run:
+        n_ctl = max(40, n_pairs // 4)
+        dup, non = _synthetic_pairs(n_pairs + 3 * n_ctl, rng)
+        reserve = [q for q, _ in non[n_pairs : n_pairs + 3 * n_ctl]]
+        return _assemble(
+            dup[:n_pairs],
+            non[:n_pairs],
+            dup[n_pairs : n_pairs + n_pairs // 2],
+            non[n_pairs : n_pairs + n_pairs // 2],
+            reserve,
+            n_ctl,
+        )
+
+    from datasets import load_dataset
+
     qqp = load_dataset("nyu-mll/glue", "qqp", split="train[:60000]")
-    paws = load_dataset(
-        "google-research-datasets/paws", "labeled_final", split="train[:30000]"
-    )
+    paws = load_dataset("google-research-datasets/paws", "labeled_final", split="train[:30000]")
 
     def clean(s):
         return " ".join((s or "").split())
@@ -55,12 +95,8 @@ def build(n_pairs: int, seed: int = 0):
         for r in qqp
         if r["label"] == 0 and len(toks(r["question1"])) >= 6
     ]
-    pdup = [
-        (clean(r["sentence1"]), clean(r["sentence2"])) for r in paws if r["label"] == 1
-    ]
-    pnon = [
-        (clean(r["sentence1"]), clean(r["sentence2"])) for r in paws if r["label"] == 0
-    ]
+    pdup = [(clean(r["sentence1"]), clean(r["sentence2"])) for r in paws if r["label"] == 1]
+    pnon = [(clean(r["sentence1"]), clean(r["sentence2"])) for r in paws if r["label"] == 0]
 
     rng.shuffle(qdup)
     rng.shuffle(qnon)
@@ -69,9 +105,17 @@ def build(n_pairs: int, seed: int = 0):
     n_ctl = max(40, n_pairs // 4)
     # reserve control text from a slice that never enters the main holdout pool
     reserve = [q for q, _ in qnon[n_pairs : n_pairs + 3 * n_ctl]]
-    qdup, qnon = qdup[:n_pairs], qnon[:n_pairs]
-    pdup, pnon = pdup[: n_pairs // 2], pnon[: n_pairs // 2]
+    return _assemble(
+        qdup[:n_pairs],
+        qnon[:n_pairs],
+        pdup[: n_pairs // 2],
+        pnon[: n_pairs // 2],
+        reserve,
+        n_ctl,
+    )
 
+
+def _assemble(qdup, qnon, pdup, pnon, reserve, n_ctl):
     holdout, train = [], []
     tid = 0
 
@@ -105,7 +149,9 @@ def build(n_pairs: int, seed: int = 0):
     # Control text comes from `reserve`, which is disjoint from every pair
     # above, so the only way a control row matches the holdout is the one
     # the control is testing.
-    a_ctl, b_ctl, c_ctl = reserve[:n_ctl], reserve[n_ctl : 2 * n_ctl], reserve[2 * n_ctl :]
+    a_ctl = reserve[:n_ctl]
+    b_ctl = reserve[n_ctl : 2 * n_ctl]
+    c_ctl = reserve[2 * n_ctl :]
 
     # positive control A: a byte-identical copy MUST be caught (recall 1.0)
     for q in a_ctl:
@@ -139,12 +185,15 @@ def rate_with_interval(flags: list[bool]):
         for i, f in enumerate(flags)
     ]
     p = wai.pass_at(rows, k=1)
-    lo, hi = p.ci95
     b = _boot(flags)
+    # pass_at().ci95 is None on small or degenerate samples (e.g. every row
+    # the same), so the bootstrap is both the cross-check and the fallback.
+    if p.ci95 is None or p.pass_at_1 is None:
+        return {**b, "via": "bootstrap (pass_at ci95 was None)"}
     return {
         "rate": p.pass_at_1,
-        "lo": lo,
-        "hi": hi,
+        "lo": p.ci95[0],
+        "hi": p.ci95[1],
         "n": len(flags),
         "via": "wai.pass_at",
         "boot_lo": b["lo"],
@@ -189,21 +238,15 @@ def summarize(train, dropped, label):
     main = [r for r in train if r["kind"] in MAIN_KINDS]
     leaks = [r for r in main if r["leak"]]
     cleans = [r for r in main if not r["leak"]]
-    out["overall"]["recall"] = rate_with_interval(
-        [r["task_id"] in dropped for r in leaks]
-    )
-    out["overall"]["false_positive"] = rate_with_interval(
-        [r["task_id"] in dropped for r in cleans]
-    )
+    out["overall"]["recall"] = rate_with_interval([r["task_id"] in dropped for r in leaks])
+    out["overall"]["false_positive"] = rate_with_interval([r["task_id"] in dropped for r in cleans])
     for lo, hi in BUCKETS:
         sel = [r for r in leaks if lo <= r["jac"] < hi]
         selc = [r for r in cleans if lo <= r["jac"] < hi]
         key = f"{lo:.2f}-{hi:.2f}"
         out["by_bucket"][key] = {
             "recall": rate_with_interval([r["task_id"] in dropped for r in sel]),
-            "false_positive": rate_with_interval(
-                [r["task_id"] in dropped for r in selc]
-            ),
+            "false_positive": rate_with_interval([r["task_id"] in dropped for r in selc]),
         }
     by = defaultdict(list)
     for r in train:
@@ -214,8 +257,14 @@ def summarize(train, dropped, label):
     return out
 
 
-def run_all(pairs: int, seed: int, semantic: bool, verbose: bool = True) -> dict:
-    holdout, train = build(pairs, seed)
+def run_all(
+    pairs: int,
+    seed: int,
+    semantic: bool,
+    verbose: bool = True,
+    dry_run: bool = False,
+) -> dict:
+    holdout, train = build(pairs, seed, dry_run=dry_run)
     if verbose:
         print(
             f"holdout={len(holdout)} train={len(train)} "
@@ -229,9 +278,7 @@ def run_all(pairs: int, seed: int, semantic: bool, verbose: bool = True) -> dict
         kept, rep = wai.decontaminate(train, against=[holdout], **kw)
         d = dropped_ids(train, kept)
         arms[label] = summarize(train, d, label)
-        arms[label]["report"] = {
-            k: v for k, v in rep.items() if isinstance(v, (int, float, str))
-        }
+        arms[label]["report"] = {k: v for k, v in rep.items() if isinstance(v, (int, float, str))}
         r = arms[label]["overall"]
         c = arms[label]["controls"]
         if not verbose:
@@ -289,9 +336,17 @@ def main():
     ap.add_argument("--pairs", type=int, default=1500)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--semantic", action="store_true")
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="template pairs instead of the labelled sets: no download, no key. "
+        "Exercises the harness; its recall numbers are not results.",
+    )
+    ap.add_argument("--limit", type=int, default=None, help="cap --pairs (smoke runs)")
     ap.add_argument("--out", default="results.json")
     a = ap.parse_args()
-    res = run_all(a.pairs, a.seed, a.semantic)
+    pairs = min(a.pairs, a.limit) if a.limit else a.pairs
+    res = run_all(pairs, a.seed, a.semantic, dry_run=a.dry_run)
     with open(a.out, "w") as f:
         json.dump(res, f, indent=2)
     print("wrote", a.out)
