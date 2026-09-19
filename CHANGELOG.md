@@ -174,6 +174,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `SimulationData.push`, which gives a graded RL set a route to a linked
   holdout (#408). The by-task split is `ingest.platform.split_holdout`,
   one function for both entry points.
+- `post.md` for the four existing paper recipes (filter-metric moved; adaptive-clip,
+  endpoint-sft and gmts-token-select flat), each under 280 characters, numbers copied
+  from their Result tables.
 
 ## 0.82 (2026-09-18)
 
