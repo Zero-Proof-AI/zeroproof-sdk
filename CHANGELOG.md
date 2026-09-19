@@ -65,6 +65,19 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   sentence, when the sentence is the policy and `draft_tools` drafts the
   tools. `character-training.md` was accurate; its two quoted outputs
   re-run byte-identical and its dataset splits still measure 60/144/35.
+- `holdout_size(effect, before=rows)` on a saturated baseline no longer
+  answers `n_tasks=2`. Rows whose tasks all pass gave `p = 1`, a binomial
+  variance of 0 and the sizing formula's floor, with no warning; a golden
+  set at pass@1 = 1.00 was told two tasks prove a 5-point gain (#392).
+  When the measured base is at or above `CEILING_PASS_RATE` (0.9, now in
+  `defaults.py`, the same share `delta_report` flags as `ceiling`;
+  `ceiling_pass_rate=` is the knob) or the measured paired sd is 0, the
+  rows are not used: `n_tasks` is the binomial model's answer at
+  `BASE_PASS_RATE` with the rows' k, `saturated` is `True`, and a new
+  `warnings` key names the ceiling and the fix (harder situations so the
+  baseline sits inside the 20-80% difficulty band, rlhfbook.com ch. 14;
+  DAPO drops prompts at accuracy 0 and 1 for the same reason). Every path
+  now returns `saturated` and `warnings`.
 - The rubric judge is told which tools were called instead of being asked
   to notice which were not (#346). The judge payload carries
   `tools_called` (the tool of every step that returned a result, in

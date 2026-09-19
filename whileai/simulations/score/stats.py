@@ -52,9 +52,11 @@ from ..defaults import (
     ALPHA,
     BASE_PASS_RATE,
     BOOTSTRAP_DRAWS,
+    CEILING_PASS_RATE,
     CI_LEVEL,
     DECONTAM_NGRAM,
     DECONTAM_OVERLAP,
+    DIFFICULTY_BAND,
     MIN_CI_TASKS,
     MIN_RERUNS,
     POWER,
@@ -379,6 +381,7 @@ def holdout_size(
     after: Sequence[dict] | None = None,
     task_std: float | None = None,
     rows: Sequence[dict] | None = None,
+    ceiling_pass_rate: float = CEILING_PASS_RATE,
 ) -> dict[str, Any]:
     """How many paired tasks a holdout needs to prove a gain of ``effect``.
 
@@ -431,9 +434,26 @@ def holdout_size(
     name) reads ``base`` and ``k`` off the data. Returns ``n_tasks``
     plus the inputs, ``task_std``, ``sd_source``, ``half_width`` (the 95%
     band on the delta at that ``n``), ``n_tasks_concentrated``,
-    ``base_spread``, ``n_paired`` and ``notes``; every key is present on
-    every path (``None`` or ``[]`` where it does not apply). The default
-    answer is unchanged; the honest paths are the two that measure.
+    ``base_spread``, ``n_paired``, ``saturated``, ``notes`` and
+    ``warnings``; every key is present on every path (``None``, ``False``
+    or ``[]`` where it does not apply). The default answer is unchanged;
+    the honest paths are the two that measure.
+
+    A saturated baseline cannot size anything. Rows whose tasks all pass
+    give ``p = 1``, the binomial variance ``p(1-p)`` is 0, and both arms
+    all passing give a measured paired sd of 0; the formula then returns
+    the floor, ``MIN_HOLDOUT_TASKS``, which is the model collapsing, not
+    evidence that two tasks are enough (#392). When the measured base is
+    at or above ``ceiling_pass_rate`` (``CEILING_PASS_RATE``, the share
+    ``delta_report`` flags as ``ceiling``) or the measured sd is 0 (the
+    paired difference identical on every task, ``DEGENERATE``), the
+    rows are not used: ``n_tasks`` is the binomial model's answer at
+    ``BASE_PASS_RATE`` and the rows' ``k``, ``sd_source`` is ``"model"``,
+    ``saturated`` is ``True``, and ``warnings`` names the ceiling and the
+    fix: harder situations, so the baseline sits inside the 20-80
+    difficulty band (rlhfbook.com/c/14-reasoning.html; DAPO, arXiv
+    2503.14476, drops prompts at accuracy 0 and 1 because they carry no
+    signal), then size again on those rows.
 
     The recipe that asked for this had 140 tasks at k=4 around 0.6: a
     band of about +-0.06, so a real 3-point gain reads
@@ -455,9 +475,11 @@ def holdout_size(
             "(agent rubrics sit near 0.38)"
         )
     notes: list[str] = []
+    warnings: list[str] = []
     spread: float | None = None
     ratio: float | None = None
     n_paired: int | None = None
+    saturated = False
     if before is not None:
         base, k, spread, ratio = _rows_base_and_k(before)
     if before is not None and after is not None:
@@ -474,6 +496,36 @@ def holdout_size(
     else:
         sd = _paired_task_sd(base, effect, k)
         source = "model"
+    if before is not None and source != "given" and (base >= ceiling_pass_rate or sd <= 0):
+        # The rows cannot size anything: at the ceiling p(1-p) is (near)
+        # zero and a measured sd of 0 says both arms agreed on every task.
+        # Answer with the model at the default base, and say so.
+        saturated = True
+        measured = f"task_std {sd:.3f} measured" if source == "rows" else "the binomial variance"
+        band_lo, band_hi = DIFFICULTY_BAND
+        if base >= ceiling_pass_rate:
+            head = (
+                f"CEILING: the before rows pass {base:.2f} of tasks, at or above the ceiling "
+                f"{ceiling_pass_rate:.2f}, so this suite cannot show a {float(effect):.2f} gain; "
+                f"{measured} collapses to 0"
+            )
+        else:
+            head = (
+                f"DEGENERATE: the paired difference is the same on every one of the "
+                f"{n_paired} tasks ({measured} is 0) at a base of {base:.2f}, so the rows carry "
+                "no spread to size from"
+            )
+        warnings.append(
+            f"{head} and the sizing formula returns its floor ({MIN_HOLDOUT_TASKS} tasks), which "
+            "is the model collapsing, not evidence. n_tasks is the binomial model's answer at "
+            f"the default base {BASE_PASS_RATE:.2f} with these rows' k={int(k)}, not a "
+            "measurement. Fix: harder situations, so the baseline sits inside the "
+            f"{band_lo:.0%}-{band_hi:.0%} difficulty band (simulate(hard_share=...) or a higher "
+            "fault_rate; rlhfbook.com/c/14-reasoning.html), then size again on those rows."
+        )
+        sd = _paired_task_sd(BASE_PASS_RATE, effect, k)
+        source = "model"
+        n_paired = None
     z = _z(1 - alpha / 2) + _z(power)
 
     def _n(s: float) -> int:
@@ -482,7 +534,8 @@ def holdout_size(
     n = _n(sd)
     concentrated: int | None = None
     if source == "model":
-        concentrated = _n(_concentrated_task_sd(base, effect, k))
+        model_base = BASE_PASS_RATE if saturated else base
+        concentrated = _n(_concentrated_task_sd(model_base, effect, k))
         notes.append(
             f"n_tasks {n} assumes the gain is spread evenly across tasks and the two arms are "
             f"independent draws. If the gain is carried by a few tasks (a trait only some "
@@ -490,7 +543,7 @@ def holdout_size(
             f"tasks (n_tasks_concentrated). Pass before= and after= from a previous eval to "
             f"measure the paired sd, or task_std= read off a delta_report interval."
         )
-        if spread is not None and spread > 0:
+        if spread is not None and spread > 0 and not saturated:
             if ratio is None:
                 how = (
                     "every task is a sure pass or a sure fail, so the model's per-task "
@@ -519,7 +572,9 @@ def holdout_size(
         "n_tasks_concentrated": concentrated,
         "base_spread": round(spread, 4) if spread is not None else None,
         "n_paired": n_paired,
+        "saturated": saturated,
         "notes": notes,
+        "warnings": warnings,
     }
 
 
