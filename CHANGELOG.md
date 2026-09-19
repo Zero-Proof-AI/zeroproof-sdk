@@ -5,6 +5,18 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `scored.compare_judges(judges=)` (and on `SimulationData`): several
+  judges, the same rows, one table. `judges` maps a name to a spec string
+  (`"typesafe:jev-latest"`, `"anthropic:claude-haiku-4-5"`), a backend
+  object, a `wai.Judge`, or any judge callable; each grades its own copy of
+  the rows under the run's system prompt and tools and is scored against
+  the gold labels the way `judge_trust` scores one judge (agreement with a
+  Wilson interval, kappa, leak rate, unsure and unjudged counts, seconds
+  per row). `print(table)` ranks them by kappa and names the first judge
+  that clears the floors; `table["name"].rows` holds that judge's graded
+  copies for reading the disagreements. A bare row list takes the same
+  call as `whileai.judge_comparison.compare_judges(rows, judges)`.
+
 ## 0.84 (2026-09-19)
 
 - Platform runs carry a scientific record. `RunRecord` = `Data` (train

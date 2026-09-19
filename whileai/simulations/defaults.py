@@ -286,6 +286,10 @@ TOOL_SCHEMA_SPAN_CHARS = 500
 # serving every account. (convention, untested)
 DEFAULT_LLM_JUDGE_CONCURRENCY = 16
 
+# JUDGE_COMPARE_CONCURRENCY = 8: parallel calls per judge while
+# ``compare_judges`` runs; judges run one after another so a rate limit
+# on one provider never slows the others (convention, untested).
+JUDGE_COMPARE_CONCURRENCY = 8
 # JUDGE_CONCURRENCY_CAP = 32: the most parallel judge calls ``grade()``
 # lets a caller ask for, whatever ``concurrency=`` says. (convention,
 # untested)
@@ -1561,6 +1565,7 @@ __all__ = [
     "HOLDOUT_BUCKET_HEX_CHARS",
     "HUNG_SLOT_S",
     "JUDGE_CHECK_SAMPLE",
+    "JUDGE_COMPARE_CONCURRENCY",
     "JUDGE_CONCURRENCY_CAP",
     "JUDGE_FINAL_TEXT_CHARS",
     "JUDGE_MAX_TOKENS",
