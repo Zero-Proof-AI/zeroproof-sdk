@@ -1,5 +1,9 @@
 # Working in whileai-sdk
 
+Read `CONSTITUTION.md` first: what the library is, what we believe, and
+where each belief is enforced. Then `docs/reference/style.md` for the
+ergonomics standard.
+
 ## Shipping a release
 
 One command, run from any checkout, by anyone with write access:

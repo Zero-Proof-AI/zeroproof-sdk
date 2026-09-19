@@ -302,8 +302,10 @@ This README is the shape of the loop. The docs are the depth, in the same order:
 | a call you want the signature of | [API](https://docs.withwhile.com/api/index): every public call, generated from the package on each release |
 | the platform | [Platform](https://docs.withwhile.com/reference/platform): sign in, datasets, hosted training, serving |
 
-The coding standard the package is held to, PyTorch and DSPy ergonomics,
-is [docs/reference/style.md](docs/reference/style.md).
+What we believe and where each belief is enforced is
+[CONSTITUTION.md](CONSTITUTION.md). The coding standard the package is
+held to, PyTorch and DSPy ergonomics, is
+[docs/reference/style.md](docs/reference/style.md).
 [CHANGELOG.md](CHANGELOG.md) has one entry per release.
 
 ## Development
