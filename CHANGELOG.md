@@ -5,6 +5,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Platform runs carry a scientific record. `RunRecord` = `Data` (train
+  and holdout ids, hashes, counts, decontamination drop), `Optimizer`
+  (loss type, lr, beta, clip range, group size, tokens, seed), `EvalSetup`
+  (metric, k, re-run noise) and `Provenance` (pins, image, recipe, commit,
+  paper, adapter); pass it as `tracked.run(..., record=)` or
+  `run.finish(record=)`. `TrainCurve` reads back `completion_length`,
+  `clip_ratio` and the record; the Runs page draws them.
+
 - Reports print themselves, step two of the style migration
   (`docs/reference/style.md` rule 5). `judge_trust`, `hack_scan`,
   `compare` (`delta_report`) and `leak_report` return a `Report`: still
