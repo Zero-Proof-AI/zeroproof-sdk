@@ -11,7 +11,7 @@ import threading
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from ..defaults import TEXT_HEURISTICS
+from ..defaults import RULE_AXIS_CAP_GRID, TEXT_HEURISTICS
 from ..world.sandbox import WorldOptions
 from .diversity import behavior_tier, mix_items_by_tier
 
@@ -288,17 +288,21 @@ def _has_reference_keys(tools: list[dict]) -> bool:
 
 _ROLE_START = re.compile(r"^(?:you are|you're|your role(?: is)?|you act as|act as)\b", re.I)
 # _MAX_CLAUSE = 120: a policy clause longer than this is cut at a word
-# boundary to serve as a coverage label; RULE_CAP = 16 clauses per policy
-# (ZP_RULE_CAP overrides) bounds the grid (convention, untested).
+# boundary to serve as a coverage label (convention, untested).
 _MAX_CLAUSE = 120
-RULE_CAP = int(os.environ.get("ZP_RULE_CAP") or 16)
+# RULE_CAP = RULE_AXIS_CAP_GRID: clauses on the generation grid's rule
+# axis (``defaults.RULE_AXIS_CAP_GRID`` says why); ZP_RULE_CAP overrides
+# it for one process.
+RULE_CAP = int(os.environ.get("ZP_RULE_CAP") or RULE_AXIS_CAP_GRID)
 
 
-def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
+def policy_sections(policy: str, *, cap: int | None = RULE_AXIS_CAP_GRID) -> list[str]:
     """Split policy text into short rule clauses used as coverage cells.
 
     Identity / system-prompt preambles are not clauses. A long unsplit
     paragraph is dropped rather than truncated mid-word into ``rule``.
+    ``cap`` is the most clauses returned, in document order; ``None`` is
+    every clause. ``rule_axis`` says how many a cap left out.
     """
     text = str(policy or "").strip()
     if not text:
@@ -355,9 +359,23 @@ def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
             continue
         seen.add(key)
         cleaned.append(clause)
-        if len(cleaned) >= cap:
+        if cap is not None and len(cleaned) >= cap:
             return cleaned
     return cleaned
+
+
+def rule_axis(policy: str, *, cap: int | None = RULE_AXIS_CAP_GRID) -> tuple[list[str], int]:
+    """The rule axis and the number of clauses the policy actually has.
+
+    Returns ``(rules, n_total)``: the clauses on the axis (at most ``cap``,
+    in document order) and the count before the cap, so a caller can say
+    "16 of 163" instead of "16" (#391). ``n_total`` is what the axis would
+    hold at ``cap=None``.
+    """
+    every = policy_sections(policy, cap=None)
+    if cap is None or len(every) <= cap:
+        return every, len(every)
+    return every[:cap], len(every)
 
 
 def _tool_dimension(tools: list[dict]) -> list[str]:
@@ -426,9 +444,16 @@ def check_dimensions(dimensions: Any) -> None:
                 )
 
 
-def build_dimensions(tools: list[dict], policy: str = "") -> dict[str, list[str]]:
-    """Coverage axes from this agent. Length and vagueness are writer-only."""
-    rules = policy_sections(policy, cap=RULE_CAP) or ["unspecified"]
+def build_dimensions(
+    tools: list[dict], policy: str = "", *, rule_cap: int | None = RULE_CAP
+) -> dict[str, list[str]]:
+    """Coverage axes from this agent. Length and vagueness are writer-only.
+
+    ``rule_cap`` is the most policy clauses on the rule axis: the grid's
+    ``RULE_CAP`` by default, ``None`` for every clause (what a report over
+    an existing suite passes, ``RULE_AXIS_CAP_REPORT``).
+    """
+    rules = policy_sections(policy, cap=rule_cap) or ["unspecified"]
     world = list(WORLD_STATES) if _has_reference_keys(tools) else ["unspecified"]
     return {
         "tool": _tool_dimension(tools),

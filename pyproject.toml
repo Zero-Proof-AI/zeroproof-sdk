@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whileai"
-version = "0.75"
+version = "0.83"
 description = "Post-training data and evaluation for tool-using LLM agents: simulate, grade, measure, select, train, export, with the checks from rlhfbook.com."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -46,7 +46,7 @@ whileai-simulations = "whileai.simulations.score.quality:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "pytest-xdist>=3.6", "ruff>=0.12",
-       "mypy>=1.16", "types-requests"]
+       "mypy>=1.16", "types-requests", "ty>=0.0.82"]
 rl = ["verifiers>=0.3; python_version >= '3.11' and python_version < '3.14'"]
 
 [tool.setuptools]
@@ -143,3 +143,31 @@ module = [
     "whileai.simulations.run.engine",
 ]
 ignore_errors = true
+
+# ty runs beside mypy in CI (about ten times faster cold); mypy stays the
+# gate until ty reaches 1.0. Same shape as the mypy block above: optional
+# extras (torch, sympy, verifiers, ...) import lazily inside functions, so
+# an unresolved import is an extra that is not installed, not a typo.
+[tool.ty.src]
+include = ["whileai"]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.rules]
+unresolved-import = "ignore"
+
+# The same three modules as the mypy override: attributes hung on function
+# objects. Drop this with the mypy override once the writer is a class.
+[[tool.ty.overrides]]
+include = [
+    "whileai/simulations/generate/generator.py",
+    "whileai/simulations/generate/scenarios.py",
+    "whileai/simulations/run/engine.py",
+]
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+call-non-callable = "ignore"
+not-subscriptable = "ignore"

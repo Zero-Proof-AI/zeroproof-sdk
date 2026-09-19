@@ -48,7 +48,7 @@ DEFAULT_CONCURRENCY = 32
 
 # PASS_THRESHOLD = 0.5: a reward under this is a failure. The outcome
 # label is binary, r in {0, 1} (rlhfbook.com/c/07-reward-models.html,
-# outcome reward models; rlhfbook.com/c/14-reasoning.html, verifiable
+# outcome reward models; rlhfbook.com/c/07-reasoning, verifiable
 # rewards gate on all assertions passing), so 0.5 is its midpoint and a
 # partial rubric score (or the conduct advisory 0.5 for a truncated reply)
 # rounds to the nearer verdict. No source names another cut. The run loop's
@@ -146,7 +146,7 @@ DEFAULT_PROBE = 2
 DEFAULT_FAULT_RATE = 0.5
 
 # RL_FAULT_RATE = 0.8: the same share under mode="rl". RL raises it because
-# the faulted cells are where a base fails (rlhfbook.com/c/14-reasoning.html,
+# the faulted cells are where a base fails (rlhfbook.com/c/07-reasoning,
 # difficulty filtering) and PALADIN trains on an 80/20 composition of
 # recovery-bearing to clean traces (arXiv 2509.25238, appendix I.4: a
 # dataset mix, not a keep rate), which is the shape 0.8 gives the tagged
@@ -320,6 +320,14 @@ MAX_SAMPLES_PER_CALL = MAX_COMPLETIONS_PER_REQUEST
 # is a fragment the junk gate drops anyway. Both HTTP backends read it
 # (convention, untested).
 MIN_REPLY_TOKENS = 256
+# DECISION_TIMEOUT_S = 30: seconds one TypeSafe decision request may
+# take (``typesafe:`` judge, typesafe_backend.py). Jev's stated end-to-end
+# latency is 70 to 500 ms and its own SDK's default timeout is 10 s;
+# 30 s leaves room for a queue behind its 1,200-requests-a-minute limit
+# without a stuck request holding a judge worker for the chat judge's
+# 120 s (convention, untested; the vendor numbers are from
+# typesafe.ai/blog/introducing-system-one-models-and-jev).
+DECISION_TIMEOUT_S = 30.0
 
 # SAMPLING_TEMPERATURE_MAX = 2.0: the ceiling every temperature knob is
 # validated against (user_temperature, the hosted trainer's rollout
@@ -339,6 +347,25 @@ SAMPLING_TEMPERATURE_MAX = 2.0
 # the band is a convention. The monitor samples its holdout at the same
 # value (MONITOR_SAMPLE_TEMPERATURE).
 LOCAL_MODEL_TEMPERATURE = 0.8
+
+# ---------------------------------------------------------------------
+# generate/: the rule axis (scenarios.py; read by score/preflight.py)
+# ---------------------------------------------------------------------
+
+# RULE_AXIS_CAP_GRID = 16: policy clauses that become cells of the
+# generation grid's rule axis. The pairwise covering array grows with its
+# largest axis, so the grid stays bounded; the environment variable
+# ZP_RULE_CAP overrides it for one process. Clauses past the cap are
+# dropped in document order and the run says how many (#391).
+# (convention, untested)
+RULE_AXIS_CAP_GRID = 16
+# RULE_AXIS_CAP_REPORT = None: ``coverage_gap`` and ``preflight`` report
+# over a suite that already exists, so there is no grid to bound and every
+# clause is on the axis. A 68 KB production prompt had about 160
+# imperative clauses; the first 16 were banner text ("Read it.") and the
+# report said "14 of 16 covered" (#391). ``rule_cap=`` on either call
+# sets a number.
+RULE_AXIS_CAP_REPORT = None
 
 # ---------------------------------------------------------------------
 # generate/: context budgets (agents.py, generator.py)
@@ -401,6 +428,15 @@ MIN_RERUNS = 3
 # binary task carries the most variance and the sizing is most
 # conservative. Measured lanes sat between 0.5 and 0.7 (#288).
 BASE_PASS_RATE = 0.6
+# CEILING_PASS_RATE = 0.9: a before side passing this share of its tasks
+# has at most 10 points of room, under the noise band of most agent evals
+# (run_std 0.02-0.04 measured across our lanes gives a band of 0.06-0.11),
+# so ``delta_report`` flags ``ceiling`` and ``holdout_size(before=rows)``
+# refuses to size on the collapsed variance (a saturated suite read as
+# "2 tasks are enough", #392). Above DIFFICULTY_BAND's top (0.8) on
+# purpose: the band prunes training prompts, the ceiling flags an eval.
+# Convention on the exact share.
+CEILING_PASS_RATE = 0.9
 # ROLLOUTS_PER_TASK = 4: the per-task rollout count the sizing assumes and
 # the smallest k ``pass_at`` reports pass^k at. tau-bench (arXiv:2406.12045)
 # plots pass^k to k=8 from at least 3 trials; tau2-bench (arXiv:2506.07982)
@@ -413,7 +449,7 @@ ROLLOUTS_PER_TASK = 4
 # ---------------------------------------------------------------------
 #
 # DIFFICULTY_BAND = (0.2, 0.8): keep tasks the current policy passes between
-# 20% and 80% of the time. rlhfbook.com/c/14-reasoning.html ("Common
+# 20% and 80% of the time. rlhfbook.com/c/07-reasoning ("Common
 # Practices in Training Reasoning Models"): difficulty filtering restricts
 # RL prompts to those
 # the starting model solves 20-80% of the time, measured from N=16
@@ -422,7 +458,7 @@ ROLLOUTS_PER_TASK = 4
 # reported practice, not an ablation, so every selector takes ``band=``.
 DIFFICULTY_BAND: tuple[float, float] = (0.2, 0.8)
 # DIFFICULTY_BAND_ROLLOUTS = 16: rollouts per task the band is measured
-# from in the sources above (rlhfbook.com/c/14-reasoning.html N=16; DAPO
+# from in the sources above (rlhfbook.com/c/07-reasoning N=16; DAPO
 # G=16). Below it
 # a task's band assignment carries a Wilson half-width near 0.3 at k=8.
 DIFFICULTY_BAND_ROLLOUTS = 16
@@ -511,6 +547,19 @@ LENGTH_GAP_FLAG = 0.15
 # 0.992 on MT-Bench (arXiv:2606.19544), so a tenth of verdicts moving is
 # far outside the measured range. Convention on the exact number.
 FLIP_FLAG = 0.10
+# MAX_SKIPPED_SHARE = 0.10: share of a judge_trust gold sample the judge may
+# leave out of the agreement count (a reward that is not exactly 0 or 1,
+# so ``judge_agreement`` skips the row) before ``ok`` is false. The rows
+# that survive a skip are not a random half: a Rubric of principles
+# scores the mean of its criteria, so the skipped rows are the ones the
+# judge was unsure about and the kept rows are the ones most likely to
+# agree with anyone, which biases agreement upward by construction (#345:
+# 40 of 80 labeled rows skipped, PASS at 100%). Held-out judge accuracy
+# is measured over the whole labeled set or not at all
+# (rlhfbook.com/c/07-reward-models.html, "Suggested Experiments"); one in
+# ten is the same tolerance FLIP_FLAG gives a re-judge. Convention on the
+# exact number; ``judge_trust(max_skipped_share=)`` moves it.
+MAX_SKIPPED_SHARE = 0.10
 # POSITION_FLIP_FLAG = 0.2: share of pairs a pairwise judge decides
 # differently when A and B are swapped before its position bias is a
 # warning. Zheng et al. (arXiv:2306.05685, Table 2) measured 65%
@@ -555,6 +604,15 @@ JUDGE_MAX_TOKENS = 120
 # to improve the robustness of LLM-as-a-judge workflows is to use a
 # sampling temperature of 0").
 JUDGE_TEMPERATURE = 0.0
+# DECISION_UNSURE_BAND = 0.1: a decision judge's (``typesafe:``) verdict
+# probability within this of PASS_THRESHOLD, so 0.4 to 0.6, marks the row
+# ``unsure`` in its judge_meta and the grade report counts them. Jev's
+# stated property is calibration, higher confidence means higher accuracy
+# (typesafe.ai/blog/introducing-system-one-models-and-jev), so a
+# near-even probability is a row for a person to read, not a label to
+# train on. The width is a convention, untested against gold;
+# ``judge_trust`` on labeled rows is how to check it.
+DECISION_UNSURE_BAND = 0.1
 
 # ---------------------------------------------------------------------
 # score: reply truncation
@@ -769,6 +827,14 @@ PLATFORM_REQUEST_TIMEOUT_S = 120
 # PLATFORM_UPLOAD_TIMEOUT_S = 300: the studio import, which grades every row
 # server side before answering. Convention, sized to a 20k-row push.
 PLATFORM_UPLOAD_TIMEOUT_S = 300
+# PLATFORM_PUT_TIMEOUT_S = 120 / PLATFORM_PUT_S_PER_MB = 4: the presigned S3
+# PUT of a pushed JSONL set may take two minutes plus four seconds per
+# megabyte (a 117 MB eval set of 4k-token rollouts gets about ten minutes;
+# it timed out at the flat cap, #386). Four seconds a megabyte is a 2 Mbit/s
+# floor, the slow end of a home uplink; ``timeout=`` on ``push_rows``
+# overrides. Convention.
+PLATFORM_PUT_TIMEOUT_S = 120
+PLATFORM_PUT_S_PER_MB = 4
 # PLATFORM_CREDENTIAL_TTL_S = 3600: default life of a delegated credential.
 # One hour matches the Clerk session token that mints it.
 PLATFORM_CREDENTIAL_TTL_S = 3600
@@ -951,6 +1017,18 @@ TRAINING_BATCH_PROMPTS = 256
 # TRAINING_SFT_EPOCHS = 2: reference SFT epochs; rlhfbook gives no number
 # and the hosted trainer owns its own. Convention, untested.
 TRAINING_SFT_EPOCHS = 2
+# TRAIN_MIN_MIXED_TASKS = 32: tasks with both a pass and a fail a grouped
+# or paired method (grpo, dpo, rm) should have before ``train`` starts a
+# hosted run without a warning. A unanimous group carries no advantage
+# (GRPO's baseline is the group mean, rlhfbook.com/c/11-policy-gradients.html),
+# so DAPO (arXiv 2503.14476, eq. 11) and ProRL (arXiv 2505.24864) keep
+# only mixed prompts, and they draw them from tens of thousands; the
+# hosted trainer steps one prompt group at a time, so under this count a
+# default run is several passes over a handful of groups (#397: 6 mixed
+# tasks, 20 steps, 3.3 epochs, grad_norm 0). 32 is the same count as
+# MONITOR_N_PROMPTS, the fewest prompts the package reads a curve on;
+# ``train(min_mixed_tasks=)`` moves it. (convention, untested)
+TRAIN_MIN_MIXED_TASKS = 32
 
 # ---------------------------------------------------------------------
 # monitor
@@ -975,7 +1053,7 @@ MONITOR_WINDOW = 3
 # rlhfbook.com/c/16-evaluation.html reports; convention for the number.
 MONITOR_DELTA = 0.1
 # MONITOR_LENGTH_PCT = 0.25: completion-length growth that counts.
-# rlhfbook.com/c/17-over-optimization.html lists the qualitative
+# rlhfbook.com/c/14-over-optimization lists the qualitative
 # signatures (stock phrases, hedging and repetition, sycophancy,
 # over-refusal) and does not name length; length growth is the bias Dr.
 # GRPO removes from the GRPO objective (arXiv:2503.20783), which is why
@@ -1333,7 +1411,7 @@ class RunKnobs:
     # (n + 2a), for the group hazard and the mixed rate; a = 1 is the
     # uniform prior on a rate, one pseudo-observation each way. Why
     # unanimous groups are stopped at all: they carry no gradient (DAPO,
-    # arXiv 2503.14476; rlhfbook.com/c/14-reasoning.html). No paper states a prior for
+    # arXiv 2503.14476; rlhfbook.com/c/07-reasoning). No paper states a prior for
     # the decision; this is the engine's own, untested against a = 0.5.
     smoothing_alpha: float = knob(1.0, lo=0.0)
 
@@ -1446,10 +1524,13 @@ __all__ = [
     "ALPHA",
     "BASE_PASS_RATE",
     "BOOTSTRAP_DRAWS",
+    "CEILING_PASS_RATE",
     "CHARS_PER_TOKEN",
     "CI_LEVEL",
     "DEAD_AGENT_BUDGET_MULTIPLE",
     "DEAD_AGENT_MIN_ERRORS",
+    "DECISION_TIMEOUT_S",
+    "DECISION_UNSURE_BAND",
     "DECONTAM_NGRAM",
     "DECONTAM_OVERLAP",
     "DEFAULT_AVG_TURNS",
@@ -1493,6 +1574,7 @@ __all__ = [
     "MAX_COMPLETIONS_PER_REQUEST",
     "MAX_GOLD_ASK",
     "MAX_SAMPLES_PER_CALL",
+    "MAX_SKIPPED_SHARE",
     "MESSAGE_EXAMPLES",
     "MIN_AGREEMENT",
     "MIN_CI_TASKS",
@@ -1529,6 +1611,8 @@ __all__ = [
     "PLATFORM_IMPORT_MAX_ROWS",
     "PLATFORM_IMPORT_POLL_S",
     "PLATFORM_IMPORT_TIMEOUT_S",
+    "PLATFORM_PUT_S_PER_MB",
+    "PLATFORM_PUT_TIMEOUT_S",
     "PLATFORM_REQUEST_TIMEOUT_S",
     "PLATFORM_REWARD_MODEL_BATCH",
     "PLATFORM_STUDIO_MAX_ROWS",
@@ -1545,6 +1629,8 @@ __all__ = [
     "RL_ROLLOUTS_PER_ASK",
     "RL_ROLLOUTS_PER_PROMPT",
     "ROLLOUTS_PER_TASK",
+    "RULE_AXIS_CAP_GRID",
+    "RULE_AXIS_CAP_REPORT",
     "SAMPLING_TEMPERATURE_MAX",
     "SATURATION_CAP",
     "SCENARIO_ID_CHARS",
@@ -1584,6 +1670,7 @@ __all__ = [
     "TRAINING_POLL_MIN_S",
     "TRAINING_POLL_S",
     "TRAINING_SFT_EPOCHS",
+    "TRAIN_MIN_MIXED_TASKS",
     "TRANSIENT_BACKOFF_S",
     "TRANSIENT_TRIES",
     "TRUNCATED_REPLY_CHARS",

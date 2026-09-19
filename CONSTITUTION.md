@@ -1,0 +1,72 @@
+# Constitution
+
+What `whileai` is, what we believe, and how that shows up in the code.
+Read it before you add a public name, write a page, or run a recipe. The
+routines that maintain this repo read it too.
+
+## What we are
+
+`whileai` is a scientific post-training library for language models: SFT
+and RL, on open models, with the measurement that says whether training
+helped. Simulate, grade, measure with intervals, select, train, prove on a
+held-out set, serve, and feed the new traces back in. Build self-improving
+systems.
+
+It is for AI researchers, ML engineers and applied-AI developers, and the
+goal is that it sits in every applied-AI and research department the way
+PyTorch does. The platform (`whileai.platform`) is a separate, optional
+service for hosted training and serving. The library needs no account.
+
+## What we believe
+
+1. **Repeatable science.** A number is a result only with its interval, its
+   noise floor, its seed and the versions that produced it. A mean alone is
+   not a result. A flat result is a result. (`pass_at`, `eval_variance`,
+   `delta_report`, `holdout_size`.)
+2. **Replicated papers are the proof.** We show the library works by
+   reproducing recent post-training research in it, one recipe per paper,
+   under an hour on one GPU, with the number it moved and the number it did
+   not. Every reproduced paper is a post. The proof point is the recipe,
+   not the pitch. (`recipes/papers/`.)
+3. **The book is the map, the paper is the citation.** Every default is
+   named, sourced and tunable from the call. [rlhfbook.com](https://rlhfbook.com)
+   (Lambert) is the map of the field; the originating paper is the
+   reference. A default with no source says "convention, untested".
+   (`defaults.py`, `scripts/check_no_hardcoding.py`.)
+4. **Bring your own keys.** Your models, your compute, your accounts.
+   Modal and Prime Intellect are first-class: a `whileai` environment
+   becomes a `verifiers` environment and back, selected rows become a
+   trainer's prompt set, eval results flow back into measurement with
+   intervals. Nothing in the loop requires our hosting.
+5. **Developer ergonomics are the product.** The code reads like PyTorch,
+   DSPy and Unsloth: one import, objects carry configuration, calls carry
+   data, reports print themselves, errors name the fix, and a first-time
+   reader can guess the next line. Rigor lives behind a default, never
+   behind a flag. (`docs/reference/style.md`, the ratchet test.)
+6. **Plain words, then the mechanism, then the proof.** Every page, every
+   docstring, every README section in that order. Book vocabulary stays in
+   the docstring that cites the chapter, never in a public name.
+7. **Mass experimentation.** A PhD or an engineer runs many experiments
+   from one import, on their own compute, and every run leaves a record
+   that a person can decide from.
+8. **Never big-bang.** The internals carry the science and the tests.
+   Change the front door, migrate callers mechanically, keep the old name
+   working for one release with a warning that says the new one.
+
+## How it shows up
+
+| Belief | Where it is enforced |
+|---|---|
+| Repeatable science | `recipes/papers/check.py` refuses "moved" without an interval that excludes zero, three base re-runs, a clean holdout, and a proxy-vs-target verdict |
+| Replicated papers | `recipes/papers/README.md`: one paper, one recipe, one command, one `post.md` |
+| Sourced defaults | `scripts/check_no_hardcoding.py` in CI; `tests/api/test_readme_defaults.py` |
+| Ergonomics | `docs/reference/style.md`; `tests/api/test_style_ratchet.py` pins the retired shapes |
+| Docs order | `docs/` on Mintlify; the docs routine's one PR a day |
+| Bring your own keys | `wai.configure(agent=, judge=, api_key=)`, backend objects whose repr names the key source; the Modal and Prime Intellect researcher routines run on their own accounts twice a day |
+
+## Who reads this
+
+People: contributors, before their first public name. Agents: the style
+guide routine, the docs and site routines, the paper recipes routine, and
+the two researcher routines, at the top of every run. When this file and
+another file disagree, this file wins and the other file gets a PR.

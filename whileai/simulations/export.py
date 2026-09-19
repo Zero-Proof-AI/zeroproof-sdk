@@ -414,39 +414,58 @@ def training_rows(
     unroll: bool = False,
     max_tool_output_chars: int | None = None,
 ) -> list[dict]:
-    """Rows a trainer can consume directly. See the module docstring.
+    """Build the rows a trainer can consume directly: system prompt in, tool schemas on, wire format fixed.
 
-    ``source`` is a ``SimulationData`` (system prompt and tools come from
-    its profile), a row list, or a JSONL path. For lists and paths, pass
-    ``system_prompt=`` and ``tools=`` explicitly; a row exported without
-    its policy trains an agent that never saw its rules. ``mask_mode``
-    picks which assistant turns carry loss (see ``loss_mask``).
+    Reach for it when you want the rows in memory rather than in a file
+    (``export_dataset`` writes these same rows as JSONL, with the gates).
+    A simulated row stores the conversation without the agent's own
+    system prompt or tool schemas; the run knows them, the row does not.
+    This call returns a list of dicts, one per source row, each with
+    ``messages`` (the ``system`` message prepended, tool calls in the
+    OpenAI wire format with ``id``, ``type``, ``function.name`` and
+    ``function.arguments`` as a JSON string, each tool result linked by
+    ``tool_call_id``), ``tools`` (the schemas), ``loss_mask`` (which
+    assistant turns carry loss), the ask as ``prompt``, and the row's
+    grade and lineage. The module docstring has the two wire shapes.
 
-    ``strip_think=True`` (the default) removes ``<think>`` blocks from the
-    assistant turns. On a reasoning base such as Qwen3 that teaches the
-    adapter to emit an empty ``<think></think>`` and answer at once, so
-    at eval it answers while the untrained base is still reasoning under
-    the same ``max_tokens`` (#297). Pass ``strip_think=False`` when the
-    student should keep reasoning, and set ``thinking=`` the same on both
-    arms of the eval either way.
+    * ``source``: a ``SimulationData`` (system prompt and tools come from
+      its profile), a row list, or a JSONL path. For lists and paths,
+      pass ``system_prompt=`` and ``tools=`` explicitly; a row exported
+      without its policy trains an agent that never saw its rules.
+    * ``strip_think`` (``True``): remove ``<think>`` blocks from the
+      assistant turns, so a thinking rollout model never teaches a
+      non-thinking student to emit them. On a reasoning base such as
+      Qwen3 that teaches the adapter to emit an empty ``<think></think>``
+      and answer at once, so at eval it answers while the untrained base
+      is still reasoning under the same ``max_tokens``. Pass
+      ``strip_think=False`` when the student should keep reasoning, and
+      set ``thinking=`` the same on both arms of the eval either way.
+    * ``mask_mode`` (``"assistant"``): which assistant turns carry loss
+      (see ``loss_mask``): all of them, or ``"final"`` for the last turn
+      only.
+    * ``unroll`` (``False``): ``True`` turns an N-turn conversation into N
+      samples, the k-th ending at the k-th assistant turn with loss on
+      that turn only (rlhf-book ch. 4, multi-turn masking). Every earlier
+      agent turn then trains once with exactly the context it had,
+      instead of only the last one (``mask_mode="final"``) or all of them
+      at once (``"assistant"``, where later turns see context the policy
+      never produced). Each sample carries ``unroll`` (``turn``,
+      ``turns``) and ``lineage.unrolled_from`` (the source row's prompt
+      hash and rollout index); ``mask_mode`` is ignored, and no group
+      fields are stamped, since samples of one conversation are not a
+      GRPO group.
+    * ``max_tool_output_chars`` (``None``, cut nothing): cap each tool
+      message at that many characters, appending ``[... N chars of tool
+      output truncated]`` and counting the cut on the row as
+      ``tool_output_truncated`` (messages) and ``tool_output_chars_cut``.
+      Tool output is masked from the loss anyway; what it costs is
+      context, and the cut is explicit rather than silent (rlhf-book
+      ch. 13).
 
-    ``unroll=True`` turns an N-turn conversation into N samples, the
-    k-th ending at the k-th assistant turn with loss on that turn only
-    (rlhf-book ch. 4, multi-turn masking). Every earlier agent turn then
-    trains once with exactly the context it had, instead of only the
-    last one (``mask_mode="final"``) or all of them at once (``"assistant"``,
-    where later turns see context the policy never produced). Each sample
-    carries ``unroll`` (``turn``, ``turns``) and ``lineage.unrolled_from``
-    (the source row's prompt hash and rollout index); ``mask_mode`` is
-    ignored, and no group fields are stamped, since samples of one
-    conversation are not a GRPO group.
-
-    ``max_tool_output_chars`` caps each tool message at that many
-    characters, appending ``[... N chars of tool output truncated]`` and
-    counting the cut on the row as ``tool_output_truncated`` (messages)
-    and ``tool_output_chars_cut``. Tool output is masked from the loss
-    anyway; what it costs is context, and the cut is explicit rather than
-    silent (rlhf-book ch. 13). ``None`` cuts nothing.
+    ```python
+    rows = wai.training_rows(data, unroll=True)
+    print(rows[0]["messages"][0]["role"], rows[0]["loss_mask"])
+    ```
     """
     if mask_mode not in MASK_MODES:
         raise ValueError(f"mask_mode must be one of {MASK_MODES}, got {mask_mode!r}")
@@ -611,37 +630,54 @@ def export_training(
     max_tool_output_chars: int | None = None,
     format: str = "openai",
 ) -> dict[str, Any]:
-    """Write ``training_rows`` as JSONL. Never overwrites the source.
+    """Write ``training_rows`` as JSONL, gated so a broken row never reaches the trainer.
 
-    ``export_dataset`` is this same function object under the product
-    name — ``export_dataset is export_training`` — not a second exporter.
-    There is no behavioral difference to pick between: same arguments,
-    same file, same report. ``export_dataset`` is the name to write in
-    new code (it exports a dataset, not a training run); ``export_training``
-    is the older spelling and is kept so nothing written today breaks.
+    Reach for it when graded rows are ready for SFT. It builds the rows
+    with ``training_rows`` (system prompt in, tool schemas on, tool calls
+    in the wire format, ``<think>`` blocks stripped), checks them, and
+    writes one JSON object per line. It returns the report: ``path``,
+    ``n`` and ``n_written``, ``rewards``, ``with_system``, ``with_tools``,
+    ``format``, ``mask_mode``, ``tool_call_roundtrip``,
+    ``privileged_leaks``, ``warnings``, and what was cut or unrolled.
+    ``export_dataset``
+    and ``export_training`` are one function object under two names
+    (``export_dataset is export_training``): same arguments, same file,
+    same report. Write ``export_dataset`` in new code (it exports a
+    dataset, not a training run); the older spelling is kept so nothing
+    written today breaks.
 
-    With a path source and no ``output``, writes ``<name>.train.jsonl``
-    next to it. ``validate=True`` refuses to write a dataset whose tool
-    calls do not round-trip to structured arguments, or whose assistant
-    turns quote the row's own ``privileged`` block (the export scrubs the
-    key, not the reply that recited it); pass ``validate=False`` to export
-    anyway and read the report instead. The leak check reads the source
-    before the scrub, so pass the ``SimulationData`` or its
-    ``trajectories``; rows that already came through ``rows()``, ``save()``
-    or a file carry nothing to check, and ``report["privileged_leaks"]``
-    says so.
+    * ``source``: a ``SimulationData`` (system prompt and tools come from
+      its profile), a row list, or a JSONL path; for the last two pass
+      ``system_prompt`` and ``tools``.
+    * ``output``: the file to write. With a path source and no ``output``
+      it writes ``<name>.train.jsonl`` next to it. It never overwrites
+      the source.
+    * ``validate`` (``True``): refuse to write a dataset whose tool calls
+      do not round-trip to structured arguments, or whose assistant turns
+      quote the row's own ``privileged`` block (the export scrubs the key,
+      not the reply that recited it); ``False`` exports anyway and leaves
+      the report to read. The leak check reads the source before the
+      scrub, so pass the ``SimulationData`` or its ``trajectories``; rows
+      that already came through ``rows()``, ``save()`` or a file carry
+      nothing to check, and ``report["privileged_leaks"]`` says so.
+    * ``format``: ``"openai"`` (the default) writes the OpenAI
+      chat-completions wire row: the full ``messages`` list,
+      ``function.arguments`` as a JSON string, and the ask carried
+      alongside as ``prompt``. ``"trl"`` writes what ``trl`` can actually
+      load: conversational SFT rows (``messages`` only, arguments as
+      dicts, the ask under ``prompt_text``). TRL decides "is this
+      conversational?" from the column set, so a ``prompt`` string beside
+      ``messages`` makes it skip the chat template without an error and
+      train on the bare ask, which is why the TRL rows do not carry one.
+      The report says which format and which argument encoding the
+      round-trip gate checked.
+    * ``strip_think``, ``mask_mode``, ``unroll``, ``max_tool_output_chars``:
+      passed through to ``training_rows``, which explains each.
 
-    ``format="openai"`` (the default) writes the OpenAI chat-completions
-    wire row: the full ``messages`` list, ``function.arguments`` as a JSON
-    string, and the ask carried alongside as ``prompt``.
-
-    ``format="trl"`` writes what ``trl`` can actually load: conversational
-    SFT rows (``messages`` only, arguments as dicts, the ask under
-    ``prompt_text``). TRL decides "is this conversational?" from the
-    column set, so a ``prompt`` string beside ``messages`` makes it skip
-    the chat template without an error and train on the bare ask — which
-    is why the TRL rows do not carry one. The report says which format
-    and which argument encoding the round-trip gate checked.
+    ```python
+    report = wai.export_dataset(data, "train.jsonl", format="trl")
+    print(report["n"], report["tool_call_roundtrip"])
+    ```
     """
     if format not in EXPORT_FORMATS:
         raise ValueError(f"format must be one of {EXPORT_FORMATS}, got {format!r}")

@@ -23,9 +23,10 @@ import hashlib
 import json
 import logging
 import re
+import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -103,12 +104,14 @@ from ..generate.generator import (
     write_scene_brief,
 )
 from ..generate.scenarios import (
+    RULE_CAP,
     SEARCH_ARMS,
     complete_yields,
     intent_for_tool,
     keep_fault_plan,
     reallocate_search_arms,
     retarget_regions,
+    rule_axis,
 )
 from ..ingest.traces import (
     behavior_state,
@@ -218,6 +221,31 @@ def _stop_reason(side: str, message: str) -> str:
 
 
 log = logging.getLogger("whileai.simulations")
+
+
+def someone_listens(logger: logging.Logger = log) -> bool:
+    """Is any handler other than the library's ``NullHandler`` attached to
+    ``logger`` or an ancestor it propagates to? ``logging.basicConfig()``,
+    a caplog, a root ``StreamHandler``: any of them counts."""
+    current: logging.Logger | None = logger
+    while current is not None:
+        if any(not isinstance(h, logging.NullHandler) for h in current.handlers):
+            return True
+        if not current.propagate:
+            return False
+        current = current.parent
+    return False
+
+
+def _say(message: str) -> None:
+    """A progress line goes to the ``whileai.simulations`` logger at INFO.
+    When nothing is listening it also goes to stderr, so a script with no
+    logging setup can tell a working run from a stuck one (#400); attach
+    any handler (``logging.basicConfig()``) to take the stream over."""
+    log.info("%s", message)
+    if not someone_listens():
+        print(message, file=sys.stderr, flush=True)
+
 
 # Every number this module reads lives in ``whileai.simulations.defaults``
 # with the reason for its value; the per-run ones are ``advanced`` keys on
@@ -331,6 +359,31 @@ def _hit_length_cap(row: dict) -> bool:
     return is_truncated(row)
 
 
+HARD_TIERS = ("ambiguous", "boundary", "adversarial")
+
+
+def tier_mix_of(rows: Sequence[dict], requested: float) -> dict[str, Any]:
+    """The difficulty mixture a set of rows carries against the share
+    asked for: ``counts`` per tier, ``rows``, ``hard_share_requested``
+    and ``hard_share_realized`` (the share of rows from ``HARD_TIERS``).
+    One function so a single run and ``simulate(runs=N)`` (every run's
+    rows together) count the same way."""
+    counts: dict[str, int] = {}
+    for t in rows:
+        dims = t.get("scenario_dimensions")
+        tier = str(t.get("tier") or "") or behavior_tier(dims if isinstance(dims, dict) else {})
+        counts[tier] = counts.get(tier, 0) + 1
+    n = sum(counts.values())
+    hard = sum(counts.get(tier, 0) for tier in HARD_TIERS)
+    realized = hard / n if n else None
+    return {
+        "hard_share_requested": round(float(requested), 4),
+        "hard_share_realized": None if realized is None else round(realized, 4),
+        "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "rows": n,
+    }
+
+
 class Run:
     """One ``simulate()`` call: inputs, build, loop, finish."""
 
@@ -372,6 +425,7 @@ class Run:
         self._start_scene_thread()
         self._build_runner()
         self._build_generator()
+        self._note_rule_axis_cap()
         self._init_loop_state()
         self._seed_pool()
         if c.out_path is not None:
@@ -786,6 +840,28 @@ class Run:
                 parse_backend_spec(c.user_model)[1] if c.user_model else self.agent_model
             )
 
+    def _note_rule_axis_cap(self) -> None:
+        """Say, once per run, when the policy has more clauses than the
+        grid's rule axis holds: the rows cover the first ``RULE_CAP``
+        clauses and none of the rest, and nothing else in the run says so
+        (#391). A caller who set ``dimensions={"rule": [...]}`` chose the
+        axis, so the note is theirs to skip."""
+        dims = self.c.dimensions
+        if isinstance(dims, Mapping) and dims.get("rule"):
+            return
+        rules, total = rule_axis(self.policy, cap=RULE_CAP)
+        if total <= len(rules):
+            return
+        note = (
+            f"The policy has {total} clauses and the grid's rule axis holds {RULE_CAP} "
+            f"(RULE_AXIS_CAP_GRID; ZP_RULE_CAP overrides), so the rows cover the first "
+            f"{RULE_CAP} clauses in document order and none of the other {total - len(rules)}. "
+            "Pass dimensions={'rule': [...]} with the clauses that matter, or split the "
+            "policy and run each part."
+        )
+        self.data.warnings.append(note)
+        log.warning(note)
+
     def _build_generator(self) -> None:
         c = self.c
         self.generator = make_default_generator(
@@ -957,15 +1033,18 @@ class Run:
 
     def _writer_of(self, meta: dict) -> str:
         """The model tag that wrote one prompt. Rows a model did not write
-        say so: ``seed`` is the caller's own opener, ``pinned`` a replay from
-        ``tasks=``, ``template`` the built-in writer and its mutations."""
+        say so: ``seed`` is the caller's own opener, ``template`` the
+        built-in writer and its mutations. A replay from ``tasks=`` keeps
+        the writer of the run it replays (the prompt was written once, by
+        that model); ``lineage.replayed`` says it is a replay. ``pinned``
+        only when the source rows carried no writer at all."""
         origin = str(meta.get("generator") or "")
         if origin == "model":
             return self.writer_model
         if origin == "user":
             return "seed"
         if origin == "pinned":
-            return "pinned"
+            return str(meta.get("writer_model") or "pinned")
         return "template"
 
     def _build_row(self, job: tuple) -> dict:
@@ -1046,6 +1125,10 @@ class Run:
                 "system_prompt_sha": self.system_prompt_sha,
                 "system_prompt_head": self.system_prompt_head,
                 "system_prompt_chars": self.system_prompt_chars,
+                # A replay from tasks= keeps the original writer's name on
+                # writer_model (the situation was written once); this is
+                # where the fact that it is a replay lives.
+                **({"replayed": True} if meta.get("generator") == "pinned" else {}),
             },
             "seed": meta.get("seed", c.seed),
             "semantic_cluster": None if not semantic else selection.get("cluster"),
@@ -1207,6 +1290,10 @@ class Run:
         cov["fault_rate"] = float(c.fault_rate)
         cov["seed"] = int(c.seed)
         cov["runs"] = 1
+        # ``budget`` is the row cap of one Run. simulate(runs=N) repeats the
+        # Run N times with the same kwargs, so the cap applies per run and
+        # the rows returned are up to N x budget; the key says so.
+        cov["budget_per_run"] = int(c.cap)
         cov["strategy"] = c.resolved_strategy
         cov["time_budget"] = c.time_budget
         cov["reproducible"] = bool(c.reproducible)
@@ -1230,6 +1317,9 @@ class Run:
         # who did which job: the situation writer ("template" offline),
         # the agent's model (a callable agent's name), the simulated user
         cov["simulator"] = self.writer_model
+        # the same value under the name every row carries, so a reader who
+        # knows the row key finds it on the report too
+        cov["writer_model"] = self.writer_model
         cov["agent_model"] = c.model_version_tag
         cov["user_model"] = self.user_model
         cov["max_turns"] = c.max_turns
@@ -1449,6 +1539,8 @@ class Run:
             self.pinned_prompts.append(prompt)
             self.generated_pool.append(prompt)
             meta: dict[str, Any] = {"arm": task["arm"], "generator": "pinned", "seed": c.seed}
+            if task.get("writer_model"):
+                meta["writer_model"] = task["writer_model"]
             if task.get("scenario_id"):
                 meta["region_id"] = task["scenario_id"]
             if task.get("assignment"):
@@ -1617,9 +1709,7 @@ class Run:
         many = rows - self.progress_rows >= self.progress_every_rows
         if not (force or stale or many):
             return
-        log.info(
-            "%s", progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started)
-        )
+        _say(progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started))
         self.progress_rows, self.progress_at = rows, now
 
     def _note_writer_start(self) -> None:
@@ -1628,12 +1718,9 @@ class Run:
         if not self.progress_on:
             return
         if isinstance(self.simulator, str) and self.simulator not in ("hosted", "default"):
-            log.info(
-                "writing situations with %s; first rows in about a minute",
-                self.simulator,
-            )
+            _say(f"writing situations with {self.simulator}; first rows in about a minute")
             return
-        log.info("writing situations with the hosted writer; first rows in about a minute")
+        _say("writing situations with the hosted writer; first rows in about a minute")
 
     def _write_progress(self, payload: dict) -> None:
         Path(str(self.c.out_path) + ".progress.json").write_text(json.dumps(payload, default=str))
@@ -1981,6 +2068,18 @@ class Run:
             data.search["abandoned_writer_waves"] = len(still_writing)
             if "writer_waves_abandoned" not in data.degraded:
                 data.degraded.append("writer_waves_abandoned")
+                n = len(still_writing)
+                note = (
+                    f"{n} writer wave{'s were' if n != 1 else ' was'} still talking to the "
+                    f"writer model when the run stopped ({data.stopped_because}) and "
+                    f"{'were' if n != 1 else 'was'} abandoned after the {c.stop_grace_s:g}s "
+                    "stop grace; the situations it was writing were never rolled out and "
+                    "cost writer tokens. Raise advanced={'stop_grace': <seconds>} to wait "
+                    "for them, or lower advanced={'scenario_concurrency': <n>} so fewer "
+                    "waves are in flight when the run stops."
+                )
+                data.warnings.append(note)
+                log.warning(note)
         self.scenario_futs[:] = []
         for fut in [f for f in list(self.inflight) if f.done()]:
             job = self.inflight.pop(fut)
@@ -2061,7 +2160,8 @@ class Run:
                     and not c.unique_cards
                     and c.time_budget is None
                 )
-                if exhausted:
+                if exhausted or self._situations_complete():
+                    # nothing a new wave writes can be rolled out
                     refill = 0
                 elif low or pipeline < need:
                     refill = min(slots, max(0, c.writer_flight - len(self.scenario_futs)))
@@ -2384,6 +2484,16 @@ class Run:
         c = self.c
         data = self.data
         gen = self.generator
+        if not self.inflight and self._situations_complete():
+            # Every situation the run was asked for exists and has all
+            # its rollouts; a bigger budget cannot be met. Writer waves
+            # still in flight do not change that: the hosted writer kept
+            # this branch from firing (a wave was always in flight, so the
+            # loop waited on it, then launched another) and a runs=2 call
+            # at budget=192 wrote 1,900 situations it never rolled out.
+            # _settle_inflight cancels or drains the waves.
+            data.stopped_because = "situations_exhausted"
+            return "break"
         if self.inflight or self.scenario_futs:
             self.empty_streak = 0
             return "proceed"
@@ -2422,20 +2532,6 @@ class Run:
             self.empty_streak = 0
             note_stage(data, "situation cap lifted to fill lost rollouts")
             return "continue"
-        if (
-            c.n_situations_target
-            and len(self.used_situations) >= c.n_situations_target
-            and not self.inflight
-            and not self.scenario_futs
-            and self.cap_lifted["lost"] == 0
-            and all(self.prompt_rollouts.get(p, 0) >= c.repeat_count for p in self.used)
-        ):
-            # every situation the run was asked for exists and
-            # has all its rollouts; a bigger budget cannot be
-            # met, so stop and say so instead of spinning the
-            # writer until the clock
-            data.stopped_because = "situations_exhausted"
-            return "break"
         # Unique ingest may drop exact/near-dupe cards. That is
         # not a run stop: the writer can invent another situation.
         if (
@@ -3070,6 +3166,21 @@ class Run:
                 (prompt, dict(meta or {}), sel if isinstance(sel, dict) else {})
             )
 
+    def _situations_complete(self) -> bool:
+        """Every situation the run was asked for (``situations=N``) has
+        been drawn and every prompt drawn has all its rollouts, with no
+        lost rollout owed. Nothing the writer adds can be rolled out, so
+        the run stops launching waves and takes ``situations_exhausted``.
+        Under ``tasks=`` the pinned set is the target, not this."""
+        c = self.c
+        return bool(
+            c.n_situations_target
+            and not self.pinned_prompts
+            and len(self.used_situations) >= c.n_situations_target
+            and self.cap_lifted["lost"] == 0
+            and all(self.prompt_rollouts.get(p, 0) >= c.repeat_count for p in self.used)
+        )
+
     def _fresh_available(self) -> bool:
         """Can the run still open a new prompt? When it cannot, finishing
         a unanimous group costs nothing else."""
@@ -3245,6 +3356,19 @@ class Run:
             if "rollouts_lost" not in data.degraded:
                 data.degraded.append("rollouts_lost")
             data.warnings.append(note)
+            log.warning(note)
+        empty = int(self.lost_by.get("empty_reply", 0))
+        if not data.trajectories and empty and empty >= sum(self.lost_by.values()) * 0.9:
+            # Every rollout came back without a reply, so the run spent its
+            # budget on nothing. Name the cause and the one fix (#375).
+            self._all_replies_empty = True
+            note = (
+                f"no rows: the agent returned an empty reply on all {empty} rollouts; "
+                "return {'final_text': <what it said>, 'steps': [...]} from the agent "
+                "callable (or check the endpoint answers) and run again"
+            )
+            if note not in data.warnings:
+                data.warnings.append(note)
             log.warning(note)
         if self.agent_errors:
             # The callable raised (or returned nothing usable). The rows
@@ -3448,6 +3572,10 @@ class Run:
             )
         self._record_tier_mix()
         data.writer_model = self.writer_model
+        if not data.trajectories and getattr(self, "_all_replies_empty", False):
+            # Set last: earlier wrap-up names the writer, but the writer did
+            # its job; the agent never answered (#375).
+            data.stopped_because = "empty_replies"
         data.user_model = self.user_model
         # One model writing the exam, sitting it, and playing the examiner's
         # stand-in is the regime the rlhf-book warns about (ch. 12: a model
@@ -3534,20 +3662,10 @@ class Run:
         c = self.c
         data = self.data
         requested = HARD_SHARE if c.hard_share is None else float(c.hard_share)
-        counts: dict[str, int] = {}
-        for t in data.trajectories:
-            dims = t.get("scenario_dimensions")
-            tier = str(t.get("tier") or "") or behavior_tier(dims if isinstance(dims, dict) else {})
-            counts[tier] = counts.get(tier, 0) + 1
-        rows = sum(counts.values())
-        hard = sum(counts.get(tier, 0) for tier in ("ambiguous", "boundary", "adversarial"))
+        mix = tier_mix_of(data.trajectories, requested)
+        rows = int(mix["rows"])
+        hard = sum(mix["counts"].get(tier, 0) for tier in HARD_TIERS)
         realized = hard / rows if rows else None
-        mix: dict[str, Any] = {
-            "hard_share_requested": round(requested, 4),
-            "hard_share_realized": None if realized is None else round(realized, 4),
-            "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
-            "rows": rows,
-        }
         asked = c.hard_share is not None and rows >= c.knobs.tier_mix_min_rows
         if asked and realized is not None and requested - realized > c.knobs.tier_mix_tolerance:
             mix["note"] = (

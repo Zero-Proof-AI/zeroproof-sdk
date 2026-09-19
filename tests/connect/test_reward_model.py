@@ -23,6 +23,17 @@ class Host:
         self.threshold = threshold
 
     def __call__(self, method, path, api_key=None, body=None, **kw):
+        if method == "GET" and path.endswith("/profile"):
+            # every task has a pass and a fail: clean for a paired method
+            return {
+                "profile": {
+                    "rows": 160,
+                    "split": {"pass": 80, "fail": 80, "ungraded": 0},
+                    "tasks": 40,
+                    "tasks_with_repeats": 40,
+                    "mixed_tasks": 40,
+                }
+            }
         self.calls.append((method, path, body))
         if method == "POST" and path.endswith("/score"):
             scores = [

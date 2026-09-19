@@ -6,7 +6,7 @@ training, so what it needs from us is not rows but the three things a
 row came from: the task set, the world that answers tool calls, and the
 reward that grades the finished trajectory
 (rlhfbook.com/c/11-policy-gradients.html on on-policy sampling,
-rlhfbook.com/c/14-reasoning.html on multi-turn tool use with a single
+rlhfbook.com/c/07-reasoning on multi-turn tool use with a single
 end-of-trajectory reward). ``export_environment`` writes those three as an installable
 ``verifiers`` package, the shape Prime Intellect and TRL consume::
 
@@ -47,6 +47,7 @@ import importlib
 import json
 import re
 import statistics
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -73,7 +74,7 @@ DEFAULT_BAND = DIFFICULTY_BAND
 #: ``n_calls``, ``judge_ok``, ``truncated`` and ``trace_clean`` are logged at
 #: weight 0 as monitors. Training on a symptom of over-optimization turns
 #: it into a proxy the policy games (Gao et al., arXiv:2210.10760;
-#: rlhfbook.com/c/17-over-optimization.html lists the symptoms); the book
+#: rlhfbook.com/c/14-over-optimization lists the symptoms); the book
 #: does not prescribe weight-0 logging, that is this package's choice.
 RUBRIC_WEIGHTS = (1.0, 0.0, 0.0, 0.0, 0.0)
 #: The version an export claims when the package is not installed as a
@@ -114,21 +115,23 @@ def _ref_of(obj: Any) -> str:
         return obj
     module = getattr(obj, "__module__", None)
     qualname = getattr(obj, "__qualname__", None) or getattr(type(obj), "__qualname__", None)
+    if not isinstance(obj, type) and not callable(obj):
+        raise ValueError(f"{obj!r} is not callable")
+    # An instance (a Verifier) is referenced by the module-level name it is
+    # bound to. Its ``__module__`` is the SDK class's, not the caller's, so
+    # look where the caller would have bound it: the module of the function
+    # it wraps, then every loaded module (#374).
+    if not isinstance(obj, type) and not hasattr(obj, "__name__"):
+        bound = _bound_name(obj)
+        if bound:
+            return bound
     if not module or not qualname or "<locals>" in str(qualname) or module == "__main__":
         raise ValueError(
             "the reward and the world must be importable by name in the trainer "
             "process: pass 'module:attr' (or a module-level function or Verifier "
             "instance defined in an importable module), not a lambda or a local"
         )
-    if not isinstance(obj, type) and not callable(obj):
-        raise ValueError(f"{obj!r} is not callable")
-    # An instance (a Verifier) is referenced by its module-level name when it
-    # has one; otherwise by its class, which load_environment instantiates.
     if not isinstance(obj, type) and not hasattr(obj, "__name__"):
-        mod = importlib.import_module(module)
-        for name, value in vars(mod).items():
-            if value is obj:
-                return f"{module}:{name}"
         # No name to import it by, so the trainer would build a bare
         # instance. That is only the same object when this one carries no
         # configuration a bare one lacks: CodeExec(tests=...) written inline
@@ -147,6 +150,47 @@ def _ref_of(obj: Any) -> str:
             )
         return f"{module}:{cls.__qualname__}"
     return f"{module}:{qualname}"
+
+
+def _bound_name(obj: Any) -> str | None:
+    """``module:name`` where a module binds ``obj`` at top level, or None.
+
+    Tries the module of the function the instance wraps first, then every
+    loaded module outside this package. A binding in ``__main__`` is named
+    by the script's file stem, which the trainer process imports when the
+    script's directory is on its path; the name is what a trainer would
+    write by hand anyway.
+    """
+    wrapped = None
+    for attr in ("_fn", "fn", "func", "__wrapped__"):
+        wrapped = getattr(obj, attr, None)
+        if wrapped is not None:
+            break
+    candidates: list[str] = []
+    if wrapped is not None and getattr(wrapped, "__module__", None):
+        candidates.append(str(wrapped.__module__))
+    candidates.extend(
+        name
+        for name in list(sys.modules)
+        if name not in candidates and not name.startswith(("whileai", "_", "importlib"))
+    )
+    for mod_name in candidates:
+        mod = sys.modules.get(mod_name)
+        if mod is None:
+            continue
+        try:
+            names = vars(mod)
+        except TypeError:
+            continue
+        for name, value in list(names.items()):
+            if value is obj and not name.startswith("_"):
+                if mod_name == "__main__":
+                    file = getattr(mod, "__file__", None)
+                    if not file:
+                        return None
+                    return f"{Path(file).stem}:{name}"
+                return f"{mod_name}:{name}"
+    return None
 
 
 def resolve_ref(ref: str) -> Any:
@@ -213,7 +257,7 @@ def build_tasks(
     When a prompt has two or more graded rollouts its solve rate is known
     (partial credit counts as it is) and, with ``band``, prompts the policy
     always or never solved are dropped: they carry no advantage
-    (rlhfbook.com/c/14-reasoning.html, difficulty filtering at 20 to 80
+    (rlhfbook.com/c/07-reasoning, difficulty filtering at 20 to 80
     percent; DAPO's dynamic sampling drops accuracy 0 and 1,
     arXiv:2503.14476). Ungraded prompts and single
     rollouts are kept as they are. ``holdout`` is a fraction, split by
@@ -452,25 +496,55 @@ def export_environment(
     ngram: int = ENV_DECONTAMINATION_NGRAM,
     world: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write ``source`` as an installable verifiers environment under ``out``.
+    """Write graded rows as an installable verifiers environment for an on-policy trainer.
 
-    ``source`` is a ``SimulationData`` (system prompt and tools come from
-    its profile), a row list, or a JSONL path; graded rows get the
-    difficulty band, ungraded rows are exported as they are. ``reward``
-    is a ``Verifier``, a judge callable honoring the SDK judge contract,
-    or ``'module:attr'``; it must be importable in the trainer process.
-    With no reward the conduct grade is used and the report warns: it is
-    a process reward, and a policy trained on it alone learns to call
-    nothing (see recipes/03-select/prime-intellect-rl). ``execute`` names a live
-    world ``(tool, arguments) -> result``; without it the SDK's mock
-    world answers, seeded per task so every rollout of a task sees the
-    same world. ``world`` is a dict of the mock world's dials
-    (``WorldOptions`` fields: ``search_hits``, ``exists_share``,
-    ``default_fault_mode``, name pools, ...); it is written into
-    ``spec.json`` and the trainer's world is built from it, so the world a
-    policy trains against is the one the export says. ``ngram`` is the
-    train-vs-holdout decontamination size. Returns the report; the same
-    text is the package README.
+    Reach for it when the next step is RL in a trainer that speaks
+    verifiers (prime-rl and the like) and needs the tasks, the world and
+    the reward as one package. It writes the package under ``out`` and
+    returns the report, which is also the package README: ``path``,
+    ``prompts``, ``tasks``, ``train`` and ``holdout`` counts,
+    ``graded_prompts``, ``band``, ``band_dropped``, ``graded_mixed``
+    (prompts the policy both solved and failed, the ones with an
+    advantage) and ``decontamination``.
+
+    * ``source``: a ``SimulationData`` (system prompt and tools come from
+      its profile), a row list, or a JSONL path; graded rows get the
+      difficulty band, ungraded rows are exported as they are. For a list
+      or path pass ``system_prompt`` and ``tools``.
+    * ``reward``: a ``Verifier``, a judge callable honoring the SDK judge
+      contract, or ``'module:attr'``; it must be importable in the trainer
+      process. A ``@verifier`` or ``All([...])`` bound to a name in your
+      own module is referenced by that name (a script run as ``__main__``
+      by its file stem, so keep that directory on the trainer's path).
+      With no reward the conduct grade is used and the report warns: it
+      is a process reward, and a policy trained on it alone learns to
+      call nothing (see recipes/03-select/prime-intellect-rl).
+    * ``execute``: a live world ``(tool, arguments) -> result``; without
+      it the SDK's mock world answers, seeded per task so every rollout
+      of a task sees the same world.
+    * ``world``: the mock world's dials as a dict (``WorldOptions``
+      fields: ``search_hits``, ``exists_share``, ``default_fault_mode``,
+      name pools, ...). It is written into ``spec.json`` and the trainer's
+      world is built from it, so the world a policy trains against is the
+      one the export says.
+    * ``holdout`` (0.2): the share of tasks held out, split by scenario id
+      (or the prompt) so a task is wholly on one side, or an explicit
+      list of holdout prompts.
+    * ``band`` (``(0.2, 0.8)``): the pass-rate band a graded prompt must
+      sit in; prompts the policy always or never solved carry no
+      advantage and are dropped (rlhf-book ch. 7, difficulty filtering at
+      20 to 80 percent; DAPO's dynamic sampling, arXiv:2503.14476).
+      ``None`` keeps them all.
+    * ``ngram`` (8): the train-versus-holdout decontamination size, the
+      overlap rlhf-book ch. 16 found its contaminations with.
+    * ``name``, ``description``, ``max_turns``: the package name, its
+      README line, and the rollout turn cap (the SDK default when
+      ``None``).
+
+    ```python
+    report = wai.export_environment(data, "envs/refunds", reward=my_verifier)
+    print(report["train"], report["holdout"], report["path"])
+    ```
     """
     from .world.sandbox import WorldOptions
 
@@ -730,7 +804,7 @@ def _make_env_class() -> type:
             """1.0 when none of the SDK's trace flags fired (fabricated test
             claims, phantom edits, test tampering, ...). Logged, not
             trained on: a monitor for over-optimization symptoms
-            (rlhfbook.com/c/17-over-optimization.html)."""
+            (rlhfbook.com/c/14-over-optimization)."""
             from .score.trace import trace_flags
 
             row = _row_from_state(state, state.get("zp_info") or {})

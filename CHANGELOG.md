@@ -3,6 +3,362 @@
 Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 `pip install zeroproof==0.4` is the `0.04` line below.
 
+## Unreleased
+
+- Reports print themselves, step two of the style migration
+  (`docs/reference/style.md` rule 5). `judge_trust`, `hack_scan`,
+  `compare` (`delta_report`) and `leak_report` return a `Report`: still
+  the dict they always were, so every key, `.get`, `json.dumps` and `==`
+  against a plain dict read the same, but `print(report)` is now the
+  block instead of a dict literal. The `format_*` twins are unchanged and
+  still take a dict. `PassAt` gained `_repr_html_` so it renders in a
+  notebook. The ratchet gained two pins: the size of the `whileai`
+  front door (29) and the number of front-door calls still returning a
+  bare dict or tuple (3: `decontaminate`, `export`, `preflight`).
+- Docs design: `docs/reference/design.md` is the standard for how the docs
+  look (five principles tied to the constitution, the Tutorial, Concept,
+  Reference and API page templates, how a measurement and a signature are
+  presented, what never appears), with an appendix of prose issues and a
+  review of withwhile.com against the same rules. The theme follows it:
+  ink dark background, Inter 600 headings, JetBrains Mono code with
+  tabular figures (`docs/style.css`), `vitesse-dark` code blocks in both
+  modes to match the site, breadcrumbs, last-modified timestamps, a footer
+  with the library, reference and project links, and agent instructions on
+  every page served as markdown. The API generator now prefixes classes
+  with `class`, links each name to the file that defines it, marks names
+  with no docstring, stops cutting first sentences at "ch.", and no longer
+  repeats the page description in the body. The index opens with the
+  offline program and the line it prints; the style page gains frontmatter.
+- README badges are all live. Coverage is the number CI measured on the last
+  green main, published to the `badges` branch by `.github/scripts/badge.py`
+  and rendered through a shields endpoint; the version badge reads the
+  release tag, which shields refreshes in five minutes where its PyPI badge
+  lagged by twelve hours; the license badge reads the repo.
+
+## 0.83 (2026-09-19)
+
+- Docs: the site now says what `CONSTITUTION.md` says. The Mintlify
+  description and the landing page lead with the post-training library,
+  not with training data for tool-calling agents; the landing page has a
+  card for `recipes/papers/` and one for training on your own GPU; the
+  Guides sidebar runs in loop order (simulate, measure, select); five
+  guides gained the "what to run next" recipe line the page contract asks
+  for; and the platform reference and the docs nav no longer send readers
+  to `zeroproofai.com` paths that 404.
+- `CONSTITUTION.md`: what the library is, the eight things we believe
+  (repeatable science, replicated papers as proof, sourced defaults, bring
+  your own keys, ergonomics as the product, plain words then mechanism
+  then proof, mass experimentation, never big-bang) and where each is
+  enforced. Linked from CLAUDE.md, CONTRIBUTING.md, README and the style
+  guide. Paper recipes gain `post.md`: the verified result as a post under
+  280 characters, the metric with its interval and the links.
+- Docs: the constitution is a page under Concepts on the docs site, and the
+  README's Documentation section links `CONSTITUTION.md`.
+- The front door, step one of the style migration (`docs/reference/style.md`).
+  `import whileai as wai` is now the library: `simulate`, `Judge`, `select`,
+  `pass_at`, `judge_trust`, `compare`, `decontaminate`, `hack_scan`,
+  `preflight`, `export`, `verify`, all loaded on first use so the import
+  stays under 200 ms and never touches the network. Everything that talks
+  to withwhile.com is one namespace, `whileai.platform`: `login`, `push`,
+  `pull`, `datasets`, `train`, `serve`, `models`, `track`. The old
+  top-level names (`send_traces`, `login`, ...) still import.
+- Where a model string and a key go, answered by an object: `wai.OpenAI`,
+  `wai.Anthropic`, `wai.Endpoint(url=)`, `wai.Ollama`, `wai.Hosted`. Each
+  prints the model and which key it uses. `wai.configure(agent=, judge=,
+  simulator=, api_key=)` sets the process once; `with wai.context(...)`
+  overrides inside a block; a keyword on the call still wins; the
+  environment is read only after all three. `print(wai.settings)` says
+  what each role resolves to. A key given on a backend is kept for that
+  provider (`resolve_completion_key`, `resolve_api_key` read settings first).
+- `wai.Judge(rubric=, model=)`: the LLM judge as an object. Callable under
+  the judge contract, so it drops into `data.grade`, `run_judge`,
+  `evaluate` and `judge_trust`; a `Rubric` object is scored item by item.
+- `Selection`: `optimize` as an object. `scored.select(mode="rl")`,
+  `data.select(mode=)` and `wai.select(...)` return a list of rows that
+  also carries `.report`, prints what each gate dropped and why, and has
+  `.export(path)` and `.push(name)` with the run's system prompt and tools
+  already filled in. `data.select()` with no mode keeps its old SFT
+  behaviour and now returns a `Selection` (still a list).
+- README and the getting-started docs open with the new program.
+- Getting started, from a tester who got lost: the README now opens with
+  "Your model, your key" (the model as a spec string, the environment
+  variable each provider reads, where requests go, and the three things
+  that reach While only when asked), says the library runs on your keys
+  and the platform is separate and optional, and moves the platform
+  section under that heading. Docs gain `get-started/your-model-and-key`
+  (second in the nav, a card on the index, a note on the quickstart).
+- Docs: two tabs, Library and Platform, with a platform overview page that
+  draws the line between the offline package and the hosted service; the
+  API reference is its own tab. "Your model and your key" gains the While
+  key's resolution order and the argument each of the three model strings
+  (agent, writer, judge) goes in.
+- `coverage_gap` and `preflight` check every clause of the system prompt.
+  Both built their rule axis with the generation grid's cap, the first 16
+  clauses in document order, and said nothing, so a 68 KB production
+  policy with about 160 imperative clauses read as "14 of 16 policy rules
+  covered" with `Read it.` and `Follow it.` on the axis and every rule
+  further down never checked (#391). A report over an existing suite has
+  no grid to bound: the default is now every clause (`rule_cap=None`,
+  `defaults.RULE_AXIS_CAP_REPORT`). `rule_cap=` on either call sets a
+  number; the report then carries `n_rules_total`, `rules_truncated` and
+  `rule_cap`, the summary reads "16 of 16 policy rules (of 163 in the
+  prompt)", and a `warnings` (`preflight`) or `notes` (`coverage_gap`)
+  line says how many clauses were left off and how to widen the axis.
+  The grid keeps its cap under its own name (`defaults.RULE_AXIS_CAP_GRID`,
+  16, `ZP_RULE_CAP` overrides), and a run whose policy has more clauses
+  than that says so once in `data.warnings` with the count.
+  `policy_sections(cap=None)` returns every clause; `rule_axis(policy,
+  cap=)` returns the axis and the total.
+- Coding standard. `docs/reference/style.md` sets the ergonomics every
+  public name is held to, copied from PyTorch and DSPy: one import
+  (`import whileai as wai`), objects carry configuration and calls carry
+  data, at most eight parameters on a public call, one rows object
+  through every stage, reports that print themselves instead of
+  `format_*` twins, verbs a scientist says, settings once with per-call
+  override. The page ends with the target front-page program and the
+  migration order. `tests/api/test_style_ratchet.py` pins today's
+  counts of the retired shapes (212 flat exports, 13 `format_*`, the
+  calls over eight parameters) and fails a PR that raises any of them.
+  CLAUDE.md and CONTRIBUTING.md point at it.
+- `train` reads the set's profile before the GPU is spent (#396, #397).
+  `method="sft"` on a set with failing rows is refused with
+  `TrainingSelectionError`: the hosted trainer clones every row, so the
+  model learns the failure (#396 measured it: tool use 0.99 -> 0.49 on a
+  set that was 86% failures), and rejection sampling keeps the passes
+  (rlhf-book ch. 10). The message names the counts (all 84 rows, 72 of
+  which fail), the fix (`scored.passes()`) and the knob (`check="warn"`
+  trains on them anyway). A grouped method (`grpo`, `dpo`, `rm`) with no
+  task that has both a pass and a fail is refused the same way, since a
+  unanimous group carries no advantage (rlhf-book ch. 11, DAPO); fewer
+  than `min_mixed_tasks` (`TRAIN_MIN_MIXED_TASKS`, 32) or any dropped
+  class is a warning naming the count used against the count given, the
+  reason per dropped class (tasks all pass, all fail, one rollout, rows
+  ungraded), how many passes `steps` makes over the survivors, and that
+  `profile(ds)["mixed_tasks"]` is the number to size the set by (#397
+  trained on 6 of 84 rows, 3.3 passes, grad_norm 0, and said nothing).
+  `check="off"` skips the read; an unreadable profile is said and does
+  not stop the run. `selection_report(profile, method=)` is the pure
+  function behind it and lands on `run.selection`. The `train` docstring
+  now says what each method trains on and that hosted GRPO's reward is
+  the trainer's own.
+- Docs audit, three pages against 0.82. `concepts/engine.mdx` named
+  `persona` as a coverage axis and left out `stance`; the six are `tool`,
+  `rule`, `stance`, `world_state`, `tool_condition` and `history`
+  (`COVERAGE_AXES`). The same page twice said every row keeps temperature
+  and per-token logprobs, which needs `logprobs=True` on a model backend.
+  `concepts/faq.mdx` promised endpoints for Llama and Nemotron, but an
+  adapter is servable only on `SERVED_BASES` (`Qwen/Qwen3-4B`,
+  `microsoft/phi-4`), and said the SDK drafts the policy from your
+  sentence, when the sentence is the policy and `draft_tools` drafts the
+  tools. `character-training.md` was accurate; its two quoted outputs
+  re-run byte-identical and its dataset splits still measure 60/144/35.
+- `holdout_size(effect, before=rows)` on a saturated baseline no longer
+  answers `n_tasks=2`. Rows whose tasks all pass gave `p = 1`, a binomial
+  variance of 0 and the sizing formula's floor, with no warning; a golden
+  set at pass@1 = 1.00 was told two tasks prove a 5-point gain (#392).
+  When the measured base is at or above `CEILING_PASS_RATE` (0.9, now in
+  `defaults.py`, the same share `delta_report` flags as `ceiling`;
+  `ceiling_pass_rate=` is the knob) or the measured paired sd is 0, the
+  rows are not used: `n_tasks` is the binomial model's answer at
+  `BASE_PASS_RATE` with the rows' k, `saturated` is `True`, and a new
+  `warnings` key names the ceiling and the fix (harder situations so the
+  baseline sits inside the 20-80% difficulty band, rlhfbook.com ch. 14;
+  DAPO drops prompts at accuracy 0 and 1 for the same reason). Every path
+  now returns `saturated` and `warnings`.
+- The rubric judge is told which tools were called instead of being asked
+  to notice which were not (#346). The judge payload carries
+  `tools_called` (the tool of every step that returned a result, in
+  order) and `tools_not_called` (declared tools with no such step) in its
+  head, where a long trajectory's cut cannot reach them, and
+  `RUBRIC_JUDGE_SYSTEM` says a reply that announces a call it never made
+  has not made it. On #346's billing agent the hosted 4B judge passed 18
+  of 18 rows whose reply said "I will escalate this" over a `steps` array
+  with no `escalate_to_human` in it, and spelling the rule out in the
+  criterion did not move that; the list is the fact it needed.
+  `grade_llm.tools_called(row)` is the helper. `rubric_judge`'s docstring
+  says both this and that a rubric of principles returns fractions.
+- `judge_trust` no longer prints `PASS` on the rows the judge was sure
+  about (#345). `judge_agreement` counts exact 0/1 rewards only, so a
+  `Rubric` of principles (the mean of its criteria) dropped every
+  partially met row, and 80 labeled rows read `PASS, agreement 100%,
+  n=40` with `ok` true. The report now carries `skipped` (labeled rows
+  with a fractional reward, the share, the floor); over
+  `max_skipped_share` (`MAX_SKIPPED_SHARE`, 0.10) `ok` is false, the
+  warning names the count, the floor constant and the fix
+  (`Criterion(kind="hard")`), and `format_judge_trust` prints
+  `INCONCLUSIVE: 40 of 80 labeled rows skipped (50%, over
+  MAX_SKIPPED_SHARE 10%); usable n=40` in place of the verdict. Under the
+  floor the count is still said next to `n`.
+- `data.grade(spec="typesafe:jev-latest")` is a call that works. The
+  `typesafe:` refusal, the README and the docs all named it, and `grade`
+  only knew the keyword as `llm_spec`, so following the message raised
+  `TypeError` (#422). `spec=` is now the keyword on `grade` as on
+  `grade_llm`, `pairwise_judge` and `rubric_judge`; `llm_spec=` still works.
+- `dataset_report("ds_...")` raises `TypeError` naming the fix
+  (`wai.dataset_report(wai.pull("ds_..."))`) instead of reading the id as
+  a sequence of characters and returning an all-zero report (#398); a
+  sequence with no row dicts in it raises the same way.
+- `push_rows` and `push_file` size the upload timeout to the payload:
+  `PLATFORM_PUT_TIMEOUT_S` (120) plus `PLATFORM_PUT_S_PER_MB` (4) per
+  megabyte, so a 117 MB eval set gets about ten minutes where the flat
+  two-minute cap made it die with `The write operation timed out` (#386).
+  `push_rows(timeout=)` overrides, and the failure names the size, the
+  cap and the two fixes. The half-created dataset record is still left
+  behind on a failed upload; `datasets()` lists it.
+- `simulate` progress lines reach stderr when no logging handler is
+  attached, so a script with no logging setup can tell a working run from
+  a stuck one instead of seeing nothing for the whole run (#400). The lines
+  still go to the `whileai.simulations` logger at INFO, and any handler
+  (`logging.basicConfig()`, a caplog) takes the stream over;
+  `engine.someone_listens()` is the check.
+- `push_rows(holdout=0.2, publish=True)`: the row-level push, and so
+  `scored.push`, take the same `holdout=` and `publish=` as
+  `SimulationData.push`, which gives a graded RL set a route to a linked
+  holdout (#408). The by-task split is `ingest.platform.split_holdout`,
+  one function for both entry points.
+- `post.md` for the four existing paper recipes (filter-metric moved; adaptive-clip,
+  endpoint-sft and gmts-token-select flat), each under 280 characters, numbers copied
+  from their Result tables.
+- `@wai.tool`: a typed Python function is the tool. The signature is the
+  schema, the docstring the description, `Annotated[T, "note"]` or an
+  `Args:` block the parameter notes; a default makes a parameter
+  optional. `simulate(tools=)` and `seeded_agent(tools)` take decorated
+  functions, plain functions and raw schema dicts in one list;
+  `wai.Tool.dispatch([...])` is an `execute=` that runs the bodies. The
+  README and the getting-started pages no longer show a hand-written
+  schema.
+
+
+## 0.82 (2026-09-18)
+
+- Releases are cut by one command, `gh workflow run release.yml`, which
+  runs `.github/scripts/release.py` on main under a concurrency group:
+  next hundredth, both pyprojects, `uv lock`, and a fresh `## Unreleased`
+  header above the version just cut. That header is the fix for today's
+  collisions, where a PR merged a minute after a cut filed its entry under
+  a version that had already shipped without it. CI now refuses a PR that
+  bumps the version alongside code, or drops the header. CLAUDE.md and
+  CONTRIBUTING.md carry the rule.
+
+## 0.81 (2026-09-18)
+
+- `export_environment(reward=<verifier>)` finds the name your module bound
+  the verifier to, so a `@wai.verifier` or `All([...])` in your own file
+  works as an object (#374). `delta_report` no longer calls two offline
+  arms (seed, template, replay) not comparable; `simulate(seeds=, runs=N)`
+  replays the drawn task set instead of raising; an agent that returns an
+  empty reply on every rollout stops with `stopped_because="empty_replies"`
+  and a warning that names the fix (#375).
+
+## 0.80 (2026-09-18)
+
+- The reasoning cites in `whileai/simulations/` (`defaults.py`,
+  `environment.py`, `generate/diversity.py`, `score/optimize.py`) and the
+  `environment` and `what-to-run` docs pages point at
+  `rlhfbook.com/c/07-reasoning`; the old link named chapter 14
+  (over-optimization) and the `.html` form the site now redirects.
+
+## 0.79 (2026-09-18)
+
+- `typesafe:<model>` is a judge backend spec: TypeSafe's Jev, a decision
+  model that answers typed questions with a probability each and writes
+  no text. `data.grade(spec="typesafe:jev-latest")` sends the judge the
+  same evidence and rubric as state and asks two questions: did the
+  agent do what it should (a yes/no, answered as a probability) and, if
+  not, which failure class (a choice over the `FAILURE_CLASSES`
+  vocabulary). The reward is the more probable outcome; every graded
+  row's `judge_meta` carries `confidence`; a probability within
+  `DECISION_UNSURE_BAND` (0.1) of even marks the row `unsure` and the
+  report counts them; a failing row's `failure_class` is the judge's own
+  choice instead of a regex over its sentence. The audit
+  (`audit_grades`, asked blind), `pairwise_judge` (A / B / tie as one
+  choice), `rubric_judge` (one yes/no per item) and the advisory
+  `llm_grade` (a three-level score) take the same spec, and
+  `judge_version` folds the questions in beside the prompt. The key is
+  `TYPESAFE_API_KEY` (`WHILEAI_TYPESAFE_API_KEY` overrides it,
+  `TYPESAFE_BASE_URL` points at a gateway); the warm-up is
+  `GET /v1/models`, so a bad key fails once, before the fan-out;
+  `DECISION_TIMEOUT_S` (30 s) is the request timeout. `agent=`,
+  `simulator=` and `user_model=` refuse the spec with the fix named, and
+  so does `complete()`. Built offline against `typesafe-sdk` 0.7's
+  request and response shapes; Jev is waitlisted early access and no
+  call here has run against the live API yet.
+
+- `delta_report` warnings, the `trace_clean` rubric docstring and the
+  `MONITOR_LENGTH_PCT` / `RUBRIC_WEIGHTS` notes cite
+  `rlhfbook.com/c/14-over-optimization`; the old link named chapter 17
+  (the product chapter) and the `.html` form the site now redirects.
+
+## 0.78 (2026-09-18)
+
+- `whileai agents | agent <id> | runs <id> | verdict <id> | promote <id> <v> |
+  keys | live <id> ...`: the platform objects a coding agent manages from a
+  terminal, each a thin call into `whileai.platform`, `--json` on every one.
+  `whileai purge` (ZeroProof traces and datasets) is removed.
+
+## 0.77 (2026-09-18)
+
+- `ty` type-checks the package in CI beside mypy (`uv run ty check`,
+  under a second cold, where mypy takes about six). mypy stays the gate
+  until ty reaches 1.0; the ty config mirrors the mypy block. Its first
+  pass tightened six `None` paths that mypy had missed or that carried a
+  `type: ignore`: the patience table in `agents.py`, the reward list and
+  integrity floor in `hack_scan.py`, the audit-reason join in
+  `grade_llm.py`, the calibration report in `optimize.py`, and the
+  packaged schema path in `schema.py`.
+
+
+## 0.76 (2026-09-18)
+
+- A `run_std` handed to `delta_report` carries where it came from.
+  `delta_report(run_std=x)` read `x` as the eval's exact spread and used
+  1.96, but every paper recipe hands in a `run_std` estimated from three
+  base re-runs, and at two degrees of freedom the 1.96 band passes about
+  19% of pure-noise deltas, not 5%. `run_std_runs=` (the `n_runs` the
+  floor came from) makes `noise_band` use the two-sided t quantile at
+  `runs - 1` (4.30 from three re-runs, 2.26 from ten); the report carries
+  `run_std_runs` and `run_std_df`, and `noise_rule` and
+  `format_delta_report` say which quantile applied. A bare `run_std=`
+  keeps 1.96 and warns with the fix. `recipes/papers/check.py` mirrors it:
+  `checks.run_std_runs` is required in every `results.json`, and "moved"
+  is held to the t band. filter-metric's base was re-evaluated ten times
+  (run_std 0.0169 from 3 runs -> see its README); the verdict is re-read
+  against the honest band there (rlhf-book ch. 16, appendix C).
+- A hosted run with `situations=N` stops when every situation has its
+  rollouts. The `situations_exhausted` stop required no writer wave in
+  flight, and the hosted writer always had one (each wave that landed
+  started another), so `simulate(situations=24, repeats=4, runs=2,
+  budget=192)` sat at 96 rows for ten minutes and wrote 1,900 situations
+  it never rolled out. The run now stops launching waves once the
+  situations are complete and takes the stop with waves still running
+  (`stop_grace` drains them). `budget` is a per-run cap under `runs=N`;
+  the docstring, README and `report()["budget_per_run"]` say so.
+- Replayed rows keep their writer. `runs=N` and `tasks=` stamped
+  `writer_model="pinned"` on the replays, so `delta_report` on two runs of
+  one call failed with `NOT COMPARABLE: writer_model` and told the user to
+  pin `simulator=`. A replay now carries the writer of the run it replays
+  (the situation was written once), with `lineage.replayed` and, under
+  `runs=`, `lineage.replayed_from_run`; rows saved by 0.75 with `pinned`
+  compare as no writer instead of as a model name.
+- `writer_waves_abandoned` in `data.degraded` comes with a `warnings`
+  line: how many waves, the stop reason, the grace they were given, and
+  the knobs (`stop_grace`, `scenario_concurrency`). Under `runs=N` the
+  warnings of every run are gathered, as `degraded` already was.
+- Two arms that drew different situation sets are not a delta.
+  `delta_report` adds `situations` to `not_comparable` when fewer than
+  half the tasks are on both sides (a `hard_share=0.4` baseline against
+  `hard_share=0.8` paired 7 of 41 and read `-0.143` under `PASS`), and
+  the warning says to pin `tasks=` from the baseline or compare per tier
+  with `dataset_report`. `format_delta_report` prints the verdict it
+  reached on its first line (`report["headline_verdict"]`): `PASS` only
+  for a gain (`moved`, `moved_unreplicated`), `NO DIFFERENCE` for an
+  interval over zero, `FAIL` for a regression, `NOT COMPARABLE (causes)`
+  when the arms cannot be compared.
+- `search["tier_mix"]` under `runs=N` counted run 0 only (96 of 192
+  rows). It now counts every run's rows and lists `per_run`.
+- `report()["writer_model"]` is on the record next to `simulator` (the
+  same value, under the name every row carries).
+
 ## 0.75 (2026-09-18)
 
 - `data.report()` is the whole experiment record. `hard_share` and

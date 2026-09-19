@@ -117,8 +117,9 @@ prompts for it, or use a teacher for the chosen side.
 "Evaluation": keep train and held-out apart, and expect the same setup to move
 between runs. `wai.decontaminate` confirms no training prompt covers a held-out
 one. Three re-runs of the untrained student give `run_std` per metric; that
-mapping goes to `delta_report(run_std=)` and, in points, to
-`Behavior(noise_floor=)`.
+mapping goes to `delta_report(run_std=, run_std_runs=)`, so the band uses the
+t quantile at `n_runs - 1` (the floor is an estimate, not the spread), and, in
+points, to `Behavior(noise_floor=)`.
 
 ```python
 before = wai.stamp_spec(grade(sample_rows(held_tasks), spec), spec)
@@ -174,6 +175,7 @@ delta = wai.delta_report(
     target="marker:trait",
     must_not_regress=["on_task", "no_filler"],
     run_std=noise["run_std_by_metric"],
+    run_std_runs=noise["n_runs"],
 )
 print(wai.format_delta_report(delta))
 assert delta["ok"], f"a guarded metric slipped; do not ship v1: {delta.get('warnings')}"

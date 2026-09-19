@@ -175,8 +175,10 @@ def stored_api_key() -> str | None:
 
 
 def resolve_api_key(explicit: str | None = None) -> str | None:
-    """``explicit`` > ``WHILEAI_API_KEY`` > the saved credentials file."""
-    return explicit or getenv("API_KEY") or stored_api_key()
+    """``explicit`` > ``wai.configure(api_key=)`` > ``WHILEAI_API_KEY`` > the saved credentials file."""
+    from .config import current
+
+    return explicit or current().api_key or getenv("API_KEY") or stored_api_key()
 
 
 def _post(path: str, body: dict, timeout: int = 30) -> tuple[int, dict]:

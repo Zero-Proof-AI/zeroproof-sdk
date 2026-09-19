@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from ..generate.agents import complete, parse_backend_spec
+from ..generate.typesafe_backend import is_typesafe_url
+from . import decision_judge
 from .grade_llm import (
     JUDGE_TEMPERATURE,
     _render_payload,
@@ -299,7 +301,7 @@ def attach_rubric(
         if not isinstance(row, dict):
             continue
         out.append(row)
-        chosen = rubric(row) if callable(rubric) else rubric
+        chosen: Any = rubric(row) if callable(rubric) else rubric
         if chosen is None:
             continue
         if not isinstance(chosen, Rubric):
@@ -323,7 +325,13 @@ RUBRIC_JUDGE_SYSTEM = (
     "For every rubric item decide true or false: a hard rule or principle is "
     "true when the reply meets it; a pitfall is true when the reply exhibits "
     "the mistake. Judge only what the record shows; a claim the tools did not "
-    "return does not meet anything. The length of the reply must not influence "
+    "return does not meet anything. tools_called lists the tools the agent "
+    "actually ran (each has a step with a result); tools_not_called lists the "
+    "tools it could have run and did not. Text in final_text or in a step "
+    "saying the agent will call, is calling, or has called a tool is not a "
+    "call: an item about a tool being used is met only when that tool is in "
+    "tools_called, and an item about a tool being avoided is met only when it "
+    "is in tools_not_called. The length of the reply must not influence "
     "any item. Answer every item, keyed by its number. Reply with one JSON "
     'object and nothing else: {"criteria": {"1": true | false, "2": ..., ...}, '
     '"reason": "<one sentence>"}.'
@@ -386,6 +394,23 @@ def rubric_judge(
     ``rubric_version`` and the score breakdown. The judge's name folds the
     rubric version in when one is fixed.
 
+    Two things about the verdict worth knowing before it is trusted. A
+    rubric of plain principles scores the *mean* of its criteria, so three
+    principles return 0, 1/3, 2/3 or 1, and ``judge_agreement`` /
+    ``judge_trust`` count exact 0/1 rewards only: every partially met row
+    is skipped, and the agreement number is read off the rows the judge
+    was sure about (#345). Give each ``Criterion`` ``kind="hard"`` for a
+    0/1 verdict (``Rubric.score``), or accept that ``judge_trust`` reports
+    the skipped share and pulls ``ok`` when it passes
+    ``MAX_SKIPPED_SHARE``. And whether a tool was *called* is handed to
+    the judge as a fact, not left for it to infer: the payload carries
+    ``tools_called`` (steps that returned a result) and
+    ``tools_not_called``, and the system prompt says a reply that
+    announces a call it never made has not made it (#346: without the
+    list, a 4B judge passed 18 of 18 announced-but-never-made
+    escalations). A criterion that must be exact belongs in a
+    ``grader=`` that reads ``steps`` itself.
+
     The hosted judge scales to zero, so the first row through warms it once
     (``warm_judge``, a 600s budget) while the rest of the fan-out waits.
     Without that, ``run_judge``'s eight concurrent calls all raced a
@@ -411,27 +436,34 @@ def rubric_judge(
         use = rubric or rubric_of(row)
         if use is None:
             return {"reward": None, "reason": "no rubric on the row", "rubric_version": None}
-        user = json.dumps(
-            {
-                "rubric": use.checklist(),
-                "reply": json.loads(_render_payload(row, policy=policy, tools=tools)),
-            },
-            default=str,
-        )
+        record = json.loads(_render_payload(row, policy=policy, tools=tools))
+        user = json.dumps({"rubric": use.checklist(), "reply": record}, default=str)
         ensure_warm()
         try:
-            reply = complete(
-                url,
-                model,
-                [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                api_key=api_key,
-                temperature=JUDGE_TEMPERATURE,
-                max_tokens=RUBRIC_JUDGE_MAX_TOKENS,
-                timeout=timeout,
-            )
+            if is_typesafe_url(url):
+                # one yes/no per rubric item, keyed by number
+                results, reason = decision_judge.rubric_decision(
+                    url,
+                    model,
+                    system=system,
+                    rubric=use,
+                    reply=record,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
+            else:
+                reply = complete(
+                    url,
+                    model,
+                    [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    api_key=api_key,
+                    temperature=JUDGE_TEMPERATURE,
+                    max_tokens=RUBRIC_JUDGE_MAX_TOKENS,
+                    timeout=timeout,
+                )
+                results, reason = parse_criteria_reply(str(reply.get("content") or ""))
         except Exception as exc:
             return {"reward": None, "reason": f"{type(exc).__name__}: {exc}"[:200]}
-        results, reason = parse_criteria_reply(str(reply.get("content") or ""))
         if results is None:
             return {"reward": None, "reason": "judge reply carried no criteria object"}
         return score_with_rubric(use, results, reason=reason)
