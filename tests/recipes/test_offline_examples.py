@@ -57,6 +57,7 @@ CLI_EXAMPLES = [
     "community/can-the-judge-be-trusted/run.py",
     "community/hosted-grpo-vs-sft/run.py",
     "community/who-protects-the-holdout/run.py",
+    "community/how-much-contamination-survives/run.py",
 ]
 
 # Need the ``modal`` client, which is not a dev dependency. Compiled, not run.

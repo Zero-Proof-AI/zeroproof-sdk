@@ -10,7 +10,7 @@ seconds, on a scripted refund agent and two judges.
 | before training, on the rows | what would a grouped update learn from this reward? | `hack_scan` |
 | before training, on the judge | which shortcuts does the judge fall for? | `judge_probes` |
 | before training, on the trajectories | did the agent fake the work, and does the reward pay for it? | `trace_flag_report` |
-| during training | is the proxy climbing while the gold stalls? | `HackMonitor` (needs a trainer; see [`recipes/04-train/grpo`](../grpo)) |
+| during training | is the proxy climbing while the gold stalls? | `HackMonitor` (needs a trainer; see [`recipes/04-train/grpo`](../../04-train/grpo)) |
 | after training | did the proxy move more than the target, and what was learned? | `delta_report(proxy=)`, `hack_scan_diff` |
 
 ## Run it
@@ -70,4 +70,4 @@ Numbers vary with `--seed`; the shape is the point.
   judge, a reward model trained on other pairs, or a rule the reward does
   not read. `HackMonitor(gold=...)` does the same during the run.
 
-How-to: [docs/reward-hacking.md](../../docs/reward-hacking.md).
+How-to: [docs/reward-hacking.md](../../../docs/reward-hacking.md).

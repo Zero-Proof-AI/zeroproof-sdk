@@ -144,6 +144,8 @@ def test_trainer_callback_maps_rl_keys():
             "reward_std": 0.1,
             "kl": 0.02,
             "completions/mean_length": 180.0,
+            "completions/clipped_ratio": 0.25,
+            "clip_ratio/region_mean": 0.03,
             "rewards/format_reward/mean": 0.9,
             "rewards/accuracy": 0.3,
             "epoch": 0.5,
@@ -152,6 +154,7 @@ def test_trainer_callback_maps_rl_keys():
     run.flush()
     point = t.calls[-1][2]["points"][-1]
     assert point["reward"] == 0.42 and point["kl"] == 0.02 and point["completion_length"] == 180.0
+    assert point["clip_ratio"] == 0.25 and "clip_ratio/region_mean" not in point
     assert point["reward_format_reward_mean"] == 0.9 and point["reward_accuracy"] == 0.3
 
 

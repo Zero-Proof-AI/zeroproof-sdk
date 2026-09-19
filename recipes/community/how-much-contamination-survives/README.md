@@ -1,0 +1,167 @@
+# How much contamination survives `decontaminate()`?
+
+Measure what fraction of *real* held-out contamination `wai.decontaminate()` actually
+removes, using human-labelled paraphrase pairs as ground truth instead of a planted copy.
+The default lexical rule removes about **9%** of it. The semantic rule removes about
+**90%**, and costs you half of any training rows that merely resemble the holdout.
+
+What you will learn: why a decontamination pass that reports `n_contaminated: 1` can
+still leave a holdout fully leaked, what the `embedder=` pass buys and what it costs, and
+how to put a control under a contamination check so you can tell a real miss from a
+broken harness. **No model key and no GPU** — this measures a text rule, not a model.
+CPU only, about ten minutes.
+
+## The question
+
+> A training row asks a holdout task's question *in different words* and carries no
+> shared task id. Does `decontaminate()` drop it?
+
+That is the ordinary case, not an exotic one: rows arriving from another team, a vendor,
+a public set, or a second generator pass share no id namespace with your holdout, so the
+`same_task` rule has nothing to match on and the text rules are all there is.
+
+## Why the ground truth is not mine
+
+If I wrote the paraphrases myself I would be measuring my own writing. So the labels come
+from two public, human-labelled sets:
+
+- **QQP duplicates** — genuine "same question, different words" pairs across a wide range
+  of lexical overlap. These are the **real leaks**.
+- **PAWS** — pairs built adversarially to share most of their words. `label=1` is a
+  paraphrase (a leak); `label=0` shares the vocabulary but asks something *different*
+  (must **not** be dropped).
+
+A train row is built from one side of a pair, the holdout from the other, and the train
+row is given a `task_id` in a different namespace on purpose.
+
+### Controls, so a reviewer can tell a miss from a bug
+
+Every arm carries three controls, and all of them held on every run:
+
+| control | what it is | must be | measured |
+|---|---|---|---|
+| `ctl_identical` | byte-identical copy of a holdout row | 1.00 | **1.00** |
+| `ctl_case` | same row, upper-cased and re-spaced | 1.00 | **1.00** |
+| `ctl_unrelated` | an unrelated question, disjoint text | ~0.00 | **0.00–0.04** |
+
+The identical-copy control is exactly the demo in
+[Lesson 5](https://docs.withwhile.com/learn/the-held-out-set.md), and it passes perfectly.
+That is the point: it is the one case that cannot fail.
+
+## Results
+
+`whileai 0.86` · offline, no model key · CPU only · 3 seeds × 2,175 rows (1,200 real
+leaks, 975 hard negatives) · intervals are `wai.pass_at(...).ci95`, cross-checked against
+an independent bootstrap · **$0**.
+
+### The lexical rules
+
+Pooled over 3 seeds. "Catches a leak" is recall; "drops a clean row" is measured on the
+**hard** negatives (same words, different question), which is the adversarial case.
+
+| rule | catches a real leak | drops a clean row | holdout still leaked |
+|---|---|---|---|
+| **default** `n=8, overlap=0.8` | **0.094** [0.077, 0.113] | 0.044 [0.031, 0.058] | **~91%** |
+| `overlap=0` (any shared 8-gram) | 0.260 [0.231, 0.288] | 0.182 [0.157, 0.207] | ~74% |
+| `n=5, overlap=0.8` | 0.168 [0.144, 0.192] | 0.083 [0.066, 0.101] | ~83% |
+| `n=5, overlap=0` | 0.558 [0.527, 0.592] | 0.422 [0.390, 0.453] | ~44% |
+| `n=3, overlap=0` | 0.928 [0.911, 0.944] | 0.869 [0.848, 0.890] | ~7% |
+
+Per-seed default recall: 0.094 / 0.092 / 0.073 — the number is stable.
+
+**There is no lexical setting that works.** Loosening the rule buys recall almost exactly
+1:1 with false positives; `n=3` reaches 0.93 recall by dropping 87% of everything.
+
+### The semantic rule (`embedder=`)
+
+`BAAI/bge-small-en-v1.5`, 1,450 rows, 800 real leaks. Two false-positive columns, because
+they answer different questions: **hard** = a different question sharing the vocabulary,
+**random** = an unrelated question (the `ctl_unrelated` control).
+
+| threshold | catches a real leak | drops a hard negative | drops a random row |
+|---|---|---|---|
+| `similarity=0.75` | 0.995 [0.988, 1.000] | 0.655 [0.615, 0.693] | 0.060 |
+| `similarity=0.80` | 0.973 [0.960, 0.985] | 0.575 [0.535, 0.613] | 0.040 |
+| **`similarity=0.85`** (the documented default) | **0.900** [0.877, 0.923] | 0.493 [0.453, 0.532] | 0.020 |
+| `similarity=0.90` | 0.742 [0.707, 0.775] | 0.410 [0.372, 0.448] | 0.020 |
+| `similarity=0.95` | 0.518 [0.478, 0.557] | 0.317 [0.280, 0.353] | 0.020 |
+
+The semantic pass is worth **~10x the recall** of the lexical default. But note the middle
+column never gets cheap: even at 0.95, where recall has fallen to 0.52, it still drops a
+third of the hard negatives. Cosine similarity cannot separate "the same question reworded"
+from "a different question in the same domain" — which is precisely the caution in
+[#286](https://github.com/whilehq/whileai-sdk/issues/286), now with numbers on it.
+
+**How to read those two columns.** Which one applies to you depends on how much of your
+training set resembles your holdout. On a general-purpose corpus most rows are random
+negatives and `0.85` is close to free. On a domain-specific set — which is what you have
+if you built it from your own traffic — most clean rows *are* hard negatives, and turning
+on `embedder=` at 0.85 will cost you around half of them.
+
+### What it costs to run
+
+`decontaminate()`'s semantic pass is quadratic in rows and not vectorised:
+
+| rows | encode | `decontaminate()` |
+|---|---|---|
+| 400 | 3.1s | 2.7s |
+| 725 | 2.5s | 8.7s |
+| 1,450 | 5.3s | 34.9s |
+
+Roughly 4x per doubling. Extrapolated to a 50k-row training set that is several hours, so
+on a real set you would want to shard it or pre-filter with the lexical rule first.
+
+## Run it
+
+```bash
+pip install whileai datasets sentence-transformers
+cd recipes/community/how-much-contamination-survives
+python run.py --pairs 600 --seed 0                # lexical arms, ~1 min
+python run.py --pairs 400 --seed 0 --semantic     # adds the embedder arms, ~4 min
+python run.py --dry-run --limit 40                # offline: no download, no key
+```
+
+| flag | default | what it does |
+|---|---|---|
+| `--pairs` | 1500 | labelled pairs drawn per class; 600 is plenty for these intervals |
+| `--seed` | 0 | shuffles which pairs are drawn; 0/1/2 were used above |
+| `--semantic` | off | adds the `embedder=` arms (downloads bge-small, ~130MB) |
+| `--limit` | none | caps `--pairs`, for a smoke run |
+| `--dry-run` | off | template pairs instead of the labelled sets: no `datasets`, no network |
+| `--out` | results.json | where to write the arm-by-arm numbers |
+
+**`--dry-run` is a harness check, not an experiment.** It swaps in template-generated
+pairs so the code path and the three controls run with no download — the controls still
+read 1.00 / 1.00 / 0.00, which is what it is there to verify. Its recall numbers are
+artefacts of the templates and mean nothing; every number quoted on this page comes from
+the labelled sets.
+
+To reproduce the whole table: `for s in 0 1 2; do python run.py --pairs 600 --seed $s --out lex.s$s.json; done`
+
+## What did not work
+
+- **`drop_leaky_rows(sources=[holdout])` finds nothing.** It is the call whose name matches
+  what you want, and it takes the *opposite* container shape from
+  `decontaminate(against=[holdout])`. Passed a list-of-lists it keeps a byte-identical copy
+  and reports `n_leaky: 0` without raising. Filed as
+  [#479](https://github.com/whilehq/whileai-sdk/issues/479). Use `decontaminate()`.
+- **`pass_at()` reads `reward`, not `passed`.** Rows with a `passed` key return
+  `pass_at_1=None` with the note `no binary rewards; grade first`. The note is good; it
+  cost a few minutes anyway.
+- **This was run on CPU, not Modal.** A Modal fan-out across seeds was built and works
+  (`app="wai-decontaminate-recall"`, one container per seed), but the image build plus the
+  dataset download cost more wall clock than the whole sweep does locally. For a pure-CPU
+  text measurement this size, Modal is not worth the round trip.
+
+## What this does NOT show
+
+No model was trained here, so this recipe does **not** measure how much a surviving leak
+inflates a before/after delta — that depends on how much the model memorises, which is a
+separate experiment. What it measures is **exposure**: after the default pass, ~91% of the
+holdout tasks that had a paraphrase in the training set still have one.
+
+## Next
+
+Train two arms — one on the contaminated set, one on the `embedder=`-cleaned set — and
+report the held-out delta between them with `wai.delta_report`. That number is the one
+that says how much the exposure above is actually worth.

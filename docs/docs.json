@@ -114,6 +114,79 @@
             ]
           },
           {
+            "group": "Recipes",
+            "pages": [
+              "recipes/index",
+              {
+                "group": "Simulate",
+                "pages": [
+                  "recipes/01-simulate/agent-behavior",
+                  "recipes/01-simulate/bring-your-own-agent",
+                  "recipes/01-simulate/verifiers"
+                ]
+              },
+              {
+                "group": "Measure",
+                "pages": [
+                  "recipes/02-measure/compare-judges",
+                  "recipes/02-measure/eval-your-agent",
+                  "recipes/02-measure/is-your-eval-any-good",
+                  "recipes/02-measure/pass-at-k",
+                  "recipes/02-measure/reward-hacking",
+                  "recipes/02-measure/safety-evals",
+                  "recipes/02-measure/safety-evals-marketplace"
+                ]
+              },
+              {
+                "group": "Select",
+                "pages": [
+                  "recipes/03-select/character",
+                  "recipes/03-select/prime-intellect-rl",
+                  "recipes/03-select/schema"
+                ]
+              },
+              {
+                "group": "Train",
+                "pages": [
+                  "recipes/04-train/dpo",
+                  "recipes/04-train/grpo",
+                  "recipes/04-train/hosted-loop",
+                  "recipes/04-train/identity",
+                  "recipes/04-train/report-run",
+                  "recipes/04-train/resist-planted-instruction",
+                  "recipes/04-train/text-to-sql"
+                ]
+              },
+              {
+                "group": "Export",
+                "pages": [
+                  "recipes/05-export/hugging-face"
+                ]
+              },
+              {
+                "group": "Papers",
+                "pages": [
+                  "recipes/papers/index",
+                  "recipes/papers/adaptive-clip",
+                  "recipes/papers/endpoint-sft",
+                  "recipes/papers/filter-metric",
+                  "recipes/papers/gmts-token-select",
+                  "recipes/papers/zero-rl-format-reward"
+                ]
+              },
+              {
+                "group": "Community",
+                "pages": [
+                  "recipes/community/index",
+                  "recipes/community/can-the-judge-be-trusted",
+                  "recipes/community/force-the-branch",
+                  "recipes/community/hosted-grpo-vs-sft",
+                  "recipes/community/same-entrypoint-before-after"
+                ]
+              }
+            ]
+          },
+          {
             "group": "Reference",
             "pages": [
               "reference/constitution",

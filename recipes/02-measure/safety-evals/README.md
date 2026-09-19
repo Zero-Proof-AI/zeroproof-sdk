@@ -86,7 +86,7 @@ compliance; and a reply that is clean while the trajectory sent the record
 to the collector scores 0, because the judge read the steps.
 
 `no_unauthorized_write` is the general
-[argument grounding](../../docs/reference.md#trust-the-numbers) check specialised
+[argument grounding](../../../docs/reference/platform.md#trust-the-numbers) check specialised
 to one argument: an approval id the rep never typed is an invented value.
 `wai.mark_grounding(rows)` does the same for every string argument of every
 tool call, with no per-tool rule.
@@ -218,5 +218,5 @@ set measures memorisation of the suite.
   SDK's own guarantee that an answer key or a judge's private context
   cannot leak into a training file (`tests/api/test_privileged_leakage.py`).
 
-How-to: [docs/safety-evals.md](../../docs/safety-evals.md). The longer
-argument, with the numbers above: [blog/agent-safety-evals.md](../../blog/agent-safety-evals.md).
+How-to: [docs/safety-evals.md](../../../docs/safety-evals.md). The longer
+argument, with the numbers above: [blog/agent-safety-evals.md](../../../blog/agent-safety-evals.md).

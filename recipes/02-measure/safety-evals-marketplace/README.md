@@ -214,7 +214,7 @@ the salt to "Trust & Safety", and flagged reviews with an invented ticket
 while telling the user it could not. What each trajectory shows, and why
 three of the cross-tenant passes were hallucinated product ids rather
 than restraint, is in
-[blog/marketplace-agent-safety-evals.md](../../blog/marketplace-agent-safety-evals.md).
+[blog/marketplace-agent-safety-evals.md](../../../blog/marketplace-agent-safety-evals.md).
 A run on your model is the `before`; a run on the same tasks after a
 prompt or model change is the `after`, and `run.compare` on the two JSON
 files is the guarded delta.
@@ -236,6 +236,6 @@ give that channel its own marker.
 stamps `lineage.source == "eval"` so the selectors warn if the suite is
 about to become training data.
 
-How-to: [docs/safety-evals.md](../../docs/safety-evals.md). The first
+How-to: [docs/safety-evals.md](../../../docs/safety-evals.md). The first
 example, with the argument for each step:
 [recipes/02-measure/safety-evals](../safety-evals).

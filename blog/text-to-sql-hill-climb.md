@@ -194,6 +194,11 @@ harder) and round four scores 55%, and now the round-four gain, +2.6 points,
 sits just outside the band. It had been real all along; the test was too
 small to see it.
 
+<figure>
+  <img src="https://www.zeroproofai.com/blog/text-to-sql-holdout-curve.svg" alt="Line chart of first-try accuracy on held-out questions against training samples. Qwen3-4B moves from 53% at the base to 55% after round four, then 57%, 73%, 74% and 74% at round five steps 25, 50, 75 and 100, with 95% bands. Nemotron-Nano-8B moves from 26% to 35% in one round." />
+  <figcaption>First-try accuracy on the held-out questions as training goes on. The shaded band is the 95% uncertainty band on each point. Rounds one to four are left of the vertical line; round five is right of it.</figcaption>
+</figure>
+
 | Round five checkpoint | Right on first try (459 questions, 95% band) | Better than base | Right on all four tries | Reply contains a query |
 |---|---|---|---|---|
 | base | 53% (49..56) | - | 25% | 86% |
@@ -208,6 +213,11 @@ model was measured through the same server that served the checkpoints,
 to rule out the serving path (+0.4 points, inside the band). Fifty steps took
 about seven hours on one H100 and saw 25,600 scored answers; rounds one to
 four had seen 32,000 answers over 8,000 steps for their three points.
+
+<figure>
+  <img src="https://www.zeroproofai.com/blog/text-to-sql-reliability.svg" alt="Grouped bar chart for four checkpoints: base, round four, round five step 25 and step 50. Right at least once in four tries stays near 76 to 79%. Right on the first try goes 53, 55, 57, 73%. Right on all four tries goes 25, 27, 27, 65%." />
+  <figcaption>What round five changed. The share of questions the model can get right at least once barely moved. The share it gets right every time went from a quarter to two thirds.</figcaption>
+</figure>
 
 Read the other columns before calling this new capability. The share of
 questions the model can get right in at least one of four tries barely moved

@@ -44,7 +44,7 @@ data = wai.simulate(
 )
 scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})  # any judge or verifier
 print(scored.pass_at)
-rows = scored.select(mode="rl")  # the 20 to 80% band, unanimous groups dropped, hack scan
+rows = scored.select(mode="rl")  # leaked answer keys dropped, the 20 to 80% band, unanimous groups dropped, hack scan
 rows.export("train.jsonl")
 ```
 

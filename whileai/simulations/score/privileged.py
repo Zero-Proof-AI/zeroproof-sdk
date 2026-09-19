@@ -53,6 +53,22 @@ def _needles(privileged: Any, *, min_len: int) -> list[tuple[str, str]]:
     return out
 
 
+def row_leak(row: dict, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> dict[str, str] | None:
+    """One row's verdict. ``None`` when the row carries nothing to check
+    (no ``privileged`` block, or only values shorter than ``min_len``);
+    ``{}`` when it carries the block and no assistant turn quotes it;
+    ``{"field": ..., "needle": ...}`` naming the first quoted value when
+    one does. ``leak_report`` and the selection gate both read this."""
+    needles = _needles(row.get("privileged"), min_len=min_len)
+    if not needles:
+        return None
+    hay = _norm(assistant_text(row))
+    for field, needle in needles:
+        if needle in hay:
+            return {"field": field, "needle": needle[:80]}
+    return {}
+
+
 def leak_report(rows: Any, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> LeakReport:
     """Which rows quote their own ``privileged`` block in the agent's text.
 
@@ -85,26 +101,22 @@ def leak_report(rows: Any, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> LeakReport
         if not isinstance(row, dict):
             continue
         n_rows += 1
-        needles = _needles(row.get("privileged"), min_len=min_len)
-        if not needles:
+        found = row_leak(row, min_len=min_len)
+        if found is None:
             # ``export_row`` always writes ``scenario_id`` (``""`` when the
             # row has none), so a row that has the key but no privileged
             # block was scrubbed on the way out rather than never filled.
             exported = exported or "scenario_id" in row
             continue
         n_checked += 1
-        hay = _norm(assistant_text(row))
-        for field, needle in needles:
-            if needle in hay:
-                leaked.append(
-                    {
-                        "scenario_id": row.get("scenario_id"),
-                        "rollout_index": row.get("rollout_index"),
-                        "field": field,
-                        "needle": needle[:80],
-                    }
-                )
-                break
+        if found:
+            leaked.append(
+                {
+                    "scenario_id": row.get("scenario_id"),
+                    "rollout_index": row.get("rollout_index"),
+                    **found,
+                }
+            )
     n_leaked = len(leaked)
     rate = (n_leaked / n_checked) if n_checked else 0.0
     if not n_checked:
