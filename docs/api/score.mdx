@@ -1569,7 +1569,10 @@ overwrites the source file unless `output` names it explicitly.
 * `mode`: `"sft"` or `"rl"`. Defaults to the run's own mode for a
   `SimulationData` and to `"rl"` otherwise. SFT picks diverse
   correct demonstrations (`select_for_sft`); RL keeps whole mixed
-  groups, never a split one (`select_for_rl`).
+  groups, never a split one (`select_for_rl`). Both drop a row whose
+  reply quotes its own privileged context first
+  (`drop_privileged_leaks`; `privileged_leaks_dropped` in the
+  report), so `export_dataset` never refuses what was kept.
 * `target`: about how many rows to keep, 1000 by default.
 * `band`: the RL difficulty band as a pass-rate range, `(0.2, 0.8)`
   by default: asks the policy always or never solves carry no
