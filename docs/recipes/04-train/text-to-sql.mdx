@@ -332,6 +332,7 @@ reply budget, same verifier, k=4.
 | Qwen3-4B, thinking on (reference) | 0.53 (0.49..0.56) | 0.25 | 0.76 | 0.13 | 0.12 | 8% |
 | Qwen3.5-9B, default template | 0.53 (0.50..0.57) | 0.25 | 0.76 | 0.10 | 0.20 | 21% |
 | Qwen3.5-4B, default template | 0.14 (0.13..0.16) | 0.00 | 0.43 | 0.46 | 0.36 | 79% |
+| Qwen3.5-9B **r1, step 25** (261 band prompts, 32 x 16 a step, micro-batch 1, gradient checkpointing, H100) | 0.56 (0.52..0.59) | 0.29 | 0.78 | 0.10 | 0.17 | - |
 
 Neither Qwen3.5 checkpoint emits `<think>` tags here; both reason in plain
 text before the query. The 4B does it at such length that 79% of replies
@@ -339,6 +340,12 @@ hit the 4,096-token cap with no query yet, so at this budget it is not a
 usable base; the 9B lands where Qwen3-4B started, with more of its misses
 being SQL that does not run (0.20 vs 0.12), which is the kind of miss a
 verifier reward fixes fastest. The 9B is the one being trained.
+
+Round 1 on the 9B, step 25, paired against its own base on the 459 tasks:
+**+0.024 (95% +0.002..+0.047)**, medium +0.04 (+0.00..+0.08), easy and hard
+flat. The same shape Qwen3-4B showed at its step 25 (+0.044) before the
+jump at step 50; the step-50 and step-75 rows follow as the checkpoints
+land (12.7 min a step at micro-batch 1 with gradient checkpointing).
 
 ## Other bases on the same holdout (140 tasks, k=4)
 
