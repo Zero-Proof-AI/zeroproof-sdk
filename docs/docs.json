@@ -129,6 +129,24 @@
         ]
       },
       {
+        "tab": "Learn",
+        "groups": [
+          {
+            "group": "From zero",
+            "pages": [
+              "learn/index",
+              "learn/what-training-does",
+              "learn/what-a-rollout-is",
+              "learn/what-a-reward-is",
+              "learn/why-one-number-is-not-a-result",
+              "learn/the-held-out-set",
+              "learn/which-rows-to-train-on",
+              "learn/train-and-prove"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Platform",
         "groups": [
           {

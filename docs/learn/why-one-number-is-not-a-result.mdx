@@ -1,0 +1,96 @@
+---
+title: "A pass rate without an interval is a guess"
+sidebarTitle: "4. Why the interval matters"
+description: "Lesson 4. pass@1, the interval around it, pass^k and headroom, and how many tasks a real result needs."
+---
+
+The agent passed 67% of tasks. Run the same thing on sixteen different
+tasks and it passes 60%, or 75%. Neither run was wrong. Sixteen tasks is
+a small sample of all the asks your customers could send, and a small
+sample bounces. The interval is the honest way to say how much. If two
+numbers have overlapping intervals, they are not different, whatever the
+means say.
+
+## The mechanism
+
+**pass@1** is the share of tasks the agent gets right on one try. It is
+the headline.
+
+The brackets after it are a **95% confidence interval**: the range the
+true rate very likely sits in, given how many tasks you ran. The library
+computes it by resampling the tasks many times with replacement and
+reading off where the middle 95% of the results land. That method is the
+**bootstrap**, and it is done over tasks, not over the four tries of a
+task, because four tries of the same ask are not four independent facts.
+
+Four tries per task give two more numbers for free.
+
+| Number | Plain words | What it is for |
+|---|---|---|
+| pass^4 | All four tries passed | Reliability. What you can promise a customer. |
+| pass@4 | At least one of four passed | What the model can do on a good day. |
+| headroom | pass@4 minus pass@1 | The gap training could close. The model already knows how, some of the time. |
+
+The bigger question is how many tasks you need. Fewer tasks, wider
+interval, and a wide interval swallows real gains. `holdout_size` answers
+it: to see a 10-point gain from a 60% base with four tries per task, you
+need about 89 tasks. Most evals people run are smaller than that, which
+is why most "it got better" claims are noise.
+
+## Run it
+
+```python
+import whileai as wai
+from whileai.simulations import holdout_size
+
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+data = wai.simulate(
+    wai.seeded_agent([get_order]),
+    tools=[get_order],
+    system_prompt="Help customers with orders.",
+    simulator=False,
+    mode="rl",
+    repeats=4,
+    repeat_policy="fixed",
+    budget=64,
+    seed=0,
+)
+scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})
+
+print(scored.pass_at)
+print(holdout_size(0.10, base=0.6, k=4)["n_tasks"], "tasks to prove a 10-point gain")
+```
+
+```text
+pass@1 0.67 [0.55..0.78] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.33 (16 groups, k=4)
+89 tasks to prove a 10-point gain
+```
+
+Read the line. On one try the agent does the job 67% of the time, and
+with sixteen tasks the true rate could be anywhere from 55% to 78%. All
+four tries pass on only 19% of tasks, so it is not reliable. At least
+one try passes on every task, so it already knows how. The headroom of
+33 points is what a training run has to work with.
+
+## Where it comes from
+
+1. Chen, M. et al. Evaluating Large Language Models Trained on Code.
+   arXiv:2107.03374, 2021. The pass@k estimator.
+2. Miller, E. Adding Error Bars to Evals. arXiv:2411.00640, 2024. Why an
+   eval number needs an interval, and why it is over questions, not
+   samples.
+3. Efron, B., Tibshirani, R. J. An Introduction to the Bootstrap. Chapman
+   and Hall, 1993.
+4. Lambert, N. Reinforcement Learning from Human Feedback. arXiv:2504.12501,
+   2025. Chapter *Evaluation*.
+
+## Next
+
+[The test the model never sees is the only score that counts](/learn/the-held-out-set):
+which tasks you are allowed to measure on.
