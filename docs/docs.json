@@ -78,6 +78,7 @@
         "pages": [
           "reference/overview",
           "reference/five-calls",
+          "reference/style",
           "reference/what-to-run",
           "reference/platform",
           "reference/parameters",
