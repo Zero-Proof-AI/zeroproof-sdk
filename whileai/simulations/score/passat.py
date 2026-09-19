@@ -26,7 +26,9 @@ Intervals: all three carry a 95% percentile bootstrap over tasks
 ``.ci95`` is pass@1's; ``.pass_pow_k_ci95`` and ``.pass_at_k_ci95``
 resample the per-group unbiased estimates of the k-eligible groups, so
 the reliability line is reported with the uncertainty of the tasks it
-was measured on. Fewer than three groups gives ``None``.
+was measured on. Fewer than three groups gives ``None``, and the
+``note`` says so and names the fix: the bootstrap resamples tasks, so
+rows that all carry one ``task_id`` are one task however many they are.
 """
 
 from __future__ import annotations
@@ -252,7 +254,7 @@ class PassAt:
     | ``pass_pow_k``       | ``pass^4``       | chance all k repeats pass (reliability)    |
     | ``pass_at_k``        | ``pass@4``       | chance at least one of k passes            |
     | ``headroom``         | ``headroom``     | property: pass@k minus pass@1              |
-    | ``ci95``             | ``[lo..hi]``     | task-bootstrap interval on pass@1          |
+    | ``ci95``             | ``[lo..hi]``     | interval on pass@1; ``None`` under 3 groups, reason in ``note`` |
     | ``pass_pow_k_ci95``  | ``[lo..hi]``     | same for pass^k; ``None`` under 3 groups   |
     | ``pass_at_k_ci95``   | ``[lo..hi]``     | same for pass@k; ``None`` under 3 groups   |
     | ``n_groups``         | ``N groups``     | tasks pass@1 averaged over                 |
@@ -405,6 +407,12 @@ def pass_at(
     rows count; partial and unjudged rows are skipped, the same rule
     ``group_signal`` uses.
 
+    The intervals resample tasks, never rows (rlhf-book ch. 16), so they
+    need at least ``MIN_CI_TASKS`` (3) tasks. Under that, ``ci95`` is
+    ``None`` and the ``note`` says why and what to change. Ten rows that
+    all carry one ``task_id`` are one task, not ten, and get no interval;
+    when they are ten separate items, give each its own ``task_id``.
+
     * ``rows``: graded rows, or the ``SimulationData`` holding them.
     * ``k``: the draw size for the k-way numbers. It defaults to the
       smallest group of two or more repeats, so every such group
@@ -494,7 +502,16 @@ def pass_at(
         pass_at_k = sum(at_vals) / len(at_vals)
         if uneven:
             note = f"groups are uneven ({sizes[0]} to {sizes[-1]} repeats); k is the smallest"
-    from .stats import bootstrap_ci
+    from .stats import bootstrap_ci, no_interval_note
+
+    ci95 = bootstrap_ci(list(per_task.values()))
+    if ci95 is None:
+        # A headline with no band and no reason reads like a result. Two
+        # eval runs in a row quoted pass@1 off one task before noticing
+        # `ci95` was None (#490).
+        note = "; ".join(
+            part for part in (note, no_interval_note(len(groups), quantity="pass@1")) if part
+        )
 
     return PassAt(
         k=resolved_k,
@@ -508,7 +525,7 @@ def pass_at(
         per_task=per_task,
         note=note,
         config=run_config(row_list, n_tasks=len(groups), k=resolved_k),
-        ci95=bootstrap_ci(list(per_task.values())),
+        ci95=ci95,
         pass_pow_k_ci95=bootstrap_ci(pow_vals) if pass_pow_k is not None else None,
         pass_at_k_ci95=bootstrap_ci(at_vals) if pass_at_k is not None else None,
     )

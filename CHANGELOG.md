@@ -7,6 +7,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 - TrainerCallback forwards TRL's `completions/clipped_ratio` as `clip_ratio`,
   the length-cap share the platform's Rollouts tile draws.
+- `pass_at` says why pass@1 has no interval instead of printing the bare
+  mean. Under three tasks the bootstrap withholds `ci95`, and the `note`
+  (printed in the line) now gives the task count, the three a bootstrap
+  needs, and the fix: the resampling is over tasks, so ten rows that all
+  carry one `task_id` are one task, and separate items each need their
+  own. It stacks after the k note rather than replacing it.
 
 ## 0.88 (2026-09-19)
 
