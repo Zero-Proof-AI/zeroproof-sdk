@@ -74,6 +74,7 @@ grade(
     judge=None,
     llm: bool = False,
     llm_spec: str | None = None,
+    spec: str | None = None,
     api_key: str | None = None,
     path: str | None = None,
     concurrency: int = 32,
@@ -130,6 +131,10 @@ Arguments that matter:
   `"warn"` (the default) logs one line when the check failed or no
   labels exist, `"require"` raises instead, `"off"` skips it.
 * `path`: write the graded run's JSONL there afterwards.
+* `spec`: which model judges on the hosted path, as a backend spec
+  (`"typesafe:jev-latest"`, `"openai:gpt-4.1-mini"`); the same
+  keyword `grade_llm`, `pairwise_judge` and `rubric_judge`
+  take. `llm_spec` is its older name and still works.
 
 ``python
 data = wai.simulate(agent, tools=TOOLS, simulator=False, budget=16)

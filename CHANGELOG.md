@@ -102,6 +102,33 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `INCONCLUSIVE: 40 of 80 labeled rows skipped (50%, over
   MAX_SKIPPED_SHARE 10%); usable n=40` in place of the verdict. Under the
   floor the count is still said next to `n`.
+- `data.grade(spec="typesafe:jev-latest")` is a call that works. The
+  `typesafe:` refusal, the README and the docs all named it, and `grade`
+  only knew the keyword as `llm_spec`, so following the message raised
+  `TypeError` (#422). `spec=` is now the keyword on `grade` as on
+  `grade_llm`, `pairwise_judge` and `rubric_judge`; `llm_spec=` still works.
+- `dataset_report("ds_...")` raises `TypeError` naming the fix
+  (`wai.dataset_report(wai.pull("ds_..."))`) instead of reading the id as
+  a sequence of characters and returning an all-zero report (#398); a
+  sequence with no row dicts in it raises the same way.
+- `push_rows` and `push_file` size the upload timeout to the payload:
+  `PLATFORM_PUT_TIMEOUT_S` (120) plus `PLATFORM_PUT_S_PER_MB` (4) per
+  megabyte, so a 117 MB eval set gets about ten minutes where the flat
+  two-minute cap made it die with `The write operation timed out` (#386).
+  `push_rows(timeout=)` overrides, and the failure names the size, the
+  cap and the two fixes. The half-created dataset record is still left
+  behind on a failed upload; `datasets()` lists it.
+- `simulate` progress lines reach stderr when no logging handler is
+  attached, so a script with no logging setup can tell a working run from
+  a stuck one instead of seeing nothing for the whole run (#400). The lines
+  still go to the `whileai.simulations` logger at INFO, and any handler
+  (`logging.basicConfig()`, a caplog) takes the stream over;
+  `engine.someone_listens()` is the check.
+- `push_rows(holdout=0.2, publish=True)`: the row-level push, and so
+  `scored.push`, take the same `holdout=` and `publish=` as
+  `SimulationData.push`, which gives a graded RL set a route to a linked
+  holdout (#408). The by-task split is `ingest.platform.split_holdout`,
+  one function for both entry points.
 
 ## 0.82 (2026-09-18)
 

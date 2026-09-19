@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import re
+import sys
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -220,6 +221,31 @@ def _stop_reason(side: str, message: str) -> str:
 
 
 log = logging.getLogger("whileai.simulations")
+
+
+def someone_listens(logger: logging.Logger = log) -> bool:
+    """Is any handler other than the library's ``NullHandler`` attached to
+    ``logger`` or an ancestor it propagates to? ``logging.basicConfig()``,
+    a caplog, a root ``StreamHandler``: any of them counts."""
+    current: logging.Logger | None = logger
+    while current is not None:
+        if any(not isinstance(h, logging.NullHandler) for h in current.handlers):
+            return True
+        if not current.propagate:
+            return False
+        current = current.parent
+    return False
+
+
+def _say(message: str) -> None:
+    """A progress line goes to the ``whileai.simulations`` logger at INFO.
+    When nothing is listening it also goes to stderr, so a script with no
+    logging setup can tell a working run from a stuck one (#400); attach
+    any handler (``logging.basicConfig()``) to take the stream over."""
+    log.info("%s", message)
+    if not someone_listens():
+        print(message, file=sys.stderr, flush=True)
+
 
 # Every number this module reads lives in ``whileai.simulations.defaults``
 # with the reason for its value; the per-run ones are ``advanced`` keys on
@@ -1683,9 +1709,7 @@ class Run:
         many = rows - self.progress_rows >= self.progress_every_rows
         if not (force or stale or many):
             return
-        log.info(
-            "%s", progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started)
-        )
+        _say(progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started))
         self.progress_rows, self.progress_at = rows, now
 
     def _note_writer_start(self) -> None:
@@ -1694,12 +1718,9 @@ class Run:
         if not self.progress_on:
             return
         if isinstance(self.simulator, str) and self.simulator not in ("hosted", "default"):
-            log.info(
-                "writing situations with %s; first rows in about a minute",
-                self.simulator,
-            )
+            _say(f"writing situations with {self.simulator}; first rows in about a minute")
             return
-        log.info("writing situations with the hosted writer; first rows in about a minute")
+        _say("writing situations with the hosted writer; first rows in about a minute")
 
     def _write_progress(self, payload: dict) -> None:
         Path(str(self.c.out_path) + ".progress.json").write_text(json.dumps(payload, default=str))

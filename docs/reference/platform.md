@@ -153,6 +153,7 @@ data.push("airline-v3", holdout=0.2)  # train set + a linked holdout set, split 
 data.push("airline-evals", purpose="eval")  # a set you measure with
 scored = data.grade(judge=my_judge)
 scored.push("airline-rl-v3", gate=True, mode="rl")  # the graded copies, gated
+scored.push("airline-rl-v3", gate=True, mode="rl", holdout=0.2)  # plus a linked holdout, by task
 wai.update_dataset("ds_...", purpose="holdout")
 wai.preview("ds_...")  # three sample rows + the analyzer report
 wai.profile("ds_...")  # pass rate, support, mixed tasks, tool use, per task

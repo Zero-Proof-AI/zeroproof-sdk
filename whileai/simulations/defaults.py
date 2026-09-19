@@ -827,6 +827,14 @@ PLATFORM_REQUEST_TIMEOUT_S = 120
 # PLATFORM_UPLOAD_TIMEOUT_S = 300: the studio import, which grades every row
 # server side before answering. Convention, sized to a 20k-row push.
 PLATFORM_UPLOAD_TIMEOUT_S = 300
+# PLATFORM_PUT_TIMEOUT_S = 120 / PLATFORM_PUT_S_PER_MB = 4: the presigned S3
+# PUT of a pushed JSONL set may take two minutes plus four seconds per
+# megabyte (a 117 MB eval set of 4k-token rollouts gets about ten minutes;
+# it timed out at the flat cap, #386). Four seconds a megabyte is a 2 Mbit/s
+# floor, the slow end of a home uplink; ``timeout=`` on ``push_rows``
+# overrides. Convention.
+PLATFORM_PUT_TIMEOUT_S = 120
+PLATFORM_PUT_S_PER_MB = 4
 # PLATFORM_CREDENTIAL_TTL_S = 3600: default life of a delegated credential.
 # One hour matches the Clerk session token that mints it.
 PLATFORM_CREDENTIAL_TTL_S = 3600
@@ -1603,6 +1611,8 @@ __all__ = [
     "PLATFORM_IMPORT_MAX_ROWS",
     "PLATFORM_IMPORT_POLL_S",
     "PLATFORM_IMPORT_TIMEOUT_S",
+    "PLATFORM_PUT_S_PER_MB",
+    "PLATFORM_PUT_TIMEOUT_S",
     "PLATFORM_REQUEST_TIMEOUT_S",
     "PLATFORM_REWARD_MODEL_BATCH",
     "PLATFORM_STUDIO_MAX_ROWS",
