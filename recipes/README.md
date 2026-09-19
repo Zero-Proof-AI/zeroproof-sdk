@@ -83,6 +83,7 @@ fork's pull request gets no secrets from this repository, by design.
 | Recipe | What you learn | Needs | Takes |
 |---|---|---|---|
 | [`hosted-loop`](04-train/hosted-loop) | push graded rows, `wai.train` SFT on Qwen3-4B, `wai.serve` the adapter, one chat completion from the endpoint | `WHILEAI_API_KEY` | about a minute of A10G, plus a cold start |
+| [`report-run`](04-train/report-run) | the typed objects the platform tracks (a tracked agent with its harness, behaviors, runs, live traffic), why a harness is versioned by its fingerprint, and why a version is scored on every behavior | `WHILEAI_API_KEY` for the real thing; nothing for the smoke run | 10 seconds |
 | [`identity`](04-train/identity) | a leak-free SFT set that teaches a name and maker, with Modal scripts for the LoRA and for the identity/leak eval | nothing to generate; Modal and an A10G to train | seconds to generate |
 | [`grpo`](04-train/grpo) | TRL `GRPOTrainer` with LoRA on a verifiable rule, `HackMonitor` and reward/KL on the run page, paired pass@1 before/after with per-category deltas, loss variants and `--balance` as flags | Modal, one A10G; the key is optional | under 15 min at 40 steps |
 | [`dpo`](04-train/dpo) | on-policy pairs from `build_preference_pairs`, TRL `DPOTrainer`, the reward margin on the run page, iterated rounds with `--from-run`, constructed negatives | Modal, one A10G; the key is optional | about 10 min |
