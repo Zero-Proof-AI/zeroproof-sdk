@@ -5,6 +5,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- README badges are all live. Coverage is the number CI measured on the last
+  green main, published to the `badges` branch by `.github/scripts/badge.py`
+  and rendered through a shields endpoint; the version badge reads the
+  release tag, which shields refreshes in five minutes where its PyPI badge
+  lagged by twelve hours; the license badge reads the repo.
+
+## 0.83 (2026-09-19)
+
 - Docs: the site now says what `CONSTITUTION.md` says. The Mintlify
   description and the landing page lead with the post-training library,
   not with training data for tool-calling agents; the landing page has a
@@ -195,11 +203,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `wai.Tool.dispatch([...])` is an `execute=` that runs the bodies. The
   README and the getting-started pages no longer show a hand-written
   schema.
-- README badges are all live. Coverage is the number CI measured on the last
-  green main, published to the `badges` branch by `.github/scripts/badge.py`
-  and rendered through a shields endpoint; the version badge reads the
-  release tag, which shields refreshes in five minutes where its PyPI badge
-  lagged by twelve hours; the license badge reads the repo.
 
 
 ## 0.82 (2026-09-18)
