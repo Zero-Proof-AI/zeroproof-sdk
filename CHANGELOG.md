@@ -5,6 +5,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Recipe `04-train/voice-register`: train a concise speaking register into
+  the weights with a two-sided reward, a judge for the register and a program
+  for the identifiers the answer must keep. `generate.py` writes prompts,
+  teacher rows and `job.json` against any OpenAI-compatible endpoint with
+  your key; the judge is your endpoint too (`VOICE_JUDGE_URL`); `report.py`
+  prints the paired delta, interval, sign test and verdict; `smoke.sh` walks
+  the pipeline on canned replies with no key.
+
 ## 0.88 (2026-09-19)
 
 - `select()` drops a row whose reply quotes its own privileged context

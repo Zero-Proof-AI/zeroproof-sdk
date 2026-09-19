@@ -1,9 +1,13 @@
-"""Train and evaluate a voice register. Greedy, fixed prompts, no simulator.
+"""Train and evaluate a voice register on Modal. Greedy, fixed prompts, no simulator.
 
-The eval here has no in-rollout person and no tool loop, so the defect that
-invalidated today's behaviour numbers - the customer being voiced by the model
-under test - cannot occur by construction. Both arms see byte-identical
-prompts and decode greedily, so the weights are the only difference.
+The eval here has no in-rollout person and no tool loop, so the customer can
+never be voiced by the model under test. Both arms see byte-identical prompts
+and decode greedily, so the weights are the only difference.
+
+Run: modal run train_modal.py --job out/voice/job.json --steps train,eval
+Needs your Modal account (``modal setup``) and one H100; ``HF_TOKEN`` in the
+environment if the base model is gated. Volumes and the app are created on
+your account under ``whileai-*`` names.
 """
 
 import json
@@ -12,7 +16,7 @@ from pathlib import Path
 
 import modal
 
-APP = os.environ.get("ZP_APP", "zp-voice")
+APP = os.environ.get("WHILEAI_MODAL_APP", "whileai-voice")
 app = modal.App(APP)
 
 TRAIN_IMAGE = (
@@ -36,13 +40,11 @@ SERVE_IMAGE = (
     .pip_install("vllm==0.10.0", "transformers==4.54.0", "huggingface_hub>=0.34", "requests>=2.25")
     .env({"HF_HOME": "/root/.cache/huggingface", "VLLM_USE_V1": "1"})
 )
-adapters = modal.Volume.from_name("zp-dogfood-adapters", create_if_missing=True)
-hf_cache = modal.Volume.from_name("zp-dogfood-hf-cache", create_if_missing=True)
+adapters = modal.Volume.from_name("whileai-voice-adapters", create_if_missing=True)
+hf_cache = modal.Volume.from_name("whileai-hf-cache", create_if_missing=True)
 VOL = "/vol"
-secrets = [
-    modal.Secret.from_name("stressd-vllm-key"),
-    modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")}),
-]
+# Your Hugging Face token, from your shell, only if the base model is gated.
+secrets = [modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})]
 
 
 @app.function(
@@ -130,7 +132,8 @@ def evaluate(job: dict, prompts: list[dict]) -> dict:
 
     name, base = job["name"], job["base"]
     adapter = f"{VOL}/{name}/adapter"
-    key = "zp-voice-key"
+    # a token for the vLLM process inside this container only; nothing outside sees it
+    key = "local-eval"
     cmd = [
         sys.executable,
         "-m",
@@ -265,7 +268,7 @@ def main(job: str, steps: str = "train,eval", out: str = ""):
         card = (lane if lane.exists() else base_dir.parent / "MODELCARD.md").read_text()
         print(json.dumps(publish.remote(cfg, card), indent=1))
     if "eval" in want:
-        prompts = json.loads((base_dir / "holdout.json").read_text())
+        prompts = json.loads((base_dir / cfg.get("holdout_file", "holdout.json")).read_text())
         res = evaluate.remote(cfg, prompts)
         d = Path(out or base_dir)
         d.mkdir(parents=True, exist_ok=True)

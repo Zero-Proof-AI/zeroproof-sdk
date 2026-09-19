@@ -1,4 +1,4 @@
-"""airline-voice-concise: train a register into the weights, not a rule.
+"""The concise register: the constitution, the judge, the omission check.
 
 Voice is not code-decidable. No fact about a trajectory tells you whether a
 reply reads as concise, so a judge has to read it. But a judge alone is not
@@ -14,12 +14,17 @@ question about three reservations is maximally concise and maximally useless.
 
 The eval is greedy, on fixed prompts, with no constitution in the prompt and
 no simulated person anywhere. Nothing in it can vary with the arm.
+
+The judge is your own endpoint. ``VOICE_JUDGE_URL``, ``VOICE_JUDGE_KEY`` and
+``VOICE_JUDGE_MODEL`` point it at a model from a different family than the
+policy; unset, it falls back to the generation endpoint and says so once.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import endpoint as RA
@@ -42,9 +47,6 @@ VOICE_TEACHER = VOICE + (
     "Never sacrifice a fact the customer asked for in order to be short."
 )
 
-JUDGE_MODEL = "microsoft/phi-4"
-JUDGE_URL = "https://zeroproofai--zeroproof-judge-serve.modal.run/v1"
-
 JUDGE_SYSTEM = (
     "You judge whether a reply is written in a particular register. The register:\n\n"
     f"{VOICE}\n\n"
@@ -55,15 +57,43 @@ JUDGE_SYSTEM = (
     "answer is correct or complete."
 )
 
+_warned = False
+
+
+def judge_endpoint() -> tuple[str, str, str]:
+    """(base_url, api_key, model) for the judge, from the environment.
+
+    A judge prefers its own family's writing (RLHF Book ch. 5 and 14), so the
+    judge should not share a family with the policy. The published run used
+    ``microsoft/phi-4`` against a Qwen policy. With nothing set, the judge is
+    the generation endpoint and model, and the first call prints a warning.
+    """
+    global _warned
+    url = str(os.environ.get("VOICE_JUDGE_URL") or "").strip()
+    key = str(os.environ.get("VOICE_JUDGE_KEY") or "").strip()
+    model = str(os.environ.get("VOICE_JUDGE_MODEL") or "").strip()
+    if not url and not model and not RA.DRY_RUN and not _warned:
+        _warned = True
+        print(
+            "note: VOICE_JUDGE_URL / VOICE_JUDGE_MODEL are not set, so the judge is the "
+            "generation model judging its own family. Point them at another family before "
+            "you trust the numbers.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return url, key, model
+
 
 def judge_voice(reply: str) -> int:
+    url, key, model = judge_endpoint()
     out = RA.chat(
         [
             {"role": "system", "content": JUDGE_SYSTEM},
             {"role": "user", "content": f"REPLY:\n{reply}\n\nIs this in the register? YES or NO."},
         ],
-        model=JUDGE_MODEL,
-        base_url=JUDGE_URL,
+        model=model,
+        base_url=url,
+        api_key=key,
         temperature=0.0,
         max_tokens=6,
     )
@@ -80,10 +110,9 @@ def distorted(reply: str, required: list[str]) -> bool:
     return any(str(item).lower() not in body.lower() for item in required)
 
 
-def voice_rows(prompts: list[dict], *, model: str | None = None, workers: int = 10) -> list[dict]:
+def voice_rows(prompts: list[dict], *, workers: int = 10) -> list[dict]:
     """Ask the teacher for the concise answer. The constitution reaches the
     teacher only; the trained model never sees it."""
-    from concurrent.futures import ThreadPoolExecutor
 
     def one(p: dict) -> dict | None:
         try:

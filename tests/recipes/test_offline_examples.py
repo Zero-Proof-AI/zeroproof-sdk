@@ -49,6 +49,8 @@ CLI_EXAMPLES = [
     "04-train/text-to-sql/distill.py",
     "04-train/text-to-sql/rollout.py",
     "04-train/text-to-sql/train.py",
+    "04-train/voice-register/generate.py",
+    "04-train/voice-register/report.py",
     "04-train/resist-planted-instruction/run.py",
     "04-train/resist-planted-instruction/analyse.py",
     "01-simulate/verifiers/run.py",
@@ -68,6 +70,7 @@ NEEDS_MODAL = {
     "04-train/text-to-sql/author.py",
     "04-train/text-to-sql/train_grpo_modal.py",
     "04-train/resist-planted-instruction/modal_train_eval.py",
+    "04-train/voice-register/train_modal.py",
 }
 
 
@@ -170,6 +173,7 @@ NEEDS_CREDENTIAL = [
     "04-train/hosted-loop/run.py",
     "05-export/hugging-face/roundtrip.py",
     "03-select/prime-intellect-rl/generate.py",
+    "04-train/voice-register/generate.py",
 ]
 
 

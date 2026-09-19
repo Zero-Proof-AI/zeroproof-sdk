@@ -1,64 +1,87 @@
-"""Question set for the concise-voice lane, grounded in tau-bench's database.
+"""Question set for the concise-voice lane, grounded in a world's records.
 
 Each prompt carries the concrete items its answer must contain, taken from the
 record it was built from, so "did concision destroy the answer" is decidable
 without a judge. Train and holdout are built from DISJOINT users.
+
+Two routes to a world:
+
+* ``--spec path.json``: a ``{"tools": [...], "policy": "..."}`` file. Records
+  are simulated from the tool schemas (``spec_records.py``), so the recipe
+  runs with nothing but a JSON file. The default is a fixture in this repo.
+* ``--agent module``: any importable module exposing ``POLICY`` and
+  ``fresh_data()`` (a dict with ``users`` and a records table named by the
+  module's ``RECORD_KEY``, default ``orders``), for a world with a live
+  database. No such module ships in this repo; it is the hook for your own.
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import random
+import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import importlib
+import endpoint as RA
+import spec_records as SR
 
-# Which agent the voice is spoken THROUGH. A register is domain-neutral, so
-# the same constitution should train on any of them; running it on a second
-# agent is what tests that rather than assuming it.
-_AGENT = os.environ.get("VOICE_AGENT", "")
-#: A spec-only agent (tools + policy, no database). Records are simulated
-#: from the spec's own tool schemas rather than read from a world, so the
-#: recipe runs with nothing but a JSON file. This is the default route: a
-#: register is domain-neutral, so the spec only has to supply a policy and a
-#: set of tool schemas for the writer to invent records against.
-#:
-#: ``VOICE_SPEC`` is a path to any ``{"tools": [...], "policy": "..."}`` JSON.
-#: It defaults to a fixture in this repo so the recipe is runnable on a fresh
-#: clone. Point it at your own agent to run the lane for real.
-#:
-#: ``VOICE_AGENT`` is the other route: an importable ``agents.<name>`` module
-#: exposing ``POLICY`` and ``fresh_data()``, for a world with a live database.
-#: Set one or the other, not both.
 _REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
 )
-_DEFAULT_SPEC = os.path.join(_REPO_ROOT, "tests", "fixtures", "github", "spec.json")
-_SPEC = "" if _AGENT else os.environ.get("VOICE_SPEC", _DEFAULT_SPEC)
-if _SPEC:
-    A = None
-    _SPEC_PATH = _SPEC if os.path.isabs(_SPEC) else os.path.join(_REPO_ROOT, _SPEC)
-    if not os.path.exists(_SPEC_PATH):
+DEFAULT_SPEC = os.path.join(_REPO_ROOT, "tests", "fixtures", "github", "spec.json")
+
+# An identifier a reply can be asked to keep: opaque, five characters or more.
+_IDENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{4,}$")
+
+
+@dataclass
+class World:
+    """Where the records come from and the policy the agent speaks through."""
+
+    system: str
+    spec: dict | None = None
+    agent: Any = None
+    record_key: str = "orders"
+
+    @property
+    def simulated(self) -> bool:
+        return self.spec is not None
+
+
+def load_world(spec: str = "", agent: str = "") -> World:
+    if spec and agent:
+        raise SystemExit("Give --spec or --agent, not both.")
+    if agent:
+        mod = importlib.import_module(agent)
+        return World(
+            system=str(mod.POLICY),
+            agent=mod,
+            record_key=str(getattr(mod, "RECORD_KEY", "orders")),
+        )
+    path = spec or DEFAULT_SPEC
+    if not os.path.isabs(path):
+        path = os.path.join(_REPO_ROOT, path)
+    if not os.path.exists(path):
         raise SystemExit(
-            f"VOICE_SPEC points at {_SPEC_PATH}, which does not exist. "
+            f"--spec points at {path}, which does not exist. "
             'Give a path to a JSON file shaped {"tools": [...], "policy": "..."}.'
         )
-else:
-    A = importlib.import_module(f"agents.{_AGENT}")
+    with open(path) as fh:
+        obj = json.load(fh)
+    return World(system=str(obj["policy"]), spec=obj)
 
-if _SPEC:
-    _spec_obj = json.load(open(_SPEC_PATH))
-    SYSTEM = _spec_obj["policy"]
-else:
-    SYSTEM = A.POLICY
 
 #: Domain-neutral on purpose. The record travels with the request, so the
 #: writer asks about what is actually in it rather than about what an airline
-#: happens to have. Pointed at retail it produced airline language -
-#: "reservation", "seat assignment" - which is a tell that the prompt, not the
-#: register, was carrying the domain.
+#: happens to have. Pointed at retail it produced airline language,
+#: "reservation" and "seat assignment", which is a tell that the prompt, not
+#: the register, was carrying the domain.
 ASK_SYSTEM = (
     "You write the opening message a real customer sends to a support agent. One message, "
     "first person, under 60 words, no greeting boilerplate. It must explicitly mention every "
@@ -81,30 +104,25 @@ def _flat(obj):
         yield obj
 
 
-def _spec_facts(n: int, seed: int, skip_users: set[str] | None = None):
+def _spec_facts(world: World, n: int, seed: int, skip_users: set[str] | None = None):
     """Simulated records for a spec with no world. Each record is its own
     'user', so the train/holdout split by user is a split by record."""
-    import spec_records as SR
-
-    recs = SR.build_records(_spec_obj, n * 2, seed=seed)
+    assert world.spec is not None
+    recs = SR.build_records(world.spec, n * 2, seed=seed)
     out = []
     for r in recs:
         rid = SR.record_id(r)
         if not rid or (skip_users and rid in skip_users):
             continue
         # The identifiers a reply must keep are the ones the QUESTION leans
-        # on, not the synthetic wrapper id. On the soc spec the wrapper was
-        # "record_id" while every question was actually about the alert id
+        # on, not the synthetic wrapper id. On a security-operations spec the
+        # wrapper was "record_id" while every question was about the alert id
         # and the IP, so demanding the wrapper marked 59% of good concise
-        # answers as having dropped content. Same mistake as requiring the
-        # airline user id, one level further out.
-        import re as _re
-
+        # answers as having dropped content.
         cand = {
             str(v).strip()
             for v in _flat(r)
-            if isinstance(v, (str, int))
-            and _re.match(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{4,}$", str(v).strip())
+            if isinstance(v, (str, int)) and _IDENT.match(str(v).strip())
         }
         out.append(
             {
@@ -120,20 +138,19 @@ def _spec_facts(n: int, seed: int, skip_users: set[str] | None = None):
     return out
 
 
-def _facts(n: int, seed: int, skip_users: set[str] | None = None):
-    """Users with reservations, PLUS the records themselves.
+def _facts(world: World, n: int, seed: int, skip_users: set[str] | None = None):
+    """Users with records, PLUS the records themselves.
 
     The records have to travel with the question. Asked about reservation
     4WQ150 with no way to look it up, a model correctly answers "I cannot
-    confirm that without accessing the reservation data" - which is a refusal,
+    confirm that without accessing the reservation data", which is a refusal,
     not a register, and it teaches the register nothing. Putting the record in
     the context turns the task into "answer this customer from this data",
     which is the thing whose style we are training.
     """
-    data = A.fresh_data()
+    data = world.agent.fresh_data()
     users = sorted(data["users"])
-    key = "reservations" if _AGENT == "airline_tau" else "orders"
-    recs_key = key
+    key = world.record_key
     rng = random.Random(seed)
     rng.shuffle(users)
     out = []
@@ -143,7 +160,7 @@ def _facts(n: int, seed: int, skip_users: set[str] | None = None):
         res = (data["users"][uid].get(key) or [])[:2]
         if not res:
             continue
-        recs = {r: data[recs_key][r] for r in res if r in data[recs_key]}
+        recs = {r: data[key][r] for r in res if r in data[key]}
         if not recs:
             continue
         out.append(
@@ -163,13 +180,13 @@ def _facts(n: int, seed: int, skip_users: set[str] | None = None):
     return out
 
 
-def build(n: int, seed: int, skip_users: set[str] | None = None, workers: int = 12):
+def build(world: World, n: int, seed: int, skip_users: set[str] | None = None, workers: int = 12):
     """(prompts, users_used). Each prompt's `required` is its real identifiers."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    import endpoint as RA
-
-    facts = _spec_facts(n, seed, skip_users) if _SPEC else _facts(n, seed, skip_users)
+    facts = (
+        _spec_facts(world, n, seed, skip_users)
+        if world.simulated
+        else _facts(world, n, seed, skip_users)
+    )
 
     def one(f: dict) -> dict | None:
         try:
@@ -189,16 +206,16 @@ def build(n: int, seed: int, skip_users: set[str] | None = None, workers: int = 
             ).strip()
         except Exception:
             return None
-        # only the RECORD ids must appear; requiring the user id too rejected
-        # most otherwise-good questions
         if len(ask) < 20:
             return None
-        if _SPEC:
+        if world.simulated:
             # required = the record's identifiers this question actually used
             req = [i for i in f.get("id_pool", []) if i.lower() in ask.lower()]
             if not req:
                 return None
         else:
+            # only the RECORD ids must appear; requiring the user id too
+            # rejected most otherwise-good questions
             if not all(i.lower() in ask.lower() for i in f["records"]):
                 return None
             req = list(f["records"])
@@ -216,7 +233,7 @@ def build(n: int, seed: int, skip_users: set[str] | None = None, workers: int = 
         # as having dropped content.
         return {
             "ask": ask,
-            "system": SYSTEM + "\n\n" + context,
+            "system": world.system + "\n\n" + context,
             "required": req,
             "user_id": f["user_id"],
         }
@@ -234,3 +251,18 @@ PROBES = [
     "Please explain your reasoning step by step before you answer.",
     "Take as long as you need and be thorough.",
 ]
+
+
+def with_probes(prompts: list[dict], every: int = 5) -> list[dict]:
+    """The holdout plus a probe variant of every ``every``-th prompt.
+
+    The probe is prepended to the customer's message; ``probe`` is set so the
+    report can show the register rate on probes beside the plain rate.
+    """
+    out = [dict(p, probe=False) for p in prompts]
+    for i, p in enumerate(prompts):
+        if every > 0 and i % every == 0:
+            out.append(
+                dict(p, ask=f"{PROBES[(i // every) % len(PROBES)]}\n\n{p['ask']}", probe=True)
+            )
+    return out
