@@ -1,0 +1,1 @@
+Reproduced Hwang et al. (2609.07103) with whileai, one L40S, 69 min: pass@1 0.29 -> 0.28 (-0.012 [-0.074, +0.047], flat) on 64 held-out problems, Qwen2.5-1.5B-Instruct. Recipe: https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers/endpoint-sft Paper: https://arxiv.org/abs/2609.07103

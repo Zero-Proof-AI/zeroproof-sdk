@@ -1,0 +1,1 @@
+Reproduced Yu (2609.13866) with whileai, one L40S, 52 min: pass@1 0.39 -> 0.46 (+0.067 [+0.021, +0.113], moved) on 120 held-out tasks, Qwen2.5-1.5B-Instruct. Recipe: https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers/filter-metric Paper: https://arxiv.org/abs/2609.13866

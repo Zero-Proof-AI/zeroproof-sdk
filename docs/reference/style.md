@@ -1,6 +1,7 @@
 # Style: how the language reads
 
-`whileai` is a scientific SDK. The code a user writes with it should read
+`whileai` is a scientific SDK ([CONSTITUTION.md](https://github.com/whilehq/whileai-sdk/blob/main/CONSTITUTION.md)
+says what that means). The code a user writes with it should read
 the way PyTorch and DSPy read: a few nouns, a few verbs, objects that carry
 their configuration, and one line per idea. This page is the coding
 standard for every public name in the package. New code follows it. Old

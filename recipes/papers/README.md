@@ -40,20 +40,16 @@ python recipe.py                    # both arms, writes results.json
 - `README.md` in the shape of [`_template/README.md`](_template/README.md): Paper, Claim, The change, numbered steps, one command, the Result table, the Climb table, three Learned bullets, the Verified line.
 - `recipe.py`: one file. Data, then train, then eval, then `results.json`. Two arms on the same holdout: the baseline and the paper's change. Paired delta with a 95% interval (`wai.delta_report`).
 - `results.json`: the numbers the table above reads. Shape in [`_template/results.json`](_template/results.json).
-- `POST.md`: the X thread for the reproduction, written from `results.json` after the run. Shape in [`_template/POST.md`](_template/POST.md). A flat result gets the same thread as a moved one; the verdict word is the one `check.py` printed.
 - Default run: under 60 GPU minutes, under $10. Bigger runs behind a flag.
 - Public data or a seeded environment that lives in the recipe directory. No customer data.
 - A flat result is a result. Say so in the table.
 - `python recipes/papers/check.py --write` passes (`tests/recipes/test_papers.py` runs it in CI).
-
-## The proof point
-
-Replicated papers are how While proves itself (`CONSTITUTION.md`). Each recipe
-ships its own `POST.md`: five posts, the paper and first author, our number
-with its interval, how we know it is not noise, what to watch, the cost and the
-rerun command. Every number in it is copied from `results.json` and the Result
-table, never typed from memory. The maintainer posts it on X; the agent only
-drafts it.
+- `post.md`: the result as a post, once the recipe is verified. Under 280
+  characters, plain words, the metric with its interval, the arXiv link
+  and the recipe link, nothing invented and nothing rounded. A flat result
+  is posted as flat. Replicated papers are how we market
+  ([CONSTITUTION.md](../../CONSTITUTION.md), belief 2); the post is the
+  last artifact of a recipe, not a separate job.
 
 ## The science bar
 

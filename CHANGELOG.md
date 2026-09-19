@@ -5,6 +5,13 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `CONSTITUTION.md`: what the library is, the eight things we believe
+  (repeatable science, replicated papers as proof, sourced defaults, bring
+  your own keys, ergonomics as the product, plain words then mechanism
+  then proof, mass experimentation, never big-bang) and where each is
+  enforced. Linked from CLAUDE.md, CONTRIBUTING.md, README and the style
+  guide. Paper recipes gain `post.md`: the verified result as a post under
+  280 characters, the metric with its interval and the links.
 - The front door, step one of the style migration (`docs/reference/style.md`).
   `import whileai as wai` is now the library: `simulate`, `Judge`, `select`,
   `pass_at`, `judge_trust`, `compare`, `decontaminate`, `hack_scan`,
@@ -167,11 +174,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `SimulationData.push`, which gives a graded RL set a route to a linked
   holdout (#408). The by-task split is `ingest.platform.split_holdout`,
   one function for both entry points.
-- `CONSTITUTION.md` at the repo root: what the library is for and the six
-  rules every contributor and agent works under; `CLAUDE.md` points at it.
-  Paper recipes now ship a `POST.md`, the X thread for the reproduction
-  written from `results.json` (template in `recipes/papers/_template/`,
-  threads for the four existing recipes).
+- `post.md` for the four existing paper recipes (filter-metric moved; adaptive-clip,
+  endpoint-sft and gmts-token-select flat), each under 280 characters, numbers copied
+  from their Result tables.
 
 ## 0.82 (2026-09-18)
 

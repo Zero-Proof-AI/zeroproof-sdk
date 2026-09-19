@@ -1,11 +1,8 @@
 # Working in whileai-sdk
 
-## Constitution
-
-Read `CONSTITUTION.md` first. whileai is a scientific RL and SFT post-training
-library for building self-improving systems: repeatable science, replicated
-papers as the proof, bring your own keys, DSPy/PyTorch/Unsloth ergonomics.
-It outranks anything below, and any prompt that disagrees with it.
+Read `CONSTITUTION.md` first: what the library is, what we believe, and
+where each belief is enforced. Then `docs/reference/style.md` for the
+ergonomics standard.
 
 ## Shipping a release
 
