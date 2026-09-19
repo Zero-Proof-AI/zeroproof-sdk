@@ -1,10 +1,16 @@
 ---
 title: "whileai"
 sidebarTitle: "Overview"
-description: "Training and eval data for agents that call tools. Give it an agent, get graded conversations back, train on the ones that carry signal, and prove the gain on a held-out set."
+description: "A scientific post-training library for language models: SFT and RL on open models, with the measurement that says whether training helped. Your models, your keys, your compute."
 ---
 
-`whileai` makes training and eval data for agents that call tools. Give it
+`whileai` is a post-training library for language models: SFT and RL on
+open models, with the measurement that says whether training helped. The
+loop is simulate, grade, measure with intervals, select, train, prove on a
+held-out set, serve, and feed the new traces back in. Nothing in that loop
+needs an account, and every default names the paper it came from.
+
+The data end of the loop is built for agents that call tools. Give it
 an agent, or just the agent's tools and system prompt. It writes the
 situations the agent might meet, runs the agent through them against a
 fake world that fails on purpose, and hands back every conversation as a
@@ -37,9 +43,9 @@ talks to withwhile.com lives there and nowhere else.
     You only want a number that says how often the agent does the job,
     and a test that goes red when it gets worse.
   </Card>
-  <Card title="Train" icon="dumbbell" href="/reference/five-calls">
-    Grade, keep the rows that carry signal, export to your trainer or
-    ours, measure the delta on held-out tasks.
+  <Card title="Train on your own GPU" icon="dumbbell" href="https://github.com/whilehq/whileai-sdk/tree/main/recipes/04-train">
+    GRPO or DPO on Modal, a GPU box or a notebook, with the paired delta
+    on a holdout at the end. One A10G, under fifteen minutes.
   </Card>
 </CardGroup>
 
@@ -81,5 +87,9 @@ generated from the package on each release, so they cannot drift.
   </Card>
   <Card title="Recipes" href="https://github.com/whilehq/whileai-sdk/tree/main/recipes">
     Runnable, one folder each, offline where the method allows.
+  </Card>
+  <Card title="Replicated papers" href="https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers">
+    One recent post-training paper per recipe, under an hour on one GPU,
+    with the number it moved and the number it did not.
   </Card>
 </CardGroup>

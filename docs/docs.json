@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "While",
-  "description": "The whileai Python SDK: training and eval data for agents that call tools, with the numbers that say whether training helped.",
+  "description": "The whileai Python SDK: a scientific post-training library for language models. SFT and RL on open models, with the measurement that says whether training helped.",
   "colors": {
     "primary": "#3F8F6B",
     "light": "#5CB08A",
@@ -39,7 +39,7 @@
     "primary": {
       "type": "button",
       "label": "Platform",
-      "href": "https://withwhile.com/platform"
+      "href": "https://withwhile.com"
     }
   },
   "navigation": {
@@ -60,12 +60,12 @@
           {
             "group": "Guides",
             "pages": [
-              "evals",
               "simulations",
               "engine",
-              "character-training",
+              "evals",
               "reward-hacking",
-              "safety-evals"
+              "safety-evals",
+              "character-training"
             ]
           },
           {

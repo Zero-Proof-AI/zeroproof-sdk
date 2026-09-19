@@ -12,7 +12,8 @@ those capabilities can be turned against their owner: by the user, by
 text the agent reads from a tool, or by an agent that follows an
 instruction it should have treated as data. This page is the recipe as the
 SDK runs it. The worked example is
-[`recipes/02-measure/safety-evals`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/safety-evals); the longer argument
+[`recipes/02-measure/safety-evals`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/safety-evals)
+(offline, no key, seconds); the longer argument
 is [`blog/agent-safety-evals.md`](https://github.com/whilehq/whileai-sdk/blob/main/blog/agent-safety-evals.md).
 
 ## What the sources say
@@ -245,3 +246,11 @@ incident as a seed, and re-run on the pinned tasks so the history stays
 paired. A model-written suite (`simulator=` on your endpoint) gives
 variety the template writer cannot; keep the hand-labeled transcripts
 either way, since they are what the judge is checked against.
+
+## What to run next
+
+[`recipes/02-measure/safety-evals`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/safety-evals)
+runs the suite on a support agent, offline, no key, in seconds.
+[`recipes/02-measure/safety-evals-marketplace`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/safety-evals-marketplace)
+is the same eval for a marketplace agent, with `live.py` to run it on a
+real model through Ollama.
