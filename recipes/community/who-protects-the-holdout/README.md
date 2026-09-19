@@ -1,27 +1,28 @@
-# Who protects the held-out set — the ids, or the text?
+# Who protects the held-out set: the ids, or the text?
 
-On a held-out set that `simulate()` wrote, `decontaminate()` catches 98–100% of
-contaminated training rows, and on an evaluation set carrying no ids it catches 18–30%.
-The rows are identical and so is the call. The difference is one rule — `same_task`,
-which compares `scenario_id` / `task_id` rather than words and skips any row that has
-none — and every evaluation set you did not write with `simulate()` is in the second
-case. The report does not say which of the two you are in.
+`decontaminate()` applies four rules in order. The first, `same_task`, compares
+`scenario_id` / `task_id` rather than words. On a holdout that `simulate()` wrote,
+the call drops **98 to 100%** of the training rows (0.981 to 1.000, three seed pairs of
+about 106 rows), and `same_task` is 103 or 104 of every 105 it drops. Strip the ids,
+which is what every evaluation set you did not write with `simulate()` looks like, and
+the same call on the same rows drops **18 to 30%** (0.178 [0.112, 0.252] to 0.295
+[0.219, 0.381]). The report does not say which of those two situations you are in.
 
 What you will learn: which rule is actually carrying your decontamination pass, why an
 external eval set is a different regime from an SDK-native one, and what
-`contamination_rate: 0.0` does and does not certify. You need **nothing** — no key, no
-model, no GPU. Under a minute.
+`contamination_rate: 0.0` does and does not certify. You need **nothing**: no key, no
+model, no GPU, no network. Under a minute.
 
 ## The question
 
 A previous community run ([`how-much-contamination-survives`](../how-much-contamination-survives/),
 [#482]) measured the *text* rules against human-labelled paraphrases (QQP, PAWS) and
-found the default lexical rule removes 0.094 [0.077, 0.113] of real contamination. That
+found the default lexical rule removes 0.087 [0.076, 0.097] of real contamination. That
 is a number about words. It left an obvious hole, which that run named in its own "next"
 section:
 
 > whether `same_task` silently rescues SDK-generated rows, i.e. how much of a real
-> `simulate()` holdout is protected by ids rather than by text — because if it is most
+> `simulate()` holdout is protected by ids rather than by text, because if it is most
 > of it, the text rules matter less than this run implies.
 
 It is most of it. And that turns out to be the more useful way round, because it means
@@ -32,56 +33,71 @@ the 9% number applies exactly where the ids are absent, and nowhere else.
 ```bash
 pip install whileai
 cd recipes/community/who-protects-the-holdout
-python run.py                       # three seed pairs, the regime comparison
-python run.py --dry-run             # one pair, small budget, a few seconds
-python run.py --json results.json   # write the numbers
+python run.py                            # three seed pairs, the regime comparison
+python run.py --dry-run                  # one pair, small budget, a few seconds
+python run.py --json out/regimes.json    # write the numbers (out/ is gitignored)
 ```
 
 | flag | default | what it does |
 |---|---|---|
 | `--budget` | 120 | rollouts per `simulate()` run |
 | `--dry-run` | off | one seed pair at budget 20 |
-| `--json` | — | write the measured numbers to a path |
+| `--json` | none | write the measured numbers to a path |
 
 ## The setup
 
 Two `simulate()` runs from the same seeded agent and the same brief, at different seeds:
 one is "training", one is "holdout". This is the case the `decontaminate` docstring names
-as the one word overlap cannot see — *"a holdout written by re-running the generator on
+as the one word overlap cannot see: *"a holdout written by re-running the generator on
 the same briefs"*. Then the same call twice:
 
-- **native** — `decontaminate(train, against=holdout)`, rows exactly as `simulate()`
+- **native**: `decontaminate(train, against=holdout)`, rows exactly as `simulate()`
   returned them.
-- **id-less** — the identical rows, with `scenario_id` and `task_id` removed from the
+- **id-less**: the identical rows, with `scenario_id` and `task_id` removed from the
   evaluation set only.
 
 Nothing else differs. Not the prompts, not the rows, not the rules, not the thresholds.
 
+**What the denominator is.** The rate below is rows dropped over all training rows, not
+recall over a labelled set of leaks; there is no human label here saying which training
+rows are contaminated. The construction stands in for one: a re-run at a new seed writes
+the same situations (67 of the 70 `scenario_id`s in seed 0 recur in seed 1), so 104 of
+the 107 training rows carry an id the holdout also carries. In the native regime the
+rate is that id match, almost by definition. The informative number is the id-less one:
+how many of those same rows the text rules find once the ids are gone.
+
 ## Results
 
 `whileai 0.86` (PyPI, fresh venv) · offline, `simulator=False`, seeded agent · **no key,
-no GPU, $0**. Intervals are `wai.pass_at(...).ci95`.
+no GPU, $0**. Re-run on `whileai 0.88` for review: every count identical, 22 s.
 
-| trial | eval set | rows caught | rate [95%] | by `same_task` |
-|---|---|---|---|---|
-| seeds 0 vs 1 | native | 105/107 | 0.981 [0.953, 1.000] | 104 |
-| | id-less | 19/107 | 0.178 [0.112, 0.252] | 0 |
-| seeds 2 vs 3 | native | 105/106 | 0.991 [0.972, 1.000] | 104 |
-| | id-less | 29/106 | 0.274 [0.198, 0.358] | 0 |
-| seeds 4 vs 5 | native | 105/105 | 1.000 [1.000, 1.000] | 103 |
-| | id-less | 31/105 | 0.295 [0.219, 0.381] | 0 |
+Intervals are `wai.pass_at(...).ci95`, a percentile bootstrap with one task per row,
+which is the bootstrap of a proportion; the exact binomial quantiles on the same counts
+agree to 0.01. The 105/105 cell is degenerate under a bootstrap (every resample is 1.0),
+so its Wilson interval is given instead.
 
-The intervals do not come close to overlapping in any trial. In every native trial,
-`same_task` alone accounts for 103–104 of the ~105 rows caught; the text rules contribute
-1–2. The `scenario_id` is robust to the seed — 67 of 70 ids recur across a re-run at a
-different seed — because it keys the *situation*, not the sampling. That is the SDK
-working exactly as its docstring says, and it is good design.
+| trial | eval set | rows dropped | rate [95%] | by `same_task` | by text rules |
+|---|---|---|---|---|---|
+| seeds 0 vs 1 | native | 105/107 | 0.981 [0.953, 1.000] | 104 | 1 |
+| | id-less | 19/107 | 0.178 [0.112, 0.252] | 0 | 19 |
+| seeds 2 vs 3 | native | 105/106 | 0.991 [0.972, 1.000] | 104 | 1 |
+| | id-less | 29/106 | 0.274 [0.198, 0.358] | 0 | 29 |
+| seeds 4 vs 5 | native | 105/105 | 1.000 [0.965, 1.000] Wilson | 103 | 2 |
+| | id-less | 31/105 | 0.295 [0.219, 0.381] | 0 | 31 |
+
+The native and id-less intervals do not come close to overlapping in any trial. In every
+native trial `same_task` alone accounts for 103 or 104 of the 105 rows dropped; the text
+rules contribute 1 or 2 (all `near` hits). In the id-less regime the drops are 14 to 17
+`exact` and 5 to 14 `near`. The `scenario_id` is robust to the seed because it keys the
+*situation*, not the sampling. That is the SDK working exactly as its docstring says, and
+it is good design.
 
 ### The part to be careful about
 
-Both reports look the same. Here is the id-less one against a real GSM8K holdout:
+Both reports look the same. Here is the id-less one against a real GSM8K holdout (from
+`build_sets.py` below):
 
-```
+```text
 n: 840    n_eval_rows: 200    n_eval_texts: 514
 n_contaminated: 0    n_same_task: 0    contamination_rate: 0.0    notes: []
 ```
@@ -91,53 +107,57 @@ work, and `notes` is empty. `n_same_task: 0` is indistinguishable from "the ids 
 compared and none matched". Filed as [#488]; it is the complement of [#480].
 
 **The practical rule:** if your eval set came from `simulate()`, the default is strong
-and `same_task` is why. If it came from anywhere else — GSM8K, a HF set, logged
-production traces — you are running on the text rules alone, and their measured recall
-is 0.18–0.30 here and 0.094 against human-labelled paraphrases ([#482]). Pass an
+and `same_task` is why. If it came from anywhere else (GSM8K, a Hub set, logged
+production traces) you are running on the text rules alone, and their measured recall
+is 0.18 to 0.30 here and 0.087 against human-labelled paraphrases ([#482]). Pass an
 `embedder=` in that case.
 
 ## The GPU half: what the survivors do to a number
 
-`inflation_modal.py` and `build_sets.py` carry the second question — not *exposure* (how
+`inflation_modal.py` and `build_sets.py` carry the second question: not *exposure* (how
 much leak survives) but *inflation* (what the survivors do to a measured held-out score).
 GSM8K, `Qwen/Qwen2.5-1.5B-Instruct`, LoRA SFT on one A10G, two arms that differ only in
-which decontamination rule cleaned the training set:
+which decontamination rule cleaned the training set. This half needs `datasets`,
+`sentence-transformers`, the GSM8K download from the Hub, and your own Modal account.
 
 ```bash
-python build_sets.py                  # 800 clean + 60 paraphrased holdout leaks
+pip install datasets sentence-transformers modal
+python build_sets.py                  # 800 clean + 60 paraphrased holdout leaks -> out/
 modal run inflation_modal.py          # base x3, then both arms, one A10G
 ```
 
-`build_sets.py` plants 60 machine-paraphrased copies of held-out questions, with their
-gold solutions, into an 800-row GSM8K training pool, then cleans it twice:
+`build_sets.py` plants 60 rule-paraphrased copies of held-out questions, with their gold
+solutions, into an 800-row GSM8K training pool, then cleans it twice. One deterministic
+run at `SEED=0`; the intervals are exact binomial on the counts:
 
 | arm | rule | leaks caught | leaks left live | clean rows dropped |
 |---|---|---|---|---|
-| `default` | lexical, `n=8`, `overlap=0.8` | 20/60 (0.333) | **40** | 0 |
-| `semantic` | `embedder=bge-small-en-v1.5`, `similarity=0.85` | 58/60 (0.967) | **2** | 11 |
+| `default` | lexical, `n=8`, `overlap=0.8` | 20/60, 0.333 [0.217, 0.450] | **40** | 0/800 |
+| `semantic` | `embedder=bge-small-en-v1.5`, `similarity=0.85` | 58/60, 0.967 [0.917, 1.000] | **2** | 11/800, 0.014 [0.006, 0.022] |
 
-Base noise floor, the untrained model on the same 200 held-out questions at temperature
-0.7. I ended up measuring it twice, on two separate A10G containers, which makes it a
-replication rather than a single triple:
+Base noise floor: the untrained model on the same 200 held-out questions at temperature
+0.7, three evals per run. It was measured twice, on two separate A10G containers, which
+makes it a replication rather than a single triple:
 
-| run | three evals | mean |
+| run | three evals (each 200 questions) | mean |
 |---|---|---|
 | 1 | 0.555 / 0.525 / 0.490 | 0.523 |
 | 2 | 0.515 / 0.535 / 0.540 | 0.530 |
 
-Six evals, all in **[0.490, 0.555]** — mean 0.527, sd 0.021, band 0.065. The two runs'
-means differ by 0.007, well inside the within-run spread, so the floor is stable across
-containers and not an artefact of one. Any arm-to-arm difference has to clear that band
-to mean anything.
+Six evals, all in **[0.490, 0.555]**; pooled 632/1200 = 0.527 [0.498, 0.555] Wilson,
+sample sd 0.023 across evals, band 0.065. A single 200-question eval carries an interval
+of about ±0.07 on its own, so the band is the sampling noise of one eval, not drift. The
+two runs' means differ by 0.007, inside the within-run spread, so the floor is stable
+across containers. Any arm-to-arm difference has to clear that band to mean anything.
 
-**This half did not finish inside the session** — the arm numbers are not in this
+**This half did not finish inside the session.** The arm pass rates are not in this
 directory. See [What did not work](#what-did-not-work). The scripts run as written and
 the setup above is reproducible today; the two pass rates are the missing cell.
 
-Note on the 0.333: machine paraphrase is a *generous* input for the lexical rule
-(rule-based rewrites keep more n-grams than a human rewording — [#482] measured 0.094 on
-human-labelled pairs). So 40 surviving leaks is a **conservative** contamination load,
-and any inflation measured from it is a lower bound.
+Note on the 0.333: rule-based paraphrase is a *generous* input for the lexical rule (it
+keeps more n-grams than a human rewording; [#482] measured 0.087 on human-labelled
+pairs). So 40 surviving leaks is a **conservative** contamination load, and any inflation
+measured from it is a lower bound.
 
 ## What did not work
 
@@ -146,14 +166,15 @@ and any inflation measured from it is a lower bound.
   an error, so I did not know it existed). They share an app *name*, so `modal app stop`
   on the one I believed was the orphan terminated the other one's runner too, eight steps
   into the first arm. I relaunched; that container's stdout had not reached my log by the
-  time the session's clock ran out, so I stopped it for the spend guardrail — and its
-  base eval turned out to have completed and flushed a moment earlier. Hence two noise
-  floors and no arms. If you run this: `modal app list` **before** you stop anything, and
-  give each run a distinct `app` name.
+  time the session's clock ran out, so I stopped it for the spend guardrail, and its base
+  eval turned out to have completed and flushed a moment earlier. Hence two noise floors
+  and no arms. If you run this: `modal app list` **before** you stop anything, and give
+  each run a distinct `app` name.
 - **`wai.pass_at(rows, k=1).ci95` returns `None`** when every row shares a task id, with
   no warning and a valid-looking `pass_at_1` beside it. It groups by task, so a
-  proportion over rows needs one group per row — `proportion()` in `run.py` does that.
-  There is no public binomial-interval helper; `pass_at` is the only door to one.
+  proportion over rows needs one group per row; `proportion()` in `run.py` does that.
+  There is no public binomial-interval helper; `pass_at` is the only door to one. Filed
+  as [#490].
 - **Paraphrasing without a model key.** No `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` this
   session, so the leaks in `build_sets.py` are rule-based rewrites (name swaps, phrase
   substitutions, question moved to the front), not model paraphrases. Their lexical
@@ -162,23 +183,32 @@ and any inflation measured from it is a lower bound.
 
 ## Reruns
 
-Everything in the table above:
+Everything in the regimes table:
 
 ```bash
 python run.py --json results_regimes.json
 ```
 
 `results_regimes.json` in this directory is the output of that exact command.
+`results.json` is the hand-assembled summary, including the GPU half.
+
+## What this does NOT show
+
+No claim about inflation is made here. Exposure is not inflation, and without the arms
+there is only the former. The id-less numbers (0.18 to 0.30) are specific to this
+template-driven generator, which hands the text rules a harder input than free-form
+prose would; the human-labelled comparison is 0.087 ([#482]).
 
 ## Next
 
-The arm pass rates. `modal run inflation_modal.py` is ~25 minutes on one A10G and turns
-the exposure number into an inflation number: the delta between the two arms on the same
-200 held-out questions, paired, against the 0.065 base noise band. The mechanism check is
-whether the gap concentrates on the 40 questions whose paraphrase survived into the
-`default` arm and not on the other 160 — `leaked_flags` in the results file is there for
-that split.
+The arm pass rates. `modal run inflation_modal.py` is about 25 minutes on one A10G and
+turns the exposure number into an inflation number: the delta between the two arms on the
+same 200 held-out questions, paired, against the 0.065 base noise band. The mechanism
+check is whether the gap concentrates on the 40 questions whose paraphrase survived into
+the `default` arm and not on the other 160; `leaked_flags` in the results file is there
+for that split.
 
 [#480]: https://github.com/whilehq/whileai-sdk/issues/480
 [#482]: https://github.com/whilehq/whileai-sdk/pull/482
 [#488]: https://github.com/whilehq/whileai-sdk/issues/488
+[#490]: https://github.com/whilehq/whileai-sdk/issues/490

@@ -28,6 +28,15 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   generated from `recipes/**/README.md` by `scripts/gen_recipe_docs.py`,
   with an index grouped by step and a clone-the-repo note on every page;
   `docs.yml` checks the pages stay in sync with the READMEs (#492).
+- Community recipes `how-much-contamination-survives` and
+  `who-protects-the-holdout` (review fixes): the lexical table pools its
+  three seeds (default `decontaminate()` catches 0.087 [0.076, 0.097] of
+  human-labelled paraphrase leaks, the `embedder=` pass 0.900 [0.877,
+  0.923]), the counts and the unrelated-control claim match `results.json`,
+  the Hub download is named, `run.py` sweeps the thresholds the README
+  reports and writes to `out/`; the holdout recipe names its denominator,
+  seeds the LoRA right before the trainer, and both are in the recipes
+  table.
 
 ## 0.88 (2026-09-19)
 

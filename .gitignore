@@ -108,3 +108,6 @@ recipes/02-measure/compare-judges/out/
 
 # paper recipes cache each arm's rows locally for --reuse; never committed
 recipes/papers/*/.cache/
+# community recipe outputs
+recipes/community/how-much-contamination-survives/out/
+recipes/community/who-protects-the-holdout/out/
