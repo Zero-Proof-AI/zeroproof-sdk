@@ -242,3 +242,10 @@ the reward. `export_environment(data, out, reward=...)` writes that as an
 installable `verifiers` environment: the tasks with a train and holdout
 split, the world dials in `spec.json`, and the 20 to 80 percent
 difficulty band applied to graded rows.
+
+## What to run next
+
+[`recipes/01-simulate/bring-your-own-agent`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/01-simulate/bring-your-own-agent)
+is the shortest version of the loop above, offline and in seconds;
+[`recipes/03-select/prime-intellect-rl`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/prime-intellect-rl)
+is the `verifiers` export this section describes, and needs a key.

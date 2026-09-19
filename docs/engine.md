@@ -96,3 +96,8 @@ marker whose interval sits below zero fails the run [1].
 
 Code paths are relative to
 [whileai/simulations/](https://github.com/whilehq/whileai-sdk/tree/main/whileai/simulations).
+
+## What to run next
+
+[`recipes/01-simulate/bring-your-own-agent`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/01-simulate/bring-your-own-agent)
+runs these eight steps on a callable of your own, offline and in seconds.

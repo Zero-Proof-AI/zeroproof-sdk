@@ -10,7 +10,8 @@ machinery as everything else (rlhfbook.com ch. 17), aimed at the manner of
 a reply instead of its correctness, and it is mostly a data pipeline: which
 phrases never appear, which replies get chosen over which. This page is the
 recipe as the SDK runs it. The worked example is
-[`recipes/03-select/character`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/character).
+[`recipes/03-select/character`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/character)
+(offline by default).
 
 ## What the sources say
 
@@ -154,3 +155,9 @@ introspection stage (it needs the trained model). The SDK produces the
 rows, the pairs, the judge check and the before/after measurement, and
 `wai.train` runs DPO on the platform; `pairs.jsonl` is there for a trainer
 of your own.
+
+## What to run next
+
+[`recipes/03-select/character`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/character)
+builds the rows, the pairs and the before/after measurement on this page
+from the Model Spec, offline by default.

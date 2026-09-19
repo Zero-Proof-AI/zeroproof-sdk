@@ -5,6 +5,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Docs: the site now says what `CONSTITUTION.md` says. The Mintlify
+  description and the landing page lead with the post-training library,
+  not with training data for tool-calling agents; the landing page has a
+  card for `recipes/papers/` and one for training on your own GPU; the
+  Guides sidebar runs in loop order (simulate, measure, select); five
+  guides gained the "what to run next" recipe line the page contract asks
+  for; and the platform reference and the docs nav no longer send readers
+  to `zeroproofai.com` paths that 404.
 - `CONSTITUTION.md`: what the library is, the eight things we believe
   (repeatable science, replicated papers as proof, sourced defaults, bring
   your own keys, ergonomics as the product, plain words then mechanism

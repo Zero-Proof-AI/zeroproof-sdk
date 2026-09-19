@@ -10,7 +10,8 @@ reward's author did not mean to pay for. rlhfbook.com ch. 14 calls the
 result over-optimization: the training reward keeps climbing while the
 evaluation you care about flattens and falls. This page is how the SDK
 looks for that gap, before a run, during it, and after. The worked
-example is [`recipes/02-measure/reward-hacking`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/reward-hacking).
+example is [`recipes/02-measure/reward-hacking`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/reward-hacking)
+(offline, no key, seconds).
 
 ## What the book says
 
@@ -194,3 +195,9 @@ not a hack.
    `gold_reward`, the hosted judge, a reward model trained on other
    pairs, or a rule the training reward does not read. The during and
    after checks are only as honest as the scorer the proxy never saw.
+
+## What to run next
+
+[`recipes/02-measure/reward-hacking`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/02-measure/reward-hacking)
+runs the before, during and after checks on a scripted agent and two
+judges, offline, no key, in seconds.

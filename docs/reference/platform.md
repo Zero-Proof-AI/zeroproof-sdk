@@ -296,7 +296,7 @@ If you have already collected rows under an inverted name, flip the value (`1 - 
 
 ## Train, and watch it
 
-Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO, DPO or a reward model, as a LoRA adapter) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are at [zeroproofai.com/platform/training](https://www.zeroproofai.com/platform/training).
+Two ways to train, one record. The platform trains a pushed dataset (SFT, GRPO, DPO or a reward model, as a LoRA adapter) and serves the result; or your own trainer runs on Modal, a GPU box, or a notebook and reports into the same run. Either way the loss curve and the progress bar are on the training page of the platform ([withwhile.com](https://withwhile.com)).
 
 ```python
 run = wai.train(
@@ -421,7 +421,7 @@ rows = wai.pull("ds_...")  # public sets need no key
 wai.unpublish("ds_...")
 ```
 
-Cards live at [zeroproofai.com/datasets](https://zeroproofai.com/datasets), grouped by agent, with rows, size and the analyzer's numbers on each. A dataset must be finalized and hold rows to publish.
+Cards live on the public catalog of the platform ([withwhile.com](https://withwhile.com)), grouped by agent, with rows, size and the analyzer's numbers on each. A dataset must be finalized and hold rows to publish.
 
 Hugging Face, both directions. Connect your account once on any dataset page, then:
 
