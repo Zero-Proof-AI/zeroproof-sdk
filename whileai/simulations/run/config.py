@@ -553,6 +553,14 @@ def resolve_run_config(
                 "'vllm:<model>@<url>') or None for the agent's own model"
             )
         user_model = user_model.strip() or None
+    # A decision model (typesafe:) answers questions and writes nothing,
+    # so it can judge but not play a role; say so before any call is made.
+    from ..generate.typesafe_backend import no_chat_error
+
+    for role, value in (("agent", agent), ("simulator", simulator), ("user_model", user_model)):
+        refusal = no_chat_error(value)
+        if refusal:
+            raise ValueError(f"{role}= {refusal}")
     backend = cfg.pop("backend", None)
     explicit_fault = "fault_rate" in cfg or "risk" in cfg
     fault_rate = float(cfg.pop("fault_rate", DEFAULT_FAULT_RATE))

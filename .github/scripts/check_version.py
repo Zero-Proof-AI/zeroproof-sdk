@@ -27,6 +27,10 @@ import urllib.request
 import tomllib
 
 PYPI = "https://pypi.org/pypi/{name}/json"
+# The per-release endpoint is not served from the same cache as the list
+# above, so it answers within seconds of an upload the list will not show
+# for many minutes.
+PYPI_RELEASE = "https://pypi.org/pypi/{name}/{version}/json"
 # The old name of this package. Its releases count as prior releases of
 # the new name (the numbering continues across the rename), and every
 # release ships a shim under it that must carry the same version.
@@ -78,6 +82,20 @@ def compat_check(name: str, version: str) -> tuple[str, list[tuple[int, ...]]]:
     return old_name, published(old_name)
 
 
+def on_pypi(name: str, version: str) -> bool:
+    """True when this exact release answers on PyPI's per-release endpoint."""
+    req = urllib.request.Request(
+        PYPI_RELEASE.format(name=name, version=version), headers={"Cache-Control": "no-cache"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status == 200
+    except urllib.error.HTTPError:
+        return False
+    except OSError:
+        return False
+
+
 def tagged(version: str) -> bool:
     """True when the release tag already exists on origin.
 
@@ -90,6 +108,8 @@ def tagged(version: str) -> bool:
         capture_output=True,
         text=True,
     )
+    if proc.returncode not in (0, 2):
+        print(f"git ls-remote failed ({proc.returncode}): {proc.stderr.strip()[:200]}")
     return proc.returncode == 0
 
 
@@ -137,7 +157,7 @@ def main() -> int:
         print(f"::notice::first release of {name} {current}")
         return emit(publish=True, version=str(current))
 
-    if current.release in prior or tagged(str(current)):
+    if current.release in prior or tagged(str(current)) or on_pypi(name, str(current)):
         # Already on PyPI, or already tagged by a publish run whose upload the
         # PyPI CDN has not caught up with yet. Not an error: main moves for
         # reasons other than a release, and re-running CI on an unchanged
@@ -146,6 +166,19 @@ def main() -> int:
         return emit(publish=False, version=str(current))
 
     latest = prior[-1]
+    # The list above can lag a release by up to fifteen minutes. A bump merged
+    # right behind another would read as a skipped step; walk forward over
+    # versions the publish job has already tagged before judging the gap.
+    while True:
+        candidate = ".".join(map(str, next_allowed(latest)))
+        if tagged(candidate):
+            reason = "tagged"
+        elif on_pypi(name, candidate):
+            reason = "on PyPI"
+        else:
+            break
+        latest = next_allowed(latest)
+        print(f"{reason}, not yet listed: {candidate}")
     if current.release < latest:
         fail(f"{current} is older than the published {'.'.join(map(str, latest))}")
 

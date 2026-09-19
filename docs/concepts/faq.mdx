@@ -1,0 +1,53 @@
+---
+title: "FAQ"
+sidebarTitle: "FAQ"
+description: "What people ask before they start."
+---
+
+**Who is it for?** Heads of AI, ML and data science, their teams, and the
+data teams that own the training data. You do not need a research team to
+run a training loop.
+
+**Mid-training or post-training?** Both, though `wai.train` runs the
+post-training methods. Mid-training continues training on your domain data
+so the model knows your world. Post-training with SFT, DPO or GRPO teaches
+it how to behave. Most teams start with post-training.
+
+**Do I have to change my agent?** No. The SDK reads what the agent does,
+from its traces or from its tools and policy. The agent keeps running
+where it runs today. See [connect your agent](/get-started/connect-your-agent).
+
+**What if my agent is not in production yet?** Describe the behavior you
+want in a sentence. That sentence is the policy. The SDK drafts the tools
+such an agent would have and runs the conversations against them, so there
+is training data before there is traffic.
+
+**Do I need a key?** Not to start. `simulator=False` writes situations
+from templates, `seeded_agent` stands in for an agent, and a lambda can
+be the judge, all offline. A key adds the hosted situation writer, the
+hosted judge, dataset storage, training and serving. See
+[install](/get-started/install).
+
+**How do I know it got better?** Every run ends with pass@1 per task
+category, before and after, on a held-out set with a 95% confidence
+interval. If the interval includes zero, nothing ships.
+
+**Which models can it train?** Open models you own at the end. Training
+runs SFT, DPO, GRPO or a reward model on hosted GPUs. Serving is narrower
+than training: an adapter reaches an endpoint only on a served base, today
+`Qwen/Qwen3-4B` and `microsoft/phi-4`, and `train` warns when a run will
+not. See [the platform reference](/reference/platform).
+
+**Where do the rollouts come from?** From your agent's own tools and
+policy. A separate model plays the customer, a mock world answers the tool
+calls, and every conversation is scored against a written rubric before it
+is kept. See [how it works](/concepts/how-it-works).
+
+**Is the judge another LLM?** Yes, when you do not pass a program. So it
+is measured against gold labels, probed with known hacks, versioned by
+rubric hash, and drawn from a different model family than the policy. See
+[the engine](/concepts/engine).
+
+**What happened to zeroproof?** Same package, renamed in 0.51.
+`pip install zeroproof` and `import zeroproof.simulations` still work and
+give you `whileai`.

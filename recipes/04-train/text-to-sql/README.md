@@ -201,6 +201,23 @@ training file.
 - **Thinking models need a reply budget.** `simulate(agent_max_tokens=4096,
   timeout=300)` (whileai >= 0.47); on the default 2048-token cap and
   60 s timeout the base lost 8% of replies mid-thought and 4 of 81 tasks.
+- **A reply budget needs a matching call timeout.** Qwen3.5-9B writes up to
+  4,096 tokens of plain-text reasoning; at 32 concurrent requests on one L40S
+  that is about 28 tokens a second per request, so the long replies took
+  longer than the 300 s default and the SDK re-rolled each one up to
+  `repeats` times. Sampling 601 prompts ran 6.5 hours and never finished.
+  `rollout.py --timeout 900 --concurrency 16` finishes; the rule is timeout
+  >= max_tokens / per-request tokens per second.
+- **Newer checkpoints, newer stack, and the weight sync is where it breaks.**
+  Qwen3.5-* (`Qwen3_5ForConditionalGeneration`) need vLLM >= 0.26 and
+  transformers 5: `--stack new` in the trainer, `--vllm 0.29.0` in
+  `serve_modal.py`, both on a CUDA devel image because vLLM compiles kernels
+  at start. transformers 5 names the text stack `model.layers...` and vLLM
+  keeps it under `language_model.model.layers...`; TRL's colocate weight sync
+  passes names straight through, so before the rename in
+  `_guard_vllm_weight_sync` every LoRA weight either crashed the run or was
+  silently skipped (training a policy vLLM never saw). The guard prints any
+  name it cannot place.
 - **Check what the SDK sent the model, not just what came back.** Before
   0.51, `simulate(tasks=...)` with a prompt-only agent drafted a tool surface
   for the situation writer and sent those schemas to the policy too. Qwen
@@ -272,6 +289,27 @@ since pass@4 sits at 0.79 for every r5 checkpoint and pass@1 has caught up
 to it, more of the same reward cannot move this base much further. New
 capability needs a bigger base or harder training prompts it can solve
 sometimes.
+
+## Qwen3.5 on the 459-task holdout (2026-09-18)
+
+Qwen3.5-4B and 9B are `model_type qwen3_5` (`Qwen3_5ForConditionalGeneration`),
+which the 2025 pins cannot load: `serve_modal.py --vllm 0.29.0` serves them
+and `train_grpo_modal.py --stack new` (transformers 5, TRL 1.13, vLLM 0.29)
+trains them; the lessons list says what that took. Same prompt, same 4,096
+reply budget, same verifier, k=4.
+
+| Model | pass@1 (95% CI) | pass^4 | pass@4 | no SQL | SQL error | cut by the reply budget |
+|---|---|---|---|---|---|---|
+| Qwen3-4B, thinking on (reference) | 0.53 (0.49..0.56) | 0.25 | 0.76 | 0.13 | 0.12 | 8% |
+| Qwen3.5-9B, default template | 0.53 (0.50..0.57) | 0.25 | 0.76 | 0.10 | 0.20 | 21% |
+| Qwen3.5-4B, default template | 0.14 (0.13..0.16) | 0.00 | 0.43 | 0.46 | 0.36 | 79% |
+
+Neither Qwen3.5 checkpoint emits `<think>` tags here; both reason in plain
+text before the query. The 4B does it at such length that 79% of replies
+hit the 4,096-token cap with no query yet, so at this budget it is not a
+usable base; the 9B lands where Qwen3-4B started, with more of its misses
+being SQL that does not run (0.20 vs 0.12), which is the kind of miss a
+verifier reward fixes fastest. The 9B is the one being trained.
 
 ## Other bases on the same holdout (140 tasks, k=4)
 

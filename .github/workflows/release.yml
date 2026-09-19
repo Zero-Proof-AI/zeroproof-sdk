@@ -1,0 +1,86 @@
+name: release
+
+# One button cuts the next version from whatever sits under `## Unreleased`.
+#
+#   gh workflow run release.yml
+#
+# Runs serialize on the `release` group: two people who press it in the
+# same minute get two releases in order, or one release and one "nothing
+# to ship", never a collision. The bump itself is .github/scripts/release.py,
+# which leaves a fresh `## Unreleased` header behind so a PR that merges a
+# minute after the cut still files its entry under the next version.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  cut:
+    name: cut the next version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: bump
+        id: bump
+        run: |
+          set -o pipefail
+          out=$(python3 .github/scripts/release.py) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" = 3 ]; then
+            echo "::notice::nothing under ## Unreleased; no release cut"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$rc" = 0 ] || exit "$rc"
+          echo "version=$(echo "$out" | sed -n 's/^version=//p')" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+      - name: land the bump on main
+        if: steps.bump.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md pyproject.toml compat/zeroproof/pyproject.toml uv.lock
+          git commit -m "whileai $V"
+          # main takes changes only through a pull request (ruleset), so the
+          # bump lands as a PR this run merges itself: no review is required
+          # and a release PR touches only the four release files.
+          git push -f origin "HEAD:release/$V"
+          # A re-run after a failed merge finds its PR still open; only then skip create.
+          if [ -z "$(gh pr list --head "release/$V" --state open --json number -q '.[0].number')" ]; then
+            gh pr create --base main --head "release/$V" --title "whileai $V" \
+              --body "Cut by the release workflow from \`## Unreleased\`. Touches only CHANGELOG.md, both pyprojects and uv.lock."
+          fi
+          # Mergeability is computed a moment after the PR opens.
+          for i in 1 2 3 4 5; do
+            gh pr merge "release/$V" --squash --delete-branch && exit 0
+            sleep 10
+          done
+          echo "::error::could not merge release/$V; merge it by hand, then: gh workflow run publish.yml"
+          exit 1
+      - name: publish
+        if: steps.bump.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.bump.outputs.version }}
+        run: |
+          # A merge made with the workflow token does not fire publish.yml's
+          # push trigger, so start it by hand on the new main. Its gate
+          # re-checks the version before anything uploads.
+          gh workflow run publish.yml --ref main
+          echo "::notice::whileai $V merged; publish.yml started"

@@ -909,21 +909,37 @@ def compare_runs(
     min_paired: int = MIN_PAIRED_TASKS,
     level: float = CI_LEVEL,
 ) -> dict[str, Any]:
-    """Is run ``b`` different from run ``a`` on ``metric``?
+    """Test whether run ``b`` differs from run ``a`` on one metric, paired by task.
+
+    Reach for it for a quick A/B on a single number; ``delta_report`` is
+    the full report with markers, the noise floor and the comparability
+    checks. It returns a dict: ``delta`` (b minus a), ``ci95`` (the
+    interval, with ``level`` beside it), ``p_value``, ``verdict``,
+    ``n_paired``, ``n_only_a``, ``n_only_b``, ``paired_share``,
+    ``mean_a``, ``mean_b``, and a ``note``.
 
     Tasks the two runs share are compared as paired differences (b minus
-    a, per task); the interval is a ``level`` bootstrap over those pairs
-    (``ci95`` at the default, with ``level`` reported beside it) and the
-    p-value is a sign-flip permutation test. With fewer than ``min_paired``
-    shared tasks the comparison falls back to unpaired task means and says
-    so. ``verdict`` is one of ``"b_better"``, ``"a_better"``,
-    ``"no_difference_detected"``: the last means the interval covers zero,
-    not that the runs are equal.
+    a, per task, keyed the way ``pass_at`` groups); the interval is a
+    ``level`` bootstrap over those pairs and the p-value is a sign-flip
+    permutation test. ``verdict`` is one of ``"b_better"``,
+    ``"a_better"``, ``"no_difference_detected"``: the last means the
+    interval covers zero, not that the runs are equal. Tasks on one side
+    only are dropped from a paired comparison, and ``note`` says how
+    many, since a verdict over a quarter of the tasks is not a verdict
+    over the eval. ``paired_share`` is the shared fraction of every task
+    either run saw.
 
-    Tasks on one side only are dropped from a paired comparison, and
-    ``note`` says how many, since a verdict over a quarter of the tasks is
-    not a verdict over the eval. ``paired_share`` is the shared fraction
-    of every task either run saw.
+    * ``metric``: ``"pass_at_1"`` (the default, binary reward) or
+      ``"marker:name"`` for a marker.
+    * ``min_paired`` (5): with fewer shared tasks the comparison falls
+      back to unpaired task means and says so.
+    * ``level`` (0.95): the interval's coverage (``ci95`` at the default).
+      ``n_boot`` (2000) and ``seed`` (0) fix the bootstrap.
+
+    >>> a = [{"task_id": t, "reward": 0} for t in "abcdef"]
+    >>> b = [{"task_id": t, "reward": 1} for t in "abcdef"]
+    >>> wai.compare_runs(a, b)["verdict"]
+    'b_better'
     """
     if not 0 < level < 1:
         raise ValueError("level is the interval's coverage, strictly between 0 and 1")
@@ -1108,54 +1124,71 @@ def decontaminate(
     embedder: Callable[[list[str]], Sequence[Sequence[float]]] | None = None,
     similarity: float = SEMANTIC_SIMILARITY,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """Drop rows whose prompt overlaps an evaluation set (rlhf-book ch. 16).
+    """Drop training rows whose prompt overlaps an evaluation set.
 
-    ``against`` is one or more evaluation sources: row lists, JSONL paths,
-    or platform dataset ids (``ds_...``). Evaluation prompts, answers and
-    references are the texts (not the eval set's own replies). Four rules,
-    applied in this order, and a row flagged by one is not counted again
-    by the next, so ``n_contaminated`` is the number of rows dropped:
+    Reach for it before any train-versus-holdout comparison: a held-out
+    task that also sits in the training data measures memory, not the
+    change (rlhf-book ch. 16). It returns ``(clean_rows, report)``: the
+    rows that survived, and a report with the count under each rule
+    (``n_contaminated`` in total), hits per field, the eval text count,
+    and the first offenders with their coverage (or ``similarity`` for
+    semantic hits).
+
+    * ``rows``: the training rows.
+    * ``against``: one or more evaluation sources: row lists, JSONL paths,
+      or platform dataset ids (``ds_...``). Evaluation prompts, answers
+      and references are the texts compared (not the eval set's own
+      replies).
+    * ``fields`` (``("prompt",)``): which row texts are checked, the
+      book's method. Add ``"final_text"`` to ask the stricter question of
+      whether replies reproduce eval answers or references.
+    * ``n`` (8) and ``overlap`` (0.8): the near-copy rule, the Llama 2
+      rule of 8-grams covering 80% of tokens. ``overlap=0`` restores
+      any-n-gram.
+    * ``embedder`` and ``similarity`` (0.85): a callable from a list of
+      texts to one vector per text turns on the semantic rule at that
+      cosine threshold; nothing here imports a model.
+
+    Four rules, applied in this order, and a row flagged by one is not
+    counted again by the next, so ``n_contaminated`` is the number of
+    rows dropped:
 
     * ``same_task`` (``n_same_task``): the row's ``scenario_id`` or
       ``task_id`` is an evaluation row's. A task is a situation, not a
       string (``task_key``), so a rephrasing of an eval situation is the
       eval situation whatever the words say. Rows with no recorded id
       skip this rule.
-    * ``exact`` (``n_exact``): one of the row's ``fields`` is an evaluation
-      text verbatim after normalization (case and whitespace).
+    * ``exact`` (``n_exact``): one of the row's ``fields`` is an
+      evaluation text verbatim after normalization (case and whitespace).
     * near copy (``n_near``): one evaluation text covers at least
-      ``overlap`` of the row's words with shared word ``n``-grams (the
-      Llama 2 rule: 8-grams, 80% of tokens). Texts shorter than ``n``
-      words match verbatim only.
+      ``overlap`` of the row's words with shared word ``n``-grams. Texts
+      shorter than ``n`` words match verbatim only.
     * ``semantic`` (``n_semantic``), only with ``embedder``: the cosine
       similarity between the row's text and an evaluation prompt is at
       least ``similarity``, and the two carry different task ids or none.
-
-    The default field is the prompt, the book's method; add
-    ``"final_text"`` to ask the stricter question of whether replies
-    reproduce eval answers or references.
 
     One shared n-gram is the book's test for free-form sets. Situations
     written from templates share whole sentences that say nothing about
     which question was asked, so any-n-gram flags every row of a
     template-written set; the coverage rule counts a row when one eval
-    text accounts for most of it. ``overlap=0`` restores any-n-gram.
+    text accounts for most of it.
 
     Word overlap does not see a paraphrase. A holdout written by
     re-running the generator on the same briefs was 70% within 0.85
     cosine of the training batch and 5 of 133 byte-identical; the 8-gram
-    rule flagged 4 of 101 prompts and the semantic pass 16 (#286).
-    ``embedder`` is any callable from a list of texts to one vector per
-    text, so nothing here imports a model; with sentence-transformers::
+    rule flagged 4 of 101 prompts and the semantic pass 16. With
+    sentence-transformers:
 
-        from sentence_transformers import SentenceTransformer
+    ```python
+    from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer("BAAI/bge-small-en-v1.5")
-        clean, report = wai.decontaminate(
-            train,
-            against=[holdout],
-            embedder=lambda texts: model.encode(texts, normalize_embeddings=True).tolist(),
-        )
+    model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    clean, report = wai.decontaminate(
+        train,
+        against=[holdout],
+        embedder=lambda texts: model.encode(texts, normalize_embeddings=True).tolist(),
+    )
+    ```
 
     A semantic flag means the two prompts read alike, not that they are
     the same task: "cancel one reservation" and "cancel three
@@ -1165,16 +1198,17 @@ def decontaminate(
     the report's ``notes`` say the flag is a question to check, not a
     verdict. The default stays lexical: ``similarity`` 0.85 was read off
     BGE (unrelated prompts score about 0.55 there) and does not transfer
-    to every model, so the pass calibrates it for yours when it can: with
+    to every model, so the pass calibrates it for yours when it can. With
     eval rows that carry task ids, the 99th percentile of similarity over
     eval-prompt pairs with different task ids is how alike distinct tasks
-    read to this embedder, and ``notes`` says it. A threshold below that
+    read to this embedder, and ``notes`` says it; a threshold below that
     number flags tasks that merely share a domain, and the note says so
     when ``similarity`` is.
 
-    Returns the clean rows and a report: the count under each rule, hits
-    per field, the eval text count, and the first offenders with their
-    coverage (or ``similarity`` for semantic hits).
+    >>> train = [{"prompt": "Where is order 4473?"}, {"prompt": "Cancel order 9911."}]
+    >>> clean, report = wai.decontaminate(train, against=[[{"prompt": "Cancel order 9911."}]])
+    >>> len(clean), report["n_contaminated"]
+    (1, 1)
     """
     if embedder is not None and not 0 <= float(similarity) <= 1:
         raise ValueError(
