@@ -149,9 +149,16 @@ kwarg. `scripts/check_no_hardcoding.py` enforces the first half; the
 ratchet enforces the second on new calls. *(every torch.optim default is in
 the signature and the docstring.)*
 
-**10. Errors and warnings name the fix.** A `ValueError` says the kwarg,
-the bound and the value. A warning says the one call that changes the
-outcome. No warning is emitted twice for the same cause in one run.
+**10. Errors and warnings name the fix, from the call that took the bad
+value.** A `ValueError` says the kwarg, the bound and the value. Whichever
+call accepted the value raises: `wai.configure(agent="openai/gpt-4.1-mini")`
+refuses the string on that line and names `"openai:gpt-4.1-mini"`, rather
+than storing it for `simulate` to fail on later, in a frame the user did
+not write. A warning says the one call that changes the outcome. No
+warning is emitted twice for the same cause in one run. The near miss is
+worth naming in the message when it is a neighbour's spelling: DSPy and
+LiteLLM write `dspy.LM("openai/gpt-4o-mini")` with a slash, so the error
+for a slash says which colon form to type.
 
 **11. Typed, importable, cheap.** Every public signature is fully typed
 and `py.typed` ships. `import whileai` takes under 200 ms, makes no

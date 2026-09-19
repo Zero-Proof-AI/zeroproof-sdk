@@ -84,6 +84,10 @@ says what each role resolves to.
 * `simulator`: the writer of user messages; the agent's model unless set.
 * `api_key`: the While account key.
 
+A spec string is checked here: `agent="openai/gpt-4.1-mini"` (the
+DSPy spelling) or `agent="gpt-4.1-mini"` raises and names the string
+to type, instead of failing later inside `simulate`.
+
 ### context
 
 ```python

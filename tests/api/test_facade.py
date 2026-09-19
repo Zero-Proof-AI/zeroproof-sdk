@@ -10,6 +10,7 @@ All offline. ``docs/reference/style.md`` is the standard this enforces.
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 import sys
 
@@ -199,3 +200,112 @@ def test_judge_drops_into_grade(monkeypatch):
     assert len(scored) == 32
     assert {r["reward"] for r in scored} == {0, 1}
     assert all(r.get("judge_name", "").startswith("judge:llama3") or True for r in scored)
+
+
+# --- rule 10: the call that took the bad model string is the one that raises
+
+
+@pytest.mark.parametrize(
+    ("spec", "names"),
+    [
+        # the DSPy / LiteLLM spelling: dspy.LM("openai/gpt-4o-mini")
+        ("openai/gpt-4.1-mini", "agent='openai:gpt-4.1-mini'"),
+        ("anthropic/claude-haiku-4-5", "agent='anthropic:claude-haiku-4-5'"),
+        # the bare model name an OpenAI user types
+        ("gpt-4.1-mini", "openai:<model>"),
+        # a provider that does not exist
+        ("together:llama-3", "'together' is not one"),
+        ("", "leave it unset"),
+    ],
+)
+def test_a_misspelled_model_names_the_string_to_type(spec, names):
+    with pytest.raises(ValueError, match="agent="):
+        wai.configure(agent=spec)
+    with pytest.raises(ValueError) as caught:
+        wai.configure(agent=spec)
+    assert names in str(caught.value)
+    # and per call, where simulate detects the transport: the front door's
+    # sentence, except for an unknown provider, which reaches the engine's
+    # own parse_backend_spec and gets the same forms from there
+    with pytest.raises(ValueError) as per_call:
+        wai.simulate(agent=spec, system_prompt=POLICY, budget=2, simulator=False)
+    message = str(per_call.value)
+    assert names in message or ("unsupported backend spec" in message and "openai:" in message)
+
+
+def test_every_spec_form_is_accepted_and_the_role_is_named():
+    for spec in (
+        "openai:gpt-4.1-mini",
+        "anthropic:claude-haiku-4-5",
+        "vllm:Qwen/Qwen3-4B@http://localhost:8000/v1",
+        "ollama:llama3.1:8b",
+        "typesafe:jev-latest",
+        "http://127.0.0.1:8000/v1",
+    ):
+        wai.configure(agent=spec)
+    for role in ("agent", "judge", "simulator"):
+        with pytest.raises(ValueError, match=f"{role}='nope'"):
+            wai.configure(**{role: "nope"})
+        with pytest.raises(ValueError, match=f"{role}='nope'"), wai.context(**{role: "nope"}):
+            pass
+
+
+def test_the_writer_sentinels_are_not_model_strings():
+    """``simulator="hosted"`` is the default written out, not a model, and
+    ``writer_spec_for`` reads it. The check must let it through."""
+    from whileai.simulations.run.config import writer_spec_for
+
+    for word in ("hosted", "default"):
+        wai.configure(simulator=word)
+    # "hosted" is the default written out, so it resolves the way an
+    # unset simulator does rather than as a model named "hosted"
+    assert writer_spec_for("openai:gpt-4.1-mini", "hosted") == writer_spec_for(
+        "openai:gpt-4.1-mini", None
+    )
+    assert writer_spec_for(None, "hosted") is None
+    # the same word is not a model for the roles that take one
+    with pytest.raises(ValueError, match="agent='hosted'"):
+        wai.configure(agent="hosted")
+
+
+def test_judge_model_is_refused_where_it_was_typed():
+    """``wai.Judge(model="openai/x")`` raises in the constructor and names
+    ``model=``, not later when the judge first runs."""
+    with pytest.raises(ValueError, match=r"model='openai/gpt-4.1-mini'") as caught:
+        wai.Judge("be brief", model="openai/gpt-4.1-mini")
+    assert "model='openai:gpt-4.1-mini'" in str(caught.value)
+    assert (
+        wai.Judge("be brief", model="anthropic:claude-haiku-4-5").spec
+        == "anthropic:claude-haiku-4-5"
+    )
+
+
+def test_a_bad_role_leaves_no_half_applied_settings():
+    wai.configure(agent="openai:gpt-4.1-mini")
+    with pytest.raises(ValueError, match="judge="):
+        wai.configure(agent="ollama:llama3", judge="anthropic/claude-haiku-4-5")
+    assert wai.settings.agent == "openai:gpt-4.1-mini"
+    assert wai.settings.judge is None
+
+
+def test_spec_forms_match_the_engine():
+    """``SPEC_FORMS`` is the vocabulary the front door checks against and
+    ``parse_backend_spec`` is the implementation. A provider added to one
+    has to be added to the other, or this fails."""
+    import re
+
+    from whileai.config import SPEC_FORMS
+    from whileai.simulations.generate.agents import parse_backend_spec
+
+    source = inspect.getsource(parse_backend_spec)
+    engine = set(re.findall(r'kind == "([a-z]+)"', source))
+    assert engine == set(SPEC_FORMS), (engine, set(SPEC_FORMS))
+    for provider in SPEC_FORMS:
+        spec = f"{provider}:m@http://x/v1" if provider == "vllm" else f"{provider}:m"
+        url, model = parse_backend_spec(spec)
+        assert url and model == "m"
+    with pytest.raises(ValueError, match="unsupported backend spec") as caught:
+        parse_backend_spec("together:llama-3")
+    # the engine's own message is built from the same dict, so one list
+    for form in SPEC_FORMS.values():
+        assert form in str(caught.value)

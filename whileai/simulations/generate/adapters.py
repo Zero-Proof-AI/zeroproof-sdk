@@ -327,9 +327,13 @@ def detect(target: Any) -> str:
             return "http"
         if ":" in target:
             return "backend_spec"
-        raise ValueError(
-            f"cannot detect a transport for string {target!r}; pass an http(s) URL or a backend spec."
-        )
+        # Not a URL and not provider:model. The front door owns the
+        # vocabulary and the sentence that fixes it, so the message is the
+        # same one ``wai.configure(agent=...)`` gives.
+        from ...config import spec_problem
+
+        problem = spec_problem(target, kwarg="agent")
+        raise ValueError(problem or f"cannot detect a transport for string {target!r}")
     if isinstance(target, (list, tuple)) and target and isinstance(target[0], str):
         return "subprocess"
     if hasattr(target, "get_graph") and hasattr(target, "invoke"):
