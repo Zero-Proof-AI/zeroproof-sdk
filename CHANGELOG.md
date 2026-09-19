@@ -5,6 +5,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.84 (2026-09-19)
+
 - Platform runs carry a scientific record. `RunRecord` = `Data` (train
   and holdout ids, hashes, counts, decontamination drop), `Optimizer`
   (loss type, lr, beta, clip range, group size, tokens, seed), `EvalSetup`
