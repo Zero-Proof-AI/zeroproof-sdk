@@ -1,0 +1,76 @@
+---
+title: "Your model and your key"
+sidebarTitle: "Your model and your key"
+description: "How to name the model the agent runs on, which environment variable each provider reads, where the requests go, and the three things that reach While only when you ask."
+---
+
+The agent is the first argument of `simulate()`. Pass the model as a
+string, and the key comes from that provider's usual environment
+variable. Every request goes straight to that provider. The situation
+writer runs on the same model, so no While key is involved.
+
+```python
+import whileai.simulations as wai
+
+data = wai.simulate(
+    "openai:gpt-4.1-mini",  # the agent; key from OPENAI_API_KEY
+    tools=TOOLS,
+    system_prompt="Help customers with orders.",
+    mode="rl",
+    repeats=4,
+    budget=64,
+)
+```
+
+| Agent | Key | Requests go to |
+|---|---|---|
+| `"openai:<model>"` | `OPENAI_API_KEY` (`OPENAI_BASE_URL` for a compatible server) | api.openai.com, or the base URL you set |
+| `"anthropic:<model>"` | `ANTHROPIC_API_KEY` | api.anthropic.com |
+| `"vllm:<model>@<url>"` | `OPENAI_API_KEY`; none for localhost or plain http | `<url>` |
+| `"ollama:<model>"` | none | localhost:11434 |
+| `my_agent(message) -> {"steps": [...], "final_text": "..."}` | yours | wherever your code goes |
+| `wai.seeded_agent(TOOLS)` | none | nowhere: an offline stand-in |
+
+Set the key the way you already do for that provider:
+
+```bash
+export OPENAI_API_KEY=sk-...        # or ANTHROPIC_API_KEY=...
+```
+
+## No tool schemas yet
+
+`draft_tools` writes plausible schemas from one sentence about the agent,
+on the same key:
+
+```python
+TOOLS = wai.draft_tools(
+    "a support agent that looks up orders and issues refunds",
+    backend_spec="openai:gpt-4.1-mini",
+)
+```
+
+Each drafted schema is marked `drafted`, so you can tell it from a
+declared tool. Replace them with your real schemas when you have them.
+
+## The judge
+
+Same shape as the agent: a callable over a row, a verifier
+(`wai.verify.MathEqual()`, `wai.verify.CodeExec(tests=...)`), or a model
+string on its own key. The judge is never the model it is judging; the
+[evals guide](/evals) shows how to check it against people before you
+trust it.
+
+## What reaches While
+
+Three things, and only when you ask for them:
+
+| You do this | What happens |
+|---|---|
+| leave `agent=` out | the agent is the Qwen the platform hosts, on the key from `whileai login` |
+| leave `simulator=False` out with a callable agent | the situation writer is hosted, on the same key |
+| call `push`, `train` or `serve` | rows go to your account for hosted training and serving |
+
+Everything else runs on your machine. `whileai status` prints which key
+the SDK will use and where it came from; `whileai login` or
+`whileai signup --email you@example.com` gets one when you want the hosted
+parts. The [platform reference](/reference/platform) covers that side.

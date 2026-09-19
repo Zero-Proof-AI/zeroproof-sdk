@@ -5,6 +5,13 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Getting started, from a tester who got lost: the README now opens with
+  "Your model, your key" (the model as a spec string, the environment
+  variable each provider reads, where requests go, and the three things
+  that reach While only when asked), says the library runs on your keys
+  and the platform is separate and optional, and moves the platform
+  section under that heading. Docs gain `get-started/your-model-and-key`
+  (second in the nav, a card on the index, a note on the quickstart).
 - `coverage_gap` and `preflight` check every clause of the system prompt.
   Both built their rule axis with the generation grid's cap, the first 16
   clauses in document order, and said nothing, so a 68 KB production
