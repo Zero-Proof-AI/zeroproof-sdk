@@ -466,6 +466,14 @@ CEILING_PASS_RATE = 0.9
 # runs every task 4 times and reports pass^1 and pass^4. Four is the
 # smallest count those benchmarks report a k-way number on.
 ROLLOUTS_PER_TASK = 4
+# PROVE_EFFECT = 0.05: the gain in pass rate the package asks a held-out
+# set to prove: ``eval_power(rows)`` reads it as the effect to size for,
+# and a pushed holdout is sized to it (PLATFORM_HOLDOUT_PROVE_EFFECT is
+# this value under the platform name). Five points is the package's proof
+# bar (a 5-point move on 50+ judged tasks); rlhfbook.com/c/16-evaluation.html
+# puts held-constant eval noise at 0.25 to 1.5 points, so five is several
+# noise floors. (convention above the measured noise)
+PROVE_EFFECT = 0.05
 
 # ---------------------------------------------------------------------
 # score: difficulty band
@@ -884,12 +892,11 @@ PLATFORM_IMPORT_MAX_ROWS = 100_000
 # PLATFORM_TRACE_PAGE_SIZE = 200: traces read per page when listing an
 # agent's traces (the ``limit=`` the traces route takes). Convention.
 PLATFORM_TRACE_PAGE_SIZE = 200
-# PLATFORM_HOLDOUT_PROVE_EFFECT = 0.05: the gain a pushed holdout is sized
-# to prove at 80% power (holdout_size). Five points is the package's proof
-# bar (a 5-point move on 50+ judged tasks); rlhfbook.com/c/16-evaluation.html
-# puts held-constant eval noise at 0.25 to 1.5 points, so five is several
-# noise floors.
-PLATFORM_HOLDOUT_PROVE_EFFECT = 0.05
+# PLATFORM_HOLDOUT_PROVE_EFFECT = PROVE_EFFECT: the gain a pushed holdout
+# is sized to prove at 80% power (holdout_size); the same quantity
+# ``eval_power`` sizes for, under the platform name, so the two cannot
+# drift. One value, one home (PROVE_EFFECT, score: statistics).
+PLATFORM_HOLDOUT_PROVE_EFFECT = PROVE_EFFECT
 # PLATFORM_REWARD_MODEL_BATCH = 256: rows per scoring request to a hosted
 # reward model; the gate's request cap, so a batch never 413s. (the gate's
 # limit)
@@ -1647,6 +1654,7 @@ __all__ = [
     "POWER",
     "PROGRESS_MIN_BUDGET",
     "PROGRESS_MIN_ROWS_FOR_ESTIMATE",
+    "PROVE_EFFECT",
     "REJECTION_SAMPLING_MIN_K",
     "REPORT_LIST_ITEMS",
     "RL_FAULT_RATE",

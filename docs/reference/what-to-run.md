@@ -150,3 +150,18 @@ In the order a post-training run happens. The index at [`recipes/README.md`](htt
 | Train | [`recipes/04-train/text-to-sql`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/04-train/text-to-sql) | Hill-climb a model on a schema with a verifier as the reward: a seeded Postgres, 741 execution-checked tasks, `SQLExec`, benchmarks through `simulate(tasks=)`, GRPO rounds on Modal, every round measured on the same holdout. Needs Postgres and a key; Modal and an H100 to train. |
 | Train | [`recipes/04-train/resist-planted-instruction`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/04-train/resist-planted-instruction) | A behaviour rubric decided by code, the criterion promoted into the reward on probe evidence, rejection sampling from the base itself, and a pre-registered random-selection control. Offline to read; a vLLM serving Qwen3-4B to generate, Modal to train. |
 | Export | [`recipes/05-export/hugging-face`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/05-export/hugging-face) | Rows to a Hub dataset repo you own, any Hub split onto your account with a profile, a run's adapter to a model repo. Needs a key and a connected Hugging Face account. |
+
+## Can this held-out set prove a gain?
+
+Before you spend on training, ask the base run whether the held-out set can
+show a difference at all:
+
+```python
+rep = wai.score.eval_power(base.rows())
+print(rep)  # verdict usable / underpowered / saturated / floored, in_band, resolvable, n_needed
+```
+
+`usable` means the set has tasks in the band the policy sometimes solves and
+enough of them to resolve the gain you are after; `underpowered` names
+`n_needed`; `saturated` and `floored` mean the base already passes or fails
+nearly everything, so train on a harder or easier set first.

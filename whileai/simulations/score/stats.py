@@ -57,9 +57,11 @@ from ..defaults import (
     DECONTAM_NGRAM,
     DECONTAM_OVERLAP,
     DIFFICULTY_BAND,
+    DIFFICULTY_BAND_ROLLOUTS,
     MIN_CI_TASKS,
     MIN_RERUNS,
     POWER,
+    PROVE_EFFECT,
     ROLLOUTS_PER_TASK,
     SEMANTIC_SIMILARITY,
     Z_95,
@@ -368,6 +370,147 @@ def _paired_sd_from_rows(
     base = _mean([_mean(means_a[t]) for t in shared])
     k = min(min(len(means_a[t]), len(means_b[t])) for t in shared)
     return _sample_sd(diffs), len(shared), base, k
+
+
+def eval_power(
+    rows: Sequence[dict],
+    *,
+    effect: float = PROVE_EFFECT,
+    power: float = POWER,
+    alpha: float = ALPHA,
+    band: tuple[float, float] = DIFFICULTY_BAND,
+) -> dict[str, Any]:
+    """Can this held-out set prove a gain of ``effect``? Ask before training.
+
+    Pass the graded rows of a BASE-ONLY run. The sizing is ``holdout_size``
+    and ``detectable_effect`` read off the same rows, so the three agree:
+    ``n_needed`` is ``holdout_size(effect, before=rows)["n_tasks"]`` and
+    ``resolvable`` is ``detectable_effect(n_tasks, base=, k=)``, the
+    smallest gain this many tasks at this ``k`` can prove at ``power``
+    (Miller 2024, arXiv:2411.00640, section 5, the power calculation;
+    rlhfbook.com/c/16-evaluation.html, the point of a better eval is
+    statistical power when comparing training runs). One model, one home:
+    ``_paired_task_sd``.
+
+    Beside the sizing, where the tasks sit. ``in_band`` counts tasks the
+    base passes between ``band[0]`` and ``band[1]`` of the time
+    (``DIFFICULTY_BAND``, rlhfbook.com/c/14-reasoning.html: the 20-80 band
+    difficulty filtering keeps, measured from N=16 there); ``tied_pass``,
+    ``tied_fail`` and ``single_rollout`` are the rest. Measured on one
+    agent, same world and rubric, base model on both sides: the default
+    set had 23 of 59 tasks in band at base 0.589; a set built to be
+    "harder" had 0 of 60 at base 0.000. The second is not a harder eval.
+    Its base score cannot tell hard tasks from a broken harness (a dead
+    tool fails every task the same way), and every group on it is
+    zero-accuracy, which DAPO (arXiv:2503.14476) drops for carrying no
+    gradient. The pass rate alone does not distinguish the two sets.
+
+    ``verdict`` is one of ``usable`` (``resolvable <= effect``),
+    ``underpowered`` (this ``n`` and ``k`` cannot prove ``effect``;
+    ``n_needed`` says what could), ``saturated`` (less than ``effect``
+    left to gain above ``base``), ``floored`` (every task fails every
+    rollout) or ``empty``. Anything but ``usable`` puts a line in
+    ``warnings`` that names the fix; ``notes`` are ``holdout_size``'s.
+    """
+    lo, hi = float(band[0]), float(band[1])
+    if not 0.0 <= lo < hi <= 1.0:
+        raise ValueError("band is (low, high) pass rates with 0 <= low < high <= 1")
+    by_task = _by_task(rows, _binary)
+    n_tasks = len(by_task)
+    out: dict[str, Any] = {
+        "n_tasks": n_tasks,
+        "n_rollouts": sum(len(v) for v in by_task.values()),
+        "k": None,
+        "base": None,
+        "task_spread": None,
+        "band": (lo, hi),
+        "in_band": 0,
+        "tied_pass": 0,
+        "tied_fail": 0,
+        "single_rollout": 0,
+        "effect": float(effect),
+        "power": float(power),
+        "alpha": float(alpha),
+        "task_std": None,
+        "resolvable": None,
+        "n_needed": None,
+        "verdict": "empty",
+        "reason": "no graded rows",
+        "notes": [],
+        "warnings": [],
+    }
+    if not n_tasks:
+        out["warnings"].append(
+            "no rows with a 0/1 reward: grade the base run first (grade=True, or "
+            "rubric_judge / evaluate), then ask again."
+        )
+        return out
+
+    rates = {task: _mean(v) for task, v in by_task.items()}
+    sizing = holdout_size(effect, power=power, alpha=alpha, before=rows)
+    base, k = sizing["base"], sizing["k"]
+    resolvable = detectable_effect(n_tasks, base=base, k=k, power=power, alpha=alpha)
+    out.update(
+        {
+            "k": k,
+            "base": round(base, 4),
+            "task_spread": sizing["base_spread"],
+            "in_band": sum(1 for r in rates.values() if lo <= r <= hi),
+            "tied_pass": sum(1 for r in rates.values() if r >= 1.0),
+            "tied_fail": sum(1 for r in rates.values() if r <= 0.0),
+            "single_rollout": sum(1 for v in by_task.values() if len(v) == 1),
+            "task_std": sizing["task_std"],
+            "resolvable": resolvable,
+            "n_needed": sizing["n_tasks"],
+            "notes": list(sizing["notes"]),
+        }
+    )
+    if k == 1:
+        out["notes"].append(
+            "k=1: each task's pass rate is one draw, so in_band cannot be read off this "
+            f"run (the band is measured from {DIFFICULTY_BAND_ROLLOUTS} rollouts per task in "
+            "its sources); the sizing stands, at the widest per-task spread."
+        )
+    headroom = 1.0 - base
+    if out["tied_fail"] == n_tasks:
+        verdict = "floored"
+        why = "every task fails every rollout"
+        fix = (
+            f"every one of the {n_tasks} tasks fails every rollout (base 0.000). The pass "
+            "rate cannot tell hard tasks from a broken harness (a dead tool fails every task "
+            "the same way), and no group on it carries a gradient. Check coverage['dead_tools'] "
+            "and the world's answers before reading 0 as difficulty, then keep tasks the base "
+            f"passes {lo:.0%} to {hi:.0%} of the time."
+        )
+    elif headroom < float(effect):
+        verdict = "saturated"
+        why = f"base {base:.3f} leaves {headroom:.3f} to gain, under {float(effect):.3f}"
+        fix = (
+            f"base {base:.3f} leaves {headroom:.3f} to gain, under the {float(effect):.3f} you "
+            "want to prove: nothing left to measure on this set. Add harder tasks (hard_share=, "
+            "or pin dimensions={'stance': ['boundary', 'ambiguous', 'adversarial']}) so the base "
+            f"sits inside the {lo:.0%} to {hi:.0%} band."
+        )
+    elif resolvable is None or resolvable > float(effect):
+        verdict = "underpowered"
+        shown = "nothing" if resolvable is None else f"{resolvable:.3f}"
+        why = f"{n_tasks} tasks at k={k} resolve {shown}, not {float(effect):.3f}"
+        fix = (
+            f"{n_tasks} tasks at k={k} resolve a {shown} gain at {float(power):.0%} power, not "
+            f"the {float(effect):.3f} you want to prove; about {sizing['n_tasks']} tasks would "
+            "(n_needed). Add tasks before training, or pass effect= the gain you expect."
+        )
+    else:
+        verdict = "usable"
+        why = (
+            f"{n_tasks} tasks at k={k} resolve {resolvable:.3f} at {float(power):.0%} power, "
+            f"{out['in_band']} in band"
+        )
+        fix = ""
+    out.update({"verdict": verdict, "reason": why})
+    if fix:
+        out["warnings"].append(f"this held-out set cannot prove a {float(effect):.3f} gain: {fix}")
+    return out
 
 
 def holdout_size(
