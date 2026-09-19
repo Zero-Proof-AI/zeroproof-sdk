@@ -325,6 +325,8 @@ train(
     temperature: float | None = None,
     truncated: str | None = None,
     config: Mapping[str, Any] | None = None,
+    check: str = 'require',
+    min_mixed_tasks: int = 32,
     wait: bool = False,
     timeout: float | None = None,
     poll: float = 15.0,
@@ -335,16 +337,35 @@ train(
 
 Start a hosted fine-tune on a pushed dataset and return the run.
 
-`method` is `"sft"` (LoRA on the passing rows), `"grpo"` (the
-reference-first-action reward over the graded rows), `"dpo"` (a
-pass against a fail per prompt, length matched) or `"rm"` (a reward
-model on those same pairs; `reward_model(run)` is then a judge).
-`steps` sets the optimizer steps for GRPO, DPO and RM, `epochs`
-the SFT epochs; each
-method has a default. `holdout` names the eval set; it defaults to
-the train set's split sibling from `datasets.cut`. `base_model`
-overrides the trainer's base; only `SERVED_BASES` can be served
-afterwards, and `train` warns when the run will not be.
+`method` is `"sft"` (LoRA on every row of the set, as pushed: the
+trainer does not filter on reward, so push `scored.passes()`),
+`"grpo"` (a grouped update over the prompts that have both a pass
+and a fail; the reward is the trainer's own, `reference first
+action` against the judge's gold, and is not a parameter on this
+path), `"dpo"` (a pass against a fail per prompt, length matched) or
+`"rm"` (a reward model on those same pairs; `reward_model(run)` is
+then a judge). `steps` sets the optimizer steps for GRPO, DPO and
+RM, `epochs` the SFT epochs; each method has a default. `holdout`
+names the eval set; it defaults to the train set's split sibling from
+`datasets.cut`. `base_model` overrides the trainer's base; only
+`SERVED_BASES` can be served afterwards, and `train` warns when
+the run will not be.
+
+Which rows survive is checked before the GPU is spent (`check`,
+default `"require"`): `train` reads `wai.profile(dataset)` and
+runs `selection_report` on it. SFT with failing rows is refused
+(`TrainingSelectionError`): the trainer clones every row and the
+model learns the failure (rlhfbook.com/c/10-rejection-sampling.html;
+#396 measured it, tool use 0.99 to 0.49). A grouped method with no
+mixed task is refused too, since a unanimous group carries no
+advantage (#397 trained on 6 of 84 rows and ended at grad_norm 0).
+Fewer mixed tasks than `min_mixed_tasks` (`TRAIN_MIN_MIXED_TASKS`,
+32), or any dropped class at all, is a warning naming the count used
+against the count given and the reason per class;
+`profile(dataset)["mixed_tasks"]` is the number to size a grouped
+set by. `check="warn"` says the same and starts the run;
+`check="off"` does not read the profile. The report is on
+`run.selection`.
 
 The run is the same record `training_run` makes, so `run.url` is
 the loss curve, `run.delta` and `get_run` work unchanged, and the
