@@ -44,6 +44,12 @@ python recipe.py                    # both arms, writes results.json
 - Public data or a seeded environment that lives in the recipe directory. No customer data.
 - A flat result is a result. Say so in the table.
 - `python recipes/papers/check.py --write` passes (`tests/recipes/test_papers.py` runs it in CI).
+- `post.md`: the result as a post, once the recipe is verified. Under 280
+  characters, plain words, the metric with its interval, the arXiv link
+  and the recipe link, nothing invented and nothing rounded. A flat result
+  is posted as flat. Replicated papers are how we market
+  ([CONSTITUTION.md](../../CONSTITUTION.md), belief 2); the post is the
+  last artifact of a recipe, not a separate job.
 
 ## The science bar
 

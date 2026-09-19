@@ -1,49 +1,29 @@
 ---
 title: "whileai"
-description: "Training and eval data for agents that call tools. Install, run the sixty-second offline example, then pick a path."
+sidebarTitle: "Overview"
+description: "A scientific post-training library for language models: SFT and RL on open models, with the measurement that says whether training helped. Your models, your keys, your compute."
 ---
 
-`whileai` makes training and eval data for agents that call tools. Give it
+`whileai` is a post-training library for language models: SFT and RL on
+open models, with the measurement that says whether training helped. The
+loop is simulate, grade, measure with intervals, select, train, prove on a
+held-out set, serve, and feed the new traces back in. Nothing in that loop
+needs an account, and every default names the paper it came from.
+
+The data end of the loop is built for agents that call tools. Give it
 an agent, or just the agent's tools and system prompt. It writes the
-situations the agent might meet, runs the agent through them against a fake
-world that fails on purpose, and hands back every conversation as a row.
-You grade the rows with your own judge or a verifier. The package then does
-the bookkeeping that is easy to skip and expensive to get wrong: pass rates
-with intervals, difficulty bands for RL, a check that your judge agrees with
-people, decontamination against your eval set, and a scan for rewards the
-policy can game.
+situations the agent might meet, runs the agent through them against a
+world that fails on purpose, and hands back every conversation as a row
+you grade with your own judge or a verifier.
 
 ```bash
-uv add whileai
+pip install whileai
 ```
 
-Or `pip install whileai`. Python 3.10 to 3.13, one dependency, typed.
-This package used to be called `zeroproof`; that name still installs it.
-
-## Two ways in
-
-<CardGroup cols={2}>
-  <Card title="You only want evals" icon="flask" href="/evals">
-    Run `whileai init-evals` in your project. A pass rate with a 95% interval,
-    a table of where the agent fails, and a test that goes red in CI when it
-    gets worse.
-  </Card>
-  <Card title="You want to train" icon="dumbbell" href="/simulations">
-    Grade the same rows, keep the ones that carry signal, export to your
-    trainer or ours.
-  </Card>
-</CardGroup>
-
-## Sixty seconds, offline
-
-No key, no network. `seeded_agent` is a stand-in agent. It answers
-honestly most of the time and, on a labeled fraction of rollouts, does one
-thing wrong on purpose: hedges, flatters, or claims success after a tool
-failed. Each row records what it did in `seeded`, so you can check that
-your judge catches exactly those rows before you trust it on real ones.
+The loop, offline, no key, about twenty seconds on a laptop:
 
 ```python
-import whileai.simulations as wai
+import whileai as wai
 
 TOOLS = [
     {
@@ -61,55 +41,103 @@ TOOLS = [
 ]
 
 data = wai.simulate(
-    wai.seeded_agent(TOOLS),
+    wai.seeded_agent(TOOLS),  # a stand-in agent that misbehaves on a labeled share of rows
     tools=TOOLS,
     system_prompt="Help customers with orders.",
-    simulator=False,  # no model
+    simulator=False,  # template situation writer: no model, no network
     mode="rl",
     repeats=4,
     repeat_policy="fixed",
     budget=64,
 )
-scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})
+scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})  # any judge or verifier
 print(scored.pass_at)
+rows = scored.select(mode="rl")  # the 20 to 80% band, unanimous groups dropped, hack scan
+rows.export("train.jsonl")
 ```
 
-```
+```text
 pass@1 0.67 [0.55..0.78] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.33 (16 groups, k=4)
 ```
 
-pass@1 is the pass rate over tasks with a bootstrap interval. pass^4 is
-how often all four rollouts of a task pass. Headroom is pass@4 minus
-pass@1, the gap an RL update could close.
+| Metric | Value | 95% interval | n | What it says |
+|---|---|---|---|---|
+| pass@1 | 0.67 | 0.55 to 0.78 | 16 tasks, k=4 | how often the agent does the job on one try; bootstrap over tasks |
+| pass^4 | 0.19 | 0.00 to 0.38 | 16 tasks, k=4 | how often all four tries pass; the reliability line |
+| pass@4 | 1.00 | 1.00 to 1.00 | 16 tasks, k=4 | at least one of four passes |
+| headroom | 0.33 | | | pass@4 minus pass@1, the gap an RL update could close |
 
-To use your own agent, pass any callable that takes the user message and
-returns `{"steps": [...], "final_text": "..."}`. To use a model, pass a
-spec string: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
-or `ollama:<model>`. With no `agent=` at all, the run uses the Qwen we
-host, on your key from `whileai login`, and Phi-4 grades. The judge is
-never the model it is judging.
+Swap the stand-in for your agent and the lambda for your judge and the
+program is the same. The package then does the bookkeeping that is easy
+to skip and expensive to get wrong: pass rates with intervals, difficulty
+bands for RL, a check that your judge agrees with people, decontamination
+against your eval set, and a scan for rewards the policy can game.
+
+Two domains, kept apart. `import whileai as wai` is the library: simulate,
+grade, measure, select, export, on your machine against your models, no
+account needed. `whileai.platform` is the While platform: sign in, push
+datasets, train and serve on hosted GPUs, track versions. Everything that
+talks to withwhile.com lives there and nowhere else.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/get-started/quickstart">
+    The program above, one step at a time, with what each line prints.
+  </Card>
+  <Card title="Your model and your key" icon="key" href="/get-started/your-model-and-key">
+    Name the model as a string, set the provider's own key, and see
+    exactly what stays on your machine.
+  </Card>
+  <Card title="Evals" icon="flask" href="/evals">
+    A pass rate with an interval, a table of where the agent fails, and a
+    CI check that goes red when it gets worse.
+  </Card>
+  <Card title="Train on your own GPU" icon="dumbbell" href="https://github.com/whilehq/whileai-sdk/tree/main/recipes/04-train">
+    GRPO or DPO on Modal, a GPU box or a notebook, with the paired delta
+    on a holdout at the end. One A10G, under fifteen minutes.
+  </Card>
+</CardGroup>
 
 ## The loop
 
 | Step | Call | What it computes |
 |---|---|---|
-| Simulate | `simulate(agent, tools=, system_prompt=, mode="rl", repeats=k)` | covering array over tools, world state and user stance; k rollouts per prompt; scheduled tool faults |
-| Grade | `data.grade(judge=)`, `verify.MathEqual`, `verify.CodeExec` | reward per rollout under one contract; verifiable rewards |
-| Validate the judge | `judge_trust`, `judge_probes` | agreement and Cohen's kappa against human gold; length bias; exploit probes |
-| Measure | `pass_at`, `delta_report`, `eval_variance`, `holdout_size` | pass@1, pass^k, pass@k with bootstrap intervals over tasks; paired delta with a permutation p-value; noise band; power |
-| Select | `optimize(mode="rl"\|"sft")`, `build_preference_pairs`, `curriculum` | 20 to 80% difficulty band, unanimous-group drop, rejection sampling, length-matched pairs, curriculum |
-| Guard | `decontaminate`, `hack_scan`, `trace_markers`, `HackMonitor` | overlap with the eval set; reward-feature correlation within task against a shuffle floor; trajectory lies |
-| Train and export | `export_dataset`, `export_environment`, `train`, `serve` | loss masks; a `verifiers` environment for GRPO; hosted LoRA SFT, GRPO, DPO, RM |
+| Simulate | `simulate(agent, tools=, system_prompt=, mode="rl", repeats=k)` | A covering array over tools, world state and user stance. k rollouts per prompt. Scheduled tool faults. |
+| Grade | `data.grade(judge=)`, `verify.MathEqual`, `verify.CodeExec` | A reward per rollout under one contract. Verifiable rewards where a program can check. |
+| Validate the judge | `judge_trust`, `judge_probes` | Agreement and Cohen's kappa against human gold. Length bias. Exploit probes. |
+| Measure | `pass_at`, `delta_report`, `eval_variance`, `holdout_size` | pass@1, pass^k, pass@k with bootstrap intervals over tasks. A paired delta with a permutation p-value. Noise band. Power. |
+| Select | `scored.select(mode="rl"\|"sft")`, `build_preference_pairs`, `curriculum` | The 20 to 80% difficulty band. Unanimous groups dropped. Rejection sampling. Length-matched pairs. |
+| Guard | `decontaminate`, `hack_scan`, `trace_markers`, `HackMonitor` | Overlap with the eval set. Reward-feature correlation within task against a shuffle floor. Trajectory lies. |
+| Train and export | `rows.export`, `export_environment`, `platform.train`, `platform.serve` | Loss masks. A `verifiers` environment for GRPO. Hosted LoRA SFT, GRPO, DPO, RM. |
 
-Where each method comes from, with numbered references, is in the
-[README](https://github.com/whilehq/whileai-sdk#references). The knob
-tables and every gate are in the [reference](/reference). Every public
-call, with its signature and docstring, is under API in the sidebar; those
-pages are generated from the package on each release, so they cannot drift.
+Where each method comes from, with numbered references, is on
+[the engine](/concepts/engine). The calls in the order a run happens are
+on [the five calls](/reference/five-calls). Every public call, with its
+signature and docstring, is under API in the sidebar; those pages are
+generated from the package on each release, so they cannot drift.
 
-## Worked recipes
+## Guides
 
-Runnable, one folder each, offline where the method allows it:
-[recipes/](https://github.com/whilehq/whileai-sdk/tree/main/recipes). The
-same paths as skills a coding agent can load are in
-[skills/](https://github.com/whilehq/whileai-sdk/tree/main/skills).
+<CardGroup cols={3}>
+  <Card title="Simulations" href="/simulations">
+    How the engine thinks and why.
+  </Card>
+  <Card title="Character training" href="/character-training">
+    A stable way of talking, in the weights.
+  </Card>
+  <Card title="Reward hacking" href="/reward-hacking">
+    The gap between the training reward and the eval you care about.
+  </Card>
+  <Card title="Safety evals" href="/safety-evals">
+    Private data, actions, sends: can they be turned against the owner?
+  </Card>
+  <Card title="Platform" href="/platform/index">
+    What the hosted service adds on top of the library, and where the line is.
+  </Card>
+  <Card title="Recipes" href="https://github.com/whilehq/whileai-sdk/tree/main/recipes">
+    Runnable, one folder each, offline where the method allows.
+  </Card>
+  <Card title="Replicated papers" href="https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers">
+    One recent post-training paper per recipe, under an hour on one GPU,
+    with the number it moved and the number it did not.
+  </Card>
+</CardGroup>

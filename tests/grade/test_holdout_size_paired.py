@@ -130,12 +130,15 @@ def test_the_result_has_the_same_keys_on_every_path():
         "n_tasks_concentrated",
         "base_spread",
         "n_paired",
+        "saturated",
         "notes",
+        "warnings",
     }
     before = _arm([0.5] * 10, 4)
     model = holdout_size(0.05, base=0.6, k=4)
     given = holdout_size(0.05, task_std=0.38)
-    measured = holdout_size(0.05, before=before, after=_arm([0.75] * 10, 4))
+    # a gain that varies by task: a uniform one has a paired sd of 0 and is DEGENERATE (#392)
+    measured = holdout_size(0.05, before=before, after=_arm([0.75] * 5 + [0.5] * 5, 4))
     for result in (model, given, measured):
         assert set(result) == keys and isinstance(result["notes"], list)
     assert model["n_paired"] is None and model["base_spread"] is None

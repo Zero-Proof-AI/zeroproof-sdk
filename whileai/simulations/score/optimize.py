@@ -46,7 +46,7 @@ from .quality import _IDISH, _QUESTION_END, _STRONG_ACTION, load_jsonl, write_js
 from .stats import task_key
 
 # DEFAULT_BAND = DIFFICULTY_BAND (0.2, 0.8): keep asks the policy passes
-# between 20% and 80% of the time (rlhfbook.com/c/14-reasoning.html, difficulty filtering
+# between 20% and 80% of the time (rlhfbook.com/c/07-reasoning, difficulty filtering
 # from N=16 samples; DAPO arXiv:2503.14476 drops accuracy 0 and 1 groups;
 # Seed-Thinking, ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a
 # form of it). A reported practice with no published ablation on the
@@ -1068,7 +1068,7 @@ def select_for_rl(
                 f"Difficulty was measured from {median_n:g} rollouts per task, so a task's "
                 f"band assignment can be off by about ±{statistics.median(halves):.1f}. "
                 f"Use repeats={DIFFICULTY_BAND_ROLLOUTS} for a firmer band (the count the "
-                "20-80 band is measured from, rlhfbook.com/c/14-reasoning.html)."
+                "20-80 band is measured from, rlhfbook.com/c/07-reasoning)."
             )
     if report["eval_sourced"]:
         report["hygiene_warnings"].append(
@@ -1289,22 +1289,44 @@ def optimize(
     order: str = "spread",
     audit: dict[str, Any] | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """One call after grading: concentrate for the post-training target.
+    """Select the rows worth training on, for SFT or RL, one call after grading.
 
-    ``source`` is a ``SimulationData``, a row list, or a JSONL path.
-    ``mode`` defaults to the data's own mode: ``"sft"`` picks diverse
-    correct demonstrations (``select`` and ``min_reward`` as in
-    ``select_for_sft``), anything else keeps whole mixed RL groups
-    inside the difficulty ``band`` (default 20%-80% pass rate;
-    ``enforce_band=False`` only ranks out-of-band asks last; ``order``
-    is ``"spread"`` across pass rates or ``"middle"`` first, see
-    ``select_for_rl``).
-    ``endorsed`` names what the reward should track (feature-name
-    substrings such as ``"tool:lookup_order"``), so the RL report's
-    ``hack_scan`` can call a shortcut a hack.
-    Returns ``(rows, report)``; writes ``output`` when given, or
-    ``<name>.<mode>.jsonl`` next to a path source. Never overwrites the
-    source file unless ``output`` names it explicitly.
+    Reach for it once rows carry ``reward``. It returns ``(rows, report)``:
+    the kept rows in training order, and a report saying which mode ran,
+    what each gate dropped and why, and for RL a ``hack_scan`` of what the
+    reward is actually tracking. It writes the rows to ``output`` when
+    given, or to ``<name>.<mode>.jsonl`` next to a path source, and never
+    overwrites the source file unless ``output`` names it explicitly.
+
+    * ``source``: a ``SimulationData``, a row list, or a JSONL path.
+    * ``mode``: ``"sft"`` or ``"rl"``. Defaults to the run's own mode for a
+      ``SimulationData`` and to ``"rl"`` otherwise. SFT picks diverse
+      correct demonstrations (``select_for_sft``); RL keeps whole mixed
+      groups, never a split one (``select_for_rl``).
+    * ``target``: about how many rows to keep, 1000 by default.
+    * ``band``: the RL difficulty band as a pass-rate range, ``(0.2, 0.8)``
+      by default: asks the policy always or never solves carry no
+      advantage (rlhf-book ch. 7, difficulty filtering at 20 to 80
+      percent; DAPO's dynamic sampling, arXiv:2503.14476).
+      ``enforce_band=False`` only ranks out-of-band asks last instead of
+      dropping them. ``order`` is ``"spread"`` across pass rates (default)
+      or ``"middle"`` first.
+    * ``select`` (``"top_per_prompt"``) and ``min_reward`` (1.0): the SFT
+      picker and the reward a demonstration needs, as in
+      ``select_for_sft``.
+    * ``endorsed``: what the reward should track, as substrings of feature
+      names (``"tool:lookup_order"``), so the RL report's ``hack_scan`` can
+      call a shortcut a hack.
+    * ``truncated``: what happens to a rollout cut at the token cap
+      (rlhf-book ch. 6, DAPO's overlong handling): ``"drop"`` removes it
+      (the default), ``"keep"`` leaves it in with ``overlong=True`` and its
+      own reward, ``"penalize"`` keeps it as a failure that counts (reward
+      0, the judged score under ``reward_before_penalty``).
+
+    ```python
+    rows, report = wai.optimize(data, mode="rl", endorsed=["tool:lookup_order"])
+    print(report["mode"], len(rows))
+    ```
     """
     resolved = mode
     src = ""
