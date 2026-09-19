@@ -33,6 +33,7 @@ CLI_EXAMPLES = [
     "04-train/identity/generate.py",
     "02-measure/pass-at-k/measure.py",
     "02-measure/is-your-eval-any-good/check_eval.py",
+    "02-measure/compare-judges/run.py",
     "02-measure/eval-your-agent/run.py",
     "03-select/prime-intellect-rl/diagnose.py",
     "03-select/prime-intellect-rl/export_prompts.py",

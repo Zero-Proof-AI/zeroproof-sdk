@@ -5,6 +5,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Recipe `02-measure/compare-judges`: six judges on the same 300 labeled
+  rollouts (checked in with a rule-computed answer key), one ranked table.
+  Jev, the hosted judge, Claude through `anthropic:` or Bedrock, and the
+  policy judging itself; `python run.py report` reprints the published run
+  offline and the smoke path runs three toy judges with no key.
+
 ## 0.86 (2026-09-19)
 
 - `tools=` takes `@wai.tool` functions everywhere, not only in `simulate`

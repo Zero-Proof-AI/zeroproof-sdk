@@ -100,3 +100,7 @@ wheels/
 
 recipes/04-train/text-to-sql/serve_config.json
 !scripts/skill_trial.py
+
+# checked-in data, named in its README
+!recipes/02-measure/compare-judges/rows/labeled.jsonl
+recipes/02-measure/compare-judges/out/
