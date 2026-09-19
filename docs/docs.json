@@ -182,7 +182,8 @@
                   "recipes/community/force-the-branch",
                   "recipes/community/hosted-grpo-vs-sft",
                   "recipes/community/how-much-contamination-survives",
-                  "recipes/community/same-entrypoint-before-after"
+                  "recipes/community/same-entrypoint-before-after",
+                  "recipes/community/who-protects-the-holdout"
                 ]
               }
             ]

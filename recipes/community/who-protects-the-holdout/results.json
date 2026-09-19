@@ -1,0 +1,168 @@
+{
+  "question": "Which decontaminate() rule protects a held-out set: same_task (ids) or the text rules?",
+  "whileai": "0.86",
+  "offline": true,
+  "regimes": {
+    "0v1": {
+      "train_seed": 0,
+      "holdout_seed": 1,
+      "native": {
+        "caught": 105,
+        "n_train": 107,
+        "rate": 0.9813,
+        "ci95": [
+          0.953,
+          1.0
+        ],
+        "same_task": 104,
+        "exact": 0,
+        "near": 1,
+        "notes": []
+      },
+      "id_less": {
+        "caught": 19,
+        "n_train": 107,
+        "rate": 0.1776,
+        "ci95": [
+          0.112,
+          0.252
+        ],
+        "same_task": 0,
+        "exact": 14,
+        "near": 5,
+        "notes": []
+      }
+    },
+    "2v3": {
+      "train_seed": 2,
+      "holdout_seed": 3,
+      "native": {
+        "caught": 105,
+        "n_train": 106,
+        "rate": 0.9906,
+        "ci95": [
+          0.972,
+          1.0
+        ],
+        "same_task": 104,
+        "exact": 0,
+        "near": 1,
+        "notes": []
+      },
+      "id_less": {
+        "caught": 29,
+        "n_train": 106,
+        "rate": 0.2736,
+        "ci95": [
+          0.198,
+          0.358
+        ],
+        "same_task": 0,
+        "exact": 17,
+        "near": 12,
+        "notes": []
+      }
+    },
+    "4v5": {
+      "train_seed": 4,
+      "holdout_seed": 5,
+      "native": {
+        "caught": 105,
+        "n_train": 105,
+        "rate": 1.0,
+        "ci95": [
+          1.0,
+          1.0
+        ],
+        "same_task": 103,
+        "exact": 0,
+        "near": 2,
+        "notes": []
+      },
+      "id_less": {
+        "caught": 31,
+        "n_train": 105,
+        "rate": 0.2952,
+        "ci95": [
+          0.219,
+          0.381
+        ],
+        "same_task": 0,
+        "exact": 17,
+        "near": 14,
+        "notes": []
+      }
+    }
+  },
+  "summary": {
+    "native_rate_range": [
+      0.9813,
+      1.0
+    ],
+    "id_less_rate_range": [
+      0.1776,
+      0.2952
+    ],
+    "same_task_share_of_native": "103-104 of ~105 rows caught in every trial",
+    "notes_field_empty_in_both_regimes": true
+  },
+  "gpu_half": {
+    "status": "incomplete - the base noise floor replicated across two runs (6 evals); both runs' training arms were lost to the app-name collision described in the README",
+    "base": "Qwen/Qwen2.5-1.5B-Instruct",
+    "gpu": "A10G",
+    "holdout_n": 200,
+    "base_noise_floor": {
+      "run_1": [
+        0.555,
+        0.525,
+        0.49
+      ],
+      "run_2": [
+        0.515,
+        0.535,
+        0.54
+      ]
+    },
+    "base_noise_band": 0.065,
+    "arms_setup": {
+      "default": {
+        "n_rows": 840,
+        "n_contaminated": 20,
+        "leaks_caught": 20,
+        "leak_recall": 0.3333,
+        "clean_rows_dropped": 0,
+        "by_rule": {
+          "n_same_task": 0,
+          "n_exact": 0,
+          "n_near": 20,
+          "n_semantic": 0
+        }
+      },
+      "semantic": {
+        "n_rows": 791,
+        "n_contaminated": 69,
+        "leaks_caught": 58,
+        "leak_recall": 0.9667,
+        "clean_rows_dropped": 11,
+        "by_rule": {
+          "n_same_task": 0,
+          "n_exact": 0,
+          "n_near": 20,
+          "n_semantic": 49
+        }
+      }
+    },
+    "n_leak_planted": 60,
+    "arm_pass_rates": null,
+    "base_noise_all": [
+      0.555,
+      0.525,
+      0.49,
+      0.515,
+      0.535,
+      0.54
+    ],
+    "base_noise_mean": 0.5267,
+    "base_noise_sd": 0.0225
+  }
+}
