@@ -87,7 +87,9 @@ still work in the same list.
 on the same key:
 
 ```python
-TOOLS = wai.simulations.draft_tools(
+from whileai.simulations.generate.generator import draft_tools
+
+TOOLS = draft_tools(
     "a support agent that looks up orders and issues refunds",
     backend_spec="openai:gpt-4.1-mini",
 )

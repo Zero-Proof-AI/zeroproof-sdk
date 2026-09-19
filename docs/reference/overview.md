@@ -226,7 +226,7 @@ export TYPESAFE_API_KEY=...
 ```
 
 ```python
-report = data.grade(spec="typesafe:jev-latest")
+report = data.grade(llm_spec="typesafe:jev-latest")  # grade takes llm_spec=, not spec=
 report["unsure"]  # rows whose verdict probability sat within 0.1 of even
 data.trajectories[0]["judge_meta"]["confidence"]  # the probability of the verdict given
 data.trajectories[0]["failure_class"]  # on a failing row: the judge's own choice
@@ -234,7 +234,7 @@ data.trajectories[0]["failure_class"]  # on a failing row: the judge's own choic
 
 #### A model you serve
 
-To put a number on a model you serve (`wai.serve`, or your own vLLM), make it the agent, and run both arms of a before/after through the same call so the only difference is the weights:
+To put a number on a model you serve (`wai.serve`, or your own vLLM), make it the agent, and run both arms of a before/after through the same call so the only difference is the weights. The writer still runs on a hosted model, so this needs `WHILEAI_API_KEY` in the environment, or `whileai login`, unless you add `simulator=False`:
 
 ```python
 agent = wai.local_model(endpoint, name, tools=TOOLS, system=POLICY, thinking=False)

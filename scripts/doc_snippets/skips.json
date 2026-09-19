@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Blocks that are a sketch rather than a program, and why. They live here",
+    "rather than in a marker on the page because Mintlify renders anything in a",
+    "fence info string as a visible filename badge, and an HTML comment breaks",
+    "its MDX parser. Each entry names the page and a distinctive substring of",
+    "the block's code, so the entry survives the block moving up or down.",
+    "Adding one is a deliberate act: it means nobody can run that block, so it",
+    "needs a reason a reader would accept."
+  ],
+  "skips": [
+    {
+      "page": "docs/reference/five-calls.md",
+      "contains": "judge(row) -> {\"reward\": 0 or 1}",
+      "reason": "the shape of a return value, not a program"
+    },
+    {
+      "page": "docs/reference/platform.md",
+      "contains": "monitor = wai.HackMonitor(",
+      "reason": "needs a live training run and TRL; recipes/04-train/grpo runs it"
+    },
+    {
+      "page": "docs/reward-hacking.md",
+      "contains": "monitor = wai.HackMonitor(",
+      "reason": "needs a live training run and TRL; recipes/04-train/grpo runs it"
+    },
+    {
+      "page": "docs/reference/style.md",
+      "contains": "scored = grade(rows, model=",
+      "reason": "a no/yes contrast: the 'no' half is a deliberately bad call shape, not a program"
+    }
+  ]
+}

@@ -6,6 +6,11 @@ description: "Agent to gated dataset in five calls: simulate, grade, trust the j
 
 Agent to gated dataset. Everything else in this reference is one layer down. `TOOLS` is the list from [Start here](/reference/overview#start-here-no-key-required); `POLICY` is the agent's system prompt.
 
+Every block on this page runs a model or reaches the platform, so it needs
+`WHILEAI_API_KEY` in the environment, or `whileai login`; a block naming an
+`openai:` spec needs `OPENAI_API_KEY`. To follow along offline, pass
+`simulator=False` and your own callable agent.
+
 ```python
 import whileai as wai
 

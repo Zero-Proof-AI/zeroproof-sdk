@@ -37,6 +37,21 @@ jobs:
       #   uv run python scripts/gen_recipe_docs.py
       - run: uv run python scripts/gen_recipe_docs.py --check
 
+  snippets:
+    name: the code in the docs runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      # Every ```python block under docs/ is executed against the package, page
+      # by page, with no keys set, except the generated docs/api/ and
+      # docs/recipes/ trees. A block that needs a key is skipped only where the
+      # page tells the reader it needs one.
+      - run: uv run python scripts/check_doc_snippets.py
+
   docs-follow-code:
     name: code change carries a docs change
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-docs')

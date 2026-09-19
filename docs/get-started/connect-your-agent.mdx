@@ -10,6 +10,12 @@ functions, as on the [quickstart](/get-started/quickstart); schema dicts
 work in the same list. This page is the second part: which model,
 behind which endpoint, on which key.
 
+Every block below reaches a model, so each one needs a key: `WHILEAI_API_KEY`
+in the environment (or `whileai login`) for the hosted model, and
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for a block that names that provider.
+Adding `simulator=False` and your own callable agent runs the same call
+offline.
+
 ## Which model, on which key
 
 A backend object names a provider, a model and a key. Print it and it
@@ -75,7 +81,8 @@ tools, answers each tool call from the mock world, and lets a separate
 model play the customer.
 
 ```python
-data = wai.simulate(wai.OpenAI("gpt-4.1-mini"), tools=TOOLS, system_prompt=POLICY)
+wai.configure(agent=wai.OpenAI("gpt-4.1-mini"))  # a Backend goes through configure
+data = wai.simulate(tools=TOOLS, system_prompt=POLICY)
 ```
 
 Leave `agent=` out and the run uses what `configure` set, else the model
