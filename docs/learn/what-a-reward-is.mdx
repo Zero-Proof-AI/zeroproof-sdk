@@ -1,0 +1,125 @@
+---
+title: "A reward is a score you can defend"
+sidebarTitle: "3. What a reward is"
+description: "Lesson 3. A number per row, from a program that checks the answer or a model that reads it. How to check the checker before you trust it."
+---
+
+You have 64 rows. Some are good and some are not, and the model will
+learn from whichever you keep. So every row needs a score. Usually it is
+0 or 1: did the agent do the job. The score has to be one you can defend,
+because the model will learn exactly what the score rewards, including
+the parts you did not mean.
+
+## The mechanism
+
+The score is called the **reward**. There are two ways to get one.
+
+- **A program.** The answer matches the reference, the tests pass, the
+  tool was called before the reply. When a program can check the job, use
+  the program. It is cheap, repeatable, and cannot be flattered. The field
+  calls this a **verifiable reward**, and the program a **verifier**.
+- **A model.** When no program can check the job (was the tone right,
+  did it explain the policy), a model reads the reply against a written
+  rubric and answers 0 or 1. That is an **LLM judge**.
+
+A judge is a measurement instrument, so you check it before you use it.
+Label 50 rows by hand, run the judge on the same rows, and measure how
+often they agree. The library reports plain agreement and **kappa**,
+which is agreement after subtracting what two coin flips would agree on.
+
+## Run it
+
+The setup is lesson 2's run. Then three rewards on the same rows.
+
+```python
+import whileai as wai
+from whileai.simulations import attach_labels
+
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+data = wai.simulate(
+    wai.seeded_agent([get_order]),
+    tools=[get_order],
+    system_prompt="Help customers with orders.",
+    simulator=False,
+    mode="rl",
+    repeats=4,
+    repeat_policy="fixed",
+    budget=64,
+    seed=0,
+)
+
+
+# 1. A judge is any function from a row to a reward. This one reads the answer key.
+def judge(row):
+    return {"reward": int(not row["seeded"])}
+
+
+scored = data.grade(judge=judge)
+print(scored.pass_at)
+
+
+# 2. A verifier is a program. This one passes when the reply names the order.
+@wai.verifier
+def names_the_order(candidate, reference, row):
+    ids = [step["arguments"].get("order_id", "") for step in row["steps"]]
+    return float(any(i and i in candidate for i in ids))
+
+
+print(data.grade(judge=names_the_order).pass_at)
+
+# 3. Check the judge against labels. Here the labels come from the answer key;
+#    in real life a person writes them, 50 to 200 of them.
+labels = [
+    {"scenario_id": r["scenario_id"], "rollout_index": r["rollout_index"], "label": int(not r["seeded"])}
+    for r in scored.rows[:40]
+]
+labeled, _ = attach_labels(scored.rows, labels, kind="human")
+trust = wai.judge_trust(labeled, judge)
+print("trusted:", trust["ok"])
+print("agreement:", trust["agreement"]["agreement"], "kappa:", trust["agreement"]["kappa"])
+```
+
+```text
+pass@1 0.67 [0.55..0.78] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.33 (16 groups, k=4)
+pass@1 0.75 [0.50..0.94] | pass^4 (pass_pow_k) 0.75 [0.50..0.94] | pass@4 0.75 [0.50..0.94] | headroom 0.00 (16 groups, k=4)
+trusted: True
+agreement: 1.0 kappa: 1.0
+```
+
+Two different rewards, two different numbers, same rows. That is not a
+bug. A reward is a definition of the job, and the first line of any
+result is which definition it used. The judge here agrees with the labels
+100% of the time because it reads the same answer key the labels came
+from. A real judge on real labels lands lower, and the library refuses to
+call it trusted below 80% agreement and 0.6 kappa.
+
+<Note>
+The numbers after each pass rate are the interval. Lesson 4 is about
+them. For now: `0.67 [0.55..0.78]` means the true rate very likely sits
+between 55% and 78%.
+</Note>
+
+## Where it comes from
+
+1. Lambert, N. et al. Tülu 3: Pushing Frontiers in Open Language Model
+   Post-Training. arXiv:2411.15124, 2024. Reinforcement learning with
+   verifiable rewards: the reward is a program.
+2. Zheng, L. et al. Judging LLM-as-a-Judge with MT-Bench and Chatbot
+   Arena. NeurIPS, 2023. arXiv:2306.05685. How well a model judge agrees
+   with people, and where it is biased.
+3. Cohen, J. A Coefficient of Agreement for Nominal Scales. Educational
+   and Psychological Measurement 20(1), 1960. Kappa.
+4. Lambert, N. Reinforcement Learning from Human Feedback. arXiv:2504.12501,
+   2025. Chapter *Reward Modeling*.
+
+## Next
+
+[A pass rate without an interval is a guess](/learn/why-one-number-is-not-a-result):
+what `0.67 [0.55..0.78]` means and why the brackets matter more than the
+number.

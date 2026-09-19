@@ -1,0 +1,92 @@
+---
+title: "The test the model never sees is the only score that counts"
+sidebarTitle: "5. The held-out set"
+description: "Lesson 5. Split the rows before training, lock the test, and check that no training row is a copy of a test row."
+---
+
+If you train the model on the same tasks you test it on, the score goes
+up and means nothing. It is handing out the exam a week early. So before
+any training, you split the rows. One part trains. The other part is
+locked away, and the only number you ever report comes from it.
+
+## The mechanism
+
+The locked part is the **held-out set**. Three rules for it.
+
+1. Never train on it.
+2. Never use it to pick between models while you are still building.
+   Every peek makes it a little less held out.
+3. Measure before and after on it, and nowhere else.
+
+Simulated asks repeat, and production traffic repeats too, so a training
+row can be a near copy of a test row without anyone meaning it to. The
+check for that is **decontamination**: compare every training row's
+prompt against every test row's, and drop the training row when they
+overlap. The library counts shared runs of eight words and drops a row
+when 80% of its runs also appear in a test row.
+
+## Run it
+
+The setup is lesson 2's run. The split here is by position, which is fine
+for a demo. For real rows, split by task so all four tries of an ask land
+on the same side.
+
+```python
+import whileai as wai
+
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+data = wai.simulate(
+    wai.seeded_agent([get_order]),
+    tools=[get_order],
+    system_prompt="Help customers with orders.",
+    simulator=False,
+    mode="rl",
+    repeats=4,
+    repeat_policy="fixed",
+    budget=64,
+    seed=0,
+)
+scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})
+
+train = scored.rows[:40]
+holdout = scored.rows[40:]  # locked from here on
+
+# Plant one test row in the training set and see it caught.
+kept, report = wai.decontaminate(train + holdout[:1], against=holdout)
+print(len(train) + 1, "->", len(kept), "training rows")
+print("contaminated:", report["n_contaminated"])
+```
+
+```text
+41 -> 40 training rows
+contaminated: 1
+```
+
+One planted copy, one row dropped. On a real set the count is rarely
+zero, and every row it drops is a row that would have made the after
+score lie.
+
+<Note>
+Public benchmarks have the same problem at scale: their questions are on
+the internet, so they are in the pretraining data. That is one reason a
+test built from your own traffic, checked for overlap, says more about
+your agent than a leaderboard does.
+</Note>
+
+## Where it comes from
+
+1. Lambert, N. Reinforcement Learning from Human Feedback. arXiv:2504.12501,
+   2025. Chapter *Evaluation*: contamination, and why held-out sets decay.
+2. Miller, E. Adding Error Bars to Evals. arXiv:2411.00640, 2024. The
+   before-and-after on the same questions is a paired test.
+
+## Next
+
+[Train on what the model gets right sometimes](/learn/which-rows-to-train-on):
+which of the training rows are worth a gradient.
