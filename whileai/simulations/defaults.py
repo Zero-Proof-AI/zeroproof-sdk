@@ -1548,6 +1548,30 @@ def laplace(successes: float, trials: float, alpha: float = 1.0) -> float:
     return (float(successes) + alpha) / (float(trials) + 2.0 * alpha)
 
 
+# DELIVERED_LONG_CONVERSATION_TURNS = 3: a conversation with at least this
+# many user turns counts as long in ``coverage["delivered"]``
+# (``user_turns_3plus_share``). Convention, untested.
+DELIVERED_LONG_CONVERSATION_TURNS = 3
+# DELIVERED_FAULT_SHORTFALL = 0.7: a delivered fault share under this
+# fraction of the requested ``fault_rate`` is reported as a gap between
+# what was asked for and what the rows carry. Convention, untested.
+DELIVERED_FAULT_SHORTFALL = 0.7
+# DELIVERED_FAULT_LEAK = 0.01: a fault share above this when ``fault_rate``
+# was 0 is reported the same way. Convention, untested.
+DELIVERED_FAULT_LEAK = 0.01
+# DELIVERED_STANCE_MIN_SHARE = 0.5: the requested stances must cover at
+# least this share of the delivered rows, else the gap is reported.
+# Convention, untested.
+DELIVERED_STANCE_MIN_SHARE = 0.5
+
+# DELIVERED_TURNS_MIN_REQUEST = 2: an ``avg_turns`` request below this is
+# not checked against the delivered mean (one turn cannot fall short).
+# Convention, untested.
+DELIVERED_TURNS_MIN_REQUEST = 2
+# DELIVERED_TURNS_SHORTFALL = 0.5: a delivered mean under this fraction of
+# the requested ``avg_turns`` is reported as a gap. Convention, untested.
+DELIVERED_TURNS_SHORTFALL = 0.5
+
 __all__ = [
     "AGENT_MAX_TOKENS_FLOOR",
     "ALLOC_GAIN",
@@ -1576,6 +1600,12 @@ __all__ = [
     "DEFAULT_SEED",
     "DEFAULT_SELECT_TARGET",
     "DEFAULT_WRITER_FLIGHT",
+    "DELIVERED_FAULT_LEAK",
+    "DELIVERED_FAULT_SHORTFALL",
+    "DELIVERED_LONG_CONVERSATION_TURNS",
+    "DELIVERED_STANCE_MIN_SHARE",
+    "DELIVERED_TURNS_MIN_REQUEST",
+    "DELIVERED_TURNS_SHORTFALL",
     "DIFFICULTY_BAND",
     "DIFFICULTY_BAND_ROLLOUTS",
     "ENV_DECONTAMINATION_EXAMPLES",
