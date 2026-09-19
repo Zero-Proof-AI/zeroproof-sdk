@@ -5,6 +5,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.87 (2026-09-19)
+
 - Recipe `02-measure/compare-judges`: six judges on the same 300 labeled
   rollouts (checked in with a rule-computed answer key), one ranked table.
   Jev, the hosted judge, Claude through `anthropic:` or Bedrock, and the
