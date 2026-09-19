@@ -26,15 +26,19 @@ import re
 import sys
 import threading
 import time
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
-import warnings
 from pathlib import Path
 from typing import Any
 
 from ...auth import trial_prerun_note
 from ..data import SimulationData, clean_faults, conversation, export_row, note_stage, row_world
 from ..defaults import (
+    DELIVERED_FAULT_LEAK,
+    DELIVERED_FAULT_SHORTFALL,
+    DELIVERED_LONG_CONVERSATION_TURNS,
+    DELIVERED_STANCE_MIN_SHARE,
     FINGERPRINT_STEM_MIN_LEN,
     MAX_COMPLETIONS_PER_REQUEST,
     OK_STATUSES,
@@ -1329,6 +1333,7 @@ class Run:
         cov["sampling"] = None if c.sampling is None else dict(c.sampling)
         cov["timeout"] = c.rollout_timeout
         cov["logprobs"] = c.logprobs
+
     def _delivered(self) -> dict:
         """What the generation knobs actually produced, beside what was asked.
 
@@ -1379,7 +1384,9 @@ class Run:
             "tier_mix": mix(lambda t: t.get("tier")),
             "stance_mix": mix(lambda t: dim(t, "stance")),
             "mean_user_turns": round(sum(turns) / n, 2),
-            "user_turns_3plus_share": round(sum(1 for x in turns if x >= 3) / n, 4),
+            "user_turns_3plus_share": round(
+                sum(1 for x in turns if x >= DELIVERED_LONG_CONVERSATION_TURNS) / n, 4
+            ),
         }
 
     def _warn_on_undelivered(self, requested: dict, delivered: dict) -> None:
@@ -1390,11 +1397,11 @@ class Run:
         want_fault = requested.get("fault_rate")
         got_fault = delivered.get("fault_share")
         if isinstance(want_fault, (int, float)) and isinstance(got_fault, (int, float)):
-            if want_fault > 0 and got_fault < want_fault * 0.7:
+            if want_fault > 0 and got_fault < want_fault * DELIVERED_FAULT_SHORTFALL:
                 gaps.append(
                     f"fault_rate={want_fault} but {100 * got_fault:.0f}% of rows carry a fault"
                 )
-            elif want_fault == 0 and got_fault > 0.01:
+            elif want_fault == 0 and got_fault > DELIVERED_FAULT_LEAK:
                 gaps.append(f"fault_rate=0 but {100 * got_fault:.0f}% of rows carry a fault")
         want_turns = requested.get("avg_turns")
         got_turns = delivered.get("mean_user_turns")
@@ -1410,7 +1417,7 @@ class Run:
             got = delivered.get("stance_mix") or {}
             total = max(1, sum(got.values()))
             hit = sum(v for k, v in got.items() if k in set(asked))
-            if hit / total < 0.5:
+            if hit / total < DELIVERED_STANCE_MIN_SHARE:
                 gaps.append(
                     f"stance={sorted(asked)} but {100 * hit / total:.0f}% of rows carry one of them"
                 )
