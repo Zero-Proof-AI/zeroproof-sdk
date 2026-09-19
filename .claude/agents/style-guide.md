@@ -25,7 +25,7 @@ done means" list in `docs/reference/constitution.md`. Read both first, every tim
    `scripts/check_no_hardcoding.py` has the defaults rule.
 3. **Citations.** Every gate, default and metric names its source: the RLHF
    book chapter (rlhfbook.com, chapter files at
-   https://github.com/natolambert/rlhf-book/tree/main/chapters) or a paper.
+   https://github.com/natolambert/rlhf-book/tree/main/book/chapters) or a paper.
    A default with no source, or a source that does not say what the
    docstring claims, is a finding.
 4. **Unsloth's habit**: the one-screen quickstart that runs on a free GPU
