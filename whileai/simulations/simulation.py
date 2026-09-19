@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .data import SimulationData
+from .defaults import DEFAULT_BUDGET
 from .generate.scenarios import SEARCH_ARMS, reallocate_search_arms
 from .run.config import HUNG_SLOT_S as _HUNG_SLOT_S  # noqa: F401
 from .run.config import SATURATION_CAP as _SATURATION_CAP  # noqa: F401
@@ -22,7 +23,7 @@ from .run.config import (  # noqa: F401
     resolve_topology,
     writer_spec_for,
 )
-from .run.engine import Run
+from .run.engine import Run, tier_mix_of
 from .run.rows import (  # noqa: F401
     _collect_finished,
     _prompt_arm,
@@ -43,6 +44,7 @@ from .run.spec import (  # noqa: F401
     backend_spec,
     kind_from_spec,
 )
+from .tools import schemas as _tool_schemas
 
 _SEARCH_ARMS = dict(SEARCH_ARMS)
 _reallocate = reallocate_search_arms
@@ -63,7 +65,7 @@ def simulate(
     spec: Any = None,
     tools: list[dict] | None = None,
     system_prompt: str | None = None,
-    budget: int | None = 1000,
+    budget: int | None = DEFAULT_BUDGET,
     time_budget: float | None = None,
     until: str = "compute",
     mode: str = "explore",
@@ -104,204 +106,217 @@ def simulate(
     patience: str | None = None,
     **passed: Any,
 ) -> SimulationData:
-    """Inspect an agent, generate situations, and roll them out.
+    """Generate situations for an agent, roll them out, and return the rows.
 
-    The knobs most runs touch, in the signature so an editor shows them:
-    ``repeats`` (rollouts per ask, k), ``phrasings`` (wordings per
-    situation, n), ``repeat_policy`` (``"fixed"`` gives every ask all k
-    repeats; ``mode="rl"`` defaults to ``"successive"``, which stops
-    early on unanimous asks), ``concurrency`` (parallel rollouts, 32),
-    ``simulator`` (the situation writer; ``False`` is the offline
-    template writer, no key, and ``"hosted"`` is the default written out,
-    the same as leaving it unset), ``user_model``, ``backend`` (the agent's
-    model when ``agent=`` is not a callable), ``seed``, ``sampling``,
-    ``max_turns`` / ``avg_turns`` (model-backed agents only; a callable
-    agent is played single-turn: one message in, one trajectory out),
-    ``fault_rate``, ``temperature``, ``timeout``, ``logprobs``. Each
-    is ``None`` unless you set it, and a misspelled keyword is a
-    ``TypeError``, never silently ignored. ``seeds=`` is a list of
-    opening asks the writer keeps and varies; with a callable agent
-    whose world has real ids (order numbers, account names), put those
-    ids in the seeds or the tool descriptions, or the writer invents
-    ids and every rollout is "not found".
+    Reach for it first: it is the run everything else reads. Give it the
+    agent and it writes a grid of human asks (ordinary, vague, complex,
+    adversarial), plays each one against the agent, and returns a
+    ``SimulationData``: ``rows()`` (one row per rollout, with the prompt,
+    the tool calls, the final reply and its lineage), ``warnings``
+    (plain-words notes, each naming the call that changes it),
+    ``report()``, ``search`` (how the budget was spent), ``pass_at``
+    once graded, and ``save(path)``. Nothing is graded unless you ask:
+    pass ``grade=True`` for the deterministic conduct grade, a callable
+    ``grader=`` to score inside the loop (the only in-simulate score
+    hook), or grade later with ``data.grade(...)`` or ``grade()``.
 
-    Every seed is run. Each one becomes at least one situation:
-    ``situations`` is sized up to ``len(seeds)`` when you pass a smaller
-    number, and the search never spends a seed's slot on an ask it wrote
-    itself. The one thing that can still drop a seed is ``budget``,
-    which pays for ``len(seeds) * repeats`` rows before anything else;
-    when it cannot, the run says which seeds it dropped in ``warnings``
-    and lists them in ``search["seeds_dropped"]`` before rolling out.
-    Seeds are asks to build a run around, not the eval set: to check
-    that a fixed list of asks all ran and how each scored, use
-    ``evaluate(eval_set=asks)``.
+    The agent and the budget:
 
-    Input is an intent or an agent: ``system_prompt`` alone, ``tools``
-    plus a prompt, or ``spec=``. Search writes a grid of human requests
-    (ordinary, vague, complex, adversarial) and a spread of agent replies.
-    It spends ``budget`` rows and ``time_budget`` seconds on new coverage.
-    No default ``reward``. Pass ``grade=True`` for the deterministic
-    conduct grade, or grade later with ``grade()``. A callable
-    ``grader=`` is the only in-simulate score hook.
+    * ``agent``: a callable ``message -> trajectory``, played single-turn
+      (one message in, one trajectory out). Leave it ``None`` to have the
+      SDK play a multi-turn agent from ``tools``, ``system_prompt``
+      (alias ``policy``) and ``backend`` (its model); ``spec=`` is the
+      third way in.
+    * ``budget``: rows the run may produce, 1000 by default, a per-run cap
+      when ``runs`` is above 1 (``runs=3, budget=100`` returns up to 300
+      rows, and ``report()["budget_per_run"]`` carries the cap).
+      ``time_budget`` is the same cap in seconds.
+    * ``mode``: ``"explore"`` (default) spends the budget on new coverage.
+      ``"rl"`` gives every ask several repeats, so pass rates and RL
+      groups exist, and defaults ``repeat_policy`` to ``"successive"``,
+      which stops early on unanimous asks; ``"fixed"`` gives every ask all
+      k repeats.
+    * ``situations`` (N, distinct worlds), ``phrasings`` (n, wordings of
+      one world; alias ``requests_per_situation``) and ``repeats`` (k,
+      independent runs of one wording; alias ``rollouts_per_request``)
+      are three independent counts. Do not collapse them. Follow-ups
+      branch on the run. ``unique_situations=True`` (alias ``unique``)
+      keeps picking new worlds (n=1, k=1 unless you set them). With
+      ``situations=N`` the run stops once all N have their rollouts
+      (``stopped_because="situations_exhausted"``), whatever ``budget``
+      still allows; a budget above ``situations x phrasings x repeats`` is
+      not spent.
+    * ``concurrency`` (32 parallel rollouts), ``seed``, ``sampling``,
+      ``temperature``, ``timeout``, ``logprobs``, ``fault_rate``,
+      ``max_turns`` / ``avg_turns`` (model-backed agents only): each is
+      ``None`` unless you set it, and a misspelled keyword is a
+      ``TypeError``, never silently ignored. Writer completions are
+      ``advanced["completions_per_request"]``; seed openers are
+      ``advanced["seed_prompts"]``.
 
-    ``traces=`` (rows or a JSONL path of production traces) aims the
-    covering grid at the behaviors those traces show instead of the whole
-    space, and drops any generated row that near-copies a source trace,
-    so held-out traces stay out of training. Without it the grid comes
-    from the agent's tools and policy alone (cold start). Traces
-    reproduce situations: the tools, faults and world states the agent
-    met. A failure mode that lives in how the reply is worded (an
-    unsupported claim, an estimate not labelled as one, two questions
-    where one was asked for) has no world-visible trigger, so traces
-    alone cannot aim at it; put a grader in the loop for those.
+    What the situations come from:
 
-    With ``grader=`` set, the grader's verdict steers the search the way
-    a tool fault already does: a row the grader failed is re-rolled and
-    its ask is mutated into new ones, so the budget moves toward what
-    the grader catches, not only toward broken tools. A grader that
-    fails reply-form rules is exactly the signal the loop was missing
-    (#285: with a 12-rule grader, every rule with a tool-result trigger
-    was reproduced and every rule about the reply's wording was not),
-    and without a grader there is no verdict to steer by, so there is no
-    switch to set: the grader is the switch. A graded failure is a reward
-    under 0.5 (a 0 from a 0/1 judge, a failed verifier, a rubric below
-    half); markers ride along on the row but do not aim on their own,
-    since their direction differs per marker. ``search["mutation_aims"]``
-    counts the parents and the mutated rows per aim, ``world_fault`` and
-    ``graded_failure``. To grade beside the loop and still steer by tool
-    faults alone, ``advanced={"mutate_graded_failures": False}``.
+    * ``simulator``: the situation writer. ``"hosted"`` is the default
+      written out, the same as leaving it unset; ``False`` is the offline
+      template writer, no key needed. ``user_model`` plays the simulated
+      person (a backend spec; ``None`` means the writer's model, the
+      agent's own by default).
+    * ``seeds``: opening asks the writer keeps and varies. Every seed is
+      run and becomes at least one situation: ``situations`` is sized up
+      to ``len(seeds)`` when you pass a smaller number, and the search
+      never spends a seed's slot on an ask it wrote itself. The one thing
+      that can still drop a seed is ``budget``, which pays for
+      ``len(seeds) * repeats`` rows before anything else; when it cannot,
+      ``warnings`` says which seeds were dropped and
+      ``search["seeds_dropped"]`` lists them before rolling out. With a
+      callable agent whose world has real ids (order numbers, account
+      names), put those ids in the seeds or the tool descriptions, or the
+      writer invents ids and every rollout is "not found". Seeds are asks
+      to build a run around, not the eval set: to check that a fixed list
+      of asks all ran and how each scored, use ``evaluate(eval_set=asks)``.
+    * ``traces``: rows or a JSONL path of production traces. The grid
+      then aims at the tools, faults and world states those traces show
+      instead of the whole space (without it the grid comes from the
+      agent's tools and policy alone, a cold start), and any generated
+      row that near-copies a source trace is dropped, so held-out traces
+      stay out of training. Traces reproduce world-visible situations. A
+      failure that lives in how a reply is worded (an unsupported claim,
+      an estimate not labelled as one, two questions where one was asked
+      for) has no world-visible trigger, so traces alone cannot aim at
+      it; put a grader in the loop for those.
+    * ``hard_share``: the difficulty dial, the share of situations drawn
+      from the ambiguous, boundary and adversarial tiers, 0.40 by
+      default, where a base fails most often. ``search["tier_mix"]``
+      reports the share asked for and the share drawn;
+      ``dimensions={"stance": [...]}`` pins one axis and keeps the other
+      axes of the grid.
+    * ``tasks``: a previous run (a ``SimulationData``, its rows, or its
+      JSONL path) whose task set is replayed instead of drawing a new
+      one. Every distinct prompt is rolled out again, on its own
+      ``scenario_id`` and ``scenario_dimensions``, under the same faults
+      and world state, and nothing else is generated. An unpinned re-run
+      draws by seed and, above ``concurrency: 1``, by completion order, so
+      it shares only part of its tasks with the first and ``compare_runs``
+      drops the rest; pinning is how an A/B (a prompt edit, a model swap,
+      another seed) keeps every pair. k comes from this call's
+      ``repeats`` when given, otherwise from the pinned run (the most
+      rollouts any of its prompts has), never from this call's ``mode``,
+      so ``pass_at`` reports the same k on both sides. The run stops when
+      every pinned prompt has its rollouts
+      (``stopped_because="tasks_done"``) or the budget is spent.
+    * ``runs``: replay the same task set that many times in one call and
+      stamp ``lineage.eval_run`` (0, 1, 2, ...) on every row, which is what
+      ``delta_report`` needs before it will call a change real (rlhf-book
+      ch. 16 and appendix C: one evaluation is a draw, three give a
+      standard deviation). ``simulate(tasks=base, runs=3)`` is the usual
+      form; without ``tasks=`` the first run draws the task set (from
+      ``seeds=`` when given) and the rest replay it. Between runs nothing
+      changes but the agent's own sampling (same tasks, faults, world
+      state and seed), so a deterministic agent gives identical runs and
+      a zero re-run band. All rows come back in one ``SimulationData``
+      (``output=`` holds them all); ``search["eval_runs"]`` lists the rows
+      and stop reason per run, and ``eval_variance(data.rows())`` splits
+      by ``eval_run`` on its own. Replayed rows keep the writer of the
+      run they replay on ``writer_model`` and say
+      ``lineage.replayed_from_run``, so ``delta_report`` on two runs of
+      one call sees one writer.
 
-    ``hard_share=`` is the difficulty dial: the fraction of situations drawn
-    from the ambiguous, boundary and adversarial tiers (default 0.40), where
-    a base fails most often. ``search["tier_mix"]`` reports the share asked
-    for and the share drawn; ``dimensions={"stance": [...]}`` pins the axis
-    and keeps the other axes of the grid.
+    What steers the search and answers the tools:
 
-    ``execute=`` is the caller's world: a function ``(tool, arguments) ->
-    result`` that answers every tool call for real, against their repo,
-    database, or service. Without it the mock world answers, which fits
-    record-shaped tools and not code. Scheduled faults still apply first.
-    ``whileai.simulations.generate.agents.current_rollout`` is a
-    thread-local set before each rollout with ``prompt``, ``rollout_index``
-    and ``seed``, so ``execute`` can tell which run it is answering.
+    * ``grader``: a callable judge. Its verdict steers the search the way
+      a tool fault already does: a row the grader failed is re-rolled and
+      its ask is mutated into new ones, so the budget moves toward what
+      the grader catches, not only toward broken tools. A grader that
+      fails reply-form rules is exactly the signal traces cannot give
+      (measured with a 12-rule grader: every rule with a tool-result
+      trigger was reproduced and every rule about the reply's wording was
+      not), and without a grader there is no verdict to steer by, so
+      there is no switch to set: the grader is the switch. A graded
+      failure is a reward under 0.5 (a 0 from a 0/1 judge, a failed
+      verifier, a rubric below half); markers ride along on the row but
+      do not aim on their own, since their direction differs per marker.
+      ``search["mutation_aims"]`` counts the parents and the mutated rows
+      per aim, ``world_fault`` and ``graded_failure``. To grade beside the
+      loop and still steer by tool faults alone, pass
+      ``advanced={"mutate_graded_failures": False}``.
+    * ``execute``: your world, a function ``(tool, arguments) -> result``
+      that answers every tool call for real, against your repo, database
+      or service. Without it the mock world answers, which fits
+      record-shaped tools and not code. Scheduled faults still apply
+      first. ``whileai.simulations.generate.agents.current_rollout`` is a
+      thread-local set before each rollout with ``prompt``,
+      ``rollout_index`` and ``seed``, so ``execute`` can tell which run it
+      is answering.
+    * ``patience``: how long the simulated person keeps answering the
+      agent's questions. ``"normal"`` (the default) always tries to answer
+      the first question, and from the second on may walk away (35% on
+      the second, 60% on each after that, drawn per thread so a seeded
+      run reproduces); at any question the person may also leave when it
+      asks for something they could not or would not know. ``"short"``
+      walks away sooner (60% then 90%); ``"endless"`` never walks away, so
+      the person answers every question until the depth cap and no rubric
+      criterion about asking can fail. The odds are a default, not a
+      measurement: to ground them, fit a Kaplan-Meier hazard per question
+      index on source traces and set the levels from it. A row the person
+      left carries ``ended_by="user_left"`` and ends on the agent's
+      question; ``search["ended_on_question"]`` is ``{"share", "n",
+      "user_left"}``: of ``n`` rows, the share that ended on a question
+      and how many of those the person left.
+    * ``scaffold``: generation-only guidance appended to the system prompt
+      of the model-backed teacher during rollout (and to the scene
+      writer). It never enters ``profile.policy``, so exports and evals
+      stay on the plain policy; it is ignored for callable agents.
+      Measured to help some agents and hurt others, so there is no
+      default: configure it per agent.
+    * ``reproducible``: a seeded run is already reproducible bit-for-bit
+      at ``concurrency: 1``, apart from timing fields and per-invocation
+      identity (with ``grader=`` every row's ``lineage.scoring_run_id``
+      names that one scoring pass, a fresh id per call; pass ``run_id=``
+      to ``run_judge`` to pin it). ``True`` makes it so at any
+      concurrency: each batch of rollouts finishes, and every verdict of
+      the batch lands, before the next is chosen, so every round sees
+      the same state. A slow rollout holds its batch, so uneven latency
+      costs throughput, and it needs the clock off, since a clock stop
+      lands wherever the run happens to be. Without the flag, which rows
+      land before the cap depends on thread timing.
 
-    Three models can take part: the agent (``agent=`` / ``backend=``), the
-    situation writer (``simulator=``), and the simulated user
-    (``user_model=``, a backend spec; ``None`` means the writer's model, the
-    agent's own by default). Every row records all three next to
-    ``model_version``: ``writer_model``, ``user_model``, and
+    What every row records. ``sampling`` (``temperature``, ``max_tokens``
+    and ``model`` as the model backend resolved them), because a result
+    is only comparable with its sampling settings on record (rlhf-book
+    ch. 16); a callable agent samples however it samples, so its rows
+    carry ``sampling: None`` unless you pass ``sampling={...}``, which is
+    recorded as given. Three models can take part, the agent (``agent=``
+    or ``backend=``), the situation writer (``simulator=``) and the
+    simulated user (``user_model=``), and every row names all three next
+    to ``model_version``: ``writer_model``, ``user_model``, and
     ``judge_meta.model`` once graded. When the agent model also wrote the
     situations or played the user, the run's ``degraded`` list carries
-    ``same_model`` and ``warnings`` says which call separates them.
-    Training on a model's own unfiltered output teaches it its own habits
-    (rlhf-book ch. 12), so the row says who wrote what.
+    ``same_model`` and ``warnings`` says which call separates them, since
+    training on a model's own unfiltered output teaches it its own habits
+    (rlhf-book ch. 12).
 
-    ``patience=`` is how long the simulated person keeps answering the
-    agent's questions. ``"normal"`` (the default) always tries to answer
-    the first question, and from the second question on may walk away
-    (35% on the second, 60% on each after that, drawn per thread so a
-    seeded run reproduces); at any question the person may also leave
-    when it asks for something they could not or would not know.
-    ``"short"`` walks away sooner (60% then 90%); ``"endless"`` never
-    walks away, which is what every run did before this knob: the
-    person answered every question until the depth cap, so no rubric
-    criterion about asking could fail. The odds are a default, not a
-    measurement: to ground them, fit a Kaplan-Meier hazard per question
-    index on source traces and set the levels from it. A row the person
-    left carries ``ended_by="user_left"`` and ends on the agent's
-    question; ``search["ended_on_question"]`` is ``{"share", "n",
-    "user_left"}``: of ``n`` rows, the share that ended on a question and
-    how many of those the person left.
+    ```python
+    import whileai.simulations as wai
 
-    ``scaffold=`` is generation-only guidance appended to the system prompt
-    of the MODEL-BACKED teacher during rollout (and to the scene writer).
-    It never enters ``profile.policy``, so exports and evals stay on the
-    plain policy; it is ignored for user-supplied callable agents. Measured
-    to help some agents and hurt others. Configure per agent, no default.
-
-    Every row says how it was sampled under ``sampling``: ``temperature``,
-    ``max_tokens`` and ``model``, as the model backend resolved them
-    (rlhf-book ch. 16: a result is only comparable with its sampling
-    settings on record). A callable agent samples however it samples, so
-    its rows carry ``sampling: None`` unless you pass ``sampling={...}``,
-    which is recorded on every row as given.
-
-    Variation is three independent counts. Do not collapse them.
-    ``situations`` (N) is distinct worlds. ``requests_per_situation`` /
-    ``phrasings`` (n) is different human wordings of one world.
-    ``rollouts_per_request`` / ``repeats`` (k) is independent agent runs of
-    the same wording. Follow-ups branch on that run.
-    ``unique_situations=True`` keeps picking new worlds (n=1, k=1 unless you
-    set them). Silent aliases: ``n`` / ``phrasings`` for n, ``repeats`` /
-    ``rollouts_per_prompt`` for k, ``unique`` for unique_situations,
-    ``policy`` for system_prompt. Writer completions are
-    ``advanced["completions_per_request"]``. Seed openers are
-    ``advanced["seed_prompts"]``.
-
-    ``tasks=`` re-runs a previous run's task set instead of drawing a new
-    one: pass that run (``SimulationData``), its rows, or its JSONL path.
-    Every distinct prompt is rolled out again, ``repeat_count`` times,
-    on its own ``scenario_id`` and ``scenario_dimensions`` and under the
-    same faults and world state, and nothing else is generated.
-
-    ``repeat_count`` is k as *this* call resolves it — from this call's
-    ``repeats`` / ``rollouts_per_request`` when given, otherwise from the
-    pinned run (the most rollouts any of its prompts has), never from
-    this call's ``mode`` preset. So a base run made with ``repeats=4``
-    and re-run as ``simulate(..., tasks=base)`` comes back at k=4 and
-    ``pass_at`` reports the same k on both sides; pass ``repeats=`` to
-    re-run at a different k on purpose::
-
-        base = wai.simulate(agent, tools=TOOLS, system_prompt=P,
-                            mode="rl", repeats=4)
-        rerun = wai.simulate(agent, tools=TOOLS, system_prompt=EDITED,
-                             tasks=base, mode="rl")  # k=4, inherited
-
-    ``runs=`` replays the same task set that many times in one call and
-    stamps ``lineage.eval_run`` (0, 1, 2, ...) on every row, which is
-    what ``delta_report`` needs before it will call a change real
-    (rlhf-book ch. 16 and appendix C: one evaluation is a draw, three
-    give a standard deviation). ``simulate(tasks=base, runs=3)`` is the
-    usual form; without ``tasks=`` the first run draws the task set and
-    the rest replay it. Between runs nothing changes but the agent's own
-    sampling: same tasks, same faults, same world state, same seed, so a
-    deterministic agent gives identical runs and a zero re-run band. The
-    rows of every run come back in one ``SimulationData`` (``output=``
-    holds them all); ``search["eval_runs"]`` lists the rows and stop
-    reason per run, and ``eval_variance(data.rows())`` splits by
-    ``eval_run`` on its own.
-
-    A run
-    otherwise draws its tasks from the grid by seed and, above
-    ``concurrency: 1``, by completion order, so a re-run shares only part
-    of its tasks with the first and ``compare_runs`` drops the rest;
-    pinning is how an A/B (a prompt edit, a model swap, another seed)
-    keeps every pair. The run stops when every pinned prompt has its
-    rollouts (``stopped_because="tasks_done"``) or the budget is spent.
-
-    A seeded run is reproducible bit-for-bit at ``concurrency: 1``,
-    apart from timing fields and per-invocation identity: with
-    ``grader=`` every row's ``lineage.scoring_run_id`` names that one
-    scoring pass (a fresh id per call, like a timestamp), so two runs
-    differ on that key and on nothing else. Pass ``run_id=`` to
-    ``run_judge`` to pin it.
-    ``reproducible=True`` makes it so at any concurrency: each batch of
-    rollouts finishes, and every verdict of the batch lands, before the
-    next is chosen, so results are consumed in submission order and
-    every round sees the same state. ``concurrency: 1`` schedules the
-    same way without the flag, so two same-seed serial runs in one
-    process return the same rows. Same seed, same concurrency, same
-    agent gives the same rows; a slow rollout holds its batch, so
-    uneven latency costs throughput. It needs the clock off, since a
-    clock stop lands wherever the run happens to be.
-    Without the flag, which rows land before the cap depends on thread
-    timing.
+    TOOLS = [{"type": "function", "function": {
+        "name": "lookup_order",
+        "parameters": {"type": "object",
+                       "properties": {"order_id": {"type": "string"}},
+                       "required": ["order_id"]}}}]
+    agent = wai.seeded_agent(TOOLS)  # an offline demo agent, no key
+    base = wai.simulate(agent, tools=TOOLS, simulator=False, seed=0,
+                        mode="rl", repeats=4, budget=32)
+    rerun = wai.simulate(agent, tools=TOOLS, simulator=False, seed=0,
+                         tasks=base, mode="rl")  # same tasks, k=4 inherited
+    print(base.stopped_because, len(base.rows()), base.warnings)
+    ```
     """
     n_runs = int(runs)
     if n_runs < 1:
         raise ValueError("runs= is how many times to replay the task set, 1 or more")
     # Named knobs travel the same road as before (``advanced`` / aliases),
     # so nothing downstream changes; they are in the signature to be seen.
+    tools = _tool_schemas(tools)
     for _name, _val in (
         ("repeats", repeats),
         ("phrasings", phrasings),
@@ -355,33 +370,49 @@ def simulate(
     return _repeat_runs(agent, n_runs, kwargs)
 
 
-def _stamp_eval_run(rows: list[dict], index: int) -> None:
+def _stamp_eval_run(rows: list[dict], index: int, *, replayed_from: int | None = None) -> None:
     for row in rows:
         lineage = row.get("lineage")
         if not isinstance(lineage, dict):
             lineage = {}
         lineage["eval_run"] = index
+        if replayed_from is not None:
+            # the run whose task set this run replayed; writer_model on
+            # the row stays the writer of that run
+            lineage["replayed_from_run"] = replayed_from
         row["lineage"] = lineage
 
 
 def _repeat_runs(agent: Any, n_runs: int, kwargs: dict[str, Any]) -> SimulationData:
     """``simulate(runs=N)``: the same task set N times, one result.
 
-    Each run is a full ``Run`` on the same config; runs after the first
+    Each run is a full ``Run`` on the same config, ``budget`` included
+    (it is a per-run cap, so the call returns up to ``N x budget`` rows
+    and ``report()["budget_per_run"]`` says so); runs after the first
     replay the first run's task set when none was pinned. Rows are
-    stamped ``lineage.eval_run`` and gathered on the first run's
-    ``SimulationData``, which is written to ``output=`` once, at the end,
-    so the file holds every run.
+    stamped ``lineage.eval_run`` (and ``lineage.replayed_from_run = 0``
+    on the replays) and gathered on the first run's ``SimulationData``,
+    which is written to ``output=`` once, at the end, so the file holds
+    every run. ``degraded`` and ``warnings`` are the union over runs;
+    ``search["tier_mix"]`` is recounted over every run's rows with a
+    ``per_run`` breakdown, so it describes what the call returned and
+    not run 0 alone.
     """
     output = kwargs.pop("output", None)
     first: SimulationData | None = None
     per_run: list[dict[str, Any]] = []
     for index in range(n_runs):
         run_kwargs = dict(kwargs)
+        replayed_from: int | None = None
         if first is not None and run_kwargs.get("tasks") is None:
             run_kwargs["tasks"] = first
+            replayed_from = 0
+            # The first run drew the task set from these; a replay takes the
+            # set as drawn, so the seeds must not be handed over again (#375).
+            for drawn in ("seeds", "seed_prompts", "extra_situations", "situations"):
+                run_kwargs.pop(drawn, None)
         data = Run(resolve_run_config(agent, **run_kwargs)).run()
-        _stamp_eval_run(data.trajectories, index)
+        _stamp_eval_run(data.trajectories, index, replayed_from=replayed_from)
         per_run.append({"rows": len(data.trajectories), "stopped_because": data.stopped_because})
         if first is None:
             first = data
@@ -392,8 +423,23 @@ def _repeat_runs(agent: Any, n_runs: int, kwargs: dict[str, Any]) -> SimulationD
         first.scenario_generation_seconds += data.scenario_generation_seconds
         first.row_seconds.extend(data.row_seconds)
         first.degraded.extend(d for d in data.degraded if d not in first.degraded)
+        # a flag without its line would be a flag nobody can act on
+        first.warnings.extend(w for w in data.warnings if w not in first.warnings)
     assert first is not None
     first.search["eval_runs"] = {"runs": n_runs, "per_run": per_run}
+    first.coverage["runs"] = n_runs
+    mix = first.search.get("tier_mix")
+    if isinstance(mix, dict) and n_runs > 1:
+        # run 0 counted its own rows; the call returns every run's
+        requested = float(mix.get("hard_share_requested") or 0.0)
+        by_run: dict[int, list[dict]] = {}
+        for row in first.trajectories:
+            by_run.setdefault(int((row.get("lineage") or {}).get("eval_run", 0)), []).append(row)
+        total = tier_mix_of(first.trajectories, requested)
+        mix.update(total)
+        mix["per_run"] = [
+            {"eval_run": i, **tier_mix_of(rows, requested)} for i, rows in sorted(by_run.items())
+        ]
     if output:
         first.save(str(output), meta=True)
     return first

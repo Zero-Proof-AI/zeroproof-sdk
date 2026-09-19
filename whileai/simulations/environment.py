@@ -4,9 +4,10 @@ A dataset is rollouts; an environment is what produces them. On-policy
 RL (GRPO, RLOO, PPO) samples its own rollouts from the policy under
 training, so what it needs from us is not rows but the three things a
 row came from: the task set, the world that answers tool calls, and the
-reward that grades the finished trajectory (rlhf-book ch. 6 on on-policy
-sampling, ch. 13 on multi-turn tool use with a single end-of-trajectory
-reward). ``export_environment`` writes those three as an installable
+reward that grades the finished trajectory
+(rlhfbook.com/c/11-policy-gradients.html on on-policy sampling,
+rlhfbook.com/c/07-reasoning on multi-turn tool use with a single
+end-of-trajectory reward). ``export_environment`` writes those three as an installable
 ``verifiers`` package, the shape Prime Intellect and TRL consume::
 
     import whileai.simulations as wai
@@ -46,10 +47,20 @@ import importlib
 import json
 import re
 import statistics
-from collections.abc import Callable, Sequence
+import sys
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .defaults import (
+    DIFFICULTY_BAND,
+    ENV_DECONTAMINATION_EXAMPLES,
+    ENV_DECONTAMINATION_NGRAM,
+    ENV_EVAL_EXAMPLES,
+    ENV_EVAL_ROLLOUTS,
+    ENV_HOLDOUT_FRACTION,
+    ENV_MAX_TURNS_FALLBACK,
+)
 from .export import _resolve
 from .score.checklist import _task_has_outcome_rule
 from .score.judging import normalize_judge_result
@@ -57,7 +68,18 @@ from .score.stats import decontaminate
 
 SPEC_FILE = "spec.json"
 DEFAULT_REWARD = "whileai.simulations.score.checklist:task_checklist"
-DEFAULT_BAND = (0.2, 0.8)
+#: The difficulty band build_tasks() keeps by default, the package-wide one.
+DEFAULT_BAND = DIFFICULTY_BAND
+#: Rubric weights, in the order the funcs are listed: only ``reward`` trains;
+#: ``n_calls``, ``judge_ok``, ``truncated`` and ``trace_clean`` are logged at
+#: weight 0 as monitors. Training on a symptom of over-optimization turns
+#: it into a proxy the policy games (Gao et al., arXiv:2210.10760;
+#: rlhfbook.com/c/14-over-optimization lists the symptoms); the book
+#: does not prescribe weight-0 logging, that is this package's choice.
+RUBRIC_WEIGHTS = (1.0, 0.0, 0.0, 0.0, 0.0)
+#: The version an export claims when the package is not installed as a
+#: distribution: the first release that carried this module.
+_FIRST_ENV_RELEASE = "0.42"
 _TASK_META = (
     "scenario_dimensions",
     "stance",
@@ -93,21 +115,23 @@ def _ref_of(obj: Any) -> str:
         return obj
     module = getattr(obj, "__module__", None)
     qualname = getattr(obj, "__qualname__", None) or getattr(type(obj), "__qualname__", None)
+    if not isinstance(obj, type) and not callable(obj):
+        raise ValueError(f"{obj!r} is not callable")
+    # An instance (a Verifier) is referenced by the module-level name it is
+    # bound to. Its ``__module__`` is the SDK class's, not the caller's, so
+    # look where the caller would have bound it: the module of the function
+    # it wraps, then every loaded module (#374).
+    if not isinstance(obj, type) and not hasattr(obj, "__name__"):
+        bound = _bound_name(obj)
+        if bound:
+            return bound
     if not module or not qualname or "<locals>" in str(qualname) or module == "__main__":
         raise ValueError(
             "the reward and the world must be importable by name in the trainer "
             "process: pass 'module:attr' (or a module-level function or Verifier "
             "instance defined in an importable module), not a lambda or a local"
         )
-    if not isinstance(obj, type) and not callable(obj):
-        raise ValueError(f"{obj!r} is not callable")
-    # An instance (a Verifier) is referenced by its module-level name when it
-    # has one; otherwise by its class, which load_environment instantiates.
     if not isinstance(obj, type) and not hasattr(obj, "__name__"):
-        mod = importlib.import_module(module)
-        for name, value in vars(mod).items():
-            if value is obj:
-                return f"{module}:{name}"
         # No name to import it by, so the trainer would build a bare
         # instance. That is only the same object when this one carries no
         # configuration a bare one lacks: CodeExec(tests=...) written inline
@@ -126,6 +150,47 @@ def _ref_of(obj: Any) -> str:
             )
         return f"{module}:{cls.__qualname__}"
     return f"{module}:{qualname}"
+
+
+def _bound_name(obj: Any) -> str | None:
+    """``module:name`` where a module binds ``obj`` at top level, or None.
+
+    Tries the module of the function the instance wraps first, then every
+    loaded module outside this package. A binding in ``__main__`` is named
+    by the script's file stem, which the trainer process imports when the
+    script's directory is on its path; the name is what a trainer would
+    write by hand anyway.
+    """
+    wrapped = None
+    for attr in ("_fn", "fn", "func", "__wrapped__"):
+        wrapped = getattr(obj, attr, None)
+        if wrapped is not None:
+            break
+    candidates: list[str] = []
+    if wrapped is not None and getattr(wrapped, "__module__", None):
+        candidates.append(str(wrapped.__module__))
+    candidates.extend(
+        name
+        for name in list(sys.modules)
+        if name not in candidates and not name.startswith(("whileai", "_", "importlib"))
+    )
+    for mod_name in candidates:
+        mod = sys.modules.get(mod_name)
+        if mod is None:
+            continue
+        try:
+            names = vars(mod)
+        except TypeError:
+            continue
+        for name, value in list(names.items()):
+            if value is obj and not name.startswith("_"):
+                if mod_name == "__main__":
+                    file = getattr(mod, "__file__", None)
+                    if not file:
+                        return None
+                    return f"{Path(file).stem}:{name}"
+                return f"{mod_name}:{name}"
+    return None
 
 
 def resolve_ref(ref: str) -> Any:
@@ -183,19 +248,24 @@ def _label(value: Any) -> float | None:
 def build_tasks(
     rows: Sequence[dict],
     *,
-    holdout: float | Sequence[str] = 0.2,
+    holdout: float | Sequence[str] = ENV_HOLDOUT_FRACTION,
     band: tuple[float, float] | None = DEFAULT_BAND,
+    ngram: int = ENV_DECONTAMINATION_NGRAM,
 ) -> tuple[list[dict], list[dict], dict[str, Any]]:
     """One task per distinct prompt, split into train and holdout.
 
     When a prompt has two or more graded rollouts its solve rate is known
     (partial credit counts as it is) and, with ``band``, prompts the policy
-    always or never solved are dropped: they carry no advantage (rlhf-book
-    ch. 7, difficulty filtering at 20 to 80 percent). Ungraded prompts and
-    single rollouts are kept as they are. ``holdout`` is a fraction, split by scenario id
-    (or the prompt) so a task is wholly on one side, or an explicit list
-    of holdout prompts. Train and holdout are decontaminated against each
-    other at 8-grams and the report says what overlapped.
+    always or never solved are dropped: they carry no advantage
+    (rlhfbook.com/c/07-reasoning, difficulty filtering at 20 to 80
+    percent; DAPO's dynamic sampling drops accuracy 0 and 1,
+    arXiv:2503.14476). Ungraded prompts and single
+    rollouts are kept as they are. ``holdout`` is a fraction, split by
+    scenario id (or the prompt) so a task is wholly on one side, or an
+    explicit list of holdout prompts. Train and holdout are decontaminated
+    against each other at ``ngram``-grams (8: the overlap size
+    rlhfbook.com/c/16-evaluation.html found its contaminations with) and
+    the report says what overlapped.
     """
     by_prompt: dict[str, list[dict]] = {}
     for row in rows:
@@ -240,7 +310,7 @@ def build_tasks(
         privileged = first.get("privileged")
         if isinstance(privileged, dict) and privileged:
             info["privileged"] = privileged
-        if len(labels) >= 2:
+        if len(labels) >= 2:  # noqa: PLR2004  # two graded rollouts before a solve rate exists
             rate = sum(labels) / len(labels)
             info["calibration"] = {"pass_rate": round(rate, 4), "n": len(labels)}
             if min(labels) < max(labels):
@@ -263,12 +333,15 @@ def build_tasks(
         _, decon_full = decontaminate(
             [{"prompt": t["prompt"], "final_text": ""} for t in train],
             [[{"prompt": t["prompt"], "final_text": ""} for t in held]],
-            n=8,
+            n=int(ngram),
         )
         decon = {
             k: decon_full[k] for k in ("n_contaminated", "contamination_rate") if k in decon_full
         }
-        decon["examples"] = [e.get("match") for e in decon_full.get("examples", [])[:3]]
+        decon["ngram"] = int(ngram)
+        decon["examples"] = [
+            e.get("match") for e in decon_full.get("examples", [])[:ENV_DECONTAMINATION_EXAMPLES]
+        ]
     report = {
         "prompts": len(by_prompt),
         "tasks": len(tasks),
@@ -325,8 +398,8 @@ include = ["{name}/**", "pyproject.toml", "README.md"]
 packages = ["{name}"]
 
 [tool.verifiers.eval]
-num_examples = 5
-rollouts_per_example = 3
+num_examples = {eval_examples}
+rollouts_per_example = {eval_rollouts}
 """
 
 
@@ -336,7 +409,7 @@ def _sdk_version() -> str:
 
         return version("whileai")
     except Exception:
-        return "0.42"  # the first release that carries this module
+        return _FIRST_ENV_RELEASE
 
 
 def _write_jsonl(path: Path, rows: Sequence[dict]) -> None:
@@ -381,7 +454,8 @@ def _readme(name: str, spec: dict, report: dict) -> str:
         )
     if decon:
         lines.append(
-            f"- **Train vs holdout 8-gram overlap**: {decon.get('n_contaminated', 0)} tasks "
+            f"- **Train vs holdout {decon.get('ngram', ENV_DECONTAMINATION_NGRAM)}-gram overlap**: "
+            f"{decon.get('n_contaminated', 0)} tasks "
             f"({(decon.get('contamination_rate') or 0):.1%})"
         )
     lines += [
@@ -415,25 +489,75 @@ def export_environment(
     execute: Any = None,
     system_prompt: str | None = None,
     tools: Sequence[dict] | None = None,
-    holdout: float | Sequence[str] = 0.2,
+    holdout: float | Sequence[str] = ENV_HOLDOUT_FRACTION,
     band: tuple[float, float] | None = DEFAULT_BAND,
     max_turns: int | None = None,
     description: str = "",
+    ngram: int = ENV_DECONTAMINATION_NGRAM,
+    world: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write ``source`` as an installable verifiers environment under ``out``.
+    """Write graded rows as an installable verifiers environment for an on-policy trainer.
 
-    ``source`` is a ``SimulationData`` (system prompt and tools come from
-    its profile), a row list, or a JSONL path; graded rows get the
-    difficulty band, ungraded rows are exported as they are. ``reward``
-    is a ``Verifier``, a judge callable honoring the SDK judge contract,
-    or ``'module:attr'``; it must be importable in the trainer process.
-    With no reward the conduct grade is used and the report warns: it is
-    a process reward, and a policy trained on it alone learns to call
-    nothing (see recipes/03-select/prime-intellect-rl). ``execute`` names a live
-    world ``(tool, arguments) -> result``; without it the SDK's mock
-    world answers, seeded per task so every rollout of a task sees the
-    same world. Returns the report; the same text is the package README.
+    Reach for it when the next step is RL in a trainer that speaks
+    verifiers (prime-rl and the like) and needs the tasks, the world and
+    the reward as one package. It writes the package under ``out`` and
+    returns the report, which is also the package README: ``path``,
+    ``prompts``, ``tasks``, ``train`` and ``holdout`` counts,
+    ``graded_prompts``, ``band``, ``band_dropped``, ``graded_mixed``
+    (prompts the policy both solved and failed, the ones with an
+    advantage) and ``decontamination``.
+
+    * ``source``: a ``SimulationData`` (system prompt and tools come from
+      its profile), a row list, or a JSONL path; graded rows get the
+      difficulty band, ungraded rows are exported as they are. For a list
+      or path pass ``system_prompt`` and ``tools``.
+    * ``reward``: a ``Verifier``, a judge callable honoring the SDK judge
+      contract, or ``'module:attr'``; it must be importable in the trainer
+      process. A ``@verifier`` or ``All([...])`` bound to a name in your
+      own module is referenced by that name (a script run as ``__main__``
+      by its file stem, so keep that directory on the trainer's path).
+      With no reward the conduct grade is used and the report warns: it
+      is a process reward, and a policy trained on it alone learns to
+      call nothing (see recipes/03-select/prime-intellect-rl).
+    * ``execute``: a live world ``(tool, arguments) -> result``; without
+      it the SDK's mock world answers, seeded per task so every rollout
+      of a task sees the same world.
+    * ``world``: the mock world's dials as a dict (``WorldOptions``
+      fields: ``search_hits``, ``exists_share``, ``default_fault_mode``,
+      name pools, ...). It is written into ``spec.json`` and the trainer's
+      world is built from it, so the world a policy trains against is the
+      one the export says.
+    * ``holdout`` (0.2): the share of tasks held out, split by scenario id
+      (or the prompt) so a task is wholly on one side, or an explicit
+      list of holdout prompts.
+    * ``band`` (``(0.2, 0.8)``): the pass-rate band a graded prompt must
+      sit in; prompts the policy always or never solved carry no
+      advantage and are dropped (rlhf-book ch. 7, difficulty filtering at
+      20 to 80 percent; DAPO's dynamic sampling, arXiv:2503.14476).
+      ``None`` keeps them all.
+    * ``ngram`` (8): the train-versus-holdout decontamination size, the
+      overlap rlhf-book ch. 16 found its contaminations with.
+    * ``name``, ``description``, ``max_turns``: the package name, its
+      README line, and the rollout turn cap (the SDK default when
+      ``None``).
+
+    ```python
+    report = wai.export_environment(data, "envs/refunds", reward=my_verifier)
+    print(report["train"], report["holdout"], report["path"])
+    ```
     """
+    from .world.sandbox import WorldOptions
+
+    world_options = dict(world) if world else None
+    if world_options is not None:
+        WorldOptions.coerce(world_options)  # a typo fails here, not in the trainer
+        try:
+            json.dumps(world_options)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "world= must be JSON (it is written into spec.json); pass callables such as "
+                "fault_modes to load_environment(world=) instead"
+            ) from exc
     rows, system, resolved_tools, _ = _resolve(source)
     if system_prompt is not None:
         system = str(system_prompt)
@@ -449,7 +573,7 @@ def export_environment(
     reward_ref = DEFAULT_REWARD if reward is None else _ref_of(reward)
     execute_ref = _ref_of(execute) if execute is not None else None
 
-    train, held, report = build_tasks(rows, holdout=holdout, band=band)
+    train, held, report = build_tasks(rows, holdout=holdout, band=band, ngram=ngram)
     if reward is None:
         checkable = sum(1 for t in train + held if _task_has_outcome_rule(t["info"]))
         report["outcome_checkable"] = checkable
@@ -481,6 +605,8 @@ def export_environment(
         "execute": execute_ref,
         "sdk_version": _sdk_version(),
     }
+    if world_options is not None:
+        spec["world"] = world_options
     report.update(
         {"name": name, "reward": reward_ref, "execute": execute_ref, "warnings": warnings}
     )
@@ -497,6 +623,8 @@ def export_environment(
             name=name,
             description=description or f"While RL environment: {name}",
             sdk_version=spec["sdk_version"],
+            eval_examples=ENV_EVAL_EXAMPLES,
+            eval_rollouts=ENV_EVAL_ROLLOUTS,
         ),
         encoding="utf-8",
     )
@@ -548,7 +676,7 @@ def _make_env_class() -> type:
     import verifiers as vf
 
     from .generate.agents import current_rollout
-    from .world.sandbox import MockEnvironment
+    from .world.sandbox import MockEnvironment, WorldOptions
 
     class WhileEnv(vf.StatefulToolEnv):
         """One SDK world per rollout; the spec's tools; the reward as the rubric."""
@@ -559,11 +687,14 @@ def _make_env_class() -> type:
             *,
             reward: Callable[[dict], Any],
             execute: Callable[[str, dict], Any] | None = None,
+            world: WorldOptions | Mapping[str, Any] | None = None,
             **kwargs: Any,
         ) -> None:
             self.spec = spec
             self.reward = reward
             self.execute = execute
+            # the mock world's dials: the call wins, then the spec, then defaults
+            self.world = WorldOptions.coerce(world if world is not None else spec.get("world"))
             self._tool_defs_raw = list(spec.get("tools") or [])
             rubric = vf.Rubric(
                 funcs=[
@@ -573,10 +704,14 @@ def _make_env_class() -> type:
                     self.truncated,
                     self.trace_clean,
                 ],
-                weights=[1.0, 0.0, 0.0, 0.0, 0.0],
+                weights=list(RUBRIC_WEIGHTS),
             )
             kwargs.setdefault("rubric", rubric)
-            super().__init__(tools=[], max_turns=int(spec.get("max_turns") or 10), **kwargs)
+            super().__init__(
+                tools=[],
+                max_turns=int(spec.get("max_turns") or ENV_MAX_TURNS_FALLBACK),
+                **kwargs,
+            )
             self.tool_defs = self._normalize_tool_defs(self._tool_defs_raw)
             for tool in self._tool_defs_raw:
                 self.tool_monitor_rubric.add_tool_metric(tool["name"])
@@ -593,6 +728,7 @@ def _make_env_class() -> type:
                     seed=int(seed) if isinstance(seed, int) else 0,
                     faults=dict(info.get("faults") or {}),
                     world_state=str(info.get("world_state") or ""),
+                    options=self.world,
                 )
             return state
 
@@ -649,8 +785,8 @@ def _make_env_class() -> type:
         def _was_truncated(state: dict) -> bool:
             # A rollout cut at the turn cap or the token cap never finished
             # the task; scoring it would reward whatever it was doing when
-            # the clock ran out (rlhf-book ch. 6: score only completions
-            # that end on their own).
+            # the clock ran out (DAPO's overlong filtering, arXiv:2503.14476:
+            # a truncated sample gets no reward signal).
             return bool(state.get("is_truncated")) or str(
                 state.get("stop_condition") or ""
             ).startswith("max_turns")
@@ -668,7 +804,7 @@ def _make_env_class() -> type:
             """1.0 when none of the SDK's trace flags fired (fabricated test
             claims, phantom edits, test tampering, ...). Logged, not
             trained on: a monitor for over-optimization symptoms
-            (rlhf-book ch. 14)."""
+            (rlhfbook.com/c/14-over-optimization)."""
             from .score.trace import trace_flags
 
             row = _row_from_state(state, state.get("zp_info") or {})
@@ -691,13 +827,16 @@ def load_environment(
     split: str = "train",
     reward: Any = None,
     execute: Any = None,
+    world: Any = None,
     **kwargs: Any,
 ) -> Any:
     """Build the verifiers environment from an exported ``spec.json``.
 
     ``split`` picks the training task set; the holdout file, when present,
     becomes ``eval_dataset``. ``reward`` and ``execute`` override the
-    spec's references (a callable or ``'module:attr'``).
+    spec's references (a callable or ``'module:attr'``). ``world`` (a
+    ``WorldOptions`` or a dict of its fields) overrides the mock world's
+    dials the spec carries; here callables such as ``fault_modes`` are fine.
     """
     try:
         from datasets import Dataset
@@ -750,6 +889,7 @@ def load_environment(
         spec_dict,
         reward=reward_obj,
         execute=execute_obj,
+        world=world,
         dataset=Dataset.from_list(train),
         eval_dataset=Dataset.from_list(held) if held else None,
         **kwargs,

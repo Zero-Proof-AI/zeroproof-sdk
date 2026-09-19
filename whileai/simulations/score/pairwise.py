@@ -21,8 +21,16 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ..defaults import (
+    JUDGE_MAX_TOKENS,
+    JUDGE_SITUATION_CHARS,
+    JUDGE_TEMPERATURE,
+    POSITION_FLIP_FLAG,
+)
 from ..generate.agents import complete, parse_backend_spec
-from .grade_llm import JUDGE_TEMPERATURE, _render_payload, judge_spec, judge_version
+from ..generate.typesafe_backend import is_typesafe_url
+from . import decision_judge
+from .grade_llm import _render_payload, judge_spec, judge_version
 
 PAIRWISE_SYSTEM = (
     "You compare two replies, A and B, from an AI agent to the same request. "
@@ -34,7 +42,16 @@ PAIRWISE_SYSTEM = (
     'Answer with one JSON object and nothing else: {"winner": "A" | "B" | '
     '"tie", "reason": "<one sentence>"}.'
 )
-PAIRWISE_MAX_TOKENS = 120
+# PAIRWISE_MAX_TOKENS = JUDGE_MAX_TOKENS (120): a winner and one sentence,
+# the same reply shape as the pointwise judge.
+PAIRWISE_MAX_TOKENS = JUDGE_MAX_TOKENS
+# PREFERS_REJECTED_FLAG = 0.2: share of judged pairs where the pairwise
+# judge picks the pointwise loser before the report says the two
+# disagree on what good is. At one in five the pointwise ranking is no
+# better than a coin on those pairs plus a margin (convention, untested).
+PREFERS_REJECTED_FLAG = 0.2
+# ERROR_CHARS = 200: how much of a judge exception is kept as the reason.
+ERROR_CHARS = 200
 _WINNER = re.compile(r'"?winner"?\s*:\s*"?(A|B|tie)"?', re.I)
 
 Verdict = dict[str, Any]
@@ -71,38 +88,48 @@ def pairwise_judge(
     policy: str = "",
     tools: Sequence | None = None,
     timeout: float = 120,
+    max_tokens: int = PAIRWISE_MAX_TOKENS,
+    request_chars: int = JUDGE_SITUATION_CHARS,
 ) -> Callable[[dict, dict], Verdict]:
     """A model judge for ``judge_pairs``: ``judge(a_row, b_row) ->
     {"winner": "A" | "B" | "tie" | None, "reason": str}``. ``spec`` is a
     backend spec (default the hosted judge); ``prompt`` replaces the
     pairwise system prompt. The judge's name is ``<model>@<prompt sha>``
-    so a prompt edit is a new judge."""
+    so a prompt edit is a new judge. ``max_tokens`` is the judge's reply
+    budget and ``request_chars`` how much of the request it is shown."""
     resolved = judge_spec(spec=spec)
     url, model = parse_backend_spec(resolved)
     system = str(prompt or "").strip() or PAIRWISE_SYSTEM
 
     def judge(a: dict, b: dict) -> Verdict:
-        request = str(a.get("prompt") or b.get("prompt") or "")[:4000]
-        user = json.dumps(
-            {
-                "request": request,
-                "A": json.loads(_render_payload(a, policy=policy, tools=tools)),
-                "B": json.loads(_render_payload(b, policy=policy, tools=tools)),
-            },
-            default=str,
-        )
+        request = str(a.get("prompt") or b.get("prompt") or "")[:request_chars]
+        a_record = json.loads(_render_payload(a, policy=policy, tools=tools))
+        b_record = json.loads(_render_payload(b, policy=policy, tools=tools))
+        user = json.dumps({"request": request, "A": a_record, "B": b_record}, default=str)
         try:
+            if is_typesafe_url(url):
+                # one choice question, A / B / tie, with its distribution
+                return decision_judge.pairwise_decision(
+                    url,
+                    model,
+                    system=system,
+                    request=request,
+                    a=a_record,
+                    b=b_record,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
             reply = complete(
                 url,
                 model,
                 [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 api_key=api_key,
                 temperature=JUDGE_TEMPERATURE,
-                max_tokens=PAIRWISE_MAX_TOKENS,
+                max_tokens=max_tokens,
                 timeout=timeout,
             )
         except Exception as exc:
-            return {"winner": None, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+            return {"winner": None, "reason": f"{type(exc).__name__}: {exc}"[:ERROR_CHARS]}
         winner, reason = parse_pairwise(str(reply.get("content") or ""))
         return {"winner": winner, "reason": reason}
 
@@ -114,7 +141,7 @@ def _verdict(judge: Callable[[dict, dict], Any], a: dict, b: dict) -> Verdict:
     try:
         out = judge(a, b)
     except Exception as exc:
-        return {"winner": None, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+        return {"winner": None, "reason": f"{type(exc).__name__}: {exc}"[:ERROR_CHARS]}
     if isinstance(out, str):
         winner, reason = parse_pairwise(out)
         return {"winner": winner, "reason": reason}
@@ -173,6 +200,8 @@ def judge_pairs(
     concurrency: int = 8,
     api_key: str | None = None,
     examples: int = 10,
+    position_flip_flag: float = POSITION_FLIP_FLAG,
+    prefers_rejected_flag: float = PREFERS_REJECTED_FLAG,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Ask a judge which side of each pair is better, both ways round.
 
@@ -190,7 +219,11 @@ def judge_pairs(
     the judge's answer changed with the order), ``tie_rate``,
     ``agrees_with_scores`` (the pairwise winner is the pointwise
     ``chosen``), ``prefers_rejected`` (the two disagree outright, the
-    rows a person should read), ``failed``.
+    rows a person should read), ``failed``. A ``position_flip_rate`` at
+    or over ``position_flip_flag`` (``POSITION_FLIP_FLAG``, 0.2: Zheng et
+    al. arXiv:2306.05685 measured 35% of GPT-4 verdicts flipping with the
+    order) and a prefers-rejected share at or over
+    ``prefers_rejected_flag`` each add a warning.
     """
     entries = [p for p in pairs if isinstance(p, dict)]
     bad = [
@@ -255,12 +288,12 @@ def judge_pairs(
         "disagreements": disagreements,
         "warnings": [],
     }
-    if swapped and flips / swapped >= 0.2:
+    if swapped and flips / swapped >= position_flip_flag:
         report["warnings"].append(
             f"position bias: the judge changed its answer when A and B were swapped in "
             f"{flips}/{swapped} pairs; those pairs are ties, and the judge prompt needs work"
         )
-    if judged and prefers_rejected / judged >= 0.2:
+    if judged and prefers_rejected / judged >= prefers_rejected_flag:
         report["warnings"].append(
             f"the pairwise judge prefers the rejected side in {prefers_rejected}/{judged} "
             "pairs; the pointwise scores and the pairwise judge disagree on what good is"

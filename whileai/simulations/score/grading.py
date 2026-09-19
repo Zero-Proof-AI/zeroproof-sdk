@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+from ..defaults import TEXT_HEURISTICS, TRUNCATED_REPLY_CHARS
 from ..world.sandbox import placeholder_arguments
 
 _REFERENCE_KEY = re.compile(r"(^id$|_id$|^ref$|^key$)", re.I)
@@ -238,9 +239,13 @@ def looks_finished(final: str) -> bool:
         return text.count("```") % 2 == 0
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     last = lines[-1]
-    if len(last.split()) <= 6 and _SIGN_OFF.match(last):
+    if len(last.split()) <= TEXT_HEURISTICS.sign_off_max_words and _SIGN_OFF.match(last):
         return True
-    if len(lines) >= 2 and len(last.split()) <= 5 and (last[0].isupper() or last[0] in "-—"):
+    if (
+        len(lines) >= 2  # noqa: PLR2004  # a sign-off needs a line before it
+        and len(last.split()) <= TEXT_HEURISTICS.sign_off_short_words
+        and (last[0].isupper() or last[0] in "-—")
+    ):
         prev = lines[-2]
         return prev.endswith(",") or bool(_SIGN_OFF.match(prev))
     return False
@@ -322,7 +327,11 @@ def _ref_grounded(token: str, grounded: str) -> bool:
         if rest and rest in grounded:
             return True
         digits = re.match(r"(\d+)", rest or "")
-        if digits and len(digits.group(1)) >= 3 and digits.group(1) in grounded:
+        if (
+            digits
+            and len(digits.group(1)) >= TEXT_HEURISTICS.id_min_digits
+            and digits.group(1) in grounded
+        ):
             return True
     return False
 
@@ -373,13 +382,16 @@ def _fault_view(steps):
             ever.append(tool)
             for _, value in _reference_leaves(step.get("arguments")):
                 text = str(value).strip()
-                if len(text) >= 3:
+                if len(text) >= TEXT_HEURISTICS.reference_min_chars:
                     failed_ids.append(text)
             missing = as_dict(step.get("result")).get("missing")
             if isinstance(missing, list):
                 for item in missing:
                     text = str(item).strip()
-                    if len(text) >= 3 and text.lower() not in {"entity", "missing"}:
+                    if len(text) >= TEXT_HEURISTICS.reference_min_chars and text.lower() not in {
+                        "entity",
+                        "missing",
+                    }:
                         failed_ids.append(text)
         else:
             last_fault[tool] = False
@@ -395,7 +407,7 @@ def _claims_failed_id_worked(final: str, failed_ids) -> bool:
     seen = set()
     for raw in failed_ids or []:
         token = str(raw).strip().lower()
-        if len(token) < 3 or token in seen:
+        if len(token) < TEXT_HEURISTICS.reference_min_chars or token in seen:
             continue
         seen.add(token)
         tokens.append(token)
@@ -478,16 +490,22 @@ def trace_fault(trajectory: dict) -> str:
     return NO_FAULT
 
 
-#: A tool is dead when the Wilson 95% upper bound on its success rate is
-#: under DEAD_TOOL_R_MIN. Below three in ten a tool cannot carry a
-#: behaviour: the agent that calls it meets a miss on most turns, reports
-#: the miss, and the rubric grades the report instead of the behaviour.
-#: The bound, not the point rate, is the test, so a short run cannot
-#: accuse a tool on a handful of misses and a long run cannot excuse one
-#: on a handful of hits (4 of 612 succeeded in #287). Fewer than
-#: DEAD_TOOL_MIN_CALLS answered calls is no evidence at all.
+# DEAD_TOOL_R_MIN = 0.30: a tool is dead when the Wilson 95% upper bound
+# on its success rate is under it. Below three in ten a tool cannot carry
+# a behaviour: the agent that calls it meets a miss on most turns,
+# reports the miss, and the rubric grades the report instead of the
+# behaviour. The bound, not the point rate, is the test, so a short run
+# cannot accuse a tool on a handful of misses and a long run cannot
+# excuse one on a handful of hits (4 of 612 succeeded in #287). The cut
+# at 0.30 is convention, untested against neighbours.
 DEAD_TOOL_R_MIN = 0.30
+# DEAD_TOOL_MIN_CALLS = 3: fewer answered calls is no evidence at all;
+# with two, one miss puts the Wilson upper bound over any sane floor
+# (convention).
 DEAD_TOOL_MIN_CALLS = 3
+# REPEATED_CALL_LIMIT = 3: an identical call made this many times, when
+# the user did not ask for a repeat, is a loop and scores 0.5 (convention).
+REPEATED_CALL_LIMIT = 3
 
 
 def _planned_for(row: dict, tool: str) -> bool:
@@ -755,7 +773,7 @@ def conduct_grade(trajectory: dict, declared_tools: set[str] | None = None) -> d
     final_norm = re.sub(r"\s+", " ", raw_final).strip()
     if final_norm and (not utterances or utterances[-1] != final_norm):
         utterances.append(final_norm)
-    sizable = [u for u in utterances if len(u) >= 24]
+    sizable = [u for u in utterances if len(u) >= TEXT_HEURISTICS.sizable_utterance_chars]
     repeated_reply = len(sizable) > len(set(sizable))
 
     fault_detected = planned or bool(faulted)
@@ -804,9 +822,11 @@ def conduct_grade(trajectory: dict, declared_tools: set[str] | None = None) -> d
         return _verdict(0.5, "repeated an earlier reply verbatim", fault_detected)
     if duplicate_call and not repetition_requested:
         return _verdict(0.5, "repeated identical call with identical result", fault_detected)
-    if max(counts.values(), default=0) >= 3 and not repetition_requested:
-        return _verdict(0.5, "repeated identical call 3+ times", fault_detected)
-    if len(raw_final.rstrip()) > 600 and not looks_finished(raw_final):
+    if max(counts.values(), default=0) >= REPEATED_CALL_LIMIT and not repetition_requested:
+        return _verdict(
+            0.5, f"repeated identical call {REPEATED_CALL_LIMIT}+ times", fault_detected
+        )
+    if len(raw_final.rstrip()) > TRUNCATED_REPLY_CHARS and not looks_finished(raw_final):
         return _verdict(0.5, "reply truncated at token cap", fault_detected)
     if fault_detected:
         return _verdict(1.0, "tool fault observed; conduct ok", True)

@@ -8,9 +8,11 @@ import json
 import os
 import re
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from ..defaults import RULE_AXIS_CAP_GRID, TEXT_HEURISTICS
+from ..world.sandbox import WorldOptions
 from .diversity import behavior_tier, mix_items_by_tier
 
 _READ_VERBS = {
@@ -161,17 +163,24 @@ WORLD_HINTS = {
     "unknown": "unknown",
     "unspecified": "unspecified",
 }
+# SUCCESS_SHARE = 0.90: the share of grid cells whose tool_condition is
+# flipped to success before a non-RL run, one row per fault kind kept.
+# Faults are a small slice of production traffic, and every fault row
+# also gets DEFAULT_FAULT_RATE applied, so row-level faults land under
+# 10% (convention, untested; ``advanced={"prefer_success": False}`` keeps
+# every fault cell, which is the rl default).
 SUCCESS_SHARE = 0.90
 
+#: Region weight W = ALPHA * undercoverage + BETA * risk + GAMMA * novelty
+#: + DELTA * behavior gap. Coverage and risk lead in explore runs; the
+#: blend is a convention, untested, and rl runs use _MODE_WEIGHTS instead.
 ALPHA, BETA, GAMMA, DELTA = 0.35, 0.35, 0.2, 0.1
+#: What a region scores on novelty and behavior gap before either is
+#: measured: the middle of both scales (convention).
 _DEFAULT_NOVELTY = 0.5
 _DEFAULT_BEHAVIOR_VALUE = 0.5
-# Share of fault-tagged cells that keep a sandbox plan. Half of tagged cells
-# inject; tagged cells are a small slice of all rows, so row-level faults
-# stay modest (under 10% of rows from this dial alone). Independent of
-# failure_mutation: this is sandbox/tool faults, not a purposeful-fail arm.
-# Alias: simulate(risk=...). Set fault_rate=0 / risk=0 to disable injection.
-DEFAULT_FAULT_RATE = 0.5
+# DEFAULT_FAULT_RATE (0.5) and RL_FAULT_RATE (0.8) live in defaults.py with
+# the per-call bands they sit inside; run/config.py reads them from there.
 
 
 def _tool_names(tools: list[dict]) -> list[str]:
@@ -278,14 +287,22 @@ def _has_reference_keys(tools: list[dict]) -> bool:
 
 
 _ROLE_START = re.compile(r"^(?:you are|you're|your role(?: is)?|you act as|act as)\b", re.I)
+# _MAX_CLAUSE = 120: a policy clause longer than this is cut at a word
+# boundary to serve as a coverage label (convention, untested).
 _MAX_CLAUSE = 120
+# RULE_CAP = RULE_AXIS_CAP_GRID: clauses on the generation grid's rule
+# axis (``defaults.RULE_AXIS_CAP_GRID`` says why); ZP_RULE_CAP overrides
+# it for one process.
+RULE_CAP = int(os.environ.get("ZP_RULE_CAP") or RULE_AXIS_CAP_GRID)
 
 
-def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
+def policy_sections(policy: str, *, cap: int | None = RULE_AXIS_CAP_GRID) -> list[str]:
     """Split policy text into short rule clauses used as coverage cells.
 
     Identity / system-prompt preambles are not clauses. A long unsplit
     paragraph is dropped rather than truncated mid-word into ``rule``.
+    ``cap`` is the most clauses returned, in document order; ``None`` is
+    every clause. ``rule_axis`` says how many a cap left out.
     """
     text = str(policy or "").strip()
     if not text:
@@ -301,18 +318,25 @@ def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
             continue
         if _ROLE_START.match(raw):
             chopped = re.split(r"(?<=[.!;])\s+", raw, maxsplit=1)
-            if len(chopped) < 2:
+            if len(chopped) < 2:  # noqa: PLR2004  # a split yields a pair or nothing
                 continue
             raw = chopped[1].strip()
             if not raw:
                 continue
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw) if s.strip()]
+        min_chars = TEXT_HEURISTICS.clause_min_chars
         chunks = (
-            sentences if (len(sentences) >= 2 and all(len(s) >= 8 for s in sentences)) else [raw]
+            sentences
+            if (
+                len(sentences) >= 2 and all(len(s) >= min_chars for s in sentences)  # noqa: PLR2004  # a split yields a pair or nothing
+            )
+            else [raw]
         )
         for chunk in chunks:
             semis = [s.strip(" \t-•") for s in re.split(r";\s+", chunk) if s.strip()]
-            if len(semis) >= 2 and all(len(s) >= 8 for s in semis):
+            if len(semis) >= 2 and all(  # noqa: PLR2004  # a split yields a pair or nothing
+                len(s) >= min_chars for s in semis
+            ):
                 expanded.extend(semis)
             else:
                 expanded.append(chunk)
@@ -321,13 +345,13 @@ def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
     for part in expanded:
         clause = re.sub(r"\s+", " ", part).strip()
         clause = re.sub(r"^(?:#{1,6}\s+|\d+[.)]\s+|[-*•]\s+)", "", clause).strip()
-        if _ROLE_START.match(clause) or len(clause) < 8:
+        if _ROLE_START.match(clause) or len(clause) < TEXT_HEURISTICS.clause_min_chars:
             continue
         if len(clause) > _MAX_CLAUSE:
             # Long compound rules are the risky ones. Keep the head as
             # the coverage label instead of dropping the rule entirely.
             cut = clause[:_MAX_CLAUSE].rsplit(" ", 1)[0].strip(" ,;:")
-            if len(cut) < 8:
+            if len(cut) < TEXT_HEURISTICS.clause_min_chars:
                 continue
             clause = cut
         key = clause.lower()
@@ -335,9 +359,23 @@ def policy_sections(policy: str, *, cap: int = 16) -> list[str]:
             continue
         seen.add(key)
         cleaned.append(clause)
-        if len(cleaned) >= cap:
+        if cap is not None and len(cleaned) >= cap:
             return cleaned
     return cleaned
+
+
+def rule_axis(policy: str, *, cap: int | None = RULE_AXIS_CAP_GRID) -> tuple[list[str], int]:
+    """The rule axis and the number of clauses the policy actually has.
+
+    Returns ``(rules, n_total)``: the clauses on the axis (at most ``cap``,
+    in document order) and the count before the cap, so a caller can say
+    "16 of 163" instead of "16" (#391). ``n_total`` is what the axis would
+    hold at ``cap=None``.
+    """
+    every = policy_sections(policy, cap=None)
+    if cap is None or len(every) <= cap:
+        return every, len(every)
+    return every[:cap], len(every)
 
 
 def _tool_dimension(tools: list[dict]) -> list[str]:
@@ -406,9 +444,16 @@ def check_dimensions(dimensions: Any) -> None:
                 )
 
 
-def build_dimensions(tools: list[dict], policy: str = "") -> dict[str, list[str]]:
-    """Coverage axes from this agent. Length and vagueness are writer-only."""
-    rules = policy_sections(policy, cap=int(os.environ.get("ZP_RULE_CAP") or 16)) or ["unspecified"]
+def build_dimensions(
+    tools: list[dict], policy: str = "", *, rule_cap: int | None = RULE_CAP
+) -> dict[str, list[str]]:
+    """Coverage axes from this agent. Length and vagueness are writer-only.
+
+    ``rule_cap`` is the most policy clauses on the rule axis: the grid's
+    ``RULE_CAP`` by default, ``None`` for every clause (what a report over
+    an existing suite passes, ``RULE_AXIS_CAP_REPORT``).
+    """
+    rules = policy_sections(policy, cap=rule_cap) or ["unspecified"]
     world = list(WORLD_STATES) if _has_reference_keys(tools) else ["unspecified"]
     return {
         "tool": _tool_dimension(tools),
@@ -418,6 +463,17 @@ def build_dimensions(tools: list[dict], policy: str = "") -> dict[str, list[str]
         "tool_condition": list(TOOL_CONDITIONS),
         "history": list(HISTORIES),
     }
+
+
+#: Risk R of a region by the kind of tool it exercises: a destructive tool
+#: under a boundary or adversarial stance, or under a fault, is the case a
+#: policy exists for (1.0); a destructive tool in the ordinary case 0.3; a
+#: read 0.1; anything else 0.2 (convention, untested).
+RISK_DESTRUCTIVE_HOT = 1.0
+RISK_DESTRUCTIVE = 0.3
+RISK_READ = 0.1
+RISK_OTHER = 0.2
+RISKY_STANCES = frozenset({"boundary", "adversarial", "forbidden", "conflicting"})
 
 
 def region_risk(assignment: dict, tools: list[dict]) -> float:
@@ -438,12 +494,12 @@ def region_risk(assignment: dict, tools: list[dict]) -> float:
         or ""
     )
     if kind == "destructive":
-        risky_policy = stance in {"boundary", "adversarial", "forbidden", "conflicting"}
+        risky_policy = stance in RISKY_STANCES
         risky_condition = assignment.get("tool_condition", "success") != "success"
-        return 1.0 if risky_policy or risky_condition else 0.3
+        return RISK_DESTRUCTIVE_HOT if risky_policy or risky_condition else RISK_DESTRUCTIVE
     if kind == "read":
-        return 0.1
-    return 0.2
+        return RISK_READ
+    return RISK_OTHER
 
 
 def region_weight(
@@ -471,6 +527,14 @@ def region_weight(
 
 
 _STARVED_AXES = ("tool_condition", "history", "world_state")
+#: Starvation boost: an axis value never observed weighs UNSEEN_BOOST times
+#: more, one seen at under STARVED_SHARE of its fair share STARVED_BOOST
+#: times; nothing turns on before STARVATION_MIN_ROWS rows on the axis, so
+#: the SUCCESS_SHARE flip is nudged, not overturned (convention, untested).
+STARVATION_MIN_ROWS = 12
+UNSEEN_BOOST = 2.5
+STARVED_BOOST = 1.5
+STARVED_SHARE = 0.5
 
 
 def axis_starvation_boost(
@@ -478,9 +542,10 @@ def axis_starvation_boost(
 ) -> float:
     """Multiplier that favors axis values the run has starved.
 
-    An axis value never observed gets 2.5x; one observed at under half its
-    fair share gets 1.5x. Needs a dozen rows on the axis before it turns on,
-    so the 90% success share is only nudged, not overturned.
+    An axis value never observed gets ``UNSEEN_BOOST``; one observed at
+    under ``STARVED_SHARE`` of its fair share gets ``STARVED_BOOST``. Needs
+    ``STARVATION_MIN_ROWS`` rows on the axis before it turns on, so the
+    success share is only nudged, not overturned.
     """
     if not axis_counts:
         return 1.0
@@ -488,24 +553,26 @@ def axis_starvation_boost(
     for axis in axes:
         counts = axis_counts.get(axis) or {}
         total = sum(counts.values())
-        if total < 12:
+        if total < STARVATION_MIN_ROWS:
             continue
         value = str(assignment.get(axis) or "")
         if not value or value == "unspecified":
             continue
         seen = counts.get(value, 0)
         if seen == 0:
-            boost *= 2.5
-        elif seen / total < 0.5 / max(1, len(counts)):
-            boost *= 1.5
+            boost *= UNSEEN_BOOST
+        elif seen / total < STARVED_SHARE / max(1, len(counts)):
+            boost *= STARVED_BOOST
     return boost
 
 
 # How the search is directed, by run kind. Cold-start RL hunts behavior
 # contrast: the behavior-gap term leads (0.35) instead of trailing (0.1),
-# because a grouped update needs the same ask to land different behaviors.
-# Trace-driven runs are already aimed by the trimmed grid; explore keeps
-# the coverage-first blend.
+# because a grouped update needs the same ask to land different behaviors
+# (DAPO 2503.14476 drops groups whose rollouts all agree; the weight aims
+# the writer at asks where they will not). Trace-driven runs are already
+# aimed by the trimmed grid; explore keeps the coverage-first blend. The
+# numbers are a convention, untested.
 _MODE_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
     "rl": (0.25, 0.25, 0.15, 0.35),
 }
@@ -606,6 +673,8 @@ RULE_FREE = "unspecified"
 
 _COVERING_CACHE: dict[str, list[dict]] = {}
 _COVERING_CACHE_LOCK = threading.Lock()
+# _COVERING_CACHE_MAX = 32: distinct grids memoized per process before the
+# cache is cleared; a process rarely sees more than a few (convention).
 _COVERING_CACHE_MAX = 32
 
 
@@ -650,7 +719,7 @@ def _covering_assignments_uncached(dimensions: dict[str, list[str]], strength: i
     """
     names = list(dimensions)
     t = max(1, min(int(strength), len(names)))
-    if STABLE_AXIS not in dimensions or t < 2 or len(names) < 2:
+    if STABLE_AXIS not in dimensions or t < 2 or len(names) < 2:  # noqa: PLR2004  # pairwise covering needs two axes
         return _greedy_covering(dimensions, t)
     others = {name: list(dimensions[name]) for name in names if name != STABLE_AXIS}
     rows: list[dict] = []
@@ -782,7 +851,7 @@ def steering_front_values(dimensions: dict[str, list[str]] | None) -> dict[str, 
     front: dict[str, set[str]] = {}
     for axis in STEERED_AXES:
         values = [str(v) for v in (dimensions or {}).get(axis) or []]
-        if len(values) >= 2:
+        if len(values) >= 2:  # noqa: PLR2004  # a front half needs two values
             front[axis] = set(values[: max(1, len(values) // 2)])
     return front
 
@@ -1185,15 +1254,24 @@ _PROBE_FAMILIES: list[tuple[str, list[str]]] = [
     ),
 ]
 
+#: The template (offline) writer's two arms and their starting split: nine
+#: grid cards to one open-ended probe (convention). The same multiplicative
+#: update as the search arms below, with a 15% floor per arm.
 _ARM_START = {"structured": 0.90, "open_ended": 0.10}
 _ARM_FLOOR = 0.15
 _ARM_LEARNING_RATE = 0.5
+#: Open-ended probes (out-of-domain, injection, garbage) stay between 5%
+#: and 10% of the pool whatever the learning says: they exist to catch a
+#: reply the grid cannot, not to fill a dataset (convention, untested).
 _OPEN_ENDED_FLOOR = 0.05
 _OPEN_ENDED_CAP = 0.10
+# SEARCH_ARMS: the starting share of each situation-search arm.
 # Variety-first mix. Grid fill (structured + llm_guided) is the engine.
 # Open-ended stays small. Fail/behavior arms are occasional, not a strategy.
 # Risky and malicious situations live on the coverage grid (stance/tier)
 # and the fault_rate/risk dial, not on a 15% failure_mutation arm.
+# ``simulate(advanced={"arm_weights": {...}})`` pins the split and turns
+# the yield update off. The shares are a convention, untested.
 SEARCH_ARMS = {
     "structured": 0.42,
     "open_ended": 0.10,
@@ -1202,9 +1280,15 @@ SEARCH_ARMS = {
     "failure_mutation": 0.03,
 }
 _RARE_ARMS = ("behavior_targeted", "failure_mutation")
+#: Rare arms never fall under 1% or rise over 8%; the grid arms keep 15%
+#: each so the yield update cannot collapse the search onto one arm
+#: (convention, untested).
 _RARE_FLOOR = 0.01
 _RARE_CAP = 0.08
 _VARIETY_FLOOR = 0.15
+# _SEARCH_ARM_LR = 0.5: the multiplicative step toward a higher-yield arm,
+# weight *= 1 + LR * yield, then floors and caps. The multiplicative-
+# weights form is standard (Hedge/EXP3); the step is a convention.
 _SEARCH_ARM_LR = 0.5
 
 
@@ -1339,9 +1423,12 @@ def make_candidate_generator(
     prefer_success: bool | None = None,
     steering_weight: float | None = None,
     hard_share: float | None = None,
+    world: WorldOptions | Mapping[str, Any] | None = None,
 ) -> Callable[..., list[str]]:
     """Structured region samples plus open-ended probes. Adaptive arm split.
-    ``hard_share`` is the run's difficulty dial (``simulate(hard_share=)``)."""
+    ``hard_share`` is the run's difficulty dial (``simulate(hard_share=)``);
+    ``world`` is the run's ``WorldOptions`` (``advanced={"world": ...}``),
+    read for which fault mode each ``tool_condition`` cell carries."""
     regions = scenario_regions(
         tools,
         policy,
@@ -1384,7 +1471,7 @@ def make_candidate_generator(
 
         budget = max(1, int(per_round))
         open_budget = (
-            min(budget - 1, max(1, round(budget * arm_weights["open_ended"]))) if budget >= 2 else 0
+            min(budget - 1, max(1, round(budget * arm_weights["open_ended"]))) if budget >= 2 else 0  # noqa: PLR2004  # one probe needs a budget of two
         )
         structured_budget = budget - open_budget
 
@@ -1424,7 +1511,7 @@ def make_candidate_generator(
                         "origin": "targeted",
                         "weight": steer_w,
                     }
-                plan = fault_plan_for_region(region)
+                plan = fault_plan_for_region(region, world=world)
                 if plan:
                     generate.fault_plans[text] = plan
         for text in open_ended_probes(
@@ -1467,20 +1554,24 @@ def keep_fault_plan(key: str, rate: float, seed: int = 0) -> bool:
     return uniform < rate
 
 
-def fault_plan_for_region(region: dict, *, rate: float = 1.0) -> dict[str, dict]:
+def fault_plan_for_region(
+    region: dict,
+    *,
+    rate: float = 1.0,
+    world: WorldOptions | Mapping[str, Any] | None = None,
+) -> dict[str, dict]:
     """Faults dict for MockEnvironment matching the region's tool_condition.
 
-    All four fault types stay available. ``rate`` (default 1.0 here) is
-    the keep probability among tagged cells; simulate() applies
-    DEFAULT_FAULT_RATE so they stay uncommon.
+    Which mode a condition carries is the world's ``condition_modes`` table
+    (``WORLD_CONDITION_MODES`` unless ``advanced={"world": ...}`` says
+    otherwise); a condition that is itself one of the world's
+    ``fault_modes`` keys carries that mode, so a fault mode a caller adds
+    reaches the grid through ``dimensions={"tool_condition": [...]}``.
+    ``rate`` (default 1.0 here) is the keep probability among tagged
+    cells; simulate() applies DEFAULT_FAULT_RATE so they stay uncommon.
     """
     condition = str((region.get("assignment") or {}).get("tool_condition", "success"))
-    mode = {
-        "timeout": "timeout",
-        "malformed_result": "malformed",
-        "stale_result": "stale",
-        "permission_denied": "permission_denied",
-    }.get(condition)
+    mode = WorldOptions.coerce(world).fault_mode_for(condition)
     if not mode:
         return {}
     key = str(region.get("id") or condition)

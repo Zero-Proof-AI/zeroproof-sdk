@@ -25,9 +25,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import HACK_THRESHOLD
 from .agreement import row_key
 from .hygiene import pearson
 from .stats import task_key
+
+#: A correlation over fewer than three points is an arrangement of the
+#: points, not a measurement (structural).
+_MIN_CORRELATION_POINTS = 3
 
 
 def _num(value: Any) -> float | None:
@@ -72,7 +77,11 @@ def logprob_report(rows: Sequence[dict]) -> dict[str, Any]:
         for r in with_lp
         if r.get("reward") in (0, 1) and not isinstance(r.get("reward"), bool)
     ]
-    corr = pearson([g[1] for g in graded], [g[0] for g in graded]) if len(graded) >= 3 else None
+    corr = (
+        pearson([g[1] for g in graded], [g[0] for g in graded])
+        if len(graded) >= _MIN_CORRELATION_POINTS
+        else None
+    )
     truncated = sum(
         1
         for r in with_lp
@@ -84,7 +93,7 @@ def logprob_report(rows: Sequence[dict]) -> dict[str, Any]:
             "no row carries logprob/n_tokens; run simulate(logprobs=True) with a model "
             "backend (a callable agent= must stamp its own)"
         )
-    if corr is not None and corr >= 0.3:
+    if corr is not None and corr >= HACK_THRESHOLD:
         warnings.append(
             f"reward tracks the policy's confidence (r={corr:.2f}); a judge that pays for "
             "fluency is a reward hack (rlhf-book ch. 14)"

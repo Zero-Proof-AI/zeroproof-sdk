@@ -33,8 +33,11 @@ from pathlib import Path
 
 from whileai._env import env_name, getenv
 
-DEFAULT_API_URL = "https://api.zeroproofai.com"
-SIGN_IN_URL = "https://www.zeroproofai.com/sign-in"
+#: The While platform API (whilehq/website/backend). ``WHILEAI_API_URL`` overrides.
+DEFAULT_API_URL = "https://mbxp83jd48.execute-api.us-east-1.amazonaws.com"
+#: The site the device flow sends people to. Becomes https://while.ai when the domain lands.
+SITE_URL = "https://while-jacobweiss2305s-projects.vercel.app"
+SIGN_IN_URL = f"{SITE_URL}/sign-in"
 #: the trial allowance the gate hands out, used when the reply does not say
 DEFAULT_TRIAL_INPUT_TOKENS = 25_000
 #: Input tokens one hosted situation spends, measured on a 4-tool spec: a
@@ -172,8 +175,10 @@ def stored_api_key() -> str | None:
 
 
 def resolve_api_key(explicit: str | None = None) -> str | None:
-    """``explicit`` > ``WHILEAI_API_KEY`` > the saved credentials file."""
-    return explicit or getenv("API_KEY") or stored_api_key()
+    """``explicit`` > ``wai.configure(api_key=)`` > ``WHILEAI_API_KEY`` > the saved credentials file."""
+    from .config import current
+
+    return explicit or current().api_key or getenv("API_KEY") or stored_api_key()
 
 
 def _post(path: str, body: dict, timeout: int = 30) -> tuple[int, dict]:
@@ -379,10 +384,10 @@ def signup(email: str, *, name: str | None = None, out: Callable[[str], None] | 
             say(trial_note(trial.get("daily_input_tokens")))
             say(
                 trial.get("lift")
-                or "Sign in once at https://www.zeroproofai.com/sign-in with an email code to lift trial limits."
+                or f"Sign in once at {SIGN_IN_URL} with an email code to lift trial limits."
             )
         else:
-            say("Dashboard: sign in at https://www.zeroproofai.com with an email code.")
+            say(f"Platform: sign in at {SITE_URL} with an email code.")
         return data["api_key"]
     error = data.get("error", "")
     if error == "account_exists":

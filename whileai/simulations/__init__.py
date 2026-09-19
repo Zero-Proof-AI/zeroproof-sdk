@@ -204,7 +204,7 @@ from .training import (
     unserve,
 )
 from .verify import Verifier, verifier
-from .world.sandbox import MockEnvironment
+from .world.sandbox import MockEnvironment, WorldOptions
 
 # Library convention: emit under "whileai.simulations", never configure
 # the root logger. Callers opt in with logging.basicConfig() or a handler.
@@ -240,6 +240,7 @@ __all__ = [
     "Trait",
     "Verifier",
     "World",
+    "WorldOptions",
     "adaptive_allocator",
     "agents",
     "allocator_slot_counts",

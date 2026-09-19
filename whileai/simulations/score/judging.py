@@ -60,11 +60,21 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
+from ..defaults import DIFFICULTY_BAND
 from .hygiene import coverage_warnings
 
 log = logging.getLogger("whileai.simulations")
 
 _VALID_STATUSES = ("ok", "missing_reward", "invalid_result", "error", "timeout")
+# LENGTH_CONFOUND_MIN_PAIRS = 8 / LENGTH_CONFOUND_SHARE = 0.75: the chosen
+# reply being the longer one in three quarters of eight or more pairs is
+# flagged as a length confound; LENGTH_CONFOUND_ALL_FROM = 3: in every pair
+# once there are three, since a total confound is one at any size
+# (length is the confound rlhfbook.com/c/07-reward-models.html tells a
+# judge to ignore). The numbers are a convention, untested.
+LENGTH_CONFOUND_MIN_PAIRS = 8
+LENGTH_CONFOUND_SHARE = 0.75
+LENGTH_CONFOUND_ALL_FROM = 3
 
 
 def _scaled(value: float, scale: tuple[float, float]) -> tuple[float | int, dict[str, Any]]:
@@ -239,6 +249,9 @@ class ScoredData:
         self.eval_coverage: dict[str, Any] | None = None
         self.judge_name = judge_name
         self.model = model
+        # the AgentProfile of the run these rows came from, when grade()
+        # made them; select() and export read the prompt and tools off it
+        self.profile: Any = None
         # Plain-words notes on whether the score means anything: no row
         # called a tool, a marker that never fired, a unanimous verdict.
         # Filled by ``run_judge`` from ``coverage_warnings``; printed once.
@@ -305,6 +318,24 @@ class ScoredData:
         """Rows the judge could not score. Never treated as failures."""
         return [r for r in self.rows if r.get("judge_status") != "ok"]
 
+    def select(
+        self,
+        *,
+        mode: str = "rl",
+        target: int = 1000,
+        band: tuple[float, float] | None = None,
+        endorsed: Sequence[str] = (),
+        truncated: str = "drop",
+    ):
+        """The rows worth training on, as a ``Selection`` that prints its
+        report: ``optimize`` over the graded copies, ``mode="rl"`` by
+        default. ``band``, ``endorsed`` and ``truncated`` as there."""
+        from ...selection import select
+
+        return select(
+            self, mode=mode, target=target, band=band, endorsed=endorsed, truncated=truncated
+        )
+
     def select_for_sft(self, *, target: int = 1000) -> tuple[list[dict], dict[str, Any]]:
         """Diverse correct demonstrations: 1-labeled, deduped by behavior."""
         from .optimize import select_for_sft
@@ -331,9 +362,17 @@ class ScoredData:
         )
 
     def select_for_rl(
-        self, *, target: int = 1000, lo: float = 0.3, hi: float = 0.7, has_tools: bool = True
+        self,
+        *,
+        target: int = 1000,
+        lo: float = DIFFICULTY_BAND[0],
+        hi: float = DIFFICULTY_BAND[1],
+        has_tools: bool = True,
     ) -> tuple[list[dict], dict[str, Any]]:
-        """Whole mixed-reward groups for RL; groups never split."""
+        """Whole mixed-reward groups for RL; groups never split. ``lo`` and
+        ``hi`` default to ``DIFFICULTY_BAND`` (0.2, 0.8), the same band
+        ``select_for_rl`` and ``optimize`` use; they used to be 0.3 and
+        0.7 here alone."""
         from .optimize import select_for_rl
 
         return select_for_rl(self.rows, target=target, lo=lo, hi=hi, has_tools=has_tools)
@@ -365,10 +404,12 @@ class ScoredData:
         """Upload the scored rows to the platform: ``push_rows(self.rows, name, ...)``.
 
         Same keywords as ``push_rows`` (``gate=``, ``mode=``, ``agent=``,
-        ``purpose=``, ``parent=``, ``endorsed=``, ``strict_hacks=``). The
-        graded copy is what a gated RL push needs, and ``SimulationData.push``
-        cannot see it: ``grade(judge=)`` leaves the run's trajectories
-        ungraded on purpose.
+        ``purpose=``, ``parent=``, ``endorsed=``, ``strict_hacks=``,
+        ``holdout=`` for a linked holdout set split by task, ``publish=``
+        for a public card, ``timeout=`` for the upload). The graded copy is
+        what a gated RL push needs, and ``SimulationData.push`` cannot see
+        it: ``grade(judge=)`` leaves the run's trajectories ungraded on
+        purpose.
         """
         from ..ingest.platform import push_rows
 
@@ -437,8 +478,9 @@ def run_judge(
         declared = getattr(rows, "declared_tools", None)
         if declared:
             tools = sorted(str(t) for t in declared)
-    if not isinstance(rows, (list, tuple)) and hasattr(rows, "trajectories"):
-        rows = rows.trajectories
+    trajectories = getattr(rows, "trajectories", None)
+    if trajectories is not None and not isinstance(rows, (list, tuple)):
+        rows = trajectories
     src_rows = [r for r in rows if isinstance(r, dict)]
     rid = run_id or f"score_{uuid.uuid4().hex[:12]}"
     # A function judge is named by __name__; a Verifier is an instance and
@@ -539,18 +581,40 @@ def evaluate(
 ) -> ScoredData:
     """Judge held-out rollouts under the exact contract ``grade`` uses.
 
-    Read the result's ``warnings`` before its numbers: no rollout called
-    a tool, a declared tool none touched (``tools=``, or pass the
-    ``SimulationData`` as ``rows``), a marker that fired on no row.
+    Reach for it to score rows that did not come from the run in hand:
+    production traces, another run's rollouts, a frozen eval set. Same
+    engine, same schema; only the lineage source differs. It returns a
+    ``ScoredData``: ``rows`` (scored copies, each with ``reward``,
+    ``reason``, ``judge_status``, ``judge_meta`` and a ``lineage`` record;
+    a judge error is marked on its row, never coerced to 0), ``warnings``
+    (read them before the numbers: no rollout called a tool, a declared
+    tool none touched, a marker that fired on no row), ``eval_coverage``
+    when ``eval_set`` was given, and ``traces``, which feeds
+    ``simulate(traces=...)`` to close the loop.
 
-    Same engine, same schema; only the lineage source differs. Feeding
-    ``evaluate(...).traces`` to ``simulate(traces=...)`` is the
-    loop-closing move. ``grader=`` is the doctrine-sketch name for the
-    judge callable; either spelling works, not both. ``eval_set=``
-    (prompt strings or rows) checks that the rollouts actually cover the
-    frozen evaluation set and reports the gap on the result's
-    ``eval_coverage`` instead of letting a silent partial eval pass as a
-    full one.
+    * ``rows``: the rollouts, or the ``SimulationData`` holding them,
+      which also supplies ``tools``.
+    * ``judge`` or ``grader``: the judge callable, either spelling, not
+      both. ``grader`` is the doctrine-sketch name.
+    * ``eval_set``: the frozen evaluation set, as prompt strings or rows.
+      The result's ``eval_coverage`` reports which asks the rollouts
+      actually covered and the gap, instead of letting a silent partial
+      eval pass as a full one.
+    * ``tools``: the agent's declared tool list (schemas or names), so a
+      declared tool no rollout called is warned about.
+    * ``judge_name``, ``model``, ``run_id``: recorded in each row's
+      ``lineage`` as the judge, the judged model, and the scoring run
+      (a fresh id per call unless pinned).
+    * ``scale``: ``(lo, hi)`` reads a numeric verdict as a rating on that
+      scale and maps it to a 0 to 1 reward, keeping the raw rating in
+      ``judge_meta``.
+    * ``concurrency`` (8) and ``timeout``: judge calls in flight and
+      seconds per call.
+
+    ```python
+    scored = wai.evaluate(traces, judge=my_judge, eval_set=asks)
+    print(scored.warnings, wai.pass_at(scored.rows).pass_at_1)
+    ```
     """
     if grader is not None and judge is not None:
         raise ValueError("pass judge= or grader=, not both")
@@ -615,7 +679,9 @@ def length_confound_warning(chosen_longer: int, n: int) -> str | None:
     if n <= 0:
         return None
     frac = chosen_longer / n
-    if (n >= 8 and frac >= 0.75) or (n >= 3 and chosen_longer == n):
+    if (n >= LENGTH_CONFOUND_MIN_PAIRS and frac >= LENGTH_CONFOUND_SHARE) or (
+        n >= LENGTH_CONFOUND_ALL_FROM and chosen_longer == n
+    ):
         return (
             f"chosen is the longer reply in {chosen_longer}/{n} pairs; a preference "
             "trainer learns length before behavior (rlhf-book ch. 8)"
@@ -666,14 +732,27 @@ def build_preference_pairs(
     min_margin: float = 1.0,
     length_match: bool = True,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """Same-task chosen/rejected pairs for preference training (DPO-style).
+    """Build same-task chosen/rejected pairs for preference training (DPO-style).
+
+    Reach for it after grading a run with several rollouts per ask: the
+    contrast between a pass and a fail on the same prompt is the training
+    signal, so failures are supply here, not waste. It returns ``(pairs,
+    report)``: each pair carries ``prompt``, ``chosen``, ``rejected``,
+    the scores and lineage listed below, and both parents' lineage; the
+    report counts the pairs, the prompts that had a contrast, and how
+    often chosen is still the longer side.
 
     A pair exists only where the same prompt has two trajectories whose
-    rewards differ by at least ``min_margin`` — the contrast is the
-    training signal, so failures are supply here, not waste. The default
-    ``1.0`` pairs 1-labeled with 0-labeled rows only; ``0.5`` also admits
-    partial-credit rows against a full pass or fail. Rows without a valid
-    judge result never pair.
+    rewards differ by at least ``min_margin``. Rows without a valid judge
+    result never pair.
+
+    * ``min_margin`` (1.0): pairs 1-labeled with 0-labeled rows only;
+      ``0.5`` also admits partial-credit rows against a full pass or fail.
+    * ``max_pairs_per_prompt`` (1): how many pairs one prompt may
+      contribute.
+    * ``length_match`` (``True``): each chosen row takes the rejected row
+      closest to it in length. DPO exploits a length gap faster than it
+      learns the behavior (rlhf-book ch. 8).
 
     Each pair keeps what the trainer and the reviewer need to trust it:
 
@@ -681,16 +760,16 @@ def build_preference_pairs(
       and their gap, so a margin-aware loss (Llama 2 style) can use them
       and a reviewer can see how far apart the two really are.
     * ``chosen_model`` / ``rejected_model`` / ``same_policy``: which policy
-      produced each side. Preference data works best when both sides come
-      from the policy being trained (Tulu 3, rlhf-book ch. 11); a mixed
-      pair is still a pair, but it is labeled as off-policy.
-    * ``length_delta``: chosen reply chars minus rejected. DPO exploits a
-      length gap faster than it learns the behavior (rlhf-book ch. 8), so
-      with ``length_match=True`` each chosen row takes the rejected row
-      closest to it in length, and the report says how often chosen is
-      still the longer side.
+      produced each side. Preference data works best when both sides
+      come from the policy being trained (Tulu 3, rlhf-book ch. 11); a
+      mixed pair is still a pair, but it is labeled as off-policy.
+    * ``length_delta``: chosen reply chars minus rejected, and the report
+      says how often chosen is still the longer side.
 
-    Returns (pairs, report); each pair carries both parents' lineage.
+    ```python
+    pairs, report = wai.build_preference_pairs(data.rows(), min_margin=1.0)
+    print(len(pairs), report)
+    ```
     """
     if min_margin <= 0:
         raise ValueError("min_margin must be positive; equal scores carry no preference")

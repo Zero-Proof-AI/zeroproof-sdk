@@ -29,13 +29,39 @@ DONE = {
 }
 
 
-class Gate:
-    """The gate's train, status, run and models routes, scripted."""
+# The profile ``train`` reads before it posts. A set is clean for one
+# method family only: SFT wants no failing row, a grouped method wants
+# every task to have both a pass and a fail (``selection_report``).
+MIXED = {
+    "rows": 160,
+    "graded": 160,
+    "split": {"pass": 80, "fail": 80, "ungraded": 0},
+    "tasks": 40,
+    "tasks_with_repeats": 40,
+    "mixed_tasks": 40,
+    "per_task": [],
+}
+PASSES = {
+    "rows": 84,
+    "graded": 84,
+    "split": {"pass": 84, "fail": 0, "ungraded": 0},
+    "tasks": 84,
+    "tasks_with_repeats": 0,
+    "mixed_tasks": 0,
+    "per_task": [],
+}
 
-    def __init__(self, states=None, already_running=False):
+
+class Gate:
+    """The gate's train, status, run, models and profile routes, scripted.
+    ``calls`` is what the run did; the profile read lands in ``reads``."""
+
+    def __init__(self, states=None, already_running=False, profile=MIXED):
         self.calls: list[tuple[str, str, dict | None]] = []
+        self.reads: list[str] = []
         self.states = list(states or [DONE])
         self.already_running = already_running
+        self.profile = profile
         self.run_meta = {
             "runId": "run_h1",
             "status": "done",
@@ -44,6 +70,9 @@ class Gate:
         }
 
     def __call__(self, method, path, api_key=None, body=None, **kw):
+        if method == "GET" and path.endswith("/profile"):
+            self.reads.append(path)
+            return {"profile": dict(self.profile)}
         self.calls.append((method, path, body))
         if method == "POST" and path.endswith("/train"):
             out = {"training": dict(RUNNING)}
@@ -88,7 +117,7 @@ def test_train_posts_the_gate_body_and_returns_the_run_handle():
 
 
 def test_sft_sends_epochs_not_steps():
-    g = Gate()
+    g = Gate(profile=PASSES)
     train("ds_train", epochs=3, api_key="k", transport=g)
     assert g.calls[0][2] == {"method": "sft", "epochs": 3.0}
 
@@ -167,11 +196,11 @@ def test_wait_polls_until_done_and_fills_adapter_and_training():
 
 
 def test_wait_true_on_train_blocks_and_timeout_raises():
-    g = Gate(states=[DONE])
+    g = Gate(states=[DONE], profile=PASSES)
     run = train("ds_train", wait=True, poll=0, api_key="k", transport=g)
     assert run.status == "done"
 
-    stuck = Gate(states=[RUNNING])
+    stuck = Gate(states=[RUNNING], profile=PASSES)
     run = train("ds_train", api_key="k", transport=stuck)
     with pytest.raises(TimeoutError, match="run_h1"):
         run.wait(timeout=0, poll=0)
@@ -179,14 +208,14 @@ def test_wait_true_on_train_blocks_and_timeout_raises():
 
 def test_failed_run_reports_the_error():
     failed = {**RUNNING, "status": "failed", "error": "CUDA out of memory"}
-    g = Gate(states=[failed])
+    g = Gate(states=[failed], profile=PASSES)
     run = train("ds_train", api_key="k", transport=g)
     assert run.wait(poll=0) == "failed"
     assert run.error == "CUDA out of memory" and run.adapter is None
 
 
 def test_already_running_warns_and_returns_that_run():
-    g = Gate(already_running=True)
+    g = Gate(already_running=True, profile=PASSES)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         run = train("ds_train", api_key="k", transport=g)
@@ -195,7 +224,7 @@ def test_already_running_warns_and_returns_that_run():
 
 
 def test_context_manager_does_not_finish_a_hosted_run():
-    g = Gate()
+    g = Gate(profile=PASSES)
     with train("ds_train", api_key="k", transport=g) as run:
         pass
     assert run.status == "running"
@@ -203,7 +232,7 @@ def test_context_manager_does_not_finish_a_hosted_run():
 
 
 def test_serve_from_a_finished_run_handle():
-    g = Gate()
+    g = Gate(profile=PASSES)
     run = train("ds_train", api_key="k", transport=g)
     run.wait(poll=0)
     row = serve("Refund-V2", run, base_model="Qwen/Qwen3-4B", api_key="k", transport=g)
@@ -244,15 +273,15 @@ def test_public_surface():
 
 
 def test_train_warns_when_the_base_cannot_be_served():
-    gate = Gate()
     with pytest.warns(UserWarning, match="wai.serve cannot host"):
-        train("ds_train", method="sft", transport=gate)  # the trainer's default base
+        # the trainer's default base
+        train("ds_train", method="sft", transport=Gate(profile=PASSES))
     with pytest.warns(UserWarning, match="Qwen/Qwen2.5-1.5B-Instruct"):
-        train("ds_train", method="grpo", base_model="Qwen/Qwen2.5-1.5B-Instruct", transport=gate)
+        train("ds_train", method="grpo", base_model="Qwen/Qwen2.5-1.5B-Instruct", transport=Gate())
 
 
 def test_train_is_quiet_on_a_served_base():
-    gate = Gate()
+    gate = Gate(profile=PASSES)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         run = train("ds_train", method="sft", base_model="Qwen/Qwen3-4B", transport=gate)
@@ -314,6 +343,7 @@ def test_train_knobs_that_do_not_apply_raise_before_any_call():
     with pytest.raises(ValueError, match="collides"):
         train("ds_train", method="grpo", beta=0.1, config={"beta": 0.2}, transport=gate)
     assert gate.calls == []
+    gate = Gate(profile=PASSES)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         train("ds_train", method="sft", seed=7, learning_rate=1e-4, transport=gate)
@@ -328,7 +358,7 @@ def test_train_masks_token_capped_replies_by_default_and_can_zero_them():
     gate = Gate()
     train("ds_train", method="grpo", truncated="zero", transport=gate)
     assert gate.calls[0][2]["maskTruncated"] is False
-    gate = Gate()
+    gate = Gate(profile=PASSES)
     train("ds_train", method="sft", transport=gate)
     assert "maskTruncated" not in gate.calls[0][2]
     with pytest.raises(ValueError, match="grpo only"):

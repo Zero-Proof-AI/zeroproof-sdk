@@ -53,33 +53,63 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from ...report import Report
+from ..defaults import ALPHA, RL_ROLLOUTS_PER_ASK, ROLLOUTS_PER_TASK
 from .hygiene import assistant_turns, is_truncated, reply_length, tool_calls
 from .optimize import _messages
 
-#: auto-tier vocabulary: the most common words and word pairs
+#: Collinear feature names shown in the degenerate-regime note before "and N more".
+_COLLINEAR_SHOWN = 4
+
+# DEFAULT_TOP_K = 200: auto-tier vocabulary, the most common words and
+# word pairs. Enough to hold every delimiter and rubric word seen in the
+# signal sweeps while a pass over a few thousand rollouts stays under a
+# second (convention).
 DEFAULT_TOP_K = 200
-#: permutations behind the noise floor
+# DEFAULT_N_PERM = 100: permutations behind the noise floor. The floor is
+# the (1 - alpha) quantile of the null maximum, so 100 draws place it
+# between the 95th and 96th order statistic; more draws sharpen the
+# floor at linear cost (convention).
 DEFAULT_N_PERM = 100
-#: a feature must be non-zero on at least this many graded rows
+# DEFAULT_MIN_OBS = 20: a feature must be non-zero on at least this many
+# graded rows, or its within-ask correlation is a handful of rows
+# (convention).
 DEFAULT_MIN_OBS = 20
-#: a rival above the floor is reported when it carries at least this
-#: share of the endorsed signal (integrity below 1 - RIVAL_SHARE)
+# RIVAL_SHARE = 0.2: a rival above the floor is reported when it carries
+# at least this share of the endorsed signal (integrity below
+# 1 - RIVAL_SHARE); under a fifth the endorsed feature still dominates
+# what the update learns (convention).
 RIVAL_SHARE = 0.2
-#: strongest binary features that seed pairwise conjunctions
+# DEFAULT_SEEDS = 12: strongest binary features that seed pairwise
+# conjunctions, 66 pairs (convention).
 DEFAULT_SEEDS = 12
-#: share of asks the policy already always passes before the pool is
-#: called exhausted (the one calibrated threshold from the signal sweeps)
+# SAT_FLAG = 0.2: share of asks the policy already always passes before
+# the pool is called exhausted. The one calibrated threshold from the
+# RLVR signal sweeps this scan descends from, and the same edge as the
+# top of the 20-80 difficulty band read from the other side.
 SAT_FLAG = 0.2
-#: how many ranked features the report lists
+# REPORT_TOP = 20: ranked features the report lists.
 REPORT_TOP = 20
-#: |within-ask rho| at or above this is not a correlation but an identity:
-#: the feature is an exact linear function of the centered reward.
+# DEGENERATE_RHO = 0.999: |within-ask rho| at or above this is not a
+# correlation but an identity: the feature is an exact linear function
+# of the centered reward, and 0.999 is 1 with float rounding.
 DEGENERATE_RHO = 0.999
-#: distinct rollouts an ask needs before the within-ask ranking can
-#: separate anything. With two, whichever of them the reward follows,
-#: every feature that differs between them is an exact function of the
-#: label: they all land at |rho| 1 and the ranking is a sort by name.
+# MIN_DISTINCT_PER_ASK = 3: distinct rollouts an ask needs before the
+# within-ask ranking can separate anything. With two, whichever of them
+# the reward follows, every feature that differs between them is an exact
+# function of the label: they all land at |rho| 1 and the ranking is a
+# sort by name.
 MIN_DISTINCT_PER_ASK = 3
+# MAX_BINARY_VARIANCE = 0.25: p(1-p) at p=0.5, the most variance a 0/1
+# reward can carry within an ask; ``capacity`` is the mean within-ask
+# variance as a share of it.
+MAX_BINARY_VARIANCE = 0.25
+# FLOOR_COARSE_BELOW = ROLLOUTS_PER_TASK (4) and RESCAN_ROLLOUTS =
+# RL_ROLLOUTS_PER_ASK (8): under four rollouts per ask at the median the
+# permutation floor has too few arrangements per ask to be sharp, and
+# the warning names the RL rollout count to re-scan at.
+FLOOR_COARSE_BELOW = ROLLOUTS_PER_TASK
+RESCAN_ROLLOUTS = RL_ROLLOUTS_PER_ASK
 
 REGIMES = ("train", "reward_hack", "pool_exhausted", "no_signal", "degenerate", "unknown")
 
@@ -300,41 +330,64 @@ def hack_scan(
     reward: str = "reward",
     seed: int = 0,
     top_features: int | None = REPORT_TOP,
-) -> dict[str, Any]:
-    """Rank what separates reward within each ask against a permutation
-    noise floor, and say what a grouped update would learn.
+    alpha: float = ALPHA,
+) -> HackScanReport:
+    """Rank the features that separate reward within each ask, against a permutation noise floor, and say what a grouped update would learn.
 
-    ``rows`` are graded rollouts, several per ask (``mode="rl"``); the
-    reward under ``reward`` may be 0/1 or partial credit. ``endorsed``
-    names the features the reward is supposed to track, as substrings of
-    feature names (``"lookup_order"`` matches ``tool:lookup_order`` and
-    ``contains:lookup_order``; ``"marker:grounded"`` a marker). Without
-    it the scan still ranks and floors, but cannot call a hack a hack.
-    ``features`` adds hand-tier columns: ``{"name": lambda row: value}``.
-    ``top_features`` caps the ranking in the report (``None`` lists all).
+    Reach for it before an RL run, and again after, to check that the
+    reward tracks the behavior you meant rather than a shortcut. It
+    returns a ``HackScanReport``, a dict that prints itself: ``regime``
+    (``train``, ``reward_hack``,
+    ``pool_exhausted``, ``no_signal``, ``degenerate``, ``unknown``),
+    ``tau`` (the floor), ``features`` ranked by |within-ask correlation|
+    with the pooled correlation beside each, ``top_feature``,
+    ``endorsed_on_top``, ``integrity`` (the share of the above-floor
+    signal that sits on an endorsed feature), the support numbers (asks
+    all-pass, all-fail, mixed, gradient capacity), and ``warnings`` in
+    one line each.
 
-    Returns ``regime`` (``train``, ``reward_hack``, ``pool_exhausted``,
-    ``no_signal``, ``degenerate``, ``unknown``), ``tau`` (the floor),
-    ``features`` ranked by |within-ask correlation| with the pooled
-    correlation beside each, ``top_feature``, ``endorsed_on_top``,
-    ``integrity`` (share of the above-floor signal that sits on an
-    endorsed feature), the support numbers (asks all-pass, all-fail,
-    mixed, gradient capacity), and ``warnings`` in one line each.
+    * ``rows``: graded rollouts, several per ask (``mode="rl"``); the
+      reward under ``reward`` may be 0/1 or partial credit.
+    * ``endorsed``: the features the reward is supposed to track, as
+      substrings of feature names (``"lookup_order"`` matches
+      ``tool:lookup_order`` and ``contains:lookup_order``;
+      ``"marker:grounded"`` a marker). Without it the scan still ranks and
+      floors, but cannot call a hack a hack.
+    * ``features``: hand-tier columns to add, as
+      ``{"name": lambda row: value}``, beside the built-in ones (reply
+      length, tool calls,
+      turns, truncation, one indicator per tool called, every numeric
+      marker). ``auto`` (``True``) adds the auto tier: presence of the
+      ``top_k`` (200) most common words and word pairs in the agent's
+      text, the tier that finds the hack nobody listed.
+    * ``alpha`` (``ALPHA``, 0.05): sets the floor. ``tau`` is the
+      ``1 - alpha`` quantile of the strongest feature's |rho| when reward
+      is shuffled within ask (``n_perm`` shuffles, 100), so a feature
+      above it clears chance at that rate.
+    * ``top_features`` (20): caps the ranking in the report (``None``
+      lists all). ``min_obs`` (20) is the fewest observations a feature
+      needs to be ranked.
 
     ``degenerate`` is the refusal: an ask holds fewer than
     ``MIN_DISTINCT_PER_ASK`` distinct rollouts at the median
-    (``distinct_per_ask``) and two or more features sit at |rho| >=
-    ``DEGENERATE_RHO``, exactly collinear with reward and with each other
-    because nothing else could happen at that variety. The ranking cannot
-    separate them and the noise floor is no help (it tells signal from
-    noise, not one perfect explanation from another), so ``top_feature``
-    and ``integrity`` are ``None``, ``inverted`` is empty, no hack is
-    claimed, and ``collinear`` lists the tied features. The direction is
-    withheld with the name: at that variety an endorsed feature is
-    negative exactly when it fell on the failing trajectory, so the sign
-    is the same coin flip. Collinear features on a varied pool are left
-    alone: there the ranking found two names for one behavior, and a
-    genuinely inverted endorsed feature is still reported.
+    (``distinct_per_ask``) and two or more features sit at |rho| at or
+    above ``DEGENERATE_RHO``, exactly collinear with reward and with each
+    other because nothing else could happen at that variety. The ranking
+    cannot separate them and the noise floor is no help (it tells signal
+    from noise, not one perfect explanation from another), so
+    ``top_feature`` and ``integrity`` are ``None``, ``inverted`` is empty,
+    no hack is claimed, and ``collinear`` lists the tied features. The
+    direction is withheld with the name: at that variety an endorsed
+    feature is negative exactly when it fell on the failing trajectory,
+    so the sign is the same coin flip. Collinear features on a varied
+    pool are left alone: there the ranking found two names for one
+    behavior, and a genuinely inverted endorsed feature is still
+    reported.
+
+    ```python
+    scan = wai.hack_scan(data.rows(), endorsed=["tool:lookup_order"])
+    print(scan["regime"], scan["top_feature"], scan["integrity"])
+    ```
     """
     graded = [r for r in rows if isinstance(r, dict) and _reward(r, reward) is not None]
     n = len(graded)
@@ -370,10 +423,10 @@ def hack_scan(
     }
     if n == 0:
         warnings.append(f"no row carries a numeric {reward!r}; grade first")
-        return base
+        return HackScanReport(base)
 
     # groups
-    rewards = [float(_reward(r, reward)) for r in graded]  # type: ignore[arg-type]
+    rewards = [v for r in graded if (v := _reward(r, reward)) is not None]
     group_index: dict[str, int] = {}
     group_of_row: list[int] = []
     for r in graded:
@@ -384,7 +437,7 @@ def hack_scan(
     for i, g in enumerate(group_of_row):
         members[g].append(i)
     group_size = [len(m) for m in members]
-    multi = [g for g in range(n_groups) if group_size[g] >= 2]
+    multi = [g for g in range(n_groups) if group_size[g] >= 2]  # noqa: PLR2004  # a group of one carries no contrast
     sizes = sorted(group_size[g] for g in multi)
     base["n_groups"] = n_groups
     base["n_groups_multi"] = len(multi)
@@ -408,7 +461,7 @@ def hack_scan(
         "sat": all_pass / n_groups,
         "dead": all_fail / n_groups,
         "mixed": (n_groups - unanimous) / n_groups,
-        "capacity": capacity / (0.25 * n_groups),
+        "capacity": capacity / (MAX_BINARY_VARIANCE * n_groups),
     }
     live = [g for g in multi if len({rewards[i] for i in members[g]}) > 1]
     base["effective_rollouts"] = sum(group_size[g] for g in live)
@@ -473,7 +526,7 @@ def hack_scan(
             else "one rollout per ask: within-ask correlation needs repeats "
             "(mode='rl', repeats>=4); only the pooled column is filled"
         )
-        return base
+        return HackScanReport(base)
 
     rho = {f.name: _rho_within(f, rc, sr, n) for f in feats}
 
@@ -528,7 +581,7 @@ def hack_scan(
                 best = value
         nulls.append(best)
     nulls.sort()
-    tau = nulls[min(len(nulls) - 1, math.ceil(0.95 * len(nulls)) - 1)] if nulls else 0.0
+    tau = nulls[min(len(nulls) - 1, math.ceil((1 - alpha) * len(nulls)) - 1)] if nulls else 0.0
 
     # Ranked by strength; a tie in magnitude goes to the endorsed feature,
     # since the complement of the behavior correlates exactly as strongly
@@ -578,7 +631,7 @@ def hack_scan(
             "patterns (feature names are like tool:<name>, marker:<name>, contains:<term>) "
             "or add a features= extractor that emits them"
         )
-        return base
+        return HackScanReport(base)
     # Degeneracy: an ask that holds only a couple of distinct rollouts
     # forces every feature that separates them to be an exact function of
     # the label, so they all tie at |rho| 1 and the ranking's tie-break is
@@ -589,7 +642,7 @@ def hack_scan(
     # same behavior, which the ranking found), so the trajectory variety
     # has to be missing too.
     collinear = [x["name"] for x in listed if abs(x["rho"]) >= DEGENERATE_RHO]
-    degenerate = len(collinear) >= 2 and base["distinct_per_ask"] < MIN_DISTINCT_PER_ASK
+    degenerate = len(collinear) >= 2 and base["distinct_per_ask"] < MIN_DISTINCT_PER_ASK  # noqa: PLR2004  # collinear needs a pair
     base["degenerate"] = degenerate
     base["collinear"] = collinear
     # e: the reward pays for the endorsed behavior (positive). An endorsed
@@ -604,15 +657,17 @@ def hack_scan(
     a = max((abs(x["rho"]) for x in above if not x["endorsed"]), default=0.0)
     inverted = [] if degenerate else [x for x in above if x["endorsed"] and x["rho"] < 0]
     base["inverted"] = [x["name"] for x in inverted]
+    integrity: float | None = None
     if endorsed and not degenerate:
         base["endorsed_on_top"] = bool(top and top["endorsed"] and top["rho"] > 0)
-        base["integrity"] = round(e / (e + a), 4) if (e + a) > 0 else 0.0
+        integrity = round(e / (e + a), 4) if (e + a) > 0 else 0.0
+        base["integrity"] = integrity
     if degenerate:
         base["regime"] = "degenerate"
         base["top_feature"] = None
-        shown = ", ".join(f'"{name}"' for name in collinear[:4])
-        if len(collinear) > 4:
-            shown += f", and {len(collinear) - 4} more"
+        shown = ", ".join(f'"{name}"' for name in collinear[:_COLLINEAR_SHOWN])
+        if len(collinear) > _COLLINEAR_SHOWN:
+            shown += f", and {len(collinear) - _COLLINEAR_SHOWN} more"
         warnings.append(
             f"too few distinct trajectories to separate features: {base['distinct_per_ask']} "
             f"distinct rollout(s) per ask at the median leaves {len(collinear)} feature(s) "
@@ -671,7 +726,8 @@ def hack_scan(
         endorsed
         and base["regime"] in ("train", "pool_exhausted")
         and a > 0
-        and base["integrity"] < 1.0 - RIVAL_SHARE
+        and integrity is not None
+        and integrity < 1.0 - RIVAL_SHARE
     ):
         rivals = [x["name"] for x in above if not x["endorsed"]][:3]
         warnings.append(
@@ -679,12 +735,27 @@ def hack_scan(
             + ", ".join(f'"{r}"' for r in rivals)
             + f" (integrity {base['integrity']:.2f})"
         )
-    if base["rollouts_per_group"] < 4:
+    if base["rollouts_per_group"] < FLOOR_COARSE_BELOW:
         warnings.append(
             f"{base['rollouts_per_group']} rollouts per ask at the median; the floor is "
-            "coarse below 4, re-scan at repeats>=8 before acting on a close call"
+            f"coarse below {FLOOR_COARSE_BELOW}, re-scan at repeats>={RESCAN_ROLLOUTS} before "
+            "acting on a close call"
         )
-    return base
+    return HackScanReport(base)
+
+
+class HackScanReport(Report):
+    """What ``hack_scan`` found, as an object that prints itself.
+
+    Still the dict it always was: ``report["regime"]`` and
+    ``report["warnings"]`` read the same. ``print(report)`` is now the
+    block ``format_hack_scan`` writes, not the dict literal.
+    """
+
+    _summary_keys = ("regime", "integrity")
+
+    def __str__(self) -> str:
+        return format_hack_scan(self)
 
 
 def format_hack_scan(report: dict[str, Any], *, top: int = 12) -> str:

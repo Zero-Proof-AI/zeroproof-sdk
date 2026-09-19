@@ -56,10 +56,24 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - run: uv run python scripts/check_no_hardcoding.py
+
+  ty:
+    name: types (ty)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      - run: uv run ty check
 
   coverage:
     name: line coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the README's coverage badge, published from main below
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -74,10 +88,20 @@ jobs:
       # is raised whenever that number moves a whole point: 90.49% at
       # 882201c (19707 statements, 1874 missed). Raise it in the same PR
       # that raises coverage; never lower it to make a red job green.
-      - run: uv run pytest -q --cov=whileai --cov-report=term
+      - run: uv run pytest -q --cov=whileai --cov-report=term --cov-report=json
               --cov-fail-under=90
         env:
           COVERAGE_CORE: sysmon
+      # The README's coverage badge is the number this job just measured, not
+      # a hand-typed floor. Published only from main, so a PR's coverage never
+      # shows on the README. See .github/scripts/badge.py.
+      - name: publish the coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pct=$(python3 -c "import json; t = json.load(open('coverage.json'))['totals']['percent_covered']; print('%.1f%%' % t)")
+          python3 .github/scripts/badge.py coverage "$pct"
 
   build:
     name: build is installable
@@ -120,6 +144,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -127,3 +153,25 @@ jobs:
       # Advisory on a PR: tells you now whether the version you picked will be
       # accepted by the publish gate after merge.
       - run: python .github/scripts/check_version.py
+      # A bump lands through the release workflow (gh workflow run
+      # release.yml), which leaves a fresh `## Unreleased` behind. A PR that
+      # bumps by hand may touch only the four release files, and no PR may
+      # drop the header the next cut renames.
+      - name: release commits touch only release files
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          grep -qx '## Unreleased' CHANGELOG.md || {
+            echo "CHANGELOG.md has no '## Unreleased' header; put it back above the newest version"
+            exit 1
+          }
+          if git diff "$BASE"...HEAD -- pyproject.toml | grep -q '^+version = '; then
+            extra=$(git diff --name-only "$BASE"...HEAD               | grep -vxE 'CHANGELOG.md|pyproject.toml|compat/zeroproof/pyproject.toml|uv.lock' || true)
+            if [ -n "$extra" ]; then
+              echo "This PR bumps the version and also changes:"; echo "$extra"
+              echo "Cut releases with: gh workflow run release.yml. Keep code changes in their own PR."
+              exit 1
+            fi
+          fi
+          echo ok

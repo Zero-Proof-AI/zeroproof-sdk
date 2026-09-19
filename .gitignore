@@ -42,8 +42,6 @@ recipes/04-train/text-to-sql/out/
 recipes/04-train/text-to-sql/pg/
 recipes/04-train/text-to-sql/author.done.txt
 # the old location; a stub README points at recipes/
-examples/*
-!examples/README.md
 !recipes/03-select/prime-intellect-rl/
 !recipes/01-simulate/agent-behavior/
 !recipes/04-train/identity/
@@ -76,11 +74,14 @@ recipes/04-train/identity/out/
 
 # helpers, not the product
 /scripts/*
+!/scripts/check_no_hardcoding.py
 # ...except the golden-output harness, which every contributor needs to prove
 # an engine change left simulate() alone. See CONTRIBUTING.md.
 !/scripts/golden.py
 # ...and the rename script, so an open branch can regenerate the rebrand.
 !/scripts/rebrand.py
+# ...and the API reference generator: CI runs it with --check on every PR.
+!/scripts/gen_api_docs.py
 simulate.ipynb
 test.ipynb
 quick_tests.ipynb
@@ -98,3 +99,4 @@ build/
 wheels/
 
 recipes/04-train/text-to-sql/serve_config.json
+!scripts/skill_trial.py

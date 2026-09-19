@@ -13,9 +13,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .defaults import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_LLM_JUDGE_CONCURRENCY,
+    DEFAULT_SELECT_TARGET,
+    JUDGE_CONCURRENCY_CAP,
+    JUDGE_MAX_TOKENS,
+    JUDGE_PAYLOAD_CHARS,
+    LEAK_MIN_QUOTE_CHARS,
+    PASS_REWARD,
+    SHORT_HASH_CHARS,
+)
 from .export import export_training
 from .generate.adapters import AgentProfile
-from .ingest.platform import push_rows
+from .ingest.platform import push_rows, split_holdout
 from .schema import SCHEMA_KEY, SCHEMA_VERSION, check, stamp
 from .score.grade_llm import apply_grade_llm, require_judge_key, rubric_prompt
 from .score.judge_trust import trust_after_grade
@@ -131,28 +142,13 @@ _CONVERSATION_FIELDS = (
 def _prompt_hash(policy: str) -> str | None:
     if not policy:
         return None
-    return hashlib.sha256(policy.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(policy.encode("utf-8")).hexdigest()[:SHORT_HASH_CHARS]
 
 
-def _split_holdout(rows: list[dict], fraction: float | None) -> tuple[list[dict], list[dict]]:
-    """Split rows by task so a task is wholly train or wholly holdout.
-
-    Deterministic: the same ``scenario_id`` lands on the same side every
-    run, which is what makes a before/after comparison honest.
-    """
-    if not fraction:
-        return rows, []
-    if not 0 < fraction < 1:
-        raise ValueError("holdout must be a fraction between 0 and 1")
-    train: list[dict] = []
-    held: list[dict] = []
-    for r in rows:
-        key = str(r.get("scenario_id") or r.get("task_id") or r.get("prompt") or "")
-        bucket = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
-        (held if bucket < fraction else train).append(r)
-    if not train:
-        raise ValueError("holdout fraction leaves no training rows")
-    return train, held
+#: The by-task split lives with ``push_rows`` now (``ingest.platform
+#: .split_holdout``), so a row-level push and ``SimulationData.push`` cut the
+#: same holdout; this name stays for callers and tests that reach it here.
+_split_holdout = split_holdout
 
 
 #: Keys that must never reach an exported row, at any depth, whatever the
@@ -419,44 +415,74 @@ class SimulationData:
         judge=None,
         llm: bool = False,
         llm_spec: str | None = None,
+        spec: str | None = None,
         api_key: str | None = None,
         path: str | None = None,
-        concurrency: int = 32,
-        llm_concurrency: int = 16,
+        concurrency: int = DEFAULT_CONCURRENCY,
+        llm_concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
         version: str | None = None,
         use_privileged: bool = False,
         scale: tuple[float, float] | None = None,
         rubric: str | None = None,
         trust: str = "warn",
+        payload_chars: int = JUDGE_PAYLOAD_CHARS,
+        max_tokens: int = JUDGE_MAX_TOKENS,
     ):
-        """Grade after simulation with the hosted judge or a custom callable.
+        """Grade this run's rows in place with the hosted judge or your own callable.
 
-        With no callable this is ``grade_llm``: the hosted LLM judge (Phi-4,
-        a different family from the hosted Qwen policy), read from
-        ``VLLM_API_KEY``. It writes ``reward`` and ``reason`` onto the rows
-        in place and returns the judge report (a dict: graded, n0, n1,
-        backend, judge_version, warnings). ``llm=True`` is the same path.
-        A plain ``grader=`` callable scores in place too and returns
-        nothing. Simulation itself never invokes this method by default.
+        Reach for it right after ``simulate`` to score the rows without
+        leaving the object. Simulation never calls it on its own. Three paths,
+        chosen by what you pass:
 
-        ``judge=`` is the contract path: any callable honoring the judge
-        contract (``judge(row) -> {"reward": 0 or 1, "reason": str,
-        "markers": {name: value}}``; a bare number works too). The
-        contract and its failure modes are written out in full in
-        ``whileai.simulations.score.judging`` — note the ``score.``,
-        there is no ``whileai.simulations.judging``. It returns a
-        ``ScoredData`` of copies — trajectories here stay unmodified, judge
-        errors are marked per-row instead of coerced to 0 — and its output
-        feeds ``export_training`` and ``simulate(traces=...)`` directly.
-        ``version=`` names the judge's version (model, rubric hash) and is
-        recorded on every scored row; the hosted grader stamps its own.
+        * No callable (or ``llm=True``): ``grade_llm``, the hosted LLM judge
+          (Phi-4 unless ``WHILEAI_JUDGE`` is set, a different family from the
+          hosted Qwen policy), read from ``VLLM_API_KEY``. It writes
+          ``reward`` (0 or 1) and ``reason`` onto the rows in place and
+          returns the judge report, a dict with ``graded``, ``n0``, ``n1``,
+          ``backend``, ``judge_version`` and ``warnings``.
+        * ``grader=``, a plain callable returning a number or
+          ``{"reward": ..., "reason": ...}`` per row: scores every row in
+          place over ``concurrency`` threads and returns the run itself, so
+          ``data.grade(my_grader).pass_at`` reads through.
+        * ``judge=``, the contract path: any callable honoring the judge
+          contract, which returns
+          ``{"reward": 0 or 1, "reason": str, "markers": {name: value}}``
+          per row (a bare number works too). The contract
+          and its failure modes are written out in full in
+          ``whileai.simulations.score.judging`` (note the ``score.``; there is
+          no ``whileai.simulations.judging``). It returns a ``ScoredData`` of
+          copies: the trajectories here stay unmodified, judge errors are
+          marked per row instead of coerced to 0, and its output feeds
+          ``export_dataset`` and ``simulate(traces=...)`` directly.
 
-        Every path then checks the judge against the rows' human labels
-        (``attach_labels(kind="human")``) and stamps the summary on each
-        graded row's ``judge_meta["trust"]``. ``trust="warn"`` (default)
-        logs one line when the check failed or no labels exist,
-        ``"require"`` raises instead, ``"off"`` skips it.
+        Arguments that matter:
+
+        * ``version``: names the judge's version (model, rubric hash) and is
+          recorded on every scored row; the hosted grader stamps its own.
+        * ``rubric``: what doing the job means, as text, for the hosted judge;
+          without it the judge grades the conduct floor only, and says so.
+        * ``use_privileged``: ``True`` shows the hosted judge each row's
+          ``privileged`` block (principle, reference, hidden state) the agent
+          never saw.
+        * ``trust``: the judge check against the rows' human labels
+          (``attach_labels(kind="human")``), run on every path, with the
+          summary stamped on each graded row's ``judge_meta["trust"]``.
+          ``"warn"`` (the default) logs one line when the check failed or no
+          labels exist, ``"require"`` raises instead, ``"off"`` skips it.
+        * ``path``: write the graded run's JSONL there afterwards.
+        * ``spec``: which model judges on the hosted path, as a backend spec
+          (``"typesafe:jev-latest"``, ``"openai:gpt-4.1-mini"``); the same
+          keyword ``grade_llm``, ``pairwise_judge`` and ``rubric_judge``
+          take. ``llm_spec`` is its older name and still works.
+
+        ```python
+        data = wai.simulate(agent, tools=TOOLS, simulator=False, budget=16)
+        data.grade(lambda row: 1.0 if row.get("final_text") else 0.0)
+        print(data.pass_at)
+        ```
         """
+        if spec is not None:
+            llm_spec = spec
         if judge is not None:
             from .score.judging import run_judge
 
@@ -464,11 +490,13 @@ class SimulationData:
                 self.trajectories,
                 judge,
                 source="grade",
-                concurrency=min(int(concurrency), 32),
+                concurrency=min(int(concurrency), JUDGE_CONCURRENCY_CAP),
                 version=version,
                 tools=sorted(str(t) for t in self.declared_tools),
                 scale=scale,
             )
+            # so scored.select() can export with this run's prompt and tools
+            scored.profile = self.profile
             note = trust_after_grade(scored.rows, mode=trust)["note"]
             if note:
                 log.warning(note)
@@ -486,6 +514,8 @@ class SimulationData:
                 path=path,
                 use_privileged=use_privileged,
                 trust=trust,
+                payload_chars=payload_chars,
+                max_tokens=max_tokens,
             )
 
         def score(t):
@@ -512,7 +542,7 @@ class SimulationData:
         for t in self.trajectories:
             slot = self.arm_yield.setdefault(t["arm"], {"executed": 0, "failing": 0})
             slot["executed"] += 1
-            slot["failing"] += t["reward"] < 1.0
+            slot["failing"] += t["reward"] < PASS_REWARD
         note = trust_after_grade(self.trajectories, mode=trust)["note"]
         if note:
             log.warning(note)
@@ -523,7 +553,7 @@ class SimulationData:
         self,
         *,
         spec: str | None = None,
-        concurrency: int = 16,
+        concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
         api_key: str | None = None,
         path: str | None = None,
     ):
@@ -550,7 +580,7 @@ class SimulationData:
         spec: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
-        concurrency: int = 16,
+        concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
         api_key: str | None = None,
         path: str | None = None,
         limit: int | None = None,
@@ -558,12 +588,18 @@ class SimulationData:
         use_privileged: bool = False,
         rubric: str | None = None,
         trust: str = "warn",
+        payload_chars: int = JUDGE_PAYLOAD_CHARS,
+        max_tokens: int = JUDGE_MAX_TOKENS,
     ):
         """Binary 0/1 situation grade. Default brain is the hosted judge
         (Phi-4 unless ``WHILEAI_JUDGE`` is set), never the policy model.
         ``use_privileged`` shows the judge each row's ``privileged`` block
         (principle, reference, hidden state) the agent never saw. ``trust``
-        is the judge check against human labels: see ``grade``."""
+        is the judge check against human labels: see ``grade``.
+        ``payload_chars`` caps the evidence the judge reads per row and
+        ``max_tokens`` its reply (defaults ``JUDGE_PAYLOAD_CHARS`` and
+        ``JUDGE_MAX_TOKENS`` in ``defaults.py``); both land in
+        ``judge_meta``."""
         require_judge_key(api_key, spec=spec, base_url=base_url, model=model)
         policy = str(self.profile.policy or "") if self.profile else ""
         tools = list(self.profile.tools) if self.profile else []
@@ -598,6 +634,8 @@ class SimulationData:
             limit=limit,
             degraded=self.degraded,
             trust=trust,
+            payload_chars=payload_chars,
+            max_tokens=max_tokens,
         )
         report["rubric"] = rubric_source
         if rubric_source == "conduct_floor":
@@ -618,15 +656,34 @@ class SimulationData:
         self._rewrite(path)
         return summarize_quality(self.trajectories)
 
-    def select(self, *, target: int = 1000) -> list[dict]:
-        """The rows recommended for training, not everything generated.
+    def select(
+        self,
+        *,
+        mode: str | None = None,
+        target: int = DEFAULT_SELECT_TARGET,
+        band: tuple[float, float] | None = None,
+        endorsed: Sequence[str] = (),
+        truncated: str = "drop",
+    ):
+        """The rows worth training on, as a ``Selection`` that prints its report.
 
-        Diverse pass-labeled demonstrations via ``select_for_sft``: one of
-        each distinct way of being right before any repeats, junk and
-        duplicate prompts dropped. Requires graded rows — grade in-loop
-        (``grade=True``, ``grader=``) or afterwards with ``grade()``.
-        The selection report lands in ``search["selection"]``.
+        With no ``mode``: diverse pass-labeled demonstrations via
+        ``select_for_sft``, one of each distinct way of being right before
+        any repeats, junk and duplicate prompts dropped. With
+        ``mode="rl"`` or ``"sft"``: ``optimize``, the full gate sequence
+        (difficulty band, unanimous groups, duplicates, truncation, hack
+        scan), with ``band``, ``endorsed`` and ``truncated`` as there.
+        Requires graded rows — grade in-loop (``grade=True``, ``grader=``)
+        or afterwards with ``grade()``. The report lands in
+        ``search["selection"]`` and on the result's ``.report``.
+
+        ```python
+        rows = data.select(mode="rl")
+        print(rows)              # what each gate dropped and why
+        rows.export("train.jsonl")
+        ```
         """
+        from ..selection import Selection, select
         from .score.optimize import _binary_label
 
         if not any(_binary_label(t) is not None for t in self.trajectories if isinstance(t, dict)):
@@ -635,12 +692,24 @@ class SimulationData:
                 "none carry one. Pass grade=True or grader= to "
                 "simulate(), or call grade() first."
             )
-        selected, report = select_for_sft(self.trajectories, target=target)
-        self.search["selection"] = report
-        return selected
+        policy = str(self.profile.policy or "") if self.profile else ""
+        tools = list(self.profile.tools) if self.profile else []
+        if mode is None:
+            selected, report = select_for_sft(self.trajectories, target=target)
+            self.search["selection"] = report
+            return Selection(selected, report=report, mode="sft", system_prompt=policy, tools=tools)
+        picked = select(
+            self, mode=mode, target=target, band=band, endorsed=endorsed, truncated=truncated
+        )
+        self.search["selection"] = picked.report
+        return picked
 
     def training_set(
-        self, output: str | None = None, *, target: int = 1000, validate: bool = True
+        self,
+        output: str | None = None,
+        *,
+        target: int = DEFAULT_SELECT_TARGET,
+        validate: bool = True,
     ) -> dict:
         """Select the recommended rows and export them trainer-ready.
 
@@ -659,7 +728,7 @@ class SimulationData:
         report["selection"] = self.search.get("selection")
         return report
 
-    def leak_report(self, *, min_len: int = 12) -> dict[str, Any]:
+    def leak_report(self, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> dict[str, Any]:
         """Did any reply quote its own ``privileged`` block? Reads the
         trajectories, which still carry the block; ``rows()`` is scrubbed
         and would check nothing. Same report as ``leak_report``."""
@@ -795,7 +864,9 @@ class SimulationData:
         if publish:
             entry = {
                 **entry,
-                "card": _publish(entry["datasetId"], agent or "", description, api_key=api_key),
+                "card": _publish(
+                    str(entry["datasetId"]), agent or "", description, api_key=api_key
+                ),
             }
         return entry
 
@@ -811,7 +882,7 @@ class SimulationData:
                 "arm": t["arm"],
             }
             for t in self.trajectories
-            if not failures_only or (t["reward"] is not None and t["reward"] < 1.0)
+            if not failures_only or (t["reward"] is not None and t["reward"] < PASS_REWARD)
         ]
 
     def save(self, path: str, *, meta: bool = False) -> str:
@@ -903,7 +974,7 @@ def llm_grade(
     data: SimulationData,
     *,
     spec: str | None = None,
-    concurrency: int = 16,
+    concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
     api_key: str | None = None,
     path: str | None = None,
 ) -> SimulationData:
@@ -917,7 +988,7 @@ def grade_llm(
     spec: str | None = None,
     base_url: str | None = None,
     model: str | None = None,
-    concurrency: int = 16,
+    concurrency: int = DEFAULT_LLM_JUDGE_CONCURRENCY,
     api_key: str | None = None,
     path: str | None = None,
     limit: int | None = None,
@@ -927,18 +998,36 @@ def grade_llm(
     tools: list | None = None,
     use_privileged: bool = False,
     trust: str = "warn",
+    payload_chars: int = JUDGE_PAYLOAD_CHARS,
+    max_tokens: int = JUDGE_MAX_TOKENS,
 ):
-    """Binary 0/1 situation grade. Default brain is hosted Qwen.
+    """Grade rows 0 or 1 with the hosted LLM judge and write a reason beside each.
 
-    ``source`` is a ``SimulationData``, a JSONL path, or a row list.
-    Writes ``reward`` 0 or 1 and a one-sentence ``reason``. Keeps the
-    previous score as ``qwen_reward`` when present. Does not run during
-    ``simulate()``. Search does not read ``reward``. ``limit`` grades
-    that many rows then stops. Hosted Qwen reads ``VLLM_API_KEY``.
-    For a path or row list, pass ``policy=`` and ``tools=`` so the judge
-    sees the agent's rules; a ``SimulationData`` supplies its own.
-    ``trust`` is the judge check against human labels: see
-    ``SimulationData.grade``.
+    Reach for it when the rows are a JSONL path or a row list rather than
+    a ``SimulationData`` you hold (that object has the same call as
+    ``data.grade()``). It writes ``reward`` (0 or 1) and a one-sentence
+    ``reason`` on each row, keeps a previous score as ``qwen_reward``
+    when present, and returns the judge report, a dict with ``graded``,
+    ``n0``, ``n1``, ``backend``, ``judge_version``, ``warnings`` and
+    ``path``. It does not run during ``simulate()``, and search never
+    reads ``reward``. The default judge is the hosted Phi-4 unless
+    ``WHILEAI_JUDGE`` is set; it reads ``VLLM_API_KEY``.
+
+    * ``source``: a ``SimulationData``, a JSONL path, or a row list. A path
+      source is rewritten graded, unless ``output`` names another file;
+      a row list is updated in place.
+    * ``policy`` and ``tools``: for a path or row list, pass the agent's
+      system prompt and tool schemas so the judge sees the rules the agent
+      was under; a ``SimulationData`` supplies its own.
+    * ``limit``: grade that many rows, then stop.
+    * ``spec``, ``base_url``, ``model``, ``api_key``: point the judge at
+      another OpenAI-compatible server instead of the hosted one.
+    * ``use_privileged``: ``True`` shows the judge each row's ``privileged``
+      block (principle, reference, hidden state) the agent never saw.
+    * ``trust``: the judge check against human labels (``"warn"``,
+      ``"require"``, ``"off"``), the same as ``SimulationData.grade``.
+    * ``payload_chars`` (8000) caps the evidence the judge reads per row
+      and ``max_tokens`` (120) its reply; both land in ``judge_meta``.
     """
     if isinstance(source, SimulationData):
         return source.grade_llm(
@@ -974,6 +1063,8 @@ def grade_llm(
         limit=limit,
         use_privileged=use_privileged,
         trust=trust,
+        payload_chars=payload_chars,
+        max_tokens=max_tokens,
     )
     dest = path or output or src
     if dest:

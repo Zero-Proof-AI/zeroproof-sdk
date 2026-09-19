@@ -11,7 +11,7 @@
 2. Reward, both arms: `outcome - 0.30 * min(len/512, 1)`. The outcome is `MathEqual` against the GSM8K gold number, so the reward is a program. The length term is the shaping the paper attacks: among wrong answers, the shortest one scores best.
 3. Baseline arm: drop a group when its **shaped scores** are all equal (`--filter-metric score`). A group of four wrong answers of different lengths is not all-equal, so it survives, and GRPO's divide-by-group-std turns those length crumbs into full-size advantages. Those are the phantom advantages — gradient that looks like signal but only encodes "be shorter".
 4. Recipe arm: drop a group when its **binary outcomes** are all equal (`--filter-metric outcome`). All-wrong is now flat, so the group is dropped and teaches nothing. This is what DAPO's dynamic sampling means.
-5. Eval: pass@1 on the same 120 held-out tasks, 4 samples per task. The untrained base is evaluated three times, not once, so the spread between those runs is the noise floor the delta has to clear; then each arm once, paired delta with a 95% interval (`wai.pass_at`, `wai.eval_variance`, `wai.delta_report`).
+5. Eval: pass@1 on the same 120 held-out tasks, 4 samples per task. The untrained base is evaluated several times, not once (`--base-runs`, 3 by default, 10 for the numbers below), so the spread between those runs is the noise floor the delta has to clear; then each arm once, paired delta with a 95% interval (`wai.pass_at`, `wai.eval_variance`, `wai.delta_report(run_std=, run_std_runs=)`). The band uses the t quantile at `run_std_runs - 1` because the floor is an estimate.
 
 Dropping is done by masking: a group whose rewards are all equal gets a zero advantage, so it contributes nothing. The paper's DAPO arm deletes the group and refills the batch with fresh prompts. Masking reproduces the advantage-level effect on a fixed batch; it does not reproduce the refill, so this recipe cannot say anything about the paper's refill-rate numbers.
 
@@ -31,16 +31,26 @@ batch. See Climb.
 
 | Arm | pass@1 | 95% CI | pass@k | Steps | GPU min |
 |---|---|---|---|---|---|
-| Base, no training | 0.37 | [0.31, 0.44] | 0.58 | 0 | 0 |
+| Base, no training | 0.36 | [0.29, 0.43] | 0.57 | 0 | 0 |
 | Baseline (filter on shaped score) | 0.39 | [0.33, 0.45] | 0.68 | 40 | 30.0 |
 | Recipe (filter on binary outcome) | 0.46 | [0.39, 0.53] | 0.70 | 40 | 21.8 |
 
 Recipe vs baseline: **+0.067 [+0.021, +0.113]** over 120 paired tasks.
 Verdict: **moved**. The interval excludes zero, the delta clears the eval's
-own re-run band (run_std 0.0169, band 0.047 = 1.96 x sqrt(2) x run_std on a
-difference of two re-run draws), and the proxy check is clean: the shaped
-score went *down* -0.035 [-0.080, +0.009] while pass@1 went up, which is the
-opposite of over-optimization.
+own re-run band (run_std 0.0078 from 10 base re-runs, band 0.025 = t(df=9)
+2.26 x sqrt(2) x run_std on a difference of two re-run draws), and the proxy
+check is clean: the shaped score went *down* -0.035 [-0.080, +0.009] while
+pass@1 went up, which is the opposite of over-optimization.
+
+The band was re-read on 2026-09-18. The 2026-09-17 run estimated run_std
+0.0169 from three base re-runs and the verdict used the 1.96 band, 0.047.
+That band treats a three-run estimate as the eval's exact spread; the honest
+quantile at df=2 is 4.30, band 0.103, and under it +0.067 is **flat**. The
+base was re-evaluated ten times (no training re-run: the arms and their
+delta stand). The ten pass@1 draws were 0.36, 0.34, 0.34, 0.34, 0.34, 0.35,
+0.34, 0.34, 0.36, 0.35: run_std 0.0078, band 0.025 at df=9, and +0.067 clears
+it. The three-run estimate was more than twice the ten-run one, which is what
+a standard deviation from three draws does.
 
 The mechanism the paper describes is visible in the lengths. The
 score-filtered arm ends at **234 characters** of mean completion, the
@@ -68,7 +78,7 @@ Every cell is written by `recipe.py` into `results.json`. These are the round 2 
 
 | Check | Book | Result |
 |---|---|---|
-| Eval noise: the base evaluated 3 times, `eval_variance` run_std | ch. 16 | **run_std 0.0169**: a delta under 0.047 (`noise_band(run_std)` = 1.96 x sqrt(2) x run_std, the band on a difference of two re-run draws) is noise. The measured +0.067 clears it |
+| Eval noise: the base evaluated 10 times, `eval_variance` run_std | ch. 16 | **run_std 0.0078 from 10 re-runs**: a delta under 0.025 (`noise_band(run_std, df=9)` = 2.26 x sqrt(2) x run_std, the band on a difference of two re-run draws, t because run_std is an estimate) is noise. The measured +0.067 clears it. On the original 3 re-runs (run_std 0.0169) the honest band was 0.103 and it did not |
 | Holdout is clean: `decontaminate(train, against=holdout)` | ch. 16 | **0 of 512 train rows dropped**, prompt-keyed against the holdout as the note below requires |
 | Reward is a program, not a judge | ch. 7, 13 | `MathEqual` against the GSM8K gold number, plus a length term. No model in the reward path |
 | Proxy vs target: `delta_report(proxy=)` | ch. 14 | **not over-optimized.** `marker:shaped_reward` -0.035 [-0.080, +0.009] while pass@1 +0.067: the target moved and the proxy did not follow it up |
@@ -84,8 +94,17 @@ Two notes on the checks, because a check that cannot fail is worse than no check
 |---|---|---|---|
 | 1 | as the paper: lambda 0.30, 40 steps, lr 1e-4, LoRA r=32, 8 prompts per step | baseline 0.36, recipe 0.41 | +0.050 [-0.006, +0.106], flat |
 | 2 | same, 16 prompts per step (toward the paper's 32) | baseline 0.39, recipe 0.46 | +0.067 [+0.021, +0.113], **moved** |
+| 2b | no training; the base re-evaluated 10 times instead of 3, band read at t(df=9) instead of 1.96 | base 0.36 (was 0.37) | +0.067 unchanged; band 0.047 (3 runs, z) -> 0.103 (3 runs, t, **flat**) -> 0.025 (10 runs, t, **moved**) |
 
-Round 1 was flat by 0.006 of interval: the delta cleared the noise floor
+Round 2b is a correction, not a climb. The 2026-09-17 verdict rested on a
+1.96 band around a run_std estimated from three draws, which is not a 95%
+band: at df=2 it passes about 19% of pure-noise deltas. Read honestly, round
+2 was flat (0.067 against 0.103). Ten base re-runs put the floor at 0.0078
+and the t band at 0.025, and round 2 is moved again on the same arms. Round
+1's "cleared the noise floor" below used the same 1.96 band and did not clear
+the honest one either (0.050 against 0.103).
+
+Round 1 was flat by 0.006 of interval: the delta cleared the 1.96 noise floor
 (0.050 against a 0.046 band) but its interval still touched zero. Round 2
 doubled the prompts per optimizer step, which is the knob this recipe was cut
 down on — the paper runs 32 — and the same change came back separated from
@@ -101,6 +120,7 @@ rescue.
 - The filter metric is a separate choice from the reward, and a trainer will let you set it to the shaped score without complaining. Nothing in the loss curve says which one you picked.
 - Shaping and group-std normalization interact: a shaping term too small to matter on its own becomes a full-size advantage once every rollout in the group is wrong and the std collapses to the shaping noise.
 - **The batch was the difference between flat and moved, and neither round changed the idea being tested.** 8 prompts per step gave +0.050 [-0.006, +0.106]; 16 gave +0.067 [+0.021, +0.113]. A recipe cut down to fit a GPU hour can report "flat" about an effect that is really there, which is why the Climb table exists and why round 1 shipped with its numbers instead of being retried until it looked good.
+- **A run_std from three draws is not the eval's spread, and 1.96 around it is not a 95% band.** The same +0.067 was moved under z, flat under t at df=2, and moved again once ten re-runs shrank the estimate from 0.0169 to 0.0078. The verdict did not change because the effect changed; it changed because the floor was measured properly. `delta_report(run_std=, run_std_runs=)` and `check.py` now carry the degrees of freedom so this cannot happen silently.
 - **The length column is the evidence, not the pass@1 column.** Score-filtering ended at 234 characters against outcome-filtering's 496 from the same base. The paper says a wrong group survives the filter and teaches the model that the shortest wrong answer is the good one; a 2x length collapse in exactly the arm that keeps those groups is what that looks like from outside.
 
-Verified 2026-09-17, whileai 0.53, TRL 0.19.1 + PEFT 0.16.0 on torch 2.7.1. 51.8 GPU minutes, $1.73 on one L40S (round 1: 42.8 minutes, $1.43). Run page: https://www.zeroproofai.com/platform/training/run_396d8b162199da3d
+Verified 2026-09-17, whileai 0.53, TRL 0.19.1 + PEFT 0.16.0 on torch 2.7.1. 51.8 GPU minutes, $1.73 on one L40S (round 1: 42.8 minutes, $1.43). Noise floor re-measured 2026-09-18 with `--arm base --base-runs 10` on whileai 0.75: 26.8 GPU minutes, $0.89, no training. Run page: https://www.zeroproofai.com/platform/training/run_396d8b162199da3d

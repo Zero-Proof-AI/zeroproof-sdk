@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .agents import complete, local_model, parse_backend_spec, split_user_turns
+from .diversity import DEFAULT_AVG_TURNS
 
 #: Claude Code tool results are kept to this many characters on the step;
 #: a longer one is cut and the step says so (result_truncated, result_chars).
@@ -19,6 +20,23 @@ CLAUDE_CODE_RESULT_CHARS = 2000
 #: Reply budget in tokens for an ``http`` agent; ``agent_max_tokens`` does
 #: not reach it, so every row from one says this number.
 HTTP_REPLY_TOKENS = 1024
+# HTTP_TEMPERATURE = 0.3: sampling temperature of an ``http`` agent unless
+# simulate(advanced={"temperature": ...}) names one. Cooler than
+# LOCAL_MODEL_TEMPERATURE (0.8): an http agent is a deployed service being
+# checked, not a policy being sampled for training, so it is run nearer
+# the deterministic setting agent benchmarks use (tau-bench 2406.12045,
+# tau2-bench 2506.07982 at 0). Convention, untested.
+HTTP_TEMPERATURE = 0.3
+# HTTP_MAX_TURNS = 5: agent turns an ``http`` agent gets per rollout; it
+# has no simulated user, so a thread is one ask and its tool calls
+# (convention).
+HTTP_MAX_TURNS = 5
+# SUBPROCESS_TIMEOUT_S = 60 / CLAUDE_CODE_TIMEOUT_S = 300: seconds a
+# subprocess agent and a ``claude -p`` run may take per rollout; a coding
+# agent reads and edits files, so it gets the rollout timeout's five
+# minutes (convention).
+SUBPROCESS_TIMEOUT_S = 60.0
+CLAUDE_CODE_TIMEOUT_S = 300.0
 
 
 def _missing(extra: str, exc: Exception) -> ImportError:
@@ -44,8 +62,8 @@ def openai_http(
     execute: Callable[[str, dict], Any] | None = None,
     system: str = "",
     api_key: str | None = None,
-    max_turns: int = 5,
-    temperature: float = 0.3,
+    max_turns: int = HTTP_MAX_TURNS,
+    temperature: float = HTTP_TEMPERATURE,
 ) -> Callable:
     """Any OpenAI-compatible /v1/chat/completions endpoint with tool support."""
     sim = execute or (lambda tool, args: {"ok": True})
@@ -113,13 +131,13 @@ def openai_http(
 
     agent.__name__ = f"openai_http[{model}]"
     # How every reply was sampled, as the engine stamps it on the row.
-    agent.sampling = {  # type: ignore[attr-defined]
+    agent.sampling = {  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
         "temperature": float(temperature),
         "max_tokens": reply_tokens,
         "model": model,
     }
-    agent.system = policy_text  # type: ignore[attr-defined]
-    agent.policy = policy_text  # type: ignore[attr-defined]
+    agent.system = policy_text  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+    agent.policy = policy_text  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return agent
 
 
@@ -275,7 +293,7 @@ def from_claude_sdk(client: Any) -> Callable:
     return _sync(agent)
 
 
-def subprocess_agent(command: list[str], *, timeout: float = 60) -> Callable:
+def subprocess_agent(command: list[str], *, timeout: float = SUBPROCESS_TIMEOUT_S) -> Callable:
     import subprocess
 
     def agent(message: str) -> dict:
@@ -340,10 +358,10 @@ def resolve(
     execute: Callable | None = None,
     model: str | None = None,
     fault_plans: dict | None = None,
-    max_turns: int = 5,
-    avg_turns: float = 6,
+    max_turns: int = HTTP_MAX_TURNS,
+    avg_turns: float = DEFAULT_AVG_TURNS,
     min_user_turns: int = 1,
-    patience: str = "normal",
+    patience: Any = "normal",
     turn_stats: dict | None = None,
     opening_rate: float = 0.0,
     temperature: float | None = None,
@@ -351,6 +369,8 @@ def resolve(
     timeout: float | None = None,
     max_tokens: int | None = None,
     user_model: str | None = None,
+    user_temperature: float | None = None,
+    world_options: Any = None,
 ) -> tuple[Any, str]:
     if isinstance(target, ConnectedAgent):
         return target.run, target.transport
@@ -371,6 +391,10 @@ def resolve(
             loop_kw["max_tokens"] = int(max_tokens)
         if user_model:
             loop_kw["user_model"] = user_model
+        if user_temperature is not None:
+            loop_kw["user_temperature"] = float(user_temperature)
+        if world_options is not None:
+            loop_kw["world_options"] = world_options
         return local_model(
             url,
             spec_model,
@@ -449,7 +473,7 @@ def claude_code(
     *,
     cwd: str | None = None,
     max_turns: int | None = None,
-    timeout: float = 300,
+    timeout: float = CLAUDE_CODE_TIMEOUT_S,
 ) -> Callable:
     import subprocess
 
@@ -574,8 +598,9 @@ def _schema_from_object(tool: Any) -> dict | None:
         or getattr(tool, "args", None)
         or {}
     )
-    if hasattr(params, "model_json_schema"):
-        params = params.model_json_schema()
+    schema_fn = getattr(params, "model_json_schema", None)
+    if callable(schema_fn):
+        params = schema_fn()
     elif hasattr(params, "schema") and not isinstance(params, dict):
         try:
             params = params.schema()

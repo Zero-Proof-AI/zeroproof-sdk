@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 
+from ..defaults import TEXT_HEURISTICS
+
 _SPECIFIC = re.compile(r"\b([A-Z]{2,}-?\d{2,}|\d+\.\d{2}|\$\d+|\b\d{3,}\b)")
 _TURN = "\n<USER_TURN>\n"
 
@@ -61,7 +63,7 @@ def punctuation_free(a: str) -> str:
 
 def token_delete(a: str, i: int) -> str:
     words = a.split()
-    if len(words) < 4:
+    if len(words) < TEXT_HEURISTICS.mutation_min_words:
         return a
     index = (i * 7 + len(words) // 2) % len(words)
     return " ".join(words[:index] + words[index + 1 :])
@@ -69,7 +71,7 @@ def token_delete(a: str, i: int) -> str:
 
 def token_swap(a: str, i: int) -> str:
     words = a.split()
-    if len(words) < 3:
+    if len(words) < TEXT_HEURISTICS.swap_min_words:
         return a
     index = (i * 5 + len(words) // 3) % (len(words) - 1)
     words[index], words[index + 1] = words[index + 1], words[index]
@@ -78,7 +80,11 @@ def token_swap(a: str, i: int) -> str:
 
 def typo_transpose(a: str, i: int) -> str:
     words = a.split()
-    eligible = [index for index, word in enumerate(words) if len(word.strip(".,!?")) >= 5]
+    eligible = [
+        index
+        for index, word in enumerate(words)
+        if len(word.strip(".,!?")) >= TEXT_HEURISTICS.swap_min_word_chars
+    ]
     if not eligible:
         return a
     index = eligible[i % len(eligible)]
@@ -119,7 +125,15 @@ MUTATORS = (
 )
 
 
-def mutate_pool(texts: list[str], rounds: int = 1, limit: int = 20_000) -> list[tuple[str, str]]:
+#: MUTATION_POOL_LIMIT = 20,000 mutated texts per call and MUTATION_MIN_CHARS
+#: = 12: a mutation shorter than this is a stub (convention).
+MUTATION_POOL_LIMIT = 20_000
+MUTATION_MIN_CHARS = 12
+
+
+def mutate_pool(
+    texts: list[str], rounds: int = 1, limit: int = MUTATION_POOL_LIMIT
+) -> list[tuple[str, str]]:
     """Apply every mutator across the pool. Returns (mutator_name, text)."""
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -136,7 +150,7 @@ def mutate_pool(texts: list[str], rounds: int = 1, limit: int = 20_000) -> list[
                     text = fn(a, b, i).strip()
                 except Exception:
                     continue
-                if len(text) < 12:
+                if len(text) < MUTATION_MIN_CHARS:
                     continue
                 key = hashlib.blake2b(text.lower().encode(), digest_size=8).hexdigest()
                 if key in seen:

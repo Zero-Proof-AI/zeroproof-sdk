@@ -1,4 +1,8 @@
-# Character training with whileai
+---
+title: "Character training with whileai"
+sidebarTitle: "Character training"
+description: "Change the weights so a model has a stable way of talking without a system prompt: sources, the recipe, and what to measure."
+---
 
 Character training changes the weights so a model has a stable way of
 talking without a system prompt telling it to. It is the same post-training
@@ -6,7 +10,8 @@ machinery as everything else (rlhfbook.com ch. 17), aimed at the manner of
 a reply instead of its correctness, and it is mostly a data pipeline: which
 phrases never appear, which replies get chosen over which. This page is the
 recipe as the SDK runs it. The worked example is
-[`recipes/03-select/character`](../recipes/03-select/character).
+[`recipes/03-select/character`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/character)
+(offline by default).
 
 ## What the sources say
 
@@ -27,12 +32,14 @@ the actual behavior of the model to what the designers intended." Read as
 data, the spec is a constitution with labeled preference pairs attached.
 
 **Maiya et al. 2025.** Three stages: a hand-written constitution, a
-distillation stage that builds DPO pairs (teacher with the constitution in
-its system prompt against a student without), and an introspection stage
-where the trained model writes about its own values for SFT. Evaluation is
-revealed preferences (which of ~150 trait words a judge sees in the output),
-robustness to "ignore role-play and respond genuinely," and a check that
-general capabilities did not move.
+distillation stage that builds DPO pairs (direct preference optimization:
+training on chosen-versus-rejected pairs with no reward model) from a
+teacher with the constitution in its system prompt against a student
+without, and an introspection stage where the trained model writes about
+its own values for SFT (supervised fine-tuning on whole replies). Evaluation
+is revealed preferences (which of ~150 trait words a judge sees in the
+output), robustness to "ignore role-play and respond genuinely," and a
+check that general capabilities did not move.
 
 ## The recipe
 
@@ -51,33 +58,74 @@ general capabilities did not move.
    else; that is `Task.privileged.principle` in the row schema, and the
    `privileged` block on the wire row. Use a different model family from
    the policy. Grade the spec's own GOOD/BAD replies with the same judge
-   and read `judge_agreement`; below about 0.8, fix the judge first.
+   and read `judge_agreement`; below 0.8 agreement, or a Cohen's kappa
+   (agreement corrected for chance) below 0.6, fix the judge first.
 5. **Markers.** `trait` from the judge, `on_task` from the judge, and
    `no_filler` from a phrase list the judge never sees. Reward on a trait
    prompt is `trait AND on_task`.
 6. **Pre-flight.** `pass_at` per trait. A trait the student already lands
    every time, or never, produces no pairs; the mixed prompts are the
    training signal (`group_signal`). `reward_correlations` says whether
-   the judge is paying for length.
-7. **Pairs and SFT.** `build_preference_pairs(length_match=True)`, then
-   `export_preference(pairs, system_prompt=DEPLOY_PROMPT)`. `export_training`
-   on the passes for SFT, loss mask on the assistant turn.
+   the judge is paying for length; above 0.3 it warns.
+7. **Pairs and SFT.** `build_preference_pairs(rows, length_match=True)`, then
+   `export_preference(pairs, "pairs.jsonl", system_prompt=DEPLOY_PROMPT)`.
+   `export_training` on the passes for SFT; the loss mask covers the
+   assistant turn by default.
 8. **Train.** `wai.train(dataset_id, method="dpo")` on the pushed rows, or
    any DPO trainer reading `pairs.jsonl`.
 9. **Measure.** The same prompts with a "drop the act" suffix, plus plain
    tasks the persona must not distort, before and after.
-   `delta_report(target="marker:trait", must_not_regress=["on_task", "no_filler"])`
+   `delta_report(before, after, target="marker:trait", must_not_regress=["on_task", "no_filler"])`
    gives the headline with an interval and fails on a regression.
+
+## Run it
+
+Both scripts run offline in seconds. The student and the judge are
+scripted, so the numbers are real and the model is not.
+
+```bash
+cd recipes/03-select/character
+python run.py             # constitution -> rows -> pairs and SFT
+python measure.py --demo  # before vs after on the adversarial holdout
+```
+
+`run.py` with the defaults (`--seed 0 --k 4`):
+
+```text
+traits 8 | train 57 prompts x 4 = 228 rows | adversarial 120 | control 24 | spec 35
+judge reference vs spec labels: agreement 1.00 (n=35, kappa 1.00)
+pass@1 0.58 | pass^4 0.39 | pass@4 0.79 | headroom 0.21 | mixed prompts 23/57
+markers: no_filler 0.64 [0.57,0.70] | on_task 1.00 | trait 0.58 [0.48,0.67]
+controls on_task 1.00 | adversarial trait 0.25
+corr(reward, reply length) +0.30 ok
+pairs 20 (chosen longer 0.7) -> out/pairs.jsonl | sft 133 -> out/sft.jsonl
+```
+
+`measure.py --demo`, the headline lines:
+
+```text
+marker:trait: moved_unreplicated (+0.500, 95% +0.408..+0.592, 30 paired tasks)
+PASS
+  pass_at_1                    0.375 -> 0.792  +0.417 [+0.319..+0.521]  up  (36 paired)
+  marker:no_filler             0.681 -> 0.986  +0.306 [+0.229..+0.389]  up  (36 paired)
+  marker:on_task               1.000 -> 1.000  +0.000 [+0.000..+0.000]  flat  (36 paired)
+  marker:trait                 0.250 -> 0.750  +0.500 [+0.408..+0.592]  up  (30 paired)
+```
+
+`moved_unreplicated` means one eval run per side; the report says to run
+each side three times (`simulate(tasks=..., runs=3)`) before calling it
+proven. It also warns that `on_task` is 1.0 on both sides, so that guard
+cannot fail here.
 
 ## The rows from one run
 
-The live run in the example (hosted Qwen3-4B student, hosted Phi-4 judge)
-is public: [zero-proof-ai/character-training-model-spec](https://huggingface.co/datasets/zero-proof-ai/character-training-model-spec)
+The live run in the example (hosted Qwen3-4B-Instruct student, hosted Phi-4 judge)
+is public: [while-ai/character-training-model-spec](https://huggingface.co/datasets/while-ai/character-training-model-spec)
 on Hugging Face, splits `train` (60), `holdout` (144) and `eval` (35, the
-spec's labeled replies with `gold_reward`), and on the
-[platform catalog](https://www.zeroproofai.com/datasets) under the agent
-`sol-character`. Grade the `eval` split with your judge before reading
-anything else; that is the check the pipeline is built around.
+spec's labeled replies with `gold_reward`). Grade the `eval` split with
+your judge before reading anything else; that is the check the pipeline is
+built around. In that run Phi-4 passed 10 of the spec's 20 BAD replies
+(agreement 0.69, kappa 0.40), which is the judge failing the check.
 
 ## Things that go wrong
 
@@ -86,17 +134,19 @@ anything else; that is the check the pipeline is built around.
   pass verbose off-character replies. Length-neutral judge instructions,
   length-matched pairs, and the correlation line exist for this.
 - **The judge is the policy.** Self-preference (ch. 5, ch. 12). The
-  `judge_vs_spec` agreement drops and the pairs encode the model's taste,
-  not the spec's.
+  recipe's `judge_vs_spec` agreement drops and the pairs encode the
+  model's taste, not the spec's.
 - **Character costs helpfulness.** A warm reply that does not answer, a
   refusal that lectures. `on_task` is a hard guard in the delta report and
   the controls carry no trait marker at all.
 - **No contrast.** A trait at pass@1 of 0 or 1 yields nothing to pair.
   Write prompts where the student is inconsistent, or use a teacher for
-  the chosen side and accept off-policy pairs (`same_policy=false`).
+  the chosen side and accept off-policy pairs (`same_policy=false` on the
+  pair).
 - **The holdout is the training set.** Adversarial variants of train
   prompts test robustness, not generalization. Written prompts split by
-  hash give a prompt-disjoint holdout; `decontaminate` checks the overlap.
+  hash give a prompt-disjoint holdout; `decontaminate` checks the overlap
+  (word 8-grams).
 
 ## What the SDK does not do
 
@@ -105,3 +155,9 @@ introspection stage (it needs the trained model). The SDK produces the
 rows, the pairs, the judge check and the before/after measurement, and
 `wai.train` runs DPO on the platform; `pairs.jsonl` is there for a trainer
 of your own.
+
+## What to run next
+
+[`recipes/03-select/character`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/character)
+builds the rows, the pairs and the before/after measurement on this page
+from the Model Spec, offline by default.

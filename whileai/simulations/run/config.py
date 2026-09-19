@@ -11,35 +11,62 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from whileai._env import getenv
 
+from ..defaults import (
+    AGENT_MAX_TOKENS_FLOOR,
+    DEAD_AGENT_MIN_ERRORS,
+    DEFAULT_AVG_TURNS,
+    DEFAULT_BUDGET,
+    DEFAULT_CARDS_PER_WAVE,
+    DEFAULT_COMPLETIONS_PER_REQUEST,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_EXTRA_CARDS,
+    DEFAULT_FAULT_RATE,
+    DEFAULT_MIN_USER_TURNS,
+    DEFAULT_POOL_SIZE,
+    DEFAULT_PROBE,
+    DEFAULT_SEED,
+    DEFAULT_WRITER_FLIGHT,
+    HUNG_SLOT_S,
+    MAX_COMPLETIONS_PER_REQUEST,
+    RL_FAULT_RATE,
+    RL_ROLLOUTS_PER_PROMPT,
+    SAMPLING_TEMPERATURE_MAX,
+    SATURATION_CAP,
+    SFT_PHRASINGS_PER_SITUATION,
+    STOP_GRACE_S,
+    RunKnobs,
+    resolve_knobs,
+)
 from ..generate.adapters import resolve_system_prompt
-from ..generate.agents import LOCAL_MODEL_TIMEOUT, PATIENCE_LEVELS
+from ..generate.agents import LOCAL_MODEL_TIMEOUT, Patience, patience_hazards
 from ..generate.diversity import adaptive_allocator
-from ..generate.scenarios import DEFAULT_FAULT_RATE, SEARCH_ARMS, check_dimensions
+from ..generate.scenarios import SEARCH_ARMS, check_dimensions
 from .spec import spec_rubric
 
-# Rows a saturation-bounded run may produce before the loop gives up.
-SATURATION_CAP = 50_000
-# Kill a hung Qwen slot after this wait. Omit the row. Not agent speech.
-# Ping-pong is several HTTP calls; 24s dropped healthy 2-person traces
-# and the replacement oversubscribed the GPU.
-HUNG_SLOT_S = 45.0
-# After a stop (clock, cap, saturation) wait this long for rollouts that
-# are already running. Queued ones are cancelled at once. Whatever is
-# still running afterwards is abandoned and reported.
-STOP_GRACE_S = 5.0
-# An agent that raises on every call is called off once this many
-# rollouts were lost with no row landed (or 2 x budget, whichever is
-# larger), instead of re-rolling until the writer runs dry (#88).
-DEAD_AGENT_MIN_ERRORS = 16
+if TYPE_CHECKING:
+    from ..world.sandbox import WorldOptions
+
+# The values themselves, with the reason for each, live in
+# ``whileai.simulations.defaults``; these names stay importable from here.
+__all__ = [
+    "DEAD_AGENT_MIN_ERRORS",
+    "HUNG_SLOT_S",
+    "SATURATION_CAP",
+    "STOP_GRACE_S",
+    "RunConfig",
+    "resolve_run_config",
+    "resolve_topology",
+    "writer_spec_for",
+]
 
 _MODE_PRESETS: dict[str, dict[str, Any]] = {
     "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
-    "sft": {"n_req": 3, "k": 1, "repeat_policy": "adaptive"},
-    "rl": {"n_req": 1, "k": 8, "repeat_policy": "successive"},
+    "sft": {"n_req": SFT_PHRASINGS_PER_SITUATION, "k": 1, "repeat_policy": "adaptive"},
+    "rl": {"n_req": 1, "k": RL_ROLLOUTS_PER_PROMPT, "repeat_policy": "successive"},
     "adaptive": {"n_req": 1, "k": 1, "repeat_policy": "adaptive"},
 }
 
@@ -153,6 +180,10 @@ def _pinned_tasks(tasks: Any) -> list[dict]:
                 "assignment": dims,
                 "arm": str(row.get("arm") or "") or "pinned",
                 "plan": plan,
+                # who wrote the situation, so the replayed row keeps the
+                # writer's name and delta_report sees one writer, not
+                # "pinned" against a model name
+                "writer_model": str(row.get("writer_model") or "") or None,
             }
         )
     if not out:
@@ -369,7 +400,10 @@ class RunConfig:
     max_turns: Any
     avg_turns: float
     min_user_turns: int
-    patience: str
+    # a level name, or (second, later) walk-away chances (see patience_hazards)
+    patience: Patience
+    # one temperature for every simulated-user line, or None for the defaults
+    user_temperature: float | None
     temperature: Any
     agent_max_tokens: int | None
     sampling: dict | None
@@ -389,6 +423,10 @@ class RunConfig:
     stop_grace_s: float
     rollout_timeout: float
     model_version_tag: str
+    # every other engine number, each an ``advanced`` key of the same name
+    knobs: RunKnobs = field(default_factory=RunKnobs)
+    # the mock world's dials (sandbox WorldOptions), or None for the defaults
+    world_options: WorldOptions | None = None
     # what is left goes to the situation writer as keyword arguments
     advanced: dict = field(default_factory=dict)
 
@@ -399,7 +437,7 @@ def resolve_run_config(
     spec: Any = None,
     tools: list[dict] | None = None,
     system_prompt: str | None = None,
-    budget: int | None = 1000,
+    budget: int | None = DEFAULT_BUDGET,
     time_budget: float | None = None,
     until: str = "compute",
     mode: str = "explore",
@@ -427,6 +465,9 @@ def resolve_run_config(
     Validation errors surface here, before any model or file is touched.
     """
     cfg, aliases = _merge_advanced(advanced, dict(passed or {}))
+    # Engine knobs first, so none of them rides ``**advanced`` into the
+    # situation writer as an unknown keyword.
+    knobs = resolve_knobs(cfg)
     policy = resolve_system_prompt(system_prompt, aliases.get("policy"))
     scaffold_text = str(scaffold or "").strip()
     unique_flag = bool(unique_situations or aliases.get("unique", False))
@@ -472,7 +513,7 @@ def resolve_run_config(
     elif pinned_tasks:
         pinned_tasks[0].pop("base_k", None)
 
-    concurrency = int(cfg.pop("concurrency", 32))
+    concurrency = int(cfg.pop("concurrency", DEFAULT_CONCURRENCY))
     dimensions = cfg.pop("dimensions", None)
     check_dimensions(dimensions)
     arm_weights = cfg.pop("arm_weights", None)
@@ -512,6 +553,14 @@ def resolve_run_config(
                 "'vllm:<model>@<url>') or None for the agent's own model"
             )
         user_model = user_model.strip() or None
+    # A decision model (typesafe:) answers questions and writes nothing,
+    # so it can judge but not play a role; say so before any call is made.
+    from ..generate.typesafe_backend import no_chat_error
+
+    for role, value in (("agent", agent), ("simulator", simulator), ("user_model", user_model)):
+        refusal = no_chat_error(value)
+        if refusal:
+            raise ValueError(f"{role}= {refusal}")
     backend = cfg.pop("backend", None)
     explicit_fault = "fault_rate" in cfg or "risk" in cfg
     fault_rate = float(cfg.pop("fault_rate", DEFAULT_FAULT_RATE))
@@ -519,16 +568,31 @@ def resolve_run_config(
     if risk is not None:
         fault_rate = float(risk)
     elif str(topo["mode"]) == "rl" and not explicit_fault:
-        fault_rate = 0.8
+        fault_rate = RL_FAULT_RATE
     texture = cfg.pop("texture", None)
     max_turns = cfg.pop("max_turns", None)
-    avg_turns = float(cfg.pop("avg_turns", 12))
-    min_user_turns = max(1, int(cfg.pop("min_user_turns", 1)))
-    patience = str(cfg.pop("patience", None) or "normal").strip().lower()
-    if patience not in PATIENCE_LEVELS:
+    avg_turns = float(cfg.pop("avg_turns", DEFAULT_AVG_TURNS))
+    min_user_turns = max(1, int(cfg.pop("min_user_turns", DEFAULT_MIN_USER_TURNS)))
+    # patience: a level name ("normal", "short", "endless") or a table
+    # {"second": p, "later": q} / (p, q) of walk-away chances fitted from
+    # your own traces. patience_hazards() is the one validator, so a bad
+    # value fails here with the fix before any model is touched.
+    raw_patience = cfg.pop("patience", None)
+    patience: Patience
+    if raw_patience is None or isinstance(raw_patience, str):
+        patience = str(raw_patience or "normal").strip().lower()
+        patience_hazards(patience)
+    else:
+        patience = patience_hazards(raw_patience)
+    # user_temperature: the sampling temperature of every simulated-user
+    # line (follow-ups and human-tool answers alike); None keeps the two
+    # named defaults in generate/agents.py.
+    raw_user_temperature = cfg.pop("user_temperature", None)
+    user_temperature = None if raw_user_temperature is None else float(raw_user_temperature)
+    if user_temperature is not None and not 0.0 <= user_temperature <= SAMPLING_TEMPERATURE_MAX:
         raise ValueError(
-            f"patience={patience!r} is not a level; use one of "
-            + ", ".join(repr(p) for p in PATIENCE_LEVELS)
+            f"user_temperature={user_temperature!r} is outside 0..2; it is a sampling "
+            "temperature for the simulated user's lines (None keeps the defaults)"
         )
     temperature = cfg.pop("temperature", None)
     # The model agent's reply budget. Default: 768 tokens, or 2048 above an
@@ -536,8 +600,10 @@ def resolve_run_config(
     # answers needs more, or its replies are cut mid-thought and score 0.
     raw_max_tokens = cfg.pop("agent_max_tokens", None)
     agent_max_tokens = int(raw_max_tokens) if raw_max_tokens else None
-    if agent_max_tokens is not None and agent_max_tokens < 64:
-        raise ValueError("agent_max_tokens is a reply budget in tokens (64 or more)")
+    if agent_max_tokens is not None and agent_max_tokens < AGENT_MAX_TOKENS_FLOOR:
+        raise ValueError(
+            f"agent_max_tokens is a reply budget in tokens ({AGENT_MAX_TOKENS_FLOOR} or more)"
+        )
     logprobs = cfg.pop("logprobs", False)
     if logprobs not in (False, True, "tokens"):
         raise ValueError('logprobs must be False, True, or "tokens"')
@@ -549,7 +615,7 @@ def resolve_run_config(
             'sampling= is a dict of how your agent samples, like {"temperature": 0.7, '
             '"max_tokens": 1024, "model": "my-model"}'
         )
-    seed = int(cfg.pop("seed", 0))
+    seed = int(cfg.pop("seed", DEFAULT_SEED))
     # The named grader= parameter wins; advanced={"grader": ...} stays as
     # the legacy spelling. Both route to one application path at the end.
     grader = grader if grader is not None else cfg.pop("grader", None)
@@ -596,7 +662,7 @@ def resolve_run_config(
         k_immediate = False
     else:
         k_immediate = bool(topo["k_explicit"] or topo["mode"] == "rl")
-    probe = max(1, int(cfg.pop("probe", 2)))
+    probe = max(1, int(cfg.pop("probe", DEFAULT_PROBE)))
 
     out_path = Path(output).expanduser() if output else None
     if texture is not None:
@@ -615,23 +681,25 @@ def resolve_run_config(
             "advanced={'mutate_graded_failures': True} needs grader=; without a grader "
             "there is no verdict to steer by"
         )
-    pool_size = int(cfg.pop("per_round", 80))
+    pool_size = int(cfg.pop("per_round", DEFAULT_POOL_SIZE))
     writer_raw = cfg.pop("scenario_concurrency", None)
     # Writer flight is a scheduler internal. Topology (unique / explore)
-    # does not change it. Default 4; too many starves rollouts.
-    scenario_concurrency = 4 if writer_raw is None else max(1, int(writer_raw))
+    # does not change it. Too many starves rollouts.
+    scenario_concurrency = DEFAULT_WRITER_FLIGHT if writer_raw is None else max(1, int(writer_raw))
     writer_flight = max(1, scenario_concurrency)
-    scenarios_per_request = max(1, int(cfg.pop("scenarios_per_request", 8)))
+    scenarios_per_request = max(1, int(cfg.pop("scenarios_per_request", DEFAULT_CARDS_PER_WAVE)))
     # A unique-situation run must walk the planned grid. Previously the
     # public unique=True knob still left the model writer in weighted
     # resampling mode unless callers also knew about this private switch.
     distinct_cards = bool(cfg.pop("distinct_cards", unique_cards))
     if "completions_per_request" in cfg:
-        completions_per_request = max(1, min(8, int(cfg["completions_per_request"])))
+        completions_per_request = max(
+            1, min(MAX_COMPLETIONS_PER_REQUEST, int(cfg["completions_per_request"]))
+        )
     else:
-        completions_per_request = 1
+        completions_per_request = DEFAULT_COMPLETIONS_PER_REQUEST
     cfg.pop("completions_per_request", None)
-    extra_cards = max(0, int(cfg.pop("extra_cards", 1)))
+    extra_cards = max(0, int(cfg.pop("extra_cards", DEFAULT_EXTRA_CARDS)))
     hung_slot_s = float(cfg.pop("hung_slot", HUNG_SLOT_S))
     stop_grace_s = max(0.0, float(cfg.pop("stop_grace", STOP_GRACE_S)))
     cfg.pop("scene_brief", None)
@@ -679,6 +747,36 @@ def resolve_run_config(
     # Seconds per completion. The default survives a served model's cold
     # start (two to three minutes); slow customer backends raise it.
     rollout_timeout = float(cfg.pop("timeout", LOCAL_MODEL_TIMEOUT) or LOCAL_MODEL_TIMEOUT)
+
+    # advanced={"world": {...}}: the mock world's dials (search_hits,
+    # exists_share, default_fault_mode, name pools, ...). Validated here so a
+    # typo fails before any model is touched; reaches MockEnvironment(options=).
+    world_options = cfg.pop("world", None)
+    if world_options is not None:
+        from ..world.sandbox import WorldOptions
+
+        world_options = WorldOptions.coerce(world_options)
+    # A tool_condition the world cannot answer would steer cells at a fault
+    # that never fires. "success", a condition in the world's condition_modes,
+    # or a fault mode the world knows (shipped or added through
+    # advanced={"world": {"fault_modes": ...}}) are the values that land.
+    if isinstance(dimensions, dict) and dimensions.get("tool_condition"):
+        from ..world.sandbox import WorldOptions
+
+        world = WorldOptions.coerce(world_options)
+        unknown_conditions = [
+            str(v)
+            for v in dimensions["tool_condition"]
+            if str(v) != "success" and world.fault_mode_for(str(v)) is None
+        ]
+        if unknown_conditions:
+            raise ValueError(
+                f"dimensions= tool_condition values {unknown_conditions} name no fault mode "
+                "the mock "
+                f"world knows; use success, {', '.join(sorted(world.condition_modes))} "
+                f"or a key of fault_modes ({', '.join(sorted(world.fault_modes))}). Add a "
+                'builder with advanced={"world": {"fault_modes": {**FAULT_MODES, name: fn}}}.'
+            )
 
     cap = budget if budget is not None else SATURATION_CAP
     return RunConfig(
@@ -729,6 +827,7 @@ def resolve_run_config(
         avg_turns=avg_turns,
         min_user_turns=min_user_turns,
         patience=patience,
+        user_temperature=user_temperature,
         temperature=temperature,
         agent_max_tokens=agent_max_tokens,
         sampling=sampling,
@@ -748,5 +847,7 @@ def resolve_run_config(
         stop_grace_s=stop_grace_s,
         rollout_timeout=rollout_timeout,
         model_version_tag=model_version_tag,
+        knobs=knobs,
+        world_options=world_options,
         advanced=cfg,
     )

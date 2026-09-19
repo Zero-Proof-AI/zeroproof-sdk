@@ -35,8 +35,15 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ..defaults import TEXT_HEURISTICS
 from ..world.sandbox import MockEnvironment
 from .agents import current_rollout
+
+# SEEDED_RATE = 0.35: the share of rollouts on which ``seeded_agent`` does
+# one wrong thing on purpose; ``seeded_agent(rate=)`` moves it. High enough
+# that a 20-row demo run catches every behavior kind at least once
+# (convention; nothing here claims to be a real failure rate).
+SEEDED_RATE = 0.35
 
 #: the wrong things a seeded agent can do, in draw order
 SEEDED_BEHAVIORS: tuple[str, ...] = (
@@ -182,21 +189,40 @@ def _honest(tool: str, ident: str, result: dict) -> str:
 def seeded_agent(
     tools: Sequence[dict],
     *,
-    rate: float = 0.35,
+    rate: float = SEEDED_RATE,
     seed: int = 0,
     behaviors: Sequence[str] | None = None,
 ) -> Callable[[str], dict]:
-    """A demo agent whose mistakes are on purpose and on the row.
+    """Build a demo agent whose mistakes are on purpose and recorded on the row.
+
+    Reach for it to try the whole loop offline, with no key and no model:
+    it gives a run something to catch, and each row says what was
+    planted, so a grader or a marker can be checked against the truth. It
+    returns a callable ``message -> trajectory`` for ``simulate(agent=...)``.
 
     Honest by default: it picks the tool the ask names, calls it through
     ``world()`` (faults fire), and reports what came back. On ``rate`` of
     rollouts, drawn deterministically from ``seed``, the prompt and the
-    rollout index, it does one thing from ``behaviors`` (default
-    ``SEEDED_BEHAVIORS``): ``hedging``, ``sycophancy``, ``apology`` and
-    ``boilerplate`` add the phrase ``style_report`` looks for;
-    ``ignore_fault`` claims success although the tool faulted;
-    ``leak`` quotes the row's privileged context. Each row it answers
-    carries ``seeded``: what it did on purpose, ``[]`` when it behaved.
+    rollout index, it does one thing from ``behaviors``: ``hedging``,
+    ``sycophancy``, ``apology`` and ``boilerplate`` add the phrase
+    ``style_report`` looks for; ``ignore_fault`` claims success although
+    the tool faulted; ``leak`` quotes the row's privileged context. Each
+    row it answers carries ``seeded``: what it did on purpose, ``[]`` when
+    it behaved.
+
+    * ``tools``: the tool schemas the agent may call.
+    * ``rate`` (``SEEDED_RATE``, 0.35): the share of rollouts with one
+      planted mistake, high enough that a 20-row demo run catches every
+      behavior kind at least once; a convention, not a real failure rate.
+    * ``seed`` (0): fixes which rollouts misbehave and how.
+    * ``behaviors`` (``SEEDED_BEHAVIORS``): the subset of mistakes to draw
+      from.
+
+    ```python
+    agent = wai.seeded_agent(TOOLS, rate=0.4, seed=3)
+    data = wai.simulate(agent, tools=TOOLS, simulator=False, budget=20)
+    print(sum(1 for row in data.trajectories if row["seeded"]), "planted")
+    ```
     """
     names = [str(b) for b in (behaviors or SEEDED_BEHAVIORS)]
     unknown = sorted(set(names) - set(SEEDED_BEHAVIORS))
@@ -204,7 +230,9 @@ def seeded_agent(
         raise ValueError(
             f"unknown seeded behaviors {unknown}; choose from {list(SEEDED_BEHAVIORS)}"
         )
-    tool_list = [dict(t) for t in tools]
+    from ..tools import schemas as _tool_schemas
+
+    tool_list = [dict(t) for t in (_tool_schemas(tools) or [])]
     if not tool_list:
         raise ValueError("seeded_agent needs tools=[...] (the same list you pass simulate)")
     w = World(tool_list, seed=seed)
@@ -215,7 +243,11 @@ def seeded_agent(
         low = text.lower()
         target = tool_list[0]
         for t in tool_list:
-            words = [x for x in _tool_name(t).lower().split("_") if len(x) > 2]
+            words = [
+                x
+                for x in _tool_name(t).lower().split("_")
+                if len(x) >= TEXT_HEURISTICS.tool_word_min_chars
+            ]
             if words and all(x in low for x in words):
                 target = t
                 break
@@ -261,7 +293,7 @@ def seeded_agent(
         return {"steps": steps, "final_text": reply, "seeded": seeded}
 
     agent.__name__ = "seeded_agent"
-    agent.world = w  # type: ignore[attr-defined]
+    agent.world = w  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return agent
 
 

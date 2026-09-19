@@ -64,6 +64,10 @@ def test_split_prompts_fill_to_k_and_the_rest_finish_when_nothing_is_left_to_ope
 
 
 def test_unanimous_prompts_stop_when_fresh_prompts_split_more_often():
+    # reproducible=True: the allocator's choices depend on the order rows
+    # land, and at concurrency=4 that order is the thread scheduler's, so
+    # which groups reach k and which stop short drifted from run to run.
+    # Pinned, the run is bit-for-bit the same in any test order.
     data = wai.simulate(
         _flaky(),
         mode="rl",
@@ -71,6 +75,7 @@ def test_unanimous_prompts_stop_when_fresh_prompts_split_more_often():
         rollouts_per_request=6,
         budget=60,
         grader=_judge,
+        reproducible=True,
         **offline(),
     )
     rows = data.trajectories

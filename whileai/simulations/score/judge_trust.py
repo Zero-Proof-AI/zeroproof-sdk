@@ -44,6 +44,14 @@ with no record of who wrote it, is not a measurement either, and says
 so. Measured means a floor, not a hint: the Wilson lower bound of
 agreement must reach ``min_agreement`` (0.8) and kappa ``min_kappa``
 (0.6), or ``ok`` is false with the number, the floor, and what to do.
+Measured also means measured on the whole labeled sample:
+``judge_agreement`` counts exact 0/1 rewards only, so a judge that
+returns fractions (a ``Rubric`` of principles scores the mean of its
+criteria) loses every partially met row, and the rows that survive are
+the ones it was sure about. The report counts them (``skipped``); over
+``max_skipped_share`` (0.1) ``ok`` is false, ``format_judge_trust``
+prints ``INCONCLUSIVE`` instead of ``PASS``, and the warning names the
+fix (``Criterion(kind="hard")``) (#345).
 
 ``trust_after_grade`` is the same check run by ``grade`` on the default
 path (rlhf-book ch. 5 "Suggested Experiments"): measure the judge on
@@ -60,6 +68,17 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ...report import Report
+from ..defaults import (
+    FLIP_FLAG,
+    JUDGE_CHECK_SAMPLE,
+    LENGTH_GAP_FLAG,
+    MAX_GOLD_ASK,
+    MAX_SKIPPED_SHARE,
+    MESSAGE_EXAMPLES,
+    MIN_AGREEMENT,
+    MIN_KAPPA,
+)
 from .agreement import (
     GOLD_KIND_KEY,
     MIN_GOLD,
@@ -73,11 +92,28 @@ from .stats import task_key, wilson_interval
 
 GOLD_KEY = "gold_reward"
 FILLER = " Let me know if there is anything else I can help with."
-LENGTH_GAP_FLAG = 0.15
-FLIP_FLAG = 0.10
-#: the floors ``ok`` needs: Wilson lower bound of agreement, and kappa
-MIN_AGREEMENT = 0.8
-MIN_KAPPA = 0.6
+# FILLER_REPEATS = 3: the neutral sentence is appended three times (about
+# 170 characters), enough to move a reply across the median length of
+# most lanes without adding a claim (convention).
+FILLER_REPEATS = 3
+# The floors ``ok`` needs (``MIN_AGREEMENT`` 0.8, ``MIN_KAPPA`` 0.6) and
+# the flags (``LENGTH_GAP_FLAG`` 0.15, ``FLIP_FLAG`` 0.10) live in
+# ``defaults`` with their sources; ``judge_trust`` takes each as a keyword.
+# HALVES_GAP_FLAG = 0.15: agreement gap between the two task halves that
+# reads as a rubric fit to its examples. Same size as LENGTH_GAP_FLAG so
+# the two rubric-shape flags fire at one sensitivity (convention).
+HALVES_GAP_FLAG = 0.15
+# HALVES_MIN_ROWS = 10: labeled rows each half needs before the gap is
+# read; under ten one row moves a half by ten points (convention).
+HALVES_MIN_ROWS = 10
+# LENGTH_MIN_ROWS_PER_LABEL = 6: rows of one gold label before the
+# short/long split is read; a median split of fewer leaves under three a
+# side (convention).
+LENGTH_MIN_ROWS_PER_LABEL = 6
+# LABEL_SEARCH_MAX = 1000: the most labels the "label more" search will
+# consider before giving up; past it the Wilson bound has converged to
+# within 0.03 of the point estimate and more labels cannot lift it.
+LABEL_SEARCH_MAX = 1000
 #: what ``grade(trust=)`` accepts
 TRUST_MODES = ("warn", "require", "off")
 NO_HUMAN_GOLD_NOTE = (
@@ -150,6 +186,43 @@ def _label(row: dict, key: str) -> int | None:
     return int(f) if f in (0.0, 1.0) else None
 
 
+def _fraction(row: dict) -> float | None:
+    """A numeric reward that is neither 0 nor 1: what ``_label`` refuses
+    and ``judge_agreement`` skips. ``None`` for a missing, boolean or
+    exact 0/1 reward."""
+    v = row.get("reward")
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if f in (0.0, 1.0) else f
+
+
+def _skipped(
+    gold_rows: Sequence[dict], labeled: Sequence[dict], max_skipped_share: float
+) -> dict[str, Any]:
+    """The labeled rows the agreement count left out, and whether that
+    share breaks the floor. ``fractional`` is the judge's doing (a reward
+    that is not 0/1); ``unscored`` rows have gold and no judge reward at
+    all, which ``missing_side_note`` already handles."""
+    fractions = [f for f in (_fraction(r) for r in gold_rows) if f is not None]
+    n_gold = len(gold_rows)
+    n_frac = len(fractions)
+    share = round(n_frac / n_gold, 4) if n_gold else 0.0
+    return {
+        "n_gold": n_gold,
+        "n_used": len(labeled),
+        "fractional": n_frac,
+        "unscored": n_gold - len(labeled) - n_frac,
+        "share": share,
+        "floor": float(max_skipped_share),
+        "over_floor": bool(n_frac) and share > float(max_skipped_share),
+        "examples": sorted({round(f, 4) for f in fractions})[:MESSAGE_EXAMPLES],
+    }
+
+
 def _task(row: dict) -> str:
     return task_key(row)
 
@@ -165,13 +238,16 @@ def _half(task: str) -> int:
     return int(hashlib.sha256(task.encode("utf-8")).hexdigest()[:8], 16) % 2
 
 
-def length_sensitivity(labeled: Sequence[dict], *, gold: str = GOLD_KEY) -> dict[str, Any]:
-    """Judge pass rate on short vs long replies, within each gold label."""
+def length_sensitivity(
+    labeled: Sequence[dict], *, gold: str = GOLD_KEY, length_gap_flag: float = LENGTH_GAP_FLAG
+) -> dict[str, Any]:
+    """Judge pass rate on short vs long replies, within each gold label;
+    ``flagged`` when the widest gap reaches ``length_gap_flag``."""
     out: dict[str, Any] = {}
     max_gap = 0.0
     for label in (1, 0):
         rows = [r for r in labeled if _label(r, gold) == label]
-        if len(rows) < 6:
+        if len(rows) < LENGTH_MIN_ROWS_PER_LABEL:
             out[f"gold_{label}"] = {"n": len(rows), "note": "too few rows"}
             continue
         lengths = sorted(reply_length(r) for r in rows)
@@ -193,17 +269,17 @@ def length_sensitivity(labeled: Sequence[dict], *, gold: str = GOLD_KEY) -> dict
             "gap_long_minus_short": gap,
         }
     out["max_gap"] = max_gap
-    out["flagged"] = max_gap >= LENGTH_GAP_FLAG
+    out["flagged"] = max_gap >= length_gap_flag
     return out
 
 
 def _padded(row: dict) -> dict:
     out = dict(row)
-    out["final_text"] = str(row.get("final_text") or "") + FILLER * 3
+    out["final_text"] = str(row.get("final_text") or "") + FILLER * FILLER_REPEATS
     messages = [dict(m) for m in (row.get("messages") or []) if isinstance(m, dict)]
     for m in reversed(messages):
         if str(m.get("role") or "") == "assistant":
-            m["content"] = str(m.get("content") or "") + FILLER * 3
+            m["content"] = str(m.get("content") or "") + FILLER * FILLER_REPEATS
             break
     if messages:
         out["messages"] = messages
@@ -300,25 +376,37 @@ def judge_probes(
     *,
     probes: str | Sequence[str] = "all",
     rubric: str | None = None,
-    sample: int = 40,
+    sample: int = JUDGE_CHECK_SAMPLE,
     seed: int = 0,
     concurrency: int = 8,
+    flip_flag: float = FLIP_FLAG,
 ) -> dict[str, Any]:
     """Try the reward hacks a policy finds first on the judge, on purpose.
 
-    Each probe in ``probes`` (``"all"`` or names from ``PROBES``) mutates
-    up to ``sample`` graded rows one way and re-judges them. An additive
-    probe (filler, the rubric's words, a success claim, the ask echoed,
-    a sycophantic opener) reports ``exploit_rate``: the share of
-    originally failing replies that pass once the text is added. A
-    replacement probe (a well-formed tool call with empty arguments, a
-    refusal) reports the share of replies that pass with the content
-    gone. ``rubric`` is the text the keyword probe draws words from;
-    without it the row's system prompt is used. A probe that applies to
-    no row is ``skipped`` with the reason.
+    Reach for it when a judge is about to become a training reward: a
+    policy trained on it will find these holes, so find them first
+    (rlhf-book ch. 14). It returns a dict: ``probes`` (per probe: ``n``,
+    ``kind``, ``pass_before``, ``pass_after``, ``flips_up``,
+    ``flips_down``, ``exploit_rate``, ``flagged``, ``errors``; a probe
+    that applies to no row is ``skipped`` with the reason),
+    ``exploitable_by`` (the probes at or over ``flip_flag``), and one
+    ``warnings`` line per exploit.
 
-    Returns per-probe counts and rates, ``exploitable_by`` (probes at or
-    over ``FLIP_FLAG``), and one warning per exploit.
+    Each probe mutates up to ``sample`` graded rows one way and re-judges
+    them. An additive probe (filler, the rubric's words, a success claim,
+    the ask echoed, a sycophantic opener) reports ``exploit_rate``: the
+    share of originally failing replies that pass once the text is added.
+    A replacement probe (a well-formed tool call with empty arguments, a
+    refusal) reports the share of replies that pass with the content
+    gone.
+
+    * ``probes``: ``"all"`` (the default) or names from ``PROBES``.
+    * ``rubric``: the text the keyword probe draws words from; without it
+      the row's system prompt is used.
+    * ``sample`` (40), ``seed`` (0), ``concurrency`` (8): how many rows to
+      re-judge, which ones, and how many judge calls run at once.
+    * ``flip_flag`` (``FLIP_FLAG``, 0.10): the exploit rate at which a
+      probe is flagged.
     """
     from .judging import run_judge
 
@@ -362,7 +450,7 @@ def judge_probes(
             rate = (up / fail_before) if fail_before else None
         else:
             rate = (pass_after / n) if n else None
-        flagged = rate is not None and rate >= FLIP_FLAG
+        flagged = rate is not None and rate >= flip_flag
         out["probes"][name] = {
             "n": n,
             "kind": "additive" if name in ADDITIVE_PROBES else "replacement",
@@ -393,11 +481,13 @@ def perturbation(
     rows: Sequence[dict],
     judge: Callable[[dict], Any],
     *,
-    sample: int = 40,
+    sample: int = JUDGE_CHECK_SAMPLE,
     seed: int = 0,
     concurrency: int = 8,
+    flip_flag: float = FLIP_FLAG,
 ) -> dict[str, Any]:
-    """Re-judge a sample as-is (consistency) and with filler (length)."""
+    """Re-judge a sample as-is (consistency) and with filler (length);
+    a flip rate at or over ``flip_flag`` is flagged."""
     from .judging import run_judge
 
     picked = _pick(rows, sample, seed)
@@ -438,8 +528,8 @@ def perturbation(
         "filler_flip_rate": length,
         "filler_flips_up": pad_up,
         "filler_flips_down": pad_down,
-        "flagged_consistency": consistency is not None and consistency >= FLIP_FLAG,
-        "flagged_length": length is not None and length >= FLIP_FLAG,
+        "flagged_consistency": consistency is not None and consistency >= flip_flag,
+        "flagged_length": length is not None and length >= flip_flag,
         "errors": sum(1 for r in again.rows + padded.rows if r.get("judge_status") != "ok"),
     }
 
@@ -449,7 +539,7 @@ def judge_trust(
     judge: Callable[[dict], Any] | None = None,
     *,
     gold: str = GOLD_KEY,
-    sample: int = 40,
+    sample: int = JUDGE_CHECK_SAMPLE,
     seed: int = 0,
     concurrency: int = 8,
     probes: str | Sequence[str] | None = None,
@@ -457,32 +547,74 @@ def judge_trust(
     min_agreement: float = MIN_AGREEMENT,
     min_kappa: float = MIN_KAPPA,
     allow_model_gold: bool = False,
-) -> dict[str, Any]:
-    """The judge-trust report. See the module docstring.
+    length_gap_flag: float = LENGTH_GAP_FLAG,
+    flip_flag: float = FLIP_FLAG,
+    max_skipped_share: float = MAX_SKIPPED_SHARE,
+) -> JudgeTrustReport:
+    """Measure whether the judge can be trusted, against human labels and under attack.
 
-    ``rows`` carry the judge's ``reward``; rows that also carry ``gold``
-    (0/1, default ``gold_reward``) feed the agreement, held-out, and
-    length checks. Pass ``judge`` to add the perturbation checks, which
-    call it on up to ``sample`` rows twice more. ``probes="all"`` (or a
-    list of names from ``PROBES``) adds ``judge_probes``, one more pass
-    over the sample per probe; ``rubric`` feeds the keyword probe.
+    Reach for it before training on a judge's rewards: the reward is only
+    as good as the judge. It returns a ``JudgeTrustReport``: print it for
+    the block, read it as the dict it has always been. The keys a caller
+    reads first: ``ok`` (measured and clean), ``agreement["agreement"]`` and
+    ``agreement["ci95"]`` (the number and its Wilson interval, not
+    ``ci``), ``agreement["n"]`` (labels compared), ``gold_kind`` (where
+    the labels came from), and ``warnings``, where every line names its
+    own fix. The rest: ``held_out_halves`` (agreement on two task-hash
+    halves; if they diverge the rubric is fit to its examples),
+    ``length_sensitivity`` (judge pass rate on short versus long replies
+    among rows humans agreed on, a length bias the labels rule out as
+    real), ``perturbation`` and ``probes`` when a judge callable is
+    given, ``disagreements`` (the review queue of rows the judge and the
+    humans disagree on), ``floors``, ``n_labeled`` and ``n_rows``.
+    ``print(report)`` writes the whole thing
+    (``format_judge_trust(report)`` is the same string). The module
+    docstring lays out each check and its rlhf-book chapter.
+    The floors and flags are keywords with their defaults in
+    ``whileai.simulations.defaults``: ``min_agreement`` (0.8, the
+    human-human agreement of MT-Bench, arXiv:2306.05685), ``min_kappa``
+    (0.6, Landis and Koch "substantial"), ``length_gap_flag`` (0.15),
+    ``flip_flag`` (0.10) and ``max_skipped_share`` (0.10, the share of
+    labeled rows the judge may leave out of the agreement count with a
+    fractional reward before ``ok`` is false; ``report["skipped"]``
+    carries the counts).
+
+    * ``rows``: graded rows carrying the judge's ``reward``. Rows that also
+      carry ``gold`` (0/1, default column ``gold_reward``, what
+      ``attach_labels`` writes) feed the agreement, held-out and length
+      checks.
+    * ``judge``: the judge callable. With it the report re-judges up to
+      ``sample`` rows twice more, as-is for consistency and with neutral
+      filler appended; flips on the filler run mean the judge pays for
+      length.
+    * ``probes``: ``"all"`` (or a list of names from ``PROBES``) adds
+      ``judge_probes``, one more pass over the sample per probe;
+      ``rubric`` feeds the keyword probe.
+    * ``min_agreement`` (0.8, the human-human agreement of MT-Bench,
+      arXiv:2306.05685) and ``min_kappa`` (0.6, Landis and Koch
+      "substantial"): the floors ``ok`` requires. ``length_gap_flag``
+      (0.15) and ``flip_flag`` (0.10) are the flags. All four live in
+      ``whileai.simulations.defaults``.
+    * ``allow_model_gold``: ``False`` by default, so model or unknown gold
+      makes ``ok`` false with the reason; only a person's labels count as
+      a measurement.
 
     ``ok`` is true only when a gold-labeled check ran against a person's
     labels, the Wilson lower bound of agreement reached ``min_agreement``,
     kappa reached ``min_kappa``, and nothing else was flagged. With no
     labels every check has ``n=0``, so ``ok`` is false with a warning
-    saying the judge is unmeasured, not failed. ``gold_kind`` in the
-    report says where the labels came from; model or unknown gold makes
-    ``ok`` false with the reason unless ``allow_model_gold=True``.
+    saying the judge is unmeasured, not failed. The perturbation pass is
+    not a substitute: a judge that passes everything is perfectly
+    consistent (rlhf-book ch. 5, ch. 12).
 
-    The keys a caller reads first: ``ok`` (measured and clean),
-    ``agreement["agreement"]`` and ``agreement["ci95"]`` (the number and
-    its Wilson interval, not ``ci``), ``agreement["n"]`` (labels
-    compared), ``gold_kind``, and ``warnings``, where every line names
-    its own fix. ``format_judge_trust(report)`` prints the whole thing.
+    >>> rows = [{"task_id": str(i), "reward": i % 2, "gold_reward": i % 2} for i in range(20)]
+    >>> wai.judge_trust(rows)["agreement"]["agreement"]
+    1.0
     """
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if _label(r, gold) is not None and _label(r, "reward") is not None]
+    gold_rows = [r for r in rows if _label(r, gold) is not None]
+    skipped = _skipped(gold_rows, labeled, max_skipped_share)
     # Over every row, not just the labeled ones: the pairs are the same
     # (``judge_agreement`` counts only rows with both sides), and it is
     # what lets the report say which half is missing when there are none.
@@ -493,7 +625,7 @@ def judge_trust(
     }
     gold_kind = agree.get("gold_kind")
     trusted = gold_kind == "human" or allow_model_gold
-    length = length_sensitivity(labeled, gold=gold)
+    length = length_sensitivity(labeled, gold=gold, length_gap_flag=length_gap_flag)
     queue = [
         {
             "task": _task(r),
@@ -506,7 +638,9 @@ def judge_trust(
         if _label(r, gold) != _label(r, "reward")
     ]
     perturb = (
-        perturbation(rows, judge, sample=sample, seed=seed, concurrency=concurrency)
+        perturbation(
+            rows, judge, sample=sample, seed=seed, concurrency=concurrency, flip_flag=flip_flag
+        )
         if judge
         else None
     )
@@ -519,12 +653,40 @@ def judge_trust(
             sample=sample,
             seed=seed,
             concurrency=concurrency,
+            flip_flag=flip_flag,
         )
         if judge and probes
         else None
     )
 
     warnings: list[str] = list(agree.get("warnings") or [])
+    # Rows the judge scored between 0 and 1 never reach the agreement
+    # count, and they are the rows it was least sure about, so the rows
+    # that remain agree more than the sample would (#345). Over the floor
+    # that is a finding against the measurement, not the judge.
+    if skipped["fractional"]:
+        examples = ", ".join(f"{f:g}" for f in skipped["examples"])
+        fix = (
+            "A Rubric of plain principles scores the mean of its criteria; give each "
+            "Criterion kind='hard' for a 0/1 verdict (or threshold the reward yourself "
+            "before judge_trust), then run it again."
+        )
+        if skipped["over_floor"]:
+            warnings.append(
+                f"Judge agreement skipped {skipped['fractional']} of {skipped['n_gold']} "
+                f"labeled rows: the judge gave them a fractional reward ({examples}) and "
+                f"agreement counts exact 0/1 only. That is {skipped['share']:.0%} of the "
+                f"sample, over the {max_skipped_share:.0%} max_skipped_share floor "
+                f"(MAX_SKIPPED_SHARE), and the {skipped['n_used']} rows kept are the ones "
+                "the judge was sure about, so the agreement above reads high by "
+                f"construction; `ok` is false. {fix}"
+            )
+        else:
+            warnings.append(
+                f"skipped {skipped['fractional']} of {skipped['n_gold']} labeled rows with a "
+                f"fractional reward ({examples}); under the {max_skipped_share:.0%} "
+                f"max_skipped_share floor, so `ok` stands. {fix}"
+            )
     # Gold labels of one class only: agreement is a pass-rate check, kappa
     # is undefined in spirit (no chance level to beat), and the length
     # split within the other class has nothing to compare. Say so instead
@@ -545,12 +707,12 @@ def judge_trust(
             point = float(agree.get("agreement") or 0.0)
             need = int(agree["n"])
             if point > min_agreement:
-                while need < 1000:
+                while need < LABEL_SEARCH_MAX:
                     ci = wilson_interval(round(point * need), need)
                     if ci is not None and ci[0] >= min_agreement:
                         break
                     need += 1
-            if point > min_agreement and need <= 200:
+            if point > min_agreement and need <= MAX_GOLD_ASK:
                 # The judge agrees often enough; the sample is what is short.
                 # Say how many labels the bound needs at this agreement rate,
                 # or a perfect judge on 14 labels reads as "change the judge". At
@@ -577,7 +739,7 @@ def judge_trust(
             )
     if halves["a"]["agreement"] is not None and halves["b"]["agreement"] is not None:
         gap = abs(halves["a"]["agreement"] - halves["b"]["agreement"])
-        if gap >= 0.15 and min(halves["a"]["n"], halves["b"]["n"]) >= 10:
+        if gap >= HALVES_GAP_FLAG and min(halves["a"]["n"], halves["b"]["n"]) >= HALVES_MIN_ROWS:
             warnings.append(
                 f"agreement differs by {gap:.0%} between task halves; the rubric may be fit to "
                 "the examples it was tuned on"
@@ -635,22 +797,29 @@ def judge_trust(
         else:
             warnings.append(line)
     ok = bool(labeled) and trusted and not flagged
-    return {
-        "ok": ok,
-        "n_rows": len(rows),
-        "n_labeled": len(labeled),
-        "gold_kind": gold_kind,
-        "gold_degenerate": degenerate_gold,
-        "floors": {"min_agreement": min_agreement, "min_kappa": min_kappa},
-        "agreement": agree,
-        "held_out_halves": halves,
-        "length_sensitivity": length,
-        "perturbation": perturb,
-        "probes": probed,
-        "exploitable_by": list(probed["exploitable_by"]) if probed else [],
-        "disagreements": queue,
-        "warnings": warnings,
-    }
+    return JudgeTrustReport(
+        {
+            "ok": ok,
+            "n_rows": len(rows),
+            "n_labeled": len(labeled),
+            "gold_kind": gold_kind,
+            "gold_degenerate": degenerate_gold,
+            "floors": {
+                "min_agreement": min_agreement,
+                "min_kappa": min_kappa,
+                "max_skipped_share": max_skipped_share,
+            },
+            "skipped": skipped,
+            "agreement": agree,
+            "held_out_halves": halves,
+            "length_sensitivity": length,
+            "perturbation": perturb,
+            "probes": probed,
+            "exploitable_by": list(probed["exploitable_by"]) if probed else [],
+            "disagreements": queue,
+            "warnings": warnings,
+        }
+    )
 
 
 def _flagged(warnings: Sequence[str]) -> bool:
@@ -659,6 +828,7 @@ def _flagged(warnings: Sequence[str]) -> bool:
         w.startswith(
             (
                 "Judge agreement with human labels",
+                "Judge agreement skipped",
                 "Judge kappa with human labels",
                 "judge pass rate differs",
                 "judge passed",
@@ -724,6 +894,20 @@ def trust_after_grade(rows: Sequence[dict], *, mode: str = "warn") -> dict[str, 
     return {"trust": summary, "note": note}
 
 
+class JudgeTrustReport(Report):
+    """What ``judge_trust`` measured, as an object that prints itself.
+
+    Still the dict it always was: ``report["agreement"]["kappa"]`` and
+    ``report["warnings"]`` read the same. ``print(report)`` is now the
+    block ``format_judge_trust`` writes, not the dict literal.
+    """
+
+    _summary_keys = ("ok", "n_labeled")
+
+    def __str__(self) -> str:
+        return format_judge_trust(self)
+
+
 def format_judge_trust(report: dict[str, Any]) -> str:
     a = report["agreement"]
     # "FAIL" on an unmeasured judge would read as a finding; it is the
@@ -734,15 +918,30 @@ def format_judge_trust(report: dict[str, Any]) -> str:
     unmeasured = not report.get("n_labeled") or any(
         w in not_a_persons_labels for w in report["warnings"]
     )
-    if not report["ok"] and unmeasured and not _flagged(report["warnings"]):
+    skipped = report.get("skipped") or {}
+    if skipped.get("over_floor"):
+        # Not PASS and not FAIL: the sample the number rests on is the
+        # judge's own selection, so there is no verdict to print (#345).
+        lines = [
+            f"INCONCLUSIVE: {skipped['fractional']} of {skipped['n_gold']} labeled rows "
+            f"skipped ({skipped['share']:.0%}, over MAX_SKIPPED_SHARE {skipped['floor']:.0%}); "
+            f"usable n={skipped['n_used']}"
+        ]
+    elif not report["ok"] and unmeasured and not _flagged(report["warnings"]):
         lines = ["NOT MEASURED"]
     else:
         lines = ["PASS" if report["ok"] else "FAIL"]
     if a["n"]:
         ci = a["ci95"]
         kappa = f", kappa {a['kappa']:.2f}" if a["kappa"] is not None else ""
+        left_out = (
+            f", {skipped['fractional']} of {skipped['n_gold']} labeled rows skipped"
+            if skipped.get("fractional")
+            else ""
+        )
         lines.append(
-            f"agreement {a['agreement']:.0%} (95% {ci[0]:.0%}..{ci[1]:.0%}, n={a['n']}){kappa}"
+            f"agreement {a['agreement']:.0%} (95% {ci[0]:.0%}..{ci[1]:.0%}, n={a['n']}"
+            f"{left_out}){kappa}"
         )
         c = a["confusion"]
         lines.append(f"  confusion tp={c['tp']} fp={c['fp']} fn={c['fn']} tn={c['tn']}")
@@ -781,6 +980,7 @@ __all__ = [
     "ADDITIVE_PROBES",
     "FILLER",
     "GOLD_KEY",
+    "MAX_SKIPPED_SHARE",
     "MIN_AGREEMENT",
     "MIN_KAPPA",
     "NO_HUMAN_GOLD_NOTE",

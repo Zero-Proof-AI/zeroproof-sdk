@@ -1,0 +1,64 @@
+name: docs
+
+# The docs site (Mintlify) reads docs/ on every push to main, so what is in
+# docs/ is what people see. These jobs keep docs/ honest with the package.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  api-reference:
+    name: docs/api matches the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      # docs/api/*.mdx are generated from __all__, signatures and docstrings.
+      # A PR that changes any of those regenerates them in the same diff:
+      #   uv run python scripts/gen_api_docs.py
+      - run: uv run python scripts/gen_api_docs.py --check
+
+  docs-follow-code:
+    name: code change carries a docs change
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-docs')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: a PR that touches whileai/ touches docs/ too
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE"...HEAD)
+          code=$(echo "$changed" | grep -E '^whileai/' | grep -vE '(^|/)tests?/' || true)
+          docs=$(echo "$changed" | grep -E '^docs/' || true)
+          if [ -n "$code" ] && [ -z "$docs" ]; then
+            echo "This PR changes the package but not docs/."
+            echo "Either document the change under docs/ (a guide, docs/reference.md, or a"
+            echo "docstring, then run: uv run python scripts/gen_api_docs.py), or add the"
+            echo "'no-docs' label to say the change is invisible to users."
+            echo "::group::package files changed"; echo "$code"; echo "::endgroup::"
+            exit 1
+          fi
+          echo "ok"
+
+  links:
+    name: docs links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Strict build: an MDX parse error or a bad frontmatter fails here,
+      # not on the hosted deploy.
+      - run: npx --yes mint validate
+        working-directory: docs
+      - run: npx --yes mint broken-links
+        working-directory: docs

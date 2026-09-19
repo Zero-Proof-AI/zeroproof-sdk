@@ -1,0 +1,130 @@
+---
+title: "Your model and your key"
+sidebarTitle: "Your model and your key"
+description: "How to name the model the agent runs on, which environment variable each provider reads, where the requests go, and the three things that reach While only when you ask."
+---
+
+The shortest answer is a backend object: `wai.OpenAI("gpt-4.1-mini",
+api_key="sk-...")`, `wai.Anthropic(...)`, `wai.Endpoint(model, url=)`,
+`wai.Ollama(...)`, `wai.Hosted()`. Its repr says where the call goes and
+which key it uses, `wai.configure(agent=, judge=, api_key=)` sets it once
+for the process, and `print(wai.settings)` shows what each role resolves
+to. That page is [Connect your agent](/get-started/connect-your-agent).
+This page is the string form underneath, for configs and command lines.
+
+The agent is the first argument of `simulate()`. Pass the model as a
+string, and the key comes from that provider's usual environment
+variable. Every request goes straight to that provider. The situation
+writer runs on the same model, so no While key is involved.
+
+```python
+import whileai as wai
+
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+data = wai.simulate(
+    "openai:gpt-4.1-mini",  # the agent; key from OPENAI_API_KEY
+    tools=[get_order],  # the function is the tool
+    system_prompt="Help customers with orders.",
+    mode="rl",
+    repeats=4,
+    budget=64,
+)
+```
+
+| Agent | Key | Requests go to |
+|---|---|---|
+| `"openai:<model>"` | `OPENAI_API_KEY` (`OPENAI_BASE_URL` for a compatible server) | api.openai.com, or the base URL you set |
+| `"anthropic:<model>"` | `ANTHROPIC_API_KEY` | api.anthropic.com |
+| `"vllm:<model>@<url>"` | `OPENAI_API_KEY`; none for localhost or plain http | `<url>` |
+| `"ollama:<model>"` | none | localhost:11434 |
+| `my_agent(message) -> {"steps": [...], "final_text": "..."}` | yours | wherever your code goes |
+| `wai.seeded_agent([get_order])` | none | nowhere: an offline stand-in |
+
+Set the key the way you already do for that provider:
+
+```bash
+export OPENAI_API_KEY=sk-...        # or ANTHROPIC_API_KEY=...
+```
+
+## Tools are functions
+
+`@wai.tool` turns a typed function into the tool: the signature is the
+schema, the docstring is the description, `Annotated[str, "note"]` or a
+Google-style `Args:` block gives a parameter its note, and a parameter
+with a default is optional. The mock world answers the calls, faults
+first. To have the bodies answer instead, pass
+`execute=wai.Tool.dispatch([get_order, ...])`. Raw OpenAI schema dicts
+still work in the same list.
+
+## No tools at all yet
+
+`draft_tools` writes plausible schemas from one sentence about the agent,
+on the same key:
+
+```python
+TOOLS = wai.simulations.draft_tools(
+    "a support agent that looks up orders and issues refunds",
+    backend_spec="openai:gpt-4.1-mini",
+)
+```
+
+Each drafted schema is marked `drafted`, so you can tell it from a
+declared tool. Replace them with your real schemas when you have them.
+
+## The judge
+
+Same shape as the agent: a callable over a row, a verifier
+(`wai.verify.MathEqual()`, `wai.verify.CodeExec(tests=...)`), or a model
+string on its own key. The judge is never the model it is judging; the
+[evals guide](/evals) shows how to check it against people before you
+trust it.
+
+## Three models, three arguments
+
+Three models can take part in a run. A model string can name each one,
+and each goes in a different place.
+
+| Role | What it does | Where the string goes | Default |
+|---|---|---|---|
+| **Agent** | Answers the customer and calls tools. The thing under test. | First argument of `simulate()`, or `backend=` | The hosted Qwen, on your While key |
+| **Writer** | Writes the situations and plays the customer in follow-up turns. | `simulator=` on `simulate()`; `user_model=` for the customer alone | Same model as the agent; `simulator=False` is the offline template writer |
+| **Judge** | Grades the finished conversation. | `data.grade(llm_spec=...)`, or `wai.grade(rows, spec=...)` | Hosted Phi-4, a different family from the agent |
+
+Set them once for a machine with `WHILEAI_AGENT`, `WHILEAI_SURROGATE`
+(the writer) and `WHILEAI_JUDGE` instead. If agent and judge end up the
+same model, `data.degraded` carries `same_model` and the warning says so.
+
+## The While key
+
+Only the hosted parts need it. The SDK looks in this order and stops at
+the first it finds:
+
+| Order | Where | How |
+|---|---|---|
+| 1 | `api_key=` on the call | `wai.simulate(..., api_key="zp_...")`, `data.grade(api_key=...)` |
+| 2 | Environment | `export WHILEAI_API_KEY=zp_...` |
+| 3 | Saved credentials | `whileai login`, or `whileai signup --email you@example.com` |
+
+Keys start with `zp_`. Every `WHILEAI_*` variable also reads its old
+`ZEROPROOF_*` name.
+
+## What reaches While
+
+Three things, and only when you ask for them:
+
+| You do this | What happens |
+|---|---|
+| leave `agent=` out | the agent is the Qwen the platform hosts, on the key from `whileai login` |
+| leave `simulator=False` out with a callable agent | the situation writer is hosted, on the same key |
+| call `push`, `train` or `serve` | rows go to your account for hosted training and serving |
+
+Everything else runs on your machine. `whileai status` prints which key
+the SDK will use and where it came from; `whileai login` or
+`whileai signup --email you@example.com` gets one when you want the hosted
+parts. The [platform reference](/reference/platform) covers that side.

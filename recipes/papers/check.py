@@ -17,6 +17,30 @@ from pathlib import Path
 PAPERS = Path(__file__).resolve().parent
 
 
+#: Two-sided 95% quantiles of Student's t by degrees of freedom, the same
+#: table as ``whileai.simulations.score.stats._T975``; past 30 the first
+#: two Cornish-Fisher terms in z, within 0.001 of the table there.
+_Z_95 = 1.96
+_T975 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306,
+    9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145, 15: 2.131,
+    16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086, 21: 2.080, 22: 2.074,
+    23: 2.069, 24: 2.064, 25: 2.060, 26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045,
+    30: 2.042,
+}  # fmt: skip
+
+
+def t_quantile(df: int) -> float:
+    """The two-sided 95% t quantile at ``df`` degrees of freedom (a stdlib
+    copy of ``whileai.simulations.score.stats._t_quantile`` at the default
+    level)."""
+    n = max(1, int(df))
+    if n in _T975:
+        return _T975[n]
+    z = _Z_95
+    return z + (z**3 + z) / (4 * n) + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * n * n)
+
+
 def noise_band(run_std: float, n_a: int = 1, n_b: int = 1, df: int | None = None) -> float:
     """The re-run band a delta has to clear: a stdlib copy of
     ``whileai.simulations.score.stats.noise_band`` (this script runs before
@@ -26,15 +50,16 @@ def noise_band(run_std: float, n_a: int = 1, n_b: int = 1, df: int | None = None
     model is evaluated again. A delta is the mean of ``n_a`` before runs
     against the mean of ``n_b`` after runs, so its own standard deviation
     is ``run_std * sqrt(1/n_a + 1/n_b)``; the band is that times 1.96 for
-    a given ``run_std`` (taken as the eval's spread, ``df=None``), or the
-    two-sided 95% t quantile at ``df`` when it was estimated from the
-    re-runs being compared. A paper recipe hands ``delta_report`` the
-    ``run_std`` of three base re-runs and compares one run per side, so
-    the bar here is ``1.96 x sqrt(2) x run_std``.
+    a ``run_std`` taken as the eval's exact spread (``df=None``), or the
+    two-sided 95% t quantile at ``df`` when it was estimated from re-runs.
+    A paper recipe estimates ``run_std`` from ``run_std_runs`` base re-runs
+    and compares one run per side, so the bar here is ``t(df =
+    run_std_runs - 1) x sqrt(2) x run_std``: 4.30 x sqrt(2) x run_std from
+    three re-runs, 2.26 x sqrt(2) from ten. The 1.96 band read a three-run
+    estimate as exact and let about one pure-noise delta in five through.
     """
-    if df is not None:
-        raise NotImplementedError("the recipes compare one run per side with a given run_std")
-    return 1.96 * float(run_std) * math.sqrt(1.0 / n_a + 1.0 / n_b)
+    q = _Z_95 if df is None else t_quantile(df)
+    return q * float(run_std) * math.sqrt(1.0 / n_a + 1.0 / n_b)
 
 
 INDEX = PAPERS / "README.md"
@@ -60,6 +85,7 @@ KEYS = {
 ARM_KEYS = {"score", "ci", "steps"}
 CHECK_KEYS = {
     "run_std",
+    "run_std_runs",
     "decontaminated_dropped",
     "over_optimized",
     "length_before",
@@ -138,17 +164,23 @@ def check_recipe(d: Path) -> dict:
     # over-optimization verdict (ch. 14). Otherwise it is "flat". The band is
     # noise_band(run_std), the same number as whileai's eval_variance
     # noise_band and delta_report(run_std=) within_noise test.
+    runs = r["checks"]["run_std_runs"]
+    if not isinstance(runs, int) or runs < 2:  # two runs before a standard deviation exists
+        fail(f"{d.name}: checks.run_std_runs is the number of base re-runs behind run_std, 2+")
     if r["delta"]["verdict"] == "moved":
         lo, hi = r["delta"].get("ci", [0.0, 0.0])
         delta = float(r["delta"]["recipe_vs_baseline"])
         run_std = float(r["checks"]["run_std"])
         if lo <= 0.0 <= hi:
             fail(f"{d.name}: verdict moved but the interval [{lo}, {hi}] covers zero")
-        band = noise_band(run_std)
+        # run_std is an estimate from ``runs`` re-runs, so the band carries
+        # its degrees of freedom: the t quantile at runs - 1, not 1.96.
+        band = noise_band(run_std, df=runs - 1)
         if abs(delta) < band:
             fail(
                 f"{d.name}: verdict moved but |delta| {abs(delta):.3f} < {band:.3f} "
-                f"(1.96 x run_std x sqrt(1/1 + 1/1), the re-run band on a one-run-per-side delta)"
+                f"(t(df={runs - 1})={t_quantile(runs - 1):.2f} x run_std x sqrt(1/1 + 1/1), the "
+                f"re-run band on a one-run-per-side delta with run_std from {runs} re-runs)"
             )
         if r["checks"]["over_optimized"]:
             fail(f"{d.name}: verdict moved but the proxy-vs-target check says over-optimized")

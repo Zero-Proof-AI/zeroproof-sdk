@@ -44,6 +44,12 @@ python recipe.py                    # both arms, writes results.json
 - Public data or a seeded environment that lives in the recipe directory. No customer data.
 - A flat result is a result. Say so in the table.
 - `python recipes/papers/check.py --write` passes (`tests/recipes/test_papers.py` runs it in CI).
+- `post.md`: the result as a post, once the recipe is verified. Under 280
+  characters, plain words, the metric with its interval, the arXiv link
+  and the recipe link, nothing invented and nothing rounded. A flat result
+  is posted as flat. Replicated papers are how we market
+  ([CONSTITUTION.md](../../CONSTITUTION.md), belief 2); the post is the
+  last artifact of a recipe, not a separate job.
 
 ## The science bar
 
@@ -52,7 +58,7 @@ the chapter it rests on, and the `## Checks` table is run, not ticked:
 
 | Check | Chapter | What `check.py` enforces |
 |---|---|---|
-| Eval noise | ch. 16 Evaluation | the base is evaluated 3 times; `eval_variance` run_std is recorded; "moved" needs a delta over `noise_band(run_std)` = 1.96 x run_std x sqrt(1/n_a + 1/n_b), which is 1.96 x sqrt(2) x run_std with one run per side (a delta is the difference of two re-run draws) |
+| Eval noise | ch. 16 Evaluation | the base is evaluated `run_std_runs` times (3 by default, more with `--base-runs`); `eval_variance` run_std and `run_std_runs` are both recorded; "moved" needs a delta over `noise_band(run_std, df=run_std_runs - 1)` = t x run_std x sqrt(1/n_a + 1/n_b), which is t x sqrt(2) x run_std with one run per side (a delta is the difference of two re-run draws). t is the two-sided 95% quantile at df = run_std_runs - 1 because run_std is an estimate, not the eval's exact spread: 4.30 from 3 re-runs, 2.26 from 10; the old 1.96 read a three-run estimate as exact and let about one pure-noise delta in five through. `delta_report(run_std=, run_std_runs=)` applies the same quantile |
 | Paired interval | ch. 16 | "moved" needs a 95% interval that excludes zero, from `delta_report` over the same holdout tasks |
 | Clean holdout | ch. 16 | `decontaminate(train, against=holdout)` runs before training; dropped rows are counted |
 | Reward is a program | ch. 7 Reasoning, ch. 13 Tool use | a verifier or a public gold answer; a judge only when the paper is about judges |

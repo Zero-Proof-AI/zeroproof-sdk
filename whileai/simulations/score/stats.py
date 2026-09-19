@@ -16,6 +16,27 @@ and evaluation prompts, 8-gram in the Tulu 3 decontamination).
   Short prompts fall back to exact normalized match.
 
 Everything here is stdlib and deterministic under ``seed``.
+
+Statistical knobs (documented once, here; every function below takes
+them as keywords and ``whileai.simulations.defaults`` holds the values):
+
+* ``alpha`` (``ALPHA``, 0.05): the two-sided false-positive rate behind a
+  verdict. ``holdout_size`` and ``detectable_effect`` size for it;
+  ``delta_report`` reads its family-wise rate from it.
+* ``level`` (``CI_LEVEL``, ``1 - ALPHA``): the interval every ``ci95``
+  key carries. ``bootstrap_ci``, ``compare_runs`` and ``noise_band`` take
+  it; the key name stays ``ci95`` and ``level`` is reported beside it.
+  The normal quantile at 0.95 is ``Z_95`` (1.96, rounded as the tables
+  print it); other levels come from ``NormalDist``, and the t quantile
+  from the table below at 0.95 or a numeric inversion elsewhere.
+* ``power`` (``POWER``, 0.8): the chance a holdout of the size
+  ``holdout_size`` names detects a real gain (Miller 2024,
+  arXiv:2411.00640, section 5: ``n = ((z_{1-alpha/2} + z_power) * sd /
+  effect) ** 2``).
+* ``n_boot`` (``BOOTSTRAP_DRAWS``, 2000): resamples behind a percentile
+  interval; Efron and Tibshirani put the floor at 1000.
+* ``MIN_CI_TASKS`` (3) and ``MIN_RERUNS`` (3): the fewest tasks an
+  interval, and the fewest re-runs a spread, can be read from.
 """
 
 from __future__ import annotations
@@ -27,9 +48,46 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-DEFAULT_BOOT = 2000
-#: tasks a bootstrap interval needs; below it the interval is the data itself
-MIN_CI_TASKS = 3
+from ..defaults import (
+    ALPHA,
+    BASE_PASS_RATE,
+    BOOTSTRAP_DRAWS,
+    CEILING_PASS_RATE,
+    CI_LEVEL,
+    DECONTAM_NGRAM,
+    DECONTAM_OVERLAP,
+    DIFFICULTY_BAND,
+    MIN_CI_TASKS,
+    MIN_RERUNS,
+    POWER,
+    ROLLOUTS_PER_TASK,
+    SEMANTIC_SIMILARITY,
+    Z_95,
+)
+
+#: the bootstrap draw count every interval here defaults to (``defaults.BOOTSTRAP_DRAWS``)
+DEFAULT_BOOT = BOOTSTRAP_DRAWS
+# MIN_HOLDOUT_TASKS = 2: the fewest tasks ``holdout_size`` will ever
+# answer; one task is not a paired comparison (convention).
+MIN_HOLDOUT_TASKS = 2
+# FIXED_POINT_STEPS = 12: iterations ``detectable_effect`` runs to solve
+# the sizing for the effect, whose after-side variance depends on it. The
+# map is a contraction and converges to four decimals in under ten steps
+# on every base rate tried (measured, not derived).
+FIXED_POINT_STEPS = 12
+# MIN_PAIRED_TASKS = 5: shared tasks ``compare_runs`` needs before it
+# pairs; under it the sign-flip test has at most 2**4 = 16 arrangements,
+# so the smallest p-value it can reach is about 0.06 and no paired
+# verdict at ALPHA is possible. Above MIN_CI_TASKS for that reason.
+MIN_PAIRED_TASKS = 5
+# UNPAIRED_MAJORITY_SHARE = 0.5: below this paired share ``compare_runs``
+# says "most tasks unpaired"; it is the meaning of "most", not a knob.
+UNPAIRED_MAJORITY_SHARE = 0.5
+# DISTINCT_TASK_PERCENTILE = 0.99: the percentile of cosine similarity
+# over eval-prompt pairs with different task ids that ``decontaminate``
+# reports as "how alike distinct tasks read". The top 1% is where two
+# tasks that only share a domain sit closest (convention, untested).
+DISTINCT_TASK_PERCENTILE = 0.99
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -48,8 +106,9 @@ def _mean(values: Sequence[float]) -> float:
 # ------------------------------------------------------------------ intervals
 
 
-def wilson_interval(successes: int, n: int, *, z: float = 1.96) -> tuple[float, float] | None:
-    """Wilson score interval for a proportion. ``None`` when n is 0."""
+def wilson_interval(successes: int, n: int, *, z: float = Z_95) -> tuple[float, float] | None:
+    """Wilson score interval for a proportion. ``None`` when n is 0.
+    ``z`` is the normal quantile of the level wanted (``Z_95`` for 95%)."""
     if n <= 0:
         return None
     p = successes / n
@@ -65,6 +124,14 @@ def _z(p: float) -> float:
     return NormalDist().inv_cdf(p)
 
 
+def _z_level(level: float) -> float:
+    """The two-sided normal quantile at ``level``: ``Z_95`` (1.96, as the
+    tables print it) at the default level, ``NormalDist`` elsewhere."""
+    if not 0 < level < 1:
+        raise ValueError("level is the interval's coverage, strictly between 0 and 1")
+    return Z_95 if level == CI_LEVEL else _z((1 + level) / 2)
+
+
 #: Two-sided 95% quantiles of Student's t by degrees of freedom, for a
 #: ``run_std`` estimated from a handful of re-runs (three runs per side is
 #: df=4 and 2.78, not 1.96). Past 30 the Cornish-Fisher expansion below is
@@ -78,17 +145,109 @@ _T975 = {
 }  # fmt: skip
 
 
-def _t975(df: int) -> float:
-    """The two-sided 95% t quantile at ``df`` degrees of freedom: the table
-    to 30, the Cornish-Fisher expansion in ``z`` past it (no scipy)."""
+#: Lentz's continued fraction guards: a floor that keeps a near-zero
+#: denominator finite, and the step size at which the fraction has
+#: converged to double precision (Numerical Recipes 6.4).
+_BETACF_TINY = 1e-300
+_BETACF_EPS = 3e-16
+#: A within-minus-between variance under this is zero at double precision.
+_VARIANCE_EPS = 1e-12
+#: The sign-flip null: each paired difference keeps or flips its sign on a
+#: fair coin, one half by definition.
+_FAIR_COIN = 0.5
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the incomplete beta function (Lentz's
+    method, as in Numerical Recipes 6.4)."""
+    tiny = _BETACF_TINY
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / (c if abs(c) > tiny else tiny)
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / (c if abs(c) > tiny else tiny)
+        step = d * c
+        h *= step
+        if abs(step - 1.0) < _BETACF_EPS:
+            break
+    return h
+
+
+def _betainc(a: float, b: float, x: float) -> float:
+    """Regularized incomplete beta ``I_x(a, b)``, stdlib only."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    front = math.exp(
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
+    )
+    if x < (a + 1.0) / (a + b + 2.0):
+        return front * _betacf(a, b, x) / a
+    return 1.0 - front * _betacf(b, a, 1.0 - x) / b
+
+
+def _t_cdf(t: float, df: int) -> float:
+    """Student's t distribution function at ``t`` with ``df`` degrees of freedom."""
+    x = df / (df + t * t)
+    tail = 0.5 * _betainc(df / 2.0, 0.5, x)
+    return 1.0 - tail if t >= 0 else tail
+
+
+# _T_BRACKET_HI = 1000: the upper end of the bisection bracket for a t
+# quantile (no level anyone asks for needs a larger t at df >= 1);
+# _T_TOLERANCE = 1e-10: the bracket width at which the inversion stops.
+_T_BRACKET_HI = 1000.0
+_T_TOLERANCE = 1e-10
+
+
+def _t_quantile(df: int, level: float = CI_LEVEL) -> float:
+    """The two-sided t quantile at ``df`` degrees of freedom and ``level``:
+    the table to 30 at the default level, the Cornish-Fisher expansion in
+    ``z`` past it (within 0.001 of the table there), and a numeric
+    inversion of the t distribution at any other level (no scipy)."""
     n = max(1, int(df))
-    if n in _T975:
-        return _T975[n]
-    z = 1.96
-    return z + (z**3 + z) / (4 * n) + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * n * n)
+    if level == CI_LEVEL:
+        if n in _T975:
+            return _T975[n]
+        z = Z_95
+        return z + (z**3 + z) / (4 * n) + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * n * n)
+    target = (1 + level) / 2
+    lo, hi = 0.0, _T_BRACKET_HI
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if _t_cdf(mid, n) < target:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < _T_TOLERANCE:
+            break
+    return (lo + hi) / 2
 
 
-def noise_band(run_std: float, n_a: int = 1, n_b: int = 1, df: int | None = None) -> float:
+def _t975(df: int) -> float:
+    """The two-sided 95% t quantile at ``df`` (``_t_quantile`` at ``CI_LEVEL``)."""
+    return _t_quantile(df, CI_LEVEL)
+
+
+def noise_band(
+    run_std: float,
+    n_a: int = 1,
+    n_b: int = 1,
+    df: int | None = None,
+    *,
+    level: float = CI_LEVEL,
+) -> float:
     """The re-run band a before/after delta has to clear (rlhf-book ch. 16,
     appendix C).
 
@@ -97,18 +256,19 @@ def noise_band(run_std: float, n_a: int = 1, n_b: int = 1, df: int | None = None
     against the mean of ``n_b`` after runs, so its own standard deviation
     is ``run_std * sqrt(1/n_a + 1/n_b)``: ``sqrt(2)`` times ``run_std``
     with one run per side, ``sqrt(2/3)`` times it with three. The band is
-    that times 1.96 when ``run_std`` is taken as the eval's true spread
-    (``df=None``: a number handed in), or times the two-sided 95% t
-    quantile at ``df`` when ``run_std`` was estimated from the re-runs
-    themselves, with ``df = sum(n_i - 1)`` over the sides (three runs per
-    side is df=4 and 2.78). Under pure noise about 5% of deltas land
-    outside it on either path; a flat ``2 * run_std`` let 15% through
-    with one run per side, and ``2 * sqrt(2) * run_std`` was right only
-    there and too wide with three.
+    that times the normal quantile at ``level`` (1.96 at the default 95%)
+    when ``run_std`` is taken as the eval's true spread (``df=None``: a
+    number handed in), or times the two-sided t quantile at ``df`` when
+    ``run_std`` was estimated from the re-runs themselves, with ``df =
+    sum(n_i - 1)`` over the sides (three runs per side is df=4 and 2.78).
+    Under pure noise about ``1 - level`` of deltas land outside it on
+    either path; a flat ``2 * run_std`` let 15% through with one run per
+    side, and ``2 * sqrt(2) * run_std`` was right only there and too wide
+    with three.
     """
     if n_a < 1 or n_b < 1:
         raise ValueError("n_a and n_b are run counts, at least 1 each")
-    q = 1.96 if df is None else _t975(df)
+    q = _z_level(level) if df is None else _t_quantile(df, level)
     return q * float(run_std) * math.sqrt(1.0 / n_a + 1.0 / n_b)
 
 
@@ -163,7 +323,7 @@ def _rows_base_and_k(rows: Sequence[dict]) -> tuple[float, int, float | None, fl
     rates = [_mean(v) for v in groups.values()]
     base = _mean(rates)
     k = min(len(v) for v in groups.values())
-    spread = _sample_sd(rates) if len(rates) >= 2 else None
+    spread = _sample_sd(rates) if len(rates) >= 2 else None  # noqa: PLR2004  # a spread needs a pair
     return base, k, spread, _independence_ratio(rates)
 
 
@@ -179,12 +339,12 @@ def _independence_ratio(rates: Sequence[float]) -> float | None:
     finite unless every task is a sure pass or a sure fail, when it is
     ``None``: the model's variance is then all between tasks and pairing
     removes all of it)."""
-    if len(rates) < 2:
+    if len(rates) < 2:  # noqa: PLR2004  # a spread needs a pair
         return None
     mean = _mean(rates)
     within = mean * (1 - mean)
     between = sum((r - mean) ** 2 for r in rates) / len(rates)
-    if within <= 0 or within - between <= 1e-12:
+    if within <= 0 or within - between <= _VARIANCE_EPS:
         return None
     return within / (within - between)
 
@@ -213,14 +373,15 @@ def _paired_sd_from_rows(
 def holdout_size(
     effect: float,
     *,
-    base: float = 0.6,
-    k: int = 4,
-    power: float = 0.8,
-    alpha: float = 0.05,
+    base: float = BASE_PASS_RATE,
+    k: int = ROLLOUTS_PER_TASK,
+    power: float = POWER,
+    alpha: float = ALPHA,
     before: Sequence[dict] | None = None,
     after: Sequence[dict] | None = None,
     task_std: float | None = None,
     rows: Sequence[dict] | None = None,
+    ceiling_pass_rate: float = CEILING_PASS_RATE,
 ) -> dict[str, Any]:
     """How many paired tasks a holdout needs to prove a gain of ``effect``.
 
@@ -273,9 +434,26 @@ def holdout_size(
     name) reads ``base`` and ``k`` off the data. Returns ``n_tasks``
     plus the inputs, ``task_std``, ``sd_source``, ``half_width`` (the 95%
     band on the delta at that ``n``), ``n_tasks_concentrated``,
-    ``base_spread``, ``n_paired`` and ``notes``; every key is present on
-    every path (``None`` or ``[]`` where it does not apply). The default
-    answer is unchanged; the honest paths are the two that measure.
+    ``base_spread``, ``n_paired``, ``saturated``, ``notes`` and
+    ``warnings``; every key is present on every path (``None``, ``False``
+    or ``[]`` where it does not apply). The default answer is unchanged;
+    the honest paths are the two that measure.
+
+    A saturated baseline cannot size anything. Rows whose tasks all pass
+    give ``p = 1``, the binomial variance ``p(1-p)`` is 0, and both arms
+    all passing give a measured paired sd of 0; the formula then returns
+    the floor, ``MIN_HOLDOUT_TASKS``, which is the model collapsing, not
+    evidence that two tasks are enough (#392). When the measured base is
+    at or above ``ceiling_pass_rate`` (``CEILING_PASS_RATE``, the share
+    ``delta_report`` flags as ``ceiling``) or the measured sd is 0 (the
+    paired difference identical on every task, ``DEGENERATE``), the
+    rows are not used: ``n_tasks`` is the binomial model's answer at
+    ``BASE_PASS_RATE`` and the rows' ``k``, ``sd_source`` is ``"model"``,
+    ``saturated`` is ``True``, and ``warnings`` names the ceiling and the
+    fix: harder situations, so the baseline sits inside the 20-80
+    difficulty band (rlhfbook.com/c/14-reasoning.html; DAPO, arXiv
+    2503.14476, drops prompts at accuracy 0 and 1 because they carry no
+    signal), then size again on those rows.
 
     The recipe that asked for this had 140 tasks at k=4 around 0.6: a
     band of about +-0.06, so a real 3-point gain reads
@@ -297,9 +475,11 @@ def holdout_size(
             "(agent rubrics sit near 0.38)"
         )
     notes: list[str] = []
+    warnings: list[str] = []
     spread: float | None = None
     ratio: float | None = None
     n_paired: int | None = None
+    saturated = False
     if before is not None:
         base, k, spread, ratio = _rows_base_and_k(before)
     if before is not None and after is not None:
@@ -316,15 +496,46 @@ def holdout_size(
     else:
         sd = _paired_task_sd(base, effect, k)
         source = "model"
+    if before is not None and source != "given" and (base >= ceiling_pass_rate or sd <= 0):
+        # The rows cannot size anything: at the ceiling p(1-p) is (near)
+        # zero and a measured sd of 0 says both arms agreed on every task.
+        # Answer with the model at the default base, and say so.
+        saturated = True
+        measured = f"task_std {sd:.3f} measured" if source == "rows" else "the binomial variance"
+        band_lo, band_hi = DIFFICULTY_BAND
+        if base >= ceiling_pass_rate:
+            head = (
+                f"CEILING: the before rows pass {base:.2f} of tasks, at or above the ceiling "
+                f"{ceiling_pass_rate:.2f}, so this suite cannot show a {float(effect):.2f} gain; "
+                f"{measured} collapses to 0"
+            )
+        else:
+            head = (
+                f"DEGENERATE: the paired difference is the same on every one of the "
+                f"{n_paired} tasks ({measured} is 0) at a base of {base:.2f}, so the rows carry "
+                "no spread to size from"
+            )
+        warnings.append(
+            f"{head} and the sizing formula returns its floor ({MIN_HOLDOUT_TASKS} tasks), which "
+            "is the model collapsing, not evidence. n_tasks is the binomial model's answer at "
+            f"the default base {BASE_PASS_RATE:.2f} with these rows' k={int(k)}, not a "
+            "measurement. Fix: harder situations, so the baseline sits inside the "
+            f"{band_lo:.0%}-{band_hi:.0%} difficulty band (simulate(hard_share=...) or a higher "
+            "fault_rate; rlhfbook.com/c/14-reasoning.html), then size again on those rows."
+        )
+        sd = _paired_task_sd(BASE_PASS_RATE, effect, k)
+        source = "model"
+        n_paired = None
     z = _z(1 - alpha / 2) + _z(power)
 
     def _n(s: float) -> int:
-        return max(2, math.ceil((z * s / float(effect)) ** 2) if s > 0 else 1)
+        return max(MIN_HOLDOUT_TASKS, math.ceil((z * s / float(effect)) ** 2) if s > 0 else 1)
 
     n = _n(sd)
     concentrated: int | None = None
     if source == "model":
-        concentrated = _n(_concentrated_task_sd(base, effect, k))
+        model_base = BASE_PASS_RATE if saturated else base
+        concentrated = _n(_concentrated_task_sd(model_base, effect, k))
         notes.append(
             f"n_tasks {n} assumes the gain is spread evenly across tasks and the two arms are "
             f"independent draws. If the gain is carried by a few tasks (a trait only some "
@@ -332,7 +543,7 @@ def holdout_size(
             f"tasks (n_tasks_concentrated). Pass before= and after= from a previous eval to "
             f"measure the paired sd, or task_std= read off a delta_report interval."
         )
-        if spread is not None and spread > 0:
+        if spread is not None and spread > 0 and not saturated:
             if ratio is None:
                 how = (
                     "every task is a sure pass or a sure fail, so the model's per-task "
@@ -361,27 +572,30 @@ def holdout_size(
         "n_tasks_concentrated": concentrated,
         "base_spread": round(spread, 4) if spread is not None else None,
         "n_paired": n_paired,
+        "saturated": saturated,
         "notes": notes,
+        "warnings": warnings,
     }
 
 
 def detectable_effect(
     n_tasks: int,
     *,
-    base: float = 0.6,
-    k: int = 4,
-    power: float = 0.8,
-    alpha: float = 0.05,
+    base: float = BASE_PASS_RATE,
+    k: int = ROLLOUTS_PER_TASK,
+    power: float = POWER,
+    alpha: float = ALPHA,
 ) -> float | None:
     """The smallest gain ``n_tasks`` paired tasks can prove at ``power``:
-    ``holdout_size`` solved for the effect (a few fixed-point steps, since
-    the after-side variance depends on it). ``None`` below two tasks."""
+    ``holdout_size`` solved for the effect (``FIXED_POINT_STEPS``
+    fixed-point steps, since the after-side variance depends on it).
+    ``None`` below ``MIN_HOLDOUT_TASKS`` tasks."""
     n = int(n_tasks)
-    if n < 2:
+    if n < MIN_HOLDOUT_TASKS:
         return None
     z = _z(1 - alpha / 2) + _z(power)
     effect = 0.0
-    for _ in range(12):
+    for _ in range(FIXED_POINT_STEPS):
         sd = _paired_task_sd(base, effect, k)
         effect = z * sd / math.sqrt(n)
     return round(min(1.0, effect), 4)
@@ -393,11 +607,13 @@ def bootstrap_ci(
     stat: Callable[[Sequence[float]], float] = _mean,
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
-    level: float = 0.95,
+    level: float = CI_LEVEL,
 ) -> tuple[float, float] | None:
-    """Percentile bootstrap interval of ``stat`` over ``values``. ``None``
-    below ``MIN_CI_TASKS`` values, where the interval would be the data
-    itself."""
+    """Percentile bootstrap interval of ``stat`` over ``values`` at
+    ``level`` (``CI_LEVEL`` by default). ``None`` below ``MIN_CI_TASKS``
+    values, where the interval would be the data itself."""
+    if not 0 < level < 1:
+        raise ValueError("level is the interval's coverage, strictly between 0 and 1")
     vals = [float(v) for v in values]
     if len(vals) < MIN_CI_TASKS:
         return None
@@ -554,12 +770,17 @@ def marker_summary(
 # ------------------------------------------------------------------ re-run variance
 
 
-#: Olmo 3's bands for the standard deviation of a benchmark across re-runs
-#: of one model, in points on a 0-100 scale: MMLU/MATH/PopQA sit near 0.2,
-#: GPQA/AlpacaEval above 1.2. rlhf-book ch. 16, "Why Many External
-#: Evaluation Comparisons Are Unreliable", puts most post-training
-#: evaluations between 0.25 and 1.5 points with the setup held constant.
+# VARIANCE_BANDS = (0.35, 0.7) points: where ``eval_variance`` places a
+# ``run_std`` on Olmo 3's bands for the standard deviation of a benchmark
+# across re-runs of one model, on a 0-100 scale: MMLU/MATH/PopQA sit near
+# 0.2, GPQA/AlpacaEval above 1.2. rlhf-book ch. 16, "Why Many External
+# Evaluation Comparisons Are Unreliable", puts most post-training
+# evaluations between 0.25 and 1.5 points with the setup held constant;
+# 0.35 and 0.7 split that range so the three labels each cover a third
+# of it (convention on the cut points).
 VARIANCE_BANDS = (("very_stable", 0.35), ("stable", 0.7), ("high_variance", float("inf")))
+# POINTS_PER_UNIT = 100: pass rates are 0-1, the bands above are in points.
+POINTS_PER_UNIT = 100
 
 
 def _run_key(row: dict, by: str | None) -> str | None:
@@ -673,7 +894,7 @@ def eval_variance(
         return by_run, covered
 
     def _sample_std(values: list[float]) -> float | None:
-        if len(values) < 2:
+        if len(values) < 2:  # noqa: PLR2004  # a spread needs a pair
             return None
         centre = _mean(values)
         return (sum((v - centre) ** 2 for v in values) / (len(values) - 1)) ** 0.5
@@ -703,7 +924,7 @@ def eval_variance(
         run_std_by_metric[floor_metric] = round(metric_std, 4) if metric_std is not None else None
     stability = None
     if std is not None:
-        points = std * 100
+        points = std * POINTS_PER_UNIT
         stability = next(name for name, cap in VARIANCE_BANDS if points < cap)
     out: dict[str, Any] = {
         "metric": metric,
@@ -712,7 +933,7 @@ def eval_variance(
         "mean": round(mean, 4) if mean is not None else None,
         "run_std": round(std, 4) if std is not None else None,
         "run_std_by_metric": run_std_by_metric,
-        "run_std_points": round(std * 100, 2) if std is not None else None,
+        "run_std_points": round(std * POINTS_PER_UNIT, 2) if std is not None else None,
         "noise_band": round(noise_band(std), 4) if std is not None else None,
         "stability": stability,
         "tasks_in_every_run": len(common),
@@ -720,9 +941,9 @@ def eval_variance(
     }
     if unkeyed:
         out["notes"].append(f"{unkeyed} row(s) carried no run id and were left out")
-    if n < 3:
+    if n < MIN_RERUNS:
         out["notes"].append(
-            f"{n} run(s): two is a difference, not a distribution; three or more re-runs "
+            f"{n} run(s): two is a difference, not a distribution; {MIN_RERUNS} or more re-runs "
             "give a standard deviation worth reading"
         )
     if task_sets and any(s != common for s in task_sets):
@@ -740,23 +961,43 @@ def compare_runs(
     metric: str = "pass_at_1",
     n_boot: int = DEFAULT_BOOT,
     seed: int = 0,
-    min_paired: int = 5,
+    min_paired: int = MIN_PAIRED_TASKS,
+    level: float = CI_LEVEL,
 ) -> dict[str, Any]:
-    """Is run ``b`` different from run ``a`` on ``metric``?
+    """Test whether run ``b`` differs from run ``a`` on one metric, paired by task.
+
+    Reach for it for a quick A/B on a single number; ``delta_report`` is
+    the full report with markers, the noise floor and the comparability
+    checks. It returns a dict: ``delta`` (b minus a), ``ci95`` (the
+    interval, with ``level`` beside it), ``p_value``, ``verdict``,
+    ``n_paired``, ``n_only_a``, ``n_only_b``, ``paired_share``,
+    ``mean_a``, ``mean_b``, and a ``note``.
 
     Tasks the two runs share are compared as paired differences (b minus
-    a, per task); the interval is a bootstrap over those pairs and the
-    p-value is a sign-flip permutation test. With fewer than ``min_paired``
-    shared tasks the comparison falls back to unpaired task means and says
-    so. ``verdict`` is one of ``"b_better"``, ``"a_better"``,
-    ``"no_difference_detected"``: the last means the interval covers zero,
-    not that the runs are equal.
+    a, per task, keyed the way ``pass_at`` groups); the interval is a
+    ``level`` bootstrap over those pairs and the p-value is a sign-flip
+    permutation test. ``verdict`` is one of ``"b_better"``,
+    ``"a_better"``, ``"no_difference_detected"``: the last means the
+    interval covers zero, not that the runs are equal. Tasks on one side
+    only are dropped from a paired comparison, and ``note`` says how
+    many, since a verdict over a quarter of the tasks is not a verdict
+    over the eval. ``paired_share`` is the shared fraction of every task
+    either run saw.
 
-    Tasks on one side only are dropped from a paired comparison, and
-    ``note`` says how many, since a verdict over a quarter of the tasks is
-    not a verdict over the eval. ``paired_share`` is the shared fraction
-    of every task either run saw.
+    * ``metric``: ``"pass_at_1"`` (the default, binary reward) or
+      ``"marker:name"`` for a marker.
+    * ``min_paired`` (5): with fewer shared tasks the comparison falls
+      back to unpaired task means and says so.
+    * ``level`` (0.95): the interval's coverage (``ci95`` at the default).
+      ``n_boot`` (2000) and ``seed`` (0) fix the bootstrap.
+
+    >>> a = [{"task_id": t, "reward": 0} for t in "abcdef"]
+    >>> b = [{"task_id": t, "reward": 1} for t in "abcdef"]
+    >>> wai.compare_runs(a, b)["verdict"]
+    'b_better'
     """
+    if not 0 < level < 1:
+        raise ValueError("level is the interval's coverage, strictly between 0 and 1")
     ma = task_means(a, metric)
     mb = task_means(b, metric)
     shared = sorted(set(ma) & set(mb))
@@ -765,14 +1006,14 @@ def compare_runs(
     if paired:
         diffs = [mb[t] - ma[t] for t in shared]
         delta = _mean(diffs)
-        ci = bootstrap_ci(diffs, n_boot=n_boot, seed=seed)
+        ci = bootstrap_ci(diffs, n_boot=n_boot, seed=seed, level=level)
         # Sign-flip permutation: under H0 each paired difference is
         # equally likely to have either sign.
         observed = abs(delta)
         n = len(diffs)
         extreme = 0
         for _ in range(n_boot):
-            flipped = _mean([d if rng.random() < 0.5 else -d for d in diffs])
+            flipped = _mean([d if rng.random() < _FAIR_COIN else -d for d in diffs])
             if abs(flipped) >= observed - 1e-12:
                 extreme += 1
         p_value = (extreme + 1) / (n_boot + 1)
@@ -781,14 +1022,14 @@ def compare_runs(
         va, vb = list(ma.values()), list(mb.values())
         delta = (_mean(vb) - _mean(va)) if va and vb else float("nan")
         ci = None
-        if len(va) >= 3 and len(vb) >= 3:
+        if len(va) >= MIN_CI_TASKS and len(vb) >= MIN_CI_TASKS:
             boots = []
             for _ in range(n_boot):
                 sa = _mean([va[rng.randrange(len(va))] for _ in va])
                 sb = _mean([vb[rng.randrange(len(vb))] for _ in vb])
                 boots.append(sb - sa)
             boots.sort()
-            ci = (boots[int(0.025 * n_boot)], boots[int(0.975 * n_boot) - 1])
+            ci = (boots[int((1 - level) / 2 * n_boot)], boots[int((1 + level) / 2 * n_boot) - 1])
         p_value = None
         n_used = min(len(va), len(vb))
     if ci is None or math.isnan(delta):
@@ -810,7 +1051,7 @@ def compare_runs(
             f"{n_only_a} tasks only in a and {n_only_b} only in b were dropped; "
             f"the verdict rests on the {len(shared)} shared"
         )
-        if paired_share is not None and paired_share < 0.5:
+        if paired_share is not None and paired_share < UNPAIRED_MAJORITY_SHARE:
             note = "most tasks unpaired: " + note
     else:
         note = ""
@@ -826,6 +1067,7 @@ def compare_runs(
         "mean_b": _mean(list(mb.values())) if mb else None,
         "delta": delta if not math.isnan(delta) else None,
         "ci95": ci,
+        "level": level,
         "p_value": p_value,
         "verdict": verdict,
         "note": note,
@@ -921,70 +1163,87 @@ def _distinct_task_similarity(
             if task_ids[b] is None or task_ids[b] == task_ids[a]:
                 continue
             sims.append(float(sum(x * y for x, y in zip(vectors[a], vectors[b]))))
-    if len(sims) < 2:
+    if len(sims) < 2:  # noqa: PLR2004  # a spread needs a pair
         return None
     sims.sort()
-    return min(1.0, sims[round(0.99 * (len(sims) - 1))])
+    return min(1.0, sims[round(DISTINCT_TASK_PERCENTILE * (len(sims) - 1))])
 
 
 def decontaminate(
     rows: Sequence[dict],
     against: Sequence[Any] | Any,
     *,
-    n: int = 8,
+    n: int = DECONTAM_NGRAM,
     fields: Sequence[str] = ("prompt",),
-    overlap: float = 0.8,
+    overlap: float = DECONTAM_OVERLAP,
     embedder: Callable[[list[str]], Sequence[Sequence[float]]] | None = None,
-    similarity: float = 0.85,
+    similarity: float = SEMANTIC_SIMILARITY,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """Drop rows whose prompt overlaps an evaluation set (rlhf-book ch. 16).
+    """Drop training rows whose prompt overlaps an evaluation set.
 
-    ``against`` is one or more evaluation sources: row lists, JSONL paths,
-    or platform dataset ids (``ds_...``). Evaluation prompts, answers and
-    references are the texts (not the eval set's own replies). Four rules,
-    applied in this order, and a row flagged by one is not counted again
-    by the next, so ``n_contaminated`` is the number of rows dropped:
+    Reach for it before any train-versus-holdout comparison: a held-out
+    task that also sits in the training data measures memory, not the
+    change (rlhf-book ch. 16). It returns ``(clean_rows, report)``: the
+    rows that survived, and a report with the count under each rule
+    (``n_contaminated`` in total), hits per field, the eval text count,
+    and the first offenders with their coverage (or ``similarity`` for
+    semantic hits).
+
+    * ``rows``: the training rows.
+    * ``against``: one or more evaluation sources: row lists, JSONL paths,
+      or platform dataset ids (``ds_...``). Evaluation prompts, answers
+      and references are the texts compared (not the eval set's own
+      replies).
+    * ``fields`` (``("prompt",)``): which row texts are checked, the
+      book's method. Add ``"final_text"`` to ask the stricter question of
+      whether replies reproduce eval answers or references.
+    * ``n`` (8) and ``overlap`` (0.8): the near-copy rule, the Llama 2
+      rule of 8-grams covering 80% of tokens. ``overlap=0`` restores
+      any-n-gram.
+    * ``embedder`` and ``similarity`` (0.85): a callable from a list of
+      texts to one vector per text turns on the semantic rule at that
+      cosine threshold; nothing here imports a model.
+
+    Four rules, applied in this order, and a row flagged by one is not
+    counted again by the next, so ``n_contaminated`` is the number of
+    rows dropped:
 
     * ``same_task`` (``n_same_task``): the row's ``scenario_id`` or
       ``task_id`` is an evaluation row's. A task is a situation, not a
       string (``task_key``), so a rephrasing of an eval situation is the
       eval situation whatever the words say. Rows with no recorded id
       skip this rule.
-    * ``exact`` (``n_exact``): one of the row's ``fields`` is an evaluation
-      text verbatim after normalization (case and whitespace).
+    * ``exact`` (``n_exact``): one of the row's ``fields`` is an
+      evaluation text verbatim after normalization (case and whitespace).
     * near copy (``n_near``): one evaluation text covers at least
-      ``overlap`` of the row's words with shared word ``n``-grams (the
-      Llama 2 rule: 8-grams, 80% of tokens). Texts shorter than ``n``
-      words match verbatim only.
+      ``overlap`` of the row's words with shared word ``n``-grams. Texts
+      shorter than ``n`` words match verbatim only.
     * ``semantic`` (``n_semantic``), only with ``embedder``: the cosine
       similarity between the row's text and an evaluation prompt is at
       least ``similarity``, and the two carry different task ids or none.
-
-    The default field is the prompt, the book's method; add
-    ``"final_text"`` to ask the stricter question of whether replies
-    reproduce eval answers or references.
 
     One shared n-gram is the book's test for free-form sets. Situations
     written from templates share whole sentences that say nothing about
     which question was asked, so any-n-gram flags every row of a
     template-written set; the coverage rule counts a row when one eval
-    text accounts for most of it. ``overlap=0`` restores any-n-gram.
+    text accounts for most of it.
 
     Word overlap does not see a paraphrase. A holdout written by
     re-running the generator on the same briefs was 70% within 0.85
     cosine of the training batch and 5 of 133 byte-identical; the 8-gram
-    rule flagged 4 of 101 prompts and the semantic pass 16 (#286).
-    ``embedder`` is any callable from a list of texts to one vector per
-    text, so nothing here imports a model; with sentence-transformers::
+    rule flagged 4 of 101 prompts and the semantic pass 16. With
+    sentence-transformers:
 
-        from sentence_transformers import SentenceTransformer
+    ```python
+    from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer("BAAI/bge-small-en-v1.5")
-        clean, report = wai.decontaminate(
-            train,
-            against=[holdout],
-            embedder=lambda texts: model.encode(texts, normalize_embeddings=True).tolist(),
-        )
+    model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    clean, report = wai.decontaminate(
+        train,
+        against=[holdout],
+        embedder=lambda texts: model.encode(texts, normalize_embeddings=True).tolist(),
+    )
+    ```
 
     A semantic flag means the two prompts read alike, not that they are
     the same task: "cancel one reservation" and "cancel three
@@ -994,19 +1253,22 @@ def decontaminate(
     the report's ``notes`` say the flag is a question to check, not a
     verdict. The default stays lexical: ``similarity`` 0.85 was read off
     BGE (unrelated prompts score about 0.55 there) and does not transfer
-    to every model, so the pass calibrates it for yours when it can: with
+    to every model, so the pass calibrates it for yours when it can. With
     eval rows that carry task ids, the 99th percentile of similarity over
     eval-prompt pairs with different task ids is how alike distinct tasks
-    read to this embedder, and ``notes`` says it. A threshold below that
+    read to this embedder, and ``notes`` says it; a threshold below that
     number flags tasks that merely share a domain, and the note says so
     when ``similarity`` is.
 
-    Returns the clean rows and a report: the count under each rule, hits
-    per field, the eval text count, and the first offenders with their
-    coverage (or ``similarity`` for semantic hits).
+    >>> train = [{"prompt": "Where is order 4473?"}, {"prompt": "Cancel order 9911."}]
+    >>> clean, report = wai.decontaminate(train, against=[[{"prompt": "Cancel order 9911."}]])
+    >>> len(clean), report["n_contaminated"]
+    (1, 1)
     """
     if embedder is not None and not 0 <= float(similarity) <= 1:
-        raise ValueError("similarity is a cosine threshold between 0 and 1 (0.85 by default)")
+        raise ValueError(
+            f"similarity is a cosine threshold between 0 and 1 ({SEMANTIC_SIMILARITY} by default)"
+        )
     sources = (
         against
         if isinstance(against, (list, tuple)) and not (against and isinstance(against[0], dict))
@@ -1093,8 +1355,9 @@ def decontaminate(
         alike = _distinct_task_similarity(eval_vecs, eval_task_ids)
         if alike is not None:
             note = (
-                f"with this embedder, distinct tasks read up to {alike:.2f} alike (99th "
-                f"percentile over {len(eval_norms)} eval prompts with different task ids); a "
+                f"with this embedder, distinct tasks read up to {alike:.2f} alike "
+                f"({DISTINCT_TASK_PERCENTILE:.0%} percentile over {len(eval_norms)} eval "
+                "prompts with different task ids); a "
                 "threshold below that flags tasks that merely share a domain"
             )
             if float(similarity) <= alike:
@@ -1170,6 +1433,8 @@ def decontaminate(
 __all__ = [
     "DEFAULT_BOOT",
     "MIN_CI_TASKS",
+    "MIN_PAIRED_TASKS",
+    "MIN_RERUNS",
     "bootstrap_ci",
     "compare_runs",
     "decontaminate",

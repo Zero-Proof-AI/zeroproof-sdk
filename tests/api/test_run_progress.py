@@ -13,6 +13,7 @@ import logging
 
 import whileai.simulations as wai
 from tests.helpers import POLICY, TOOLS, offline, scripted_agent
+from whileai.simulations.defaults import RunKnobs
 from whileai.simulations.run import engine
 from whileai.simulations.run.config import resolve_run_config, writer_spec_for
 
@@ -27,6 +28,8 @@ class _FakeRun:
         self.data = type("Data", (), {"trajectories": []})()
         self.generated_pool: list[str] = []
         self.progress_on = cap >= engine.PROGRESS_MIN_BUDGET
+        self.progress_every_s = RunKnobs().progress_every_s
+        self.progress_every_rows = RunKnobs().progress_every_rows
         self.progress_rows = 0
         self.progress_at = 0.0
         self.progress_clock = lambda: self.now

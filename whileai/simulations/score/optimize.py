@@ -26,6 +26,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from ..defaults import (
+    DIFFICULTY_BAND,
+    DIFFICULTY_BAND_ROLLOUTS,
+    REJECTION_SAMPLING_MIN_K,
+    RL_ROLLOUTS_PER_ASK,
+    TRUNCATED_REPLY_CHARS,
+)
 from .grading import (
     _DEGENERATE,
     _HARNESS_LEAK,
@@ -38,12 +45,32 @@ from .passat import pass_at
 from .quality import _IDISH, _QUESTION_END, _STRONG_ACTION, load_jsonl, write_jsonl
 from .stats import task_key
 
-# Public drop tags. optimize_rl uses these strings in the report.
-# The difficulty band: keep asks the policy passes between 20% and 80% of
-# the time (rlhf-book ch. 7, offline difficulty filtering; Seed-Thinking,
-# ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a form of it).
-# A heuristic with no published ablation, so it stays configurable.
-DEFAULT_BAND: tuple[float, float] = (0.2, 0.8)
+# DEFAULT_BAND = DIFFICULTY_BAND (0.2, 0.8): keep asks the policy passes
+# between 20% and 80% of the time (rlhfbook.com/c/07-reasoning, difficulty filtering
+# from N=16 samples; DAPO arXiv:2503.14476 drops accuracy 0 and 1 groups;
+# Seed-Thinking, ORZ, Phi-4, INTELLECT-2, MiMo, Skywork-OR1 all report a
+# form of it). A reported practice with no published ablation on the
+# edges, so every selector takes ``band=``.
+DEFAULT_BAND: tuple[float, float] = DIFFICULTY_BAND
+# SFT_TARGET_DEFAULT = 800 and SELECTION_SURPLUS = 3: ``recommend`` sizes
+# an SFT run for 800 selected rows (curated agent SFT lands at 500 to
+# 2,000: FireAct 500, LIMA 1,000, AgentTuning 1,866) from three times as
+# many candidates, so the selector chooses rather than keeps everything
+# (the surplus is convention).
+SFT_TARGET_DEFAULT = 800
+SELECTION_SURPLUS = 3
+# BUDGET_ROUNDING = 100: a recommended row budget is rounded up to the
+# next hundred, a number a person can say (convention).
+BUDGET_ROUNDING = 100
+# MIXED_RATE_FLOOR = 0.02: the lowest mixed-group rate ``recommend`` will
+# size for; below it the ask count explodes and the honest answer is a
+# harder grid, which the reasoning says (convention).
+MIXED_RATE_FLOOR = 0.02
+# MIXED_RATE_DEFAULT = 0.5: the mixed-group rate assumed before one is
+# measured; a struggling agent mixes on half its asks, a competent one on
+# a cold-start grid measured 4% (field test, 48x8, hosted Qwen), so this
+# is the optimistic end and the docstring says to probe first.
+MIXED_RATE_DEFAULT = 0.5
 
 # How asks inside the band are ordered within a fault kind: ``"spread"``
 # takes them round-robin across pass rates, ``"middle"`` ranks the ones
@@ -145,7 +172,7 @@ def is_incomplete_junk(row: dict) -> bool:
     # A reply cut at the cap is junk unless ``select_for_rl(truncated=)``
     # already claimed it (``overlong``): keep and penalize decide its fate,
     # not this gate, or the report counts a row the output never carries.
-    if len(final) > 600 and not looks_finished(final) and not row.get("overlong"):
+    if len(final) > TRUNCATED_REPLY_CHARS and not looks_finished(final) and not row.get("overlong"):
         return True
     messages = _messages(row)
     if not messages:
@@ -156,7 +183,7 @@ def is_incomplete_junk(row: dict) -> bool:
     return bool(
         not has_tool
         and _QUESTION_END.search(final)
-        and len(str(row.get("prompt") or "").split()) <= 2
+        and len(str(row.get("prompt") or "").split()) <= 2  # noqa: PLR2004  # a one- or two-word prompt is a stub (convention)
     )
 
 
@@ -281,7 +308,7 @@ def group_signal(
     groups = _group_label_lists(rows)
     n_mixed = n_all_zero = n_all_one = n_single = in_band = 0
     for labels in groups.values():
-        if len(labels) < 2:
+        if len(labels) < 2:  # noqa: PLR2004  # a group of one carries no contrast
             n_single += 1
             continue
         p = sum(labels) / len(labels)
@@ -538,11 +565,13 @@ def _sft_report(
             per_prompt[key] = per_prompt.get(key, 0) + 1
     max_k = max(per_prompt.values(), default=0)
     report["completions_per_prompt_max"] = max_k
-    if 0 < max_k < 10:
+    if 0 < max_k < REJECTION_SAMPLING_MIN_K:
         report["note"] = (
             f"at most {max_k} completion(s) per prompt; rejection-sampling selection "
-            "wants 10 to 30 so the pick is not biased (rlhf-book ch. 9). Raise "
-            "repeats= if you mean to choose among completions rather than filter."
+            f"wants {REJECTION_SAMPLING_MIN_K} to 30 so the pick is not biased "
+            "(rlhfbook.com/c/10-rejection-sampling.html; Llama 3 samples 10 to 30). "
+            "Raise repeats= if you mean to choose among "
+            "completions rather than filter."
         )
     return report
 
@@ -693,11 +722,11 @@ def next_round(
         if rate < lo:
             unsolved += 1
             continue
-        rep = dict(first.get(key) or given.get(key) or {"prompt": key})
-        cal = dict(rep.get("calibration") or {})
+        report: dict[str, Any] = dict(first.get(key) or given.get(key) or {"prompt": key})
+        cal = dict(report.get("calibration") or {})
         cal.update({"pass_rate": round(rate, 4), "n": len(labels[key]), "band": [lo, hi]})
-        rep["calibration"] = cal
-        kept.append(rep)
+        report["calibration"] = cal
+        kept.append(report)
     sha = hashlib.sha256("\n".join(sorted(task_key(r) for r in kept)).encode()).hexdigest()[:16]
     return {
         "tasks": kept,
@@ -892,7 +921,7 @@ def select_for_rl(
     collapsed = {
         prompt
         for prompt, labels in _group_label_lists(kept).items()
-        if original_sizes.get(prompt, 0) >= 2 and len(set(labels)) == 1
+        if original_sizes.get(prompt, 0) >= 2 and len(set(labels)) == 1  # noqa: PLR2004  # a group of one carries no contrast
     }
     if collapsed:
         kept = [row for row in kept if task_key(row) not in collapsed]
@@ -922,7 +951,7 @@ def select_for_rl(
     def _score(prompt: str) -> tuple:
         p = _pass_rate(prompt)
         in_band = lo <= p <= hi
-        middle = abs(p - 0.5) if order == "middle" else 0.0
+        middle = abs(p - (lo + hi) / 2) if order == "middle" else 0.0
         return (0 if in_band else 1, middle, _stable_key(prompt))
 
     fault_buckets: dict[str, list[str]] = {}
@@ -1010,11 +1039,12 @@ def select_for_rl(
     ]
     if tasks and halves:
         median_n = statistics.median(t["n"] for t in tasks)
-        if median_n < 16:
+        if median_n < DIFFICULTY_BAND_ROLLOUTS:
             report["hygiene_warnings"].append(
                 f"Difficulty was measured from {median_n:g} rollouts per task, so a task's "
                 f"band assignment can be off by about ±{statistics.median(halves):.1f}. "
-                "Use repeats=16 for a firmer band."
+                f"Use repeats={DIFFICULTY_BAND_ROLLOUTS} for a firmer band (the count the "
+                "20-80 band is measured from, rlhfbook.com/c/07-reasoning)."
             )
     if report["eval_sourced"]:
         report["hygiene_warnings"].append(
@@ -1132,7 +1162,7 @@ def recommend(
     system_prompt: str | None = None,
     mode: str = "sft",
     target: int | None = None,
-    mixed_rate: float = 0.5,
+    mixed_rate: float = MIXED_RATE_DEFAULT,
 ) -> dict[str, Any]:
     """How much data this agent needs, from its own grid. No guessing.
 
@@ -1160,13 +1190,13 @@ def recommend(
     cells = len(scenario_regions(list(tools or []), policy, mode=str(mode).lower()))
     reasoning = [f"covering grid: {cells} cells for this agent"]
     if kind == "sft":
-        goal = int(target or 800)
+        goal = int(target or SFT_TARGET_DEFAULT)
         by_grid = cells * SATURATION_COPIES
-        raw = max(by_grid, 3 * goal)
-        raw = int(-(-raw // 100) * 100)
+        raw = max(by_grid, SELECTION_SURPLUS * goal)
+        raw = int(-(-raw // BUDGET_ROUNDING) * BUDGET_ROUNDING)
         reasoning += [
             f"saturation wants {SATURATION_COPIES} visits per cell = {by_grid} rows",
-            f"selection wants about 3x its target of {goal} to choose from",
+            f"selection wants about {SELECTION_SURPLUS}x its target of {goal} to choose from",
             f"generate {raw}, select {goal} diverse 1-labeled rows",
             "time_budget off: a sized run stops on rows, not the clock",
         ]
@@ -1178,14 +1208,14 @@ def recommend(
             "simulate_kwargs": {"mode": "sft", "budget": raw, "time_budget": None},
             "reasoning": reasoning,
         }
-    goal = int(target or 800)
-    k = 8
+    goal = int(target or SFT_TARGET_DEFAULT)
+    k = RL_ROLLOUTS_PER_ASK
     # Whole-group selection keeps only asks whose k rollouts disagree.
     # The surviving fraction is the agent's, not ours: a struggling agent
     # mixes on half its asks; a competent agent on a cold-start grid
     # measured 4% (field test, 48x8, hosted Qwen). Probe first: 12 asks,
     # grade, group_signal, then pass the measured rate back in here.
-    rate = min(1.0, max(0.02, float(mixed_rate)))
+    rate = min(1.0, max(MIXED_RATE_FLOOR, float(mixed_rate)))
     # Expected mixed rows = situations * k * rate, so situations =
     # goal / (k * rate). Rounding k * rate to an integer first (the old
     # form) collapsed to 1 below rate 1/16 and under-provisioned by 3x
@@ -1235,22 +1265,44 @@ def optimize(
     order: str = "spread",
     audit: dict[str, Any] | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """One call after grading: concentrate for the post-training target.
+    """Select the rows worth training on, for SFT or RL, one call after grading.
 
-    ``source`` is a ``SimulationData``, a row list, or a JSONL path.
-    ``mode`` defaults to the data's own mode: ``"sft"`` picks diverse
-    correct demonstrations (``select`` and ``min_reward`` as in
-    ``select_for_sft``), anything else keeps whole mixed RL groups
-    inside the difficulty ``band`` (default 20%-80% pass rate;
-    ``enforce_band=False`` only ranks out-of-band asks last; ``order``
-    is ``"spread"`` across pass rates or ``"middle"`` first, see
-    ``select_for_rl``).
-    ``endorsed`` names what the reward should track (feature-name
-    substrings such as ``"tool:lookup_order"``), so the RL report's
-    ``hack_scan`` can call a shortcut a hack.
-    Returns ``(rows, report)``; writes ``output`` when given, or
-    ``<name>.<mode>.jsonl`` next to a path source. Never overwrites the
-    source file unless ``output`` names it explicitly.
+    Reach for it once rows carry ``reward``. It returns ``(rows, report)``:
+    the kept rows in training order, and a report saying which mode ran,
+    what each gate dropped and why, and for RL a ``hack_scan`` of what the
+    reward is actually tracking. It writes the rows to ``output`` when
+    given, or to ``<name>.<mode>.jsonl`` next to a path source, and never
+    overwrites the source file unless ``output`` names it explicitly.
+
+    * ``source``: a ``SimulationData``, a row list, or a JSONL path.
+    * ``mode``: ``"sft"`` or ``"rl"``. Defaults to the run's own mode for a
+      ``SimulationData`` and to ``"rl"`` otherwise. SFT picks diverse
+      correct demonstrations (``select_for_sft``); RL keeps whole mixed
+      groups, never a split one (``select_for_rl``).
+    * ``target``: about how many rows to keep, 1000 by default.
+    * ``band``: the RL difficulty band as a pass-rate range, ``(0.2, 0.8)``
+      by default: asks the policy always or never solves carry no
+      advantage (rlhf-book ch. 7, difficulty filtering at 20 to 80
+      percent; DAPO's dynamic sampling, arXiv:2503.14476).
+      ``enforce_band=False`` only ranks out-of-band asks last instead of
+      dropping them. ``order`` is ``"spread"`` across pass rates (default)
+      or ``"middle"`` first.
+    * ``select`` (``"top_per_prompt"``) and ``min_reward`` (1.0): the SFT
+      picker and the reward a demonstration needs, as in
+      ``select_for_sft``.
+    * ``endorsed``: what the reward should track, as substrings of feature
+      names (``"tool:lookup_order"``), so the RL report's ``hack_scan`` can
+      call a shortcut a hack.
+    * ``truncated``: what happens to a rollout cut at the token cap
+      (rlhf-book ch. 6, DAPO's overlong handling): ``"drop"`` removes it
+      (the default), ``"keep"`` leaves it in with ``overlong=True`` and its
+      own reward, ``"penalize"`` keeps it as a failure that counts (reward
+      0, the judged score under ``reward_before_penalty``).
+
+    ```python
+    rows, report = wai.optimize(data, mode="rl", endorsed=["tool:lookup_order"])
+    print(report["mode"], len(rows))
+    ```
     """
     resolved = mode
     src = ""

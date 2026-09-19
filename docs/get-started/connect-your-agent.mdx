@@ -1,0 +1,175 @@
+---
+title: "Connect your agent"
+sidebarTitle: "Connect your agent"
+description: "Where your model string and your key go: backend objects, configure once, override per call. The four ways to hand simulate() an agent, and how traces aim the run."
+---
+
+`simulate()` needs to know what the agent can do (its tools and system
+prompt) and how to run it. This page is the second part: which model,
+behind which endpoint, on which key.
+
+## Which model, on which key
+
+A backend object names a provider, a model and a key. Print it and it
+says where the call goes.
+
+```python
+import whileai as wai
+
+wai.OpenAI("gpt-4.1-mini")                              # OpenAI(model='gpt-4.1-mini', key=OPENAI_API_KEY)
+wai.OpenAI("gpt-4.1-mini", api_key="sk-...")            # OpenAI(model='gpt-4.1-mini', key=given)
+wai.Anthropic("claude-haiku-4-5")                       # key=ANTHROPIC_API_KEY
+wai.Endpoint("Qwen/Qwen3-4B", url="http://localhost:8000/v1")   # any OpenAI-compatible server; key=none needed
+wai.Ollama("llama3")                                    # key=none needed
+wai.Hosted()                                            # the model While hosts, key=`whileai login`
+```
+
+| Backend | Talks to | Key |
+|---|---|---|
+| `wai.OpenAI(model)` | OpenAI | `api_key=` or `OPENAI_API_KEY` |
+| `wai.Anthropic(model)` | Anthropic's Messages API | `api_key=` or `ANTHROPIC_API_KEY` |
+| `wai.Endpoint(model, url=)` | vLLM, SGLang, TGI, LM Studio, a served adapter | `api_key=`, else `VLLM_API_KEY` or `OPENAI_API_KEY`; none for a local URL |
+| `wai.Ollama(model)` | Ollama on this machine | none |
+| `wai.Hosted()` | The model While hosts | `wai.configure(api_key=)`, `WHILEAI_API_KEY`, or `whileai login` |
+
+A key given on a backend is kept for that provider, so every call to that
+provider in the process finds it. The spec strings the objects stand for
+(`openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
+`ollama:<model>`) still work anywhere a backend does.
+
+## Set it once, override per call
+
+Three roles: the agent under test, the judge, and the simulator that
+writes the user's messages. `configure` sets them for the process. A
+keyword on the call wins over `configure`; a `context` block wins inside
+the block; the environment is read only when none of those say.
+
+```python
+wai.configure(
+    agent=wai.OpenAI("gpt-4.1-mini"),
+    judge=wai.Anthropic("claude-haiku-4-5"),   # never the agent's model by default
+    api_key="zp_...",                          # the While account key, for hosted models and the platform
+)
+print(wai.settings)
+
+data = wai.simulate(tools=TOOLS, system_prompt=POLICY)           # gpt-4.1-mini
+strict = data.grade(wai.Judge(rubric=RUBRIC))                    # claude-haiku-4-5
+
+with wai.context(judge=wai.OpenAI("gpt-4.1")):
+    second = data.grade(wai.Judge(rubric=RUBRIC))                # gpt-4.1, inside the block only
+```
+
+```text
+Settings(agent=openai:gpt-4.1-mini, judge=anthropic:claude-haiku-4-5, simulator=default (While hosted), api_key=set)
+```
+
+## Four ways to hand simulate() the agent
+
+### A backend object
+
+No wrapper at all. The SDK builds the agent from the tools and system
+prompt you pass and plays it multi-turn: it sends the system prompt and
+tools, answers each tool call from the mock world, and lets a separate
+model play the customer.
+
+```python
+data = wai.simulate(wai.OpenAI("gpt-4.1-mini"), tools=TOOLS, system_prompt=POLICY)
+```
+
+Leave `agent=` out and the run uses what `configure` set, else the model
+While hosts on the key from `whileai login`. Useful for a policy that does
+not have an agent yet: pass only `system_prompt=` and `tools=` and see how
+a capable open model behaves under it. The judge is never the model it is
+judging: the hosted judge is a different family from the hosted agent.
+
+### A callable
+
+Any function that takes the user's message and returns the tool calls it
+made and what it finally said.
+
+```python
+def my_agent(message: str) -> dict:
+    return {
+        "steps": [
+            {
+                "tool": "get_order",
+                "arguments": {"order_id": "4412"},
+                "result": {"status": "shipped"},
+            }
+        ],
+        "final_text": "Order 4412 shipped yesterday.",
+    }
+
+data = wai.simulate(my_agent, tools=TOOLS, system_prompt=POLICY)
+```
+
+A callable is played single-turn: one message in, one trajectory out. It
+is the right shape for an agent you already run behind an HTTP handler or
+a queue worker. Wrap the handler, return what it did.
+
+<Tip>
+`wai.simulations.world(tools)` gives a callable agent the same mock world
+the engine uses, so a real tool call in your code can be answered by the
+sandbox (faults included) instead of by production.
+</Tip>
+
+### An endpoint with knobs
+
+`wai.Endpoint` covers a served model. When you need the engine's
+per-agent knobs (a reasoning base that should reply without its trace,
+pinned tool results, scheduled faults), build the agent with
+`local_model` and pass the callable.
+
+```python
+agent = wai.simulations.local_model(
+    "http://localhost:8000/v1",
+    "Qwen/Qwen3-8B",
+    tools=TOOLS,
+    system=POLICY,
+    thinking=False,  # reasoning bases: reply with the answer, not the trace
+)
+data = wai.simulate(agent, tools=TOOLS, system_prompt=POLICY)
+```
+
+`result_shapes=` pins what a tool returns so a policy branch is actually
+reached; `fault_plans=` schedules which tool fails on which ask. Both are
+on the [parameters](/reference/parameters) page.
+
+### A spec string
+
+The string form of a backend object, for configs and command lines.
+
+```python
+data = wai.simulate("openai:gpt-4.1-mini", tools=TOOLS, system_prompt=POLICY)
+```
+
+`typesafe:<model>` is TypeSafe's Jev, on `TYPESAFE_API_KEY`. It is a
+judge only: `spec=` on `grade`, never `agent=`.
+
+## Aim the run with traces
+
+Without traces, the coverage grid comes from the tools and policy alone
+(a cold start). With them, it aims at the situations the agent actually
+met: the tools called, the faults seen, the world states. Any generated
+row that near-copies a source trace is dropped, so held-out traces stay
+out of training.
+
+```python
+data = wai.simulate(my_agent, tools=TOOLS, system_prompt=POLICY, traces="traces.jsonl")
+```
+
+`traces=` takes rows or a JSONL path. `wai.simulations.load_traces`
+normalizes the common shapes (OpenAI `messages`, `tool_trace`,
+`final`/`output`) to the one the engine reads, and
+`wai.simulations.rows_from_otel` reads an OpenTelemetry batch. Traces
+reproduce situations, not wording failures: an unsupported claim or an
+estimate not labelled as one has no world-visible trigger, so put a grader
+in the loop for those (`grader=`, on the
+[what to run](/reference/what-to-run) page).
+
+## Seeds
+
+`seeds=` is a list of opening asks the writer keeps and varies. Every
+seed is run. With a callable agent whose world has real ids (order
+numbers, account names), put those ids in the seeds or in the tool
+descriptions, or the writer invents ids and every rollout is "not found".

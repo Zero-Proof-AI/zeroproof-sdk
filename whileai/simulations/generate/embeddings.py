@@ -20,7 +20,25 @@ from whileai._env import getenv
 from .diversity import apply_annealing_explore
 from .scenarios import novelty as min_cosine_distance
 
-_DIM = 256
+# HASH_DIM = 256: buckets of the word+bigram hash embedder; enough that
+# two short asks rarely collide, small enough that the O(n^2) novelty
+# scan stays cheap in pure Python (convention, untested).
+HASH_DIM = 256
+_DIM = HASH_DIM
+#: EMBED_BATCH = 128 texts per HTTP embedding call, EMBED_TIMEOUT_S = 30,
+# EMBED_RETRIES = 3 with EMBED_BACKOFF_S * attempt between them: the
+# OpenAI and Ollama embedders share these (convention).
+EMBED_BATCH = 128
+EMBED_TIMEOUT_S = 30
+EMBED_RETRIES = 3
+EMBED_BACKOFF_S = 1.5
+# BGE_ENCODE_BATCH = 32: sentence-transformers batch on CPU or MPS (convention).
+BGE_ENCODE_BATCH = 32
+# MODAL_EMBED_TIMEOUT_S = 20 / MODAL_PROBE_TIMEOUT_S = 1.5: the hosted
+# embedder's call timeout, and the quick probe that decides whether it is
+# up before a run commits to it (convention).
+MODAL_EMBED_TIMEOUT_S = 20.0
+MODAL_PROBE_TIMEOUT_S = 1.5
 
 
 def _normalize(vec: list[float]) -> list[float]:
@@ -74,15 +92,15 @@ class OllamaEmbedder:
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         output: list[list[float]] = []
-        for start in range(0, len(texts), 128):
+        for start in range(0, len(texts), EMBED_BATCH):
             request = urllib.request.Request(
                 f"{self.host}/api/embed",
                 data=json.dumps(
-                    {"model": self.model, "input": list(texts[start : start + 128])}
+                    {"model": self.model, "input": list(texts[start : start + EMBED_BATCH])}
                 ).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=EMBED_TIMEOUT_S) as response:
                 output.extend(json.loads(response.read()).get("embeddings") or [])
         if len(output) != len(texts):
             raise RuntimeError(
@@ -107,20 +125,20 @@ class OpenAIEmbedder:
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         output: list[list[float]] = []
-        for start in range(0, len(texts), 128):
+        for start in range(0, len(texts), EMBED_BATCH):
             headers = {"Content-Type": "application/json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
             request = urllib.request.Request(
                 f"{self.base_url}/embeddings",
                 data=json.dumps(
-                    {"model": self.model, "input": list(texts[start : start + 128])}
+                    {"model": self.model, "input": list(texts[start : start + EMBED_BATCH])}
                 ).encode(),
                 headers=headers,
             )
-            for attempt in range(3):
+            for attempt in range(EMBED_RETRIES):
                 try:
-                    with urllib.request.urlopen(request, timeout=30) as response:
+                    with urllib.request.urlopen(request, timeout=EMBED_TIMEOUT_S) as response:
                         rows = sorted(
                             json.loads(response.read()).get("data") or [],
                             key=lambda row: row["index"],
@@ -128,9 +146,9 @@ class OpenAIEmbedder:
                         output.extend(row["embedding"] for row in rows)
                     break
                 except (OSError, urllib.error.URLError):
-                    if attempt == 2:
+                    if attempt == EMBED_RETRIES - 1:
                         raise
-                    time.sleep(1.5 * (attempt + 1))
+                    time.sleep(EMBED_BACKOFF_S * (attempt + 1))
         if len(output) != len(texts):
             raise RuntimeError(
                 f"{self.name} returned {len(output)} embeddings for {len(texts)} texts"
@@ -144,7 +162,12 @@ DEFAULT_EMBED_URL = "https://zeroproofai--zeroproof-embed-embedder-embed.modal.r
 class ModalEmbedder:
     """The hosted While embedding endpoint: batched, semantic."""
 
-    def __init__(self, url: str | None = None, api_key: str | None = None, timeout: float = 20):
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        timeout: float = MODAL_EMBED_TIMEOUT_S,
+    ):
         self.url = url or getenv("EMBED") or DEFAULT_EMBED_URL
         self.api_key = api_key or os.environ.get("VLLM_API_KEY", "")
         self.timeout = timeout
@@ -162,12 +185,12 @@ class ModalEmbedder:
 
 
 def _live_modal(url: str | None = None) -> ModalEmbedder | None:
-    candidate = ModalEmbedder(url, timeout=1.5)
+    candidate = ModalEmbedder(url, timeout=MODAL_PROBE_TIMEOUT_S)
     try:
         candidate.embed(["probe"])
     except Exception:
         return None
-    candidate.timeout = 20
+    candidate.timeout = MODAL_EMBED_TIMEOUT_S
     return candidate
 
 
@@ -203,10 +226,12 @@ def bge_embedder(model: str = _BGE_MODEL, device: str | None = None) -> Callable
 
     def encode(texts: Sequence[str]):
         cleaned = [str(t) if str(t).strip() else " " for t in texts]
-        return st.encode(cleaned, batch_size=32, normalize_embeddings=True, show_progress_bar=False)
+        return st.encode(
+            cleaned, batch_size=BGE_ENCODE_BATCH, normalize_embeddings=True, show_progress_bar=False
+        )
 
     embedder = CallableEmbedder(encode, name=f"sentence-transformers:{model}")
-    embedder.device = chosen  # type: ignore[attr-defined]
+    embedder.device = chosen  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return embedder
 
 
@@ -243,8 +268,27 @@ def is_semantic(embedder: Any) -> bool:
     ).startswith("hash")
 
 
+#: Batch selection: candidates are k-means clustered (at most MAX_CLUSTERS
+#: = 8 clusters, sqrt of the pool, KMEANS_ITERS = 8 Lloyd steps), then a
+#: batch is half "typical" picks spread across clusters and half "fill"
+#: picks by novelty against everything already run (FILL_SHARE = 0.5),
+#: drawn from a k-center spread over CANDIDATE_MULTIPLE = 2 times the
+#: batch. Cluster-then-compare-within-cluster is SemDeDup's recipe
+#: (2303.09540, k-means then pairwise inside each cluster); the split and
+#: the caps are conventions, untested. KMEANS_DEFAULT_ITERS = 40 is the
+#: standalone default.
+MAX_CLUSTERS = 8
+KMEANS_ITERS = 8
+KMEANS_DEFAULT_ITERS = 40
+FILL_SHARE = 0.5
+CANDIDATE_MULTIPLE = 2
+# SUMMARY_CLUSTERS = 8: how many concentrated and sparse cluster examples
+# the batch info reports (convention).
+SUMMARY_CLUSTERS = 8
+
+
 def kmeans(
-    vectors: list[list[float]], k: int, seed: int, iterations: int = 40
+    vectors: list[list[float]], k: int, seed: int, iterations: int = KMEANS_DEFAULT_ITERS
 ) -> tuple[list[int], list[list[float]]]:
     n = len(vectors)
     if not n:
@@ -365,14 +409,14 @@ def select_execution_batch(
     if len(vectors) != len(texts):
         raise RuntimeError("embedder returned a different count than inputs")
 
-    n_clusters = max(1, min(8, round(math.sqrt(len(texts)))))
-    labels, _ = kmeans(vectors, n_clusters, seed, iterations=8)
+    n_clusters = max(1, min(MAX_CLUSTERS, round(math.sqrt(len(texts)))))
+    labels, _ = kmeans(vectors, n_clusters, seed, iterations=KMEANS_ITERS)
     by_cluster: dict[int, list[int]] = {}
     for i, label in enumerate(labels):
         by_cluster.setdefault(int(label), []).append(i)
 
     need = max(1, int(batch_size))
-    fill_n = max(1, need // 2)
+    fill_n = max(1, int(need * FILL_SHARE))
     typical_n = max(0, need - fill_n)
 
     archive_ok = archive.compatible(embedder)
@@ -401,7 +445,7 @@ def select_execution_batch(
         if not progressed:
             break
 
-    per_cluster = max(1, math.ceil((need * 2) / max(1, len(by_cluster))))
+    per_cluster = max(1, math.ceil((need * CANDIDATE_MULTIPLE) / max(1, len(by_cluster))))
     stratified: list[int] = []
     for indices in by_cluster.values():
         sub = [vectors[i] for i in indices]
@@ -409,7 +453,9 @@ def select_execution_batch(
         stratified.extend(indices[p] for p in picks)
     stratified = list(dict.fromkeys(stratified))
     spread_vecs = [vectors[i] for i in stratified]
-    spread_picks = select_diverse(spread_vecs, min(max(need * 2, need), len(stratified)))
+    spread_picks = select_diverse(
+        spread_vecs, min(max(need * CANDIDATE_MULTIPLE, need), len(stratified))
+    )
     ranked = [stratified[p] for p in spread_picks]
 
     taken = set(typical_idx)
@@ -461,6 +507,8 @@ def select_execution_batch(
     sparse = (
         list(reversed(cluster_order))[: max(1, len(cluster_order) // 3)] if cluster_order else []
     )
-    info["concentrated"] = [texts[by_cluster[c][0]] for c in dense if by_cluster[c]][:8]
-    info["sparse"] = [texts[by_cluster[c][0]] for c in sparse if by_cluster[c]][:8]
+    info["concentrated"] = [texts[by_cluster[c][0]] for c in dense if by_cluster[c]][
+        :SUMMARY_CLUSTERS
+    ]
+    info["sparse"] = [texts[by_cluster[c][0]] for c in sparse if by_cluster[c]][:SUMMARY_CLUSTERS]
     return selected, info

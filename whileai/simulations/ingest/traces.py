@@ -17,15 +17,38 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
+from ..defaults import (
+    TRACE_EXEMPLAR_DICT_KEYS,
+    TRACE_EXEMPLAR_LIST_ITEMS,
+    TRACE_EXEMPLAR_MAX_CHARS,
+    TRACE_EXEMPLAR_STRING_CHARS,
+    TRACE_EXEMPLARS_PER_TOOL,
+    TRACE_EXPLORATION_FLOOR,
+    TRACE_EXPLORATION_MAX,
+    TRACE_LEAK_EXAMPLES,
+    TRACE_LEAK_THRESHOLD,
+    TRACE_MIN_SUPPORT,
+    TRACE_PSEUDO_PRODUCTION_FRACTION,
+    TRACE_RATE_FLOOR,
+    TRACE_REPORT_LIST_CAP,
+    TRACE_STATE_PRIORITY,
+    TRACE_SUPPORT_SATURATION,
+    TRACE_TASK_HASH_CHARS,
+)
 from ..generate.embeddings import resolve_embedder
 from ..generate.scenarios import build_dimensions
 from ..score.grading import NO_FAULT, _fault_from_result, behavior_signature, trace_fault
 
-# Observed fault chip -> the grid axis and value that reproduces it.
-_FAULT_TO_AXIS = {
+#: Observed fault chip -> the grid axis and value that reproduces it. The
+#: chip names are what ``trace_fault`` reads off a result; the values are
+#: the ``tool_condition`` / ``world_state`` axis values ``build_dimensions``
+#: emits. ``error`` maps to ``timeout`` because a generic error has no
+#: fault of its own on the grid. Extend with
+#: ``dimensions_from_traces(fault_to_axis={**FAULT_TO_AXIS, ...})``.
+FAULT_TO_AXIS: dict[str, tuple[str, str]] = {
     "timeout": ("tool_condition", "timeout"),
     "malformed": ("tool_condition", "malformed_result"),
     "stale": ("tool_condition", "stale_result"),
@@ -34,10 +57,23 @@ _FAULT_TO_AXIS = {
     "not_found": ("world_state", "entity missing"),
     "already_done": ("world_state", "entity already acted on"),
 }
+_FAULT_TO_AXIS = FAULT_TO_AXIS
+
+#: Row keys read for a 0/1 label, in order: the SDK's ``reward``, then the
+#: advisory judge label an unlabelled row may carry.
+REWARD_KEYS = ("reward", "qwen_reward")
+#: Axis values that mean "nothing went wrong" and stay in every aimed axis
+#: as the contrast (they never gain emphasis).
+CLEAN_CONDITION = "success"
+CLEAN_WORLD = "entity exists"
+#: Tool-axis entries that are not tools and always keep their place.
+SPECIAL_TOOLS = frozenset({"unrelated", "multi_tool"})
+#: Row keys that do not carry a world state.
+UNKNOWN_WORLDS = frozenset({"unspecified", "unknown"})
 
 
 def _binary_reward(row: dict) -> int | None:
-    for key in ("reward", "qwen_reward"):
+    for key in REWARD_KEYS:
         value = row.get(key)
         if value is None:
             continue
@@ -78,7 +114,7 @@ def mine_traces(rows: Sequence[dict]) -> dict[str, Any]:
         if fault != NO_FAULT:
             faults[fault] = faults.get(fault, 0) + 1
         world = str(row.get("world_state") or "").strip()
-        if world and world not in {"unspecified", "unknown"}:
+        if world and world not in UNKNOWN_WORLDS:
             worlds[world] = worlds.get(world, 0) + 1
         flawed = fault != NO_FAULT or reward == 0
         if flawed:
@@ -109,10 +145,14 @@ def mine_traces(rows: Sequence[dict]) -> dict[str, Any]:
 # Trace-grounded result exemplars. Agent specs declare tool inputs but
 # almost never result shapes, so invented results drift from the real
 # product. Traces carry the real payloads; a few per tool become shape
-# templates. Three shows the shape family; ~500 serialized chars keeps a
-# template affordable in a prompt.
-_EXEMPLARS_PER_TOOL = 3
-_EXEMPLAR_MAX_CHARS = 500
+# templates. The counts and caps live in defaults.py (TRACE_EXEMPLAR_*)
+# and are keywords on ``mine_result_exemplars``.
+_EXEMPLARS_PER_TOOL = TRACE_EXEMPLARS_PER_TOOL
+_EXEMPLAR_MAX_CHARS = TRACE_EXEMPLAR_MAX_CHARS
+#: Shape-key detail: record keys listed, and the length band (in hundreds
+#: of characters, capped) a text result is bucketed by.
+_SHAPE_KEY_KEYS = 10
+_SHAPE_TEXT_BANDS = 4
 
 
 def _exemplar_value(result: Any) -> Any:
@@ -129,27 +169,36 @@ def _exemplar_shape_key(value: Any) -> str:
     """Coarse shape identity: keys for records, item shape for lists,
     length band for text. Two results with the same key teach nothing new."""
     if isinstance(value, dict):
-        return "dict:" + ",".join(sorted(str(k) for k in value)[:10])
+        return "dict:" + ",".join(sorted(str(k) for k in value)[:_SHAPE_KEY_KEYS])
     if isinstance(value, list):
         return "list:" + (_exemplar_shape_key(value[0]) if value else "empty")
     if isinstance(value, str):
-        return f"str:{min(len(value) // 100, 4)}"
+        return f"str:{min(len(value) // 100, _SHAPE_TEXT_BANDS)}"
     return type(value).__name__
 
 
-def _trim_exemplar(value: Any) -> Any:
+def _trim_exemplar(
+    value: Any,
+    *,
+    string_chars: int = TRACE_EXEMPLAR_STRING_CHARS,
+    list_items: int = TRACE_EXEMPLAR_LIST_ITEMS,
+    dict_keys: int = TRACE_EXEMPLAR_DICT_KEYS,
+) -> Any:
     """Shrink a payload toward the serialized cap without breaking JSON."""
     if isinstance(value, str):
-        return value if len(value) <= 160 else value[:157] + "..."
+        return value if len(value) <= string_chars else value[: string_chars - 3] + "..."
     if isinstance(value, list):
-        return [_trim_exemplar(v) for v in value[:2]]
+        return [_trim_exemplar(v) for v in value[:list_items]]
     if isinstance(value, dict):
-        return {str(k): _trim_exemplar(v) for k, v in list(value.items())[:12]}
+        return {str(k): _trim_exemplar(v) for k, v in list(value.items())[:dict_keys]}
     return value
 
 
 def mine_result_exemplars(
-    rows: Sequence[dict], *, per_tool: int = _EXEMPLARS_PER_TOOL
+    rows: Sequence[dict],
+    *,
+    per_tool: int = TRACE_EXEMPLARS_PER_TOOL,
+    max_chars: int = TRACE_EXEMPLAR_MAX_CHARS,
 ) -> dict[str, list]:
     """Up to ``per_tool`` real result payloads per tool, shape-diverse.
 
@@ -157,7 +206,9 @@ def mine_result_exemplars(
     tools RETURNED, for grounding invented results. Faulted and empty
     results are skipped (they show the fault axis, not the success
     shape), a result whose shape is already kept is skipped, and each
-    exemplar is trimmed to serialize within ~500 chars.
+    exemplar is trimmed to serialize within ``max_chars`` (about a quarter
+    of that in tokens; the default keeps three per tool under a few
+    hundred tokens of writer prompt).
     """
     out: dict[str, list] = {}
     seen: dict[str, set[str]] = {}
@@ -187,7 +238,7 @@ def mine_result_exemplars(
                 continue
             trimmed = _trim_exemplar(value)
             try:
-                if len(json.dumps(trimmed, default=str)) > _EXEMPLAR_MAX_CHARS:
+                if len(json.dumps(trimmed, default=str)) > int(max_chars):
                     continue
             except (TypeError, ValueError):
                 continue
@@ -217,7 +268,12 @@ def exemplar_result_shapes(exemplars: dict[str, list]) -> dict[str, dict]:
 
 
 def dimensions_from_traces(
-    rows: Sequence[dict], tools: list[dict], policy: str = "", *, broaden: bool = True
+    rows: Sequence[dict],
+    tools: list[dict],
+    policy: str = "",
+    *,
+    broaden: bool = True,
+    fault_to_axis: Mapping[str, tuple[str, str]] | None = None,
 ) -> dict[str, list[str]]:
     """Coverage axes aimed at behaviors seen in ``rows``.
 
@@ -227,7 +283,10 @@ def dimensions_from_traces(
     (keeping the base specials such as ``unrelated``), so a run spends its
     budget near the flaws instead of boiling the ocean. Fault and world
     axes always keep their clean value: contrast needs passing rows too.
+    ``fault_to_axis`` maps an observed fault chip to the axis value that
+    reproduces it (``FAULT_TO_AXIS`` by default).
     """
+    mapping = FAULT_TO_AXIS if fault_to_axis is None else dict(fault_to_axis)
     base = build_dimensions(tools, policy)
     mined = mine_traces(rows)
     observed = mined["tools"]
@@ -237,7 +296,7 @@ def dimensions_from_traces(
         return (-int(slot.get("fault_n", 0)), -int(slot.get("n", 0)), name)
 
     base_tools = list(base.get("tool") or [])
-    specials = [t for t in base_tools if t in {"unrelated", "multi_tool"}]
+    specials = [t for t in base_tools if t in SPECIAL_TOOLS]
     real = [t for t in base_tools if t not in specials]
     seen = [t for t in real if t in observed]
     unseen = [t for t in real if t not in observed]
@@ -249,7 +308,7 @@ def dimensions_from_traces(
     focus_conditions: list[str] = []
     focus_worlds: list[str] = []
     for name in sorted(mined["faults"], key=mined["faults"].get, reverse=True):
-        axis_value = _FAULT_TO_AXIS.get(name)
+        axis_value = mapping.get(name)
         if not axis_value:
             if name in conditions:
                 focus_conditions.append(name)
@@ -263,9 +322,9 @@ def dimensions_from_traces(
         if world in worlds and world not in focus_worlds:
             focus_worlds.append(world)
     if focus_conditions:
-        conditions = ["success"] + [c for c in focus_conditions if c != "success"]
+        conditions = [CLEAN_CONDITION] + [c for c in focus_conditions if c != CLEAN_CONDITION]
     if focus_worlds:
-        clean = [w for w in ("entity exists",) if w in worlds]
+        clean = [w for w in (CLEAN_WORLD,) if w in worlds]
         worlds = clean + [w for w in focus_worlds if w not in clean]
 
     out = dict(base)
@@ -296,7 +355,7 @@ def _task_key(row: dict, index: int) -> tuple[str, object]:
 
 
 def split_pseudo_production(
-    rows: Sequence[dict], *, fraction: float = 0.2, seed: int = 0
+    rows: Sequence[dict], *, fraction: float = TRACE_PSEUDO_PRODUCTION_FRACTION, seed: int = 0
 ) -> tuple[list[dict], list[dict]]:
     """Set aside a pseudo-production slice; the rest stays for training.
 
@@ -344,7 +403,7 @@ def split_pseudo_production(
         rest.sort(
             key=lambda task: hashlib.sha256(
                 f"{seed}:{tasks[task][0]}:"
-                f"{str(items[tasks[task][0]].get('prompt') or '')[:200]}".encode()
+                f"{str(items[tasks[task][0]].get('prompt') or '')[:TRACE_TASK_HASH_CHARS]}".encode()
             ).hexdigest()
         )
         for task in rest:
@@ -386,7 +445,12 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 def _leak_flags(
-    generated: Sequence[Any], sources: Sequence[Any], *, threshold: float, embedder: Any
+    generated: Sequence[Any],
+    sources: Sequence[Any],
+    *,
+    threshold: float,
+    embedder: Any,
+    examples: int = TRACE_LEAK_EXAMPLES,
 ) -> tuple[list[bool], dict[str, Any]]:
     gen_texts = [_prompt_of(item) for item in generated]
     src_texts = [t for t in (_prompt_of(item) for item in sources) if t]
@@ -419,7 +483,7 @@ def _leak_flags(
         if best >= min(float(threshold), 1.0):
             flags[i] = True
             report["n_leaky"] += 1
-            if len(report["leaky"]) < 20:
+            if len(report["leaky"]) < int(examples):
                 report["leaky"].append({"row": i, "source": best_j, "similarity": round(best, 4)})
     return flags, report
 
@@ -428,27 +492,47 @@ def leakage_report(
     generated: Sequence[Any],
     sources: Sequence[Any],
     *,
-    threshold: float = 0.9,
+    threshold: float = TRACE_LEAK_THRESHOLD,
     embedder: Any = "hash",
+    examples: int = TRACE_LEAK_EXAMPLES,
 ) -> dict[str, Any]:
     """Near-copy check of generated prompts against source traces.
 
     A generated row whose prompt sits at or above ``threshold`` cosine
-    similarity to any source prompt is flagged. Exact matches always flag,
-    whatever the embedder thinks. ``leaky`` lists the first 20 offenders;
-    ``n_leaky`` is the full count.
+    similarity to any source prompt is flagged (0.9 by default: the 8-gram
+    exact-overlap test of rlhfbook.com/c/16-evaluation.html with a small
+    paraphrase allowance). Exact matches always flag, whatever the embedder
+    thinks. ``leaky`` lists the first ``examples`` offenders; ``n_leaky`` is
+    the full count.
     """
-    return _leak_flags(generated, sources, threshold=threshold, embedder=embedder)[1]
+    return _leak_flags(
+        generated, sources, threshold=threshold, embedder=embedder, examples=examples
+    )[1]
 
 
 def drop_leaky_rows(
-    rows: Sequence[dict], sources: Sequence[Any], *, threshold: float = 0.9, embedder: Any = "hash"
+    rows: Sequence[dict],
+    sources: Sequence[Any],
+    *,
+    threshold: float = TRACE_LEAK_THRESHOLD,
+    embedder: Any = "hash",
+    examples: int = TRACE_LEAK_EXAMPLES,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Kept rows plus the report. Flagged rows are removed, not rewritten."""
-    flags, report = _leak_flags(rows, sources, threshold=threshold, embedder=embedder)
+    flags, report = _leak_flags(
+        rows, sources, threshold=threshold, embedder=embedder, examples=examples
+    )
     kept = [row for row, bad in zip(rows, flags) if not bad]
     report["n_dropped"] = len(rows) - len(kept)
     return kept, report
+
+
+#: What a tool drafted from traces says about itself, and the JSON type its
+#: arguments get. Traces carry values, not schemas, so every argument is a
+#: string until the caller edits the draft (``infer_harness`` reads the
+#: observed values for a type; this union keeps the looser shape).
+OBSERVED_TOOL_DESCRIPTION = "{name}, observed in this agent's traces"
+OBSERVED_ARG_TYPE = "string"
 
 
 def tools_from_traces(traces: Sequence[dict]) -> list[dict]:
@@ -474,10 +558,10 @@ def tools_from_traces(traces: Sequence[dict]) -> list[dict]:
             "type": "function",
             "function": {
                 "name": name,
-                "description": f"{name}, observed in this agent's traces",
+                "description": OBSERVED_TOOL_DESCRIPTION.format(name=name),
                 "parameters": {
                     "type": "object",
-                    "properties": {arg: {"type": "string"} for arg in sorted(args)},
+                    "properties": {arg: {"type": OBSERVED_ARG_TYPE} for arg in sorted(args)},
                 },
             },
         }
@@ -525,9 +609,12 @@ def simulate_from_traces(
 # accepts anything ``load_traces`` accepts: While simulation rows, eval
 # rollouts, raw JSONL exports, ``rows_from_otel`` output, graded or not.
 
-_PROMPT_KEYS = ("prompt", "question", "input", "task", "ask")
-_STEP_KEYS = ("steps", "tool_trace", "trace")
-_FINAL_KEYS = ("final_text", "final", "output", "response", "answer")
+#: Row keys read, in order, for the ask, the step list and the final reply.
+#: The spellings the exporters we have met use; extend by editing the
+#: tuples before calling ``load_traces``.
+PROMPT_KEYS = ("prompt", "question", "input", "task", "ask")
+STEP_KEYS = ("steps", "tool_trace", "trace")
+FINAL_KEYS = ("final_text", "final", "output", "response", "answer")
 
 
 #: Names a tool step's argument and result fields arrive under. The platform's
@@ -536,8 +623,23 @@ _FINAL_KEYS = ("final_text", "final", "output", "response", "answer")
 #: both spellings, because the consumers that only knew one did not fail
 #: loudly: `tool_call_roundtrip` reported "checked: 0" on a whole dataset of
 #: ingested traces and every row passed the export gate without being looked at.
-_ARG_KEYS = ("arguments", "input", "args", "parameters")
-_RESULT_KEYS = ("result", "output", "response")
+ARG_KEYS = ("arguments", "input", "args", "parameters")
+RESULT_KEYS = ("result", "output", "response")
+_PROMPT_KEYS, _STEP_KEYS, _FINAL_KEYS, _ARG_KEYS, _RESULT_KEYS = (
+    PROMPT_KEYS,
+    STEP_KEYS,
+    FINAL_KEYS,
+    ARG_KEYS,
+    RESULT_KEYS,
+)
+
+#: How a tool result is bound to its call, in order: by call id (the only
+#: binding that survives parallel calls answered out of order), then by tool
+#: name, then to the first unfilled call (FIFO). Fixed, not a knob: any other
+#: order (last-unfilled, name before id) swaps payloads between parallel
+#: calls answered in order, and mining then blames the wrong tool. An orphan
+#: result becomes its own step so its fault still reaches the miner.
+RESULT_BINDING = ("id", "name", "fifo")
 
 
 def _normalize_step(step: dict) -> dict:
@@ -550,7 +652,7 @@ def _normalize_step(step: dict) -> dict:
     if "tool" not in step:
         return step
     out = dict(step)
-    for canonical, aliases in (("arguments", _ARG_KEYS), ("result", _RESULT_KEYS)):
+    for canonical, aliases in (("arguments", ARG_KEYS), ("result", RESULT_KEYS)):
         if canonical in out:
             continue
         source = next((k for k in aliases if k in out), None)
@@ -583,12 +685,8 @@ def _steps_from_messages(messages: Sequence[dict]) -> list[dict]:
     by_id: dict[str, dict] = {}
 
     def _attach(result: Any, name: str, call_id: str = "") -> None:
-        # Match by call id first: it is the only binding that survives
-        # parallel calls, which providers answer out of order. Name, then
-        # first-unfilled (FIFO), remain for exports that carry no ids.
-        # Never last-unfilled: parallel calls answered in order would swap
-        # payloads and mining would blame the wrong tool. An orphan result
-        # becomes its own step so its fault still reaches the miner.
+        # RESULT_BINDING: id, then name, then FIFO. See the constant for why
+        # the order is fixed.
         target = by_id.pop(call_id, None) if call_id else None
         if target is not None and "result" in target:
             target = None
@@ -694,14 +792,30 @@ def _coerce_reward(value: Any) -> int | None:
 
 
 def load_traces(source) -> list[dict]:
-    """Normalize any supported trace source to the canonical schema above.
+    """Normalize any supported trace source to the one trajectory schema the SDK reads.
 
-    ``source`` is a JSONL path or an iterable of dicts. Rows carrying
-    ``tool_trace``/``trace`` instead of ``steps``, ``final``/``output``/
-    ``response`` instead of ``final_text``, or only OpenAI-style
-    ``messages`` are converted; ``reward`` is kept only when it coerces
-    cleanly to 0 or 1, and its absence is fine. Rows that are not dicts or
-    carry neither an ask nor any steps are dropped.
+    Reach for it when you have traces from somewhere else (a production
+    log, an eval harness, an OpenAI-style ``messages`` export) and want
+    ``simulate(traces=...)``, ``evaluate`` or ``decontaminate`` to read
+    them. It returns a list of dicts in the canonical schema: ``prompt``
+    (the first user ask), ``steps`` (a list of ``{"user": str}``,
+    ``{"tool": str, "arguments": dict, "result": Any}`` and
+    ``{"text": str}`` agent turns), ``final_text`` (the agent's last
+    message) and, optionally, ``reward`` (0 or 1). Every other key
+    carries through untouched, and ungraded traces are first-class.
+
+    * ``source``: a JSONL path or an iterable of dicts. Rows carrying
+      ``tool_trace``/``trace`` instead of ``steps``,
+      ``final``/``output``/``response`` instead of ``final_text``, or only
+      OpenAI-style ``messages`` are converted (``PROMPT_KEYS``,
+      ``STEP_KEYS``, ``FINAL_KEYS``, ``ARG_KEYS`` and ``RESULT_KEYS`` list
+      the spellings read); ``reward`` is kept only when it coerces cleanly
+      to 0 or 1, and its absence is fine. Rows that are not dicts or carry
+      neither an ask nor any steps are dropped.
+
+    >>> rows = wai.load_traces([{"question": "Where is order 4473?", "output": "Shipped."}])
+    >>> rows[0]["prompt"], rows[0]["final_text"]
+    ('Where is order 4473?', 'Shipped.')
     """
     from pathlib import Path as _Path
 
@@ -718,15 +832,15 @@ def load_traces(source) -> list[dict]:
         row = dict(row)
         # An empty steps list is absence, not content: real exports emit
         # steps: [] next to a populated messages/tool_trace field.
-        steps = next((row[k] for k in _STEP_KEYS if isinstance(row.get(k), list) and row[k]), None)
+        steps = next((row[k] for k in STEP_KEYS if isinstance(row.get(k), list) and row[k]), None)
         if steps is None and isinstance(row.get("messages"), list):
             steps = _steps_from_messages(row["messages"])
         row["steps"] = [_normalize_step(s) for s in (steps or []) if isinstance(s, dict)]
-        prompt = next((str(row[k]) for k in _PROMPT_KEYS if row.get(k)), "")
+        prompt = next((str(row[k]) for k in PROMPT_KEYS if row.get(k)), "")
         if not prompt:
             prompt = next((str(s["user"]) for s in row["steps"] if "user" in s), "")
         row["prompt"] = prompt
-        final = next((str(row[k]) for k in _FINAL_KEYS if row.get(k)), "")
+        final = next((str(row[k]) for k in FINAL_KEYS if row.get(k)), "")
         if not final:
             final = next((str(s["text"]) for s in reversed(row["steps"]) if "text" in s), "")
         row["final_text"] = final
@@ -818,7 +932,7 @@ def trace_report(traces, tools: list[dict] | None = None, policy: str = "") -> d
         # REORDER toward the front. The clean contrast values stay in every
         # aimed axis by design and receive no extra weight, so they are
         # excluded from the claim.
-        clean = {"success", "entity exists", NO_FAULT}
+        clean = {CLEAN_CONDITION, CLEAN_WORLD, NO_FAULT}
         emphasis: dict[str, list[str]] = {}
         for axis in ("tool", "tool_condition", "world_state"):
             base_axis = list(base.get(axis) or [])
@@ -879,16 +993,16 @@ def format_trace_report(report: dict[str, Any]) -> str:
     if report.get("foreign_tools"):
         lines.append(
             "warning: observed tools not in this agent's toolset: "
-            + ", ".join(report["foreign_tools"][:5])
+            + ", ".join(report["foreign_tools"][:TRACE_REPORT_LIST_CAP])
         )
     emphasis = report.get("emphasis")
     if emphasis:
         parts = []
         names = {"tool": "tools", "tool_condition": "faults", "world_state": "world states"}
         for axis, values in emphasis.items():
-            shown = ", ".join(values[:5])
-            if len(values) > 5:
-                shown += f" (+{len(values) - 5} more)"
+            shown = ", ".join(values[:TRACE_REPORT_LIST_CAP])
+            if len(values) > TRACE_REPORT_LIST_CAP:
+                shown += f" (+{len(values) - TRACE_REPORT_LIST_CAP} more)"
             parts.append(f"{names.get(axis, axis)} {shown}")
         lines.append("extra generation weight goes to: " + "; ".join(parts))
     else:
@@ -1004,18 +1118,15 @@ __all__ = [
 
 # --- behavioral state over trace history ------------------------------------
 
-_STATE_PRIORITY = {
-    "new": 1.0,
-    "persistent": 0.9,
-    "uncertain": 0.35,
-    "improving": 0.2,
-    "solved": 0.05,
-    "passing": 0.05,
-}
-_EXPLORATION_FLOOR = 0.2
-# Graded rows a region needs before its allocation is more than a hint.
-_MIN_SUPPORT = 3
-_RECIPE_AXES = ("tool", "tool_condition", "world_state", "stance", "history")
+# The allocation numbers live in defaults.py (TRACE_*) with their reasons and
+# are keywords on ``behavior_state``. The old private names stay as aliases.
+_STATE_PRIORITY = TRACE_STATE_PRIORITY
+_EXPLORATION_FLOOR = TRACE_EXPLORATION_FLOOR
+_MIN_SUPPORT = TRACE_MIN_SUPPORT
+#: Grid axes a failing row's coordinates are remembered under: the region's
+#: expansion recipe (how variants are generated around it, never its identity).
+RECIPE_AXES = ("tool", "tool_condition", "world_state", "stance", "history")
+_RECIPE_AXES = RECIPE_AXES
 
 
 def _row_regions(row: dict) -> list[tuple[str, str, bool | None]]:
@@ -1061,7 +1172,13 @@ def _row_regions(row: dict) -> list[tuple[str, str, bool | None]]:
 
 
 def behavior_state(
-    rows: Sequence[dict], *, targeted: Sequence[str] = (), exploration: float = _EXPLORATION_FLOOR
+    rows: Sequence[dict],
+    *,
+    targeted: Sequence[str] = (),
+    exploration: float = TRACE_EXPLORATION_FLOOR,
+    min_support: int = TRACE_MIN_SUPPORT,
+    priority: Mapping[str, float] | None = None,
+    max_exploration: float = TRACE_EXPLORATION_MAX,
 ) -> dict:
     """The optimizer's memory: evidence in, allocation out.
 
@@ -1077,10 +1194,19 @@ def behavior_state(
     weight scaled by support and by a Laplace-shrunk fail rate over the
     region's graded rows, so a region that fails once in a hundred draws
     far less than one that fails half the time. Regions under
-    ``_MIN_SUPPORT`` graded rows are flagged ``low_support``: reported,
-    but not to be trusted for allocation. budget_share sums to
-    1 - exploration; broad exploration is always reserved.
+    ``min_support`` graded rows (3: the smallest count at which "never
+    failed" has a 95% upper bound under two thirds) are flagged
+    ``low_support``: reported, but not to be trusted for allocation.
+    ``priority`` maps a status to its weight (``TRACE_STATE_PRIORITY``).
+    budget_share sums to 1 - exploration, with ``exploration`` clamped to
+    ``max_exploration``; broad exploration is always reserved.
     """
+    weights = dict(TRACE_STATE_PRIORITY if priority is None else priority)
+    missing_status = set(TRACE_STATE_PRIORITY) - set(weights)
+    if missing_status:
+        raise ValueError(
+            f"priority= needs a weight for every status; missing {sorted(missing_status)}"
+        )
     items = [r for r in rows if isinstance(r, dict)]
     if any("ts" in r for r in items):
         items.sort(key=lambda r: r.get("ts") or 0)
@@ -1093,7 +1219,7 @@ def behavior_state(
         v = str(r.get("model_version") or "")
         if v and v not in versions:
             versions.append(v)
-    if len(versions) >= 2:
+    if len(versions) >= 2:  # noqa: PLR2004  # two versions before a comparison
 
         def bucket_of(idx, r):
             return str(r.get("model_version") or versions[0])
@@ -1131,7 +1257,7 @@ def behavior_state(
             slot["last_bucket"] = bucket
             if failed:
                 recipe = slot["recipe"]
-                for axis in _RECIPE_AXES:
+                for axis in RECIPE_AXES:
                     value = str(dims.get(axis) or "")
                     if value and value != "unspecified":
                         recipe.setdefault(axis, [])
@@ -1168,16 +1294,19 @@ def behavior_state(
             status = "new" if rec_fail else "passing"
         fails_total = sum(b[0] for b in per.values())
         graded_total = sum(b[0] + b[1] for b in per.values())
-        support_factor = min(1.0, 0.5 + 0.25 * min(fails_total, 6) / 3)
+        # support: 0.5 with no failures, 1.0 at TRACE_SUPPORT_SATURATION
+        support_factor = min(
+            1.0, 0.5 + 0.5 * min(fails_total, TRACE_SUPPORT_SATURATION) / TRACE_SUPPORT_SATURATION
+        )
         # Laplace-shrunk fail rate over every graded row in the region:
         # one failure in a hundred and fifty in a hundred used to draw the
         # same priority. A region with no graded rows sits at the prior.
         fail_rate = (fails_total + 1.0) / (graded_total + 2.0)
-        rate_factor = 0.25 + 0.75 * fail_rate
+        rate_factor = TRACE_RATE_FLOOR + (1.0 - TRACE_RATE_FLOOR) * fail_rate
         slot["status"] = status
         slot["n_graded"] = graded_total
         slot["fail_rate"] = round(fail_rate, 4)
-        slot["low_support"] = graded_total < _MIN_SUPPORT
+        slot["low_support"] = graded_total < int(min_support)
         slot["previously_targeted"] = was_targeted
         slot["rotate_coordinates"] = bool(was_targeted and status == "persistent")
         slot["history"] = [
@@ -1189,11 +1318,11 @@ def behavior_state(
             for b in buckets
             if b in per
         ]
-        slot["priority"] = round(_STATE_PRIORITY[status] * support_factor * rate_factor, 4)
+        slot["priority"] = round(float(weights[status]) * support_factor * rate_factor, 4)
         out.append(slot)
 
     total = sum(s["priority"] for s in out) or 1.0
-    pool = 1.0 - max(0.0, min(0.6, exploration))
+    pool = 1.0 - max(0.0, min(float(max_exploration), float(exploration)))
     for slot in out:
         slot["budget_share"] = round(pool * slot["priority"] / total, 4)
         del slot["by_bucket"]

@@ -27,11 +27,23 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ..defaults import JUDGE_CHECK_SAMPLE, PASS_THRESHOLD
 from .judging import run_judge
 from .stats import wilson_interval
 
-#: above this share of audited failures, the verifier is the problem to fix first
+# FN_WARN = 0.10: above this share of audited failures overturned by the
+# judge, the verifier is the problem to fix first. One false negative in
+# ten halves the separation on a tenth of the tasks, about the size of a
+# training gain; on 570 SEC XBRL tasks the rate was far past it and the
+# grader fix moved mean reward 0.20 -> 0.48 (measured; the cut is
+# convention).
 FN_WARN = 0.10
+# MIN_AUDITED_FAILS = 20: audited failures before the false-negative rate
+# is worth acting on; under it the Wilson interval is wider than 0.3
+# (convention).
+MIN_AUDITED_FAILS = 20
+# AUDIT_EXAMPLES = 5: overturned rows shown in the report.
+AUDIT_EXAMPLES = 5
 
 #: what the judge is asked when the row has no rubric of its own
 AUDIT_QUESTION = (
@@ -101,13 +113,14 @@ def audit_grades(
     rows: Sequence[dict],
     *,
     judge: Callable[[dict], Any],
-    sample: int = 40,
+    sample: int = JUDGE_CHECK_SAMPLE,
     passes: int = 0,
     question: str = AUDIT_QUESTION,
     seed: int = 0,
     concurrency: int = 4,
     timeout: float = 120,
     judge_name: str | None = None,
+    fn_warn: float = FN_WARN,
 ) -> dict[str, Any]:
     """Estimate the verifier's false-negative rate from a judged sample.
 
@@ -117,15 +130,16 @@ def audit_grades(
     ``seed`` and each is put to ``judge`` (any judge in the ``run_judge``
     contract: ``rubric_judge()``, ``grade_llm``, your own callable) with
     the reference in place and ``question`` as the rubric when the row
-    carries none. A judge reward at or above 0.5 on a failed row is a
-    false negative. ``passes`` samples passed rows the same way for the
-    false-positive side.
+    carries none. A judge reward at or above ``PASS_THRESHOLD`` (0.5) on
+    a failed row is a false negative. ``passes`` samples passed rows the
+    same way for the false-positive side.
 
     Returns ``fn_rate`` with ``fn_ci95`` (Wilson), ``estimated_wrong_fails``
     (the rate over every failed row), ``reasons`` (the verifier's failure
     kinds in the sample, each with how many the judge overturned), a few
     ``examples``, ``fp_rate`` when ``passes`` > 0, and ``warnings``. Above
-    ``FN_WARN`` the summary says to fix the verifier before training;
+    ``fn_warn`` (``FN_WARN``, 0.10) the summary says to fix the verifier
+    before training;
     ``select_for_rl(audit=report)`` and ``optimize(audit=)`` carry the
     same warning into the selection.
     """
@@ -160,9 +174,9 @@ def audit_grades(
     judge_label = next((str(r.get("judge_name")) for r in judged_f + judged_p), judge_name)
 
     checked_f = [r for r in judged_f if r.get("judge_status") == "ok" and _num(r) is not None]
-    overturned = [r for r in checked_f if float(_num(r) or 0.0) >= 0.5]
+    overturned = [r for r in checked_f if float(_num(r) or 0.0) >= PASS_THRESHOLD]
     checked_p = [r for r in judged_p if r.get("judge_status") == "ok" and _num(r) is not None]
-    fp_rows = [r for r in checked_p if float(_num(r) or 0.0) < 0.5]
+    fp_rows = [r for r in checked_p if float(_num(r) or 0.0) < PASS_THRESHOLD]
     errors = sum(1 for r in judged_f + judged_p if r.get("judge_status") != "ok")
 
     fn_rate, fn_ci = _rate(len(overturned), len(checked_f))
@@ -173,7 +187,7 @@ def audit_grades(
         key = _reason_key((r.get("audit") or {}).get("verifier_reason"), verifier)
         slot = reasons.setdefault(key, {"n": 0, "fn": 0})
         slot["n"] += 1
-        if float(_num(r) or 0.0) >= 0.5:
+        if float(_num(r) or 0.0) >= PASS_THRESHOLD:
             slot["fn"] += 1
     reasons = dict(sorted(reasons.items(), key=lambda kv: (-kv[1]["fn"], -kv[1]["n"], kv[0])))
 
@@ -184,7 +198,7 @@ def audit_grades(
             "verifier_reason": (r.get("audit") or {}).get("verifier_reason"),
             "judge_reason": r.get("reason"),
         }
-        for r in overturned[:5]
+        for r in overturned[:AUDIT_EXAMPLES]
     ]
     estimated = round(float(fn_rate) * len(failed)) if fn_rate is not None else None
 
@@ -202,7 +216,7 @@ def audit_grades(
             f"false-negative rate {fn_rate:.0%} (95% {lo:.0%}..{hi:.0%}), about {estimated} of "
             f"{len(failed)} failed rows are right answers the verifier rejected"
         )
-        if fn_rate > FN_WARN:
+        if fn_rate > fn_warn:
             top = next(iter(reasons), None)
             warnings.append(
                 f"VERIFIER: {summary}. Fix the verifier before training: each false negative "
@@ -211,12 +225,12 @@ def audit_grades(
                 + (f". The reason the judge overturns most: {top!r}" if top else "")
                 + "."
             )
-        if len(checked_f) < 20:
+        if len(checked_f) < MIN_AUDITED_FAILS:
             warnings.append(
                 f"{len(checked_f)} audited failures is a small sample; the interval is wide. "
                 "Raise sample= for a rate worth acting on."
             )
-        if fp_rate is not None and fp_rate > FN_WARN:
+        if fp_rate is not None and fp_rate > fn_warn:
             warnings.append(
                 f"the judge also disagreed with {len(fp_rows)} of {len(checked_p)} audited passes "
                 f"(false-positive rate {fp_rate:.0%}); the rule may be too loose as well"

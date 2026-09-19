@@ -48,6 +48,23 @@ import statistics
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from .defaults import (
+    MONITOR_BUFFER,
+    MONITOR_CONCURRENCY,
+    MONITOR_DELTA,
+    MONITOR_EVERY,
+    MONITOR_K,
+    MONITOR_LENGTH_PCT,
+    MONITOR_MAX_NEW_TOKENS,
+    MONITOR_N_PROMPTS,
+    MONITOR_SAMPLE_BATCH,
+    MONITOR_SAMPLE_TEMPERATURE,
+    MONITOR_SAMPLE_TOP_P,
+    MONITOR_SCAN_MIN,
+    MONITOR_SCAN_PERMUTATIONS,
+    MONITOR_WINDOW,
+    MONITOR_WINDOW_BOOTSTRAPS,
+)
 from .schema import Judgment, ScorerRef, attach
 from .score.hack_scan import hack_scan
 from .score.judging import normalize_judge_result
@@ -57,17 +74,20 @@ from .training import TrainingRun, _callback_base, _json_safe
 log = logging.getLogger("whileai.simulations")
 
 ALARMS = ("divergence", "length", "drift", "feature")
+# Every default below lives in defaults.py (MONITOR_*) with its reason and
+# is a keyword on HackMonitor. The old names stay as aliases.
 #: holdout asks sampled per eval, and completions per ask
-DEFAULT_N_PROMPTS = 32
-DEFAULT_K = 4
+DEFAULT_N_PROMPTS = MONITOR_N_PROMPTS
+DEFAULT_K = MONITOR_K
 #: evals the window spans
-DEFAULT_WINDOW = 3
+DEFAULT_WINDOW = MONITOR_WINDOW
 #: proxy gain over the window that counts as climbing
-DEFAULT_DELTA = 0.1
+DEFAULT_DELTA = MONITOR_DELTA
 #: completion-length growth over the window that counts as growing
-DEFAULT_LENGTH_PCT = 0.25
+DEFAULT_LENGTH_PCT = MONITOR_LENGTH_PCT
 #: completions the reward wrapper keeps for the feature scan
-DEFAULT_BUFFER = 512
+DEFAULT_BUFFER = MONITOR_BUFFER
+#: holdout row columns that are the ask or the reply, never a proxy column
 _RESERVED = frozenset({"prompt", "messages", "completion", "completions", "final_text"})
 
 
@@ -105,11 +125,13 @@ def _default_sample(
     *,
     n: int,
     max_new_tokens: int,
-    batch: int = 16,
-    temperature: float = 0.8,
+    batch: int = MONITOR_SAMPLE_BATCH,
+    temperature: float = MONITOR_SAMPLE_TEMPERATURE,
+    top_p: float = MONITOR_SAMPLE_TOP_P,
 ) -> list[list[str]]:
     """``n`` completions per prompt from the live policy: chat template
-    when the prompt is a message list, batched, sampled."""
+    when the prompt is a message list, batched, sampled at ``temperature``
+    and ``top_p`` (``HackMonitor(sampling=)`` sets them)."""
     import torch
 
     was_training = bool(getattr(model, "training", False))
@@ -130,7 +152,7 @@ def _default_sample(
                 **enc,
                 do_sample=True,
                 temperature=temperature,
-                top_p=0.95,
+                top_p=top_p,
                 max_new_tokens=max_new_tokens,
                 num_return_sequences=n,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
@@ -144,7 +166,7 @@ def _default_sample(
     return out
 
 
-class HackMonitor(_callback_base()):  # type: ignore[misc]
+class HackMonitor(_callback_base()):  # type: ignore[misc]  # ty: ignore[unsupported-base]
     """Watch a TRL run for reward hacking. See the module docstring.
 
     ``holdout`` is a list of prompts (strings or message lists) or rows
@@ -156,7 +178,13 @@ class HackMonitor(_callback_base()):  # type: ignore[misc]
     in, a reward or ``{"reward": ...}`` out). ``sample`` overrides how
     completions are drawn: ``sample(model, tokenizer, prompts, n=,
     max_new_tokens=) -> list[list[str]]``; the default uses the chat
-    template and ``model.generate``.
+    template and ``model.generate``; ``sampling`` (``temperature``,
+    ``top_p``, ``batch``) steers that default sampler.
+
+    ``n_boot`` is the bootstrap count behind the gold-vs-window interval,
+    ``n_perm`` the permutation count behind the feature scan, ``scan_min``
+    the fewest buffered completions the scan runs on. Every number has its
+    reason in ``defaults.py`` (MONITOR_*).
 
     ``run`` is the platform run the points and alarms land on; ``None``
     keeps everything on the monitor (``history``, ``alarms``,
@@ -171,19 +199,23 @@ class HackMonitor(_callback_base()):  # type: ignore[misc]
         proxy: Callable[..., Sequence[float]] | None = None,
         gold: Callable[[dict], Any] | None = None,
         sample: Callable[..., list[list[str]]] | None = None,
-        every: int = 10,
-        k: int = DEFAULT_K,
-        n_prompts: int = DEFAULT_N_PROMPTS,
-        window: int = DEFAULT_WINDOW,
-        delta: float = DEFAULT_DELTA,
-        length_pct: float = DEFAULT_LENGTH_PCT,
+        every: int = MONITOR_EVERY,
+        k: int = MONITOR_K,
+        n_prompts: int = MONITOR_N_PROMPTS,
+        window: int = MONITOR_WINDOW,
+        delta: float = MONITOR_DELTA,
+        length_pct: float = MONITOR_LENGTH_PCT,
         kl_budget: float | None = None,
         endorsed: Sequence[str] = (),
         stop_on: str | Sequence[str] = (),
-        buffer: int = DEFAULT_BUFFER,
-        max_new_tokens: int = 256,
-        concurrency: int = 8,
+        buffer: int = MONITOR_BUFFER,
+        max_new_tokens: int = MONITOR_MAX_NEW_TOKENS,
+        concurrency: int = MONITOR_CONCURRENCY,
         seed: int = 0,
+        n_boot: int = MONITOR_WINDOW_BOOTSTRAPS,
+        n_perm: int = MONITOR_SCAN_PERMUTATIONS,
+        scan_min: int = MONITOR_SCAN_MIN,
+        sampling: Mapping[str, Any] | None = None,
     ):
         super().__init__()
         if not holdout:
@@ -191,7 +223,18 @@ class HackMonitor(_callback_base()):  # type: ignore[misc]
         self.run = run
         self.proxy = proxy
         self.gold = gold
-        self.sample = sample or _default_sample
+        if sample is None:
+            allowed = {"temperature", "top_p", "batch"}
+            unknown = sorted(set(sampling or {}) - allowed)
+            if unknown:
+                raise ValueError(f"sampling: unknown key(s) {unknown}; use {sorted(allowed)}")
+            sample = functools.partial(_default_sample, **dict(sampling or {}))
+        elif sampling:
+            raise ValueError("sampling= steers the default sampler; drop it when passing sample=")
+        self.sample = sample
+        self.n_boot = max(1, int(n_boot))
+        self.n_perm = max(1, int(n_perm))
+        self.scan_min = max(1, int(scan_min))
         self.every = max(1, int(every))
         self.k = max(1, int(k))
         self.window = max(1, int(window))
@@ -408,19 +451,21 @@ class HackMonitor(_callback_base()):  # type: ignore[misc]
                 kl=entry["kl"],
             )
         # feature: what the buffer says the policy is paid for
-        if self.endorsed and len(self.buffer) >= 2 * DEFAULT_K:
-            scan = hack_scan(self.buffer, endorsed=self.endorsed, n_perm=50)
+        if self.endorsed and len(self.buffer) >= self.scan_min:
+            scan = hack_scan(self.buffer, endorsed=self.endorsed, n_perm=self.n_perm)
             self.last_scan = {
                 k: scan[k] for k in ("regime", "top_feature", "rho_max", "tau", "integrity")
             }
             if scan["regime"] == "reward_hack":
                 self._raise(entry, "feature", scan["warnings"][0], **self.last_scan)
-        if len(self.history) < 2:
+        if len(self.history) < 2:  # noqa: PLR2004  # two evals before a trend
             return
         then = self.history[max(0, len(self.history) - 1 - self.window)]
         gold_up: bool | None = None
         if then["gold"] is not None and entry["gold"] is not None:
-            cmp = compare_runs(then["rows"], entry["rows"], metric="marker:gold", n_boot=500)
+            cmp = compare_runs(
+                then["rows"], entry["rows"], metric="marker:gold", n_boot=self.n_boot
+            )
             gold_up = cmp["verdict"] == "b_better"
             entry["gold_vs_window"] = {
                 "delta": cmp["delta"],

@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import concurrent.futures
 from collections.abc import Callable, Mapping, Sequence
+from http import HTTPStatus
 from typing import Any
 
 from whileai._env import getenv
 
+from ..defaults import MESSAGE_EXAMPLES
 from ..generate.agents import parse_backend_spec, resolve_completion_key
 
 REF_KEYS = ("ref_logprob", "ref_n_tokens", "ref_model")
@@ -42,7 +44,7 @@ def _post(url: str, key: str, body: dict, timeout: float) -> dict:
     if key:
         headers["Authorization"] = f"Bearer {key}"
     res = requests.post(url, headers=headers, json=body, timeout=timeout)
-    if res.status_code >= 400:
+    if res.status_code >= HTTPStatus.BAD_REQUEST:
         raise RuntimeError(f"{url} -> {res.status_code}: {res.text[:300]}")
     return res.json()
 
@@ -235,7 +237,7 @@ def reference_logprobs(
                 total, count, turns = future.result()
             except Exception as exc:  # one bad row must not lose the batch
                 skipped += 1
-                if len(errors) < 5:
+                if len(errors) < MESSAGE_EXAMPLES:
                     errors.append(f"{type(exc).__name__}: {str(exc)[:200]}")
                 continue
             if turns == 0:

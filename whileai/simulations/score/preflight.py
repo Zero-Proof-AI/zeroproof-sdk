@@ -25,6 +25,11 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import MESSAGE_EXAMPLES, RULE_AXIS_CAP_REPORT, TEXT_HEURISTICS
+
+#: Untested policy rules named in the preflight summary before "and N more".
+_UNTESTED_SHOWN = 3
+
 FAILURE_CLASSES = (
     "fabrication",
     "unconfirmed_write",
@@ -186,22 +191,41 @@ def _policy_mentions(name: str, policy: str) -> bool:
     verb, nouns = tokens[0], [t for t in tokens[1:] if t not in _NAME_STOP]
     if not nouns:
         return bool(re.search(rf"\b{re.escape(verb)}", low))
-    nouns_seen = all(
-        re.search(rf"\b{re.escape(n[:-1] if len(n) > 4 and n.endswith('s') else n)}", low)
-        for n in nouns
-    )
+    nouns_seen = all(re.search(rf"\b{re.escape(_stem(n))}", low) for n in nouns)
     verb_seen = any(re.search(rf"\b{re.escape(v)}", low) for v in _VERB_SYNONYMS.get(verb, (verb,)))
     return nouns_seen and verb_seen
 
 
-def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
+def _rule_cap_note(shown: int, total: int, cap: int | None, *, where: str) -> str | None:
+    """The line a report carries when its rule axis is shorter than the
+    policy: how many clauses are on it, how many the prompt has, and the
+    knob that widens it. ``None`` when nothing was dropped."""
+    if cap is None or total <= shown:
+        return None
+    dropped = total - shown
+    return (
+        f"{shown} of {total} policy clauses are on the rule axis (rule_cap={cap}); the other "
+        f"{dropped} are never checked, so '{shown} of {shown} rules covered' is not the "
+        f"policy. Pass rule_cap=None to {where} to check every clause, or a larger number."
+    )
+
+
+def preflight(
+    tools: Sequence[dict], system_prompt: str = "", *, rule_cap: int | None = RULE_AXIS_CAP_REPORT
+) -> dict[str, Any]:
     """Spec-quality report for an agent. Report only; nothing is changed.
 
     ``warnings`` is the list a developer should read before generating
     thousands of rows; ``cells`` is the covering-grid size the same way
-    ``recommend`` counts it.
+    ``recommend`` counts it. ``rules`` is every clause of the policy
+    (``rule_cap=None``, the default ``RULE_AXIS_CAP_REPORT``); a number
+    keeps the first that many in document order, ``n_rules_total`` says
+    how many the policy has, ``rules_truncated`` whether any were left
+    off, and a ``warnings`` line names the count (#391). The generation
+    grid keeps its own cap (``RULE_AXIS_CAP_GRID``); ``cells`` is counted
+    on the same axis ``rules`` shows.
     """
-    from ..generate.scenarios import build_dimensions, scenario_regions
+    from ..generate.scenarios import build_dimensions, rule_axis, scenario_regions
 
     tools = list(tools or [])
     policy = str(system_prompt or "")
@@ -232,8 +256,8 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
     if missing_shapes:
         warnings.append(
             f"{len(missing_shapes)} of {len(tools)} tools declare no result "
-            f"shape ({', '.join(missing_shapes[:5])}"
-            f"{', ...' if len(missing_shapes) > 5 else ''}): grounding is "
+            f"shape ({', '.join(missing_shapes[:MESSAGE_EXAMPLES])}"
+            f"{', ...' if len(missing_shapes) > MESSAGE_EXAMPLES else ''}): grounding is "
             "harder and grounding-style scaffolds can convert fabrication "
             "into refusal instead of correct service; add a `returns` key "
             "to each tool (an example result or a JSON schema)"
@@ -253,7 +277,7 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
             "no system prompt: rule axes of the grid will be "
             "generic and grading has no policy to hold against"
         )
-    elif len(policy) < 200:
+    elif len(policy) < THIN_POLICY_CHARS:
         warnings.append(
             f"system prompt is {len(policy)} chars: thin policies give the "
             "grid few rules to test and graders little to enforce"
@@ -263,7 +287,11 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
         for entry in per_tool
         if entry["name"] and not _policy_mentions(entry["name"], policy)
     )
-    dimensions = build_dimensions(tools, policy)
+    dimensions = build_dimensions(tools, policy, rule_cap=rule_cap)
+    rules, n_rules_total = rule_axis(policy, cap=rule_cap)
+    cap_note = _rule_cap_note(len(rules), n_rules_total, rule_cap, where="preflight")
+    if cap_note:
+        warnings.append(cap_note)
     cells = len(scenario_regions(tools, policy, mode="sft", dimensions=dimensions))
     return {
         "n_tools": len(tools),
@@ -272,6 +300,9 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
         # The policy branches the engine extracted: the rule axis of the
         # grid, and what ``coverage_gap`` checks a test suite against.
         "rules": [str(rule) for rule in dimensions.get("rule") or []],
+        "n_rules_total": n_rules_total,
+        "rules_truncated": n_rules_total > len(rules),
+        "rule_cap": rule_cap,
         "tools": per_tool,
         "destructive_tools": destructive,
         "missing_result_shapes": missing_shapes,
@@ -304,21 +335,50 @@ def classify_failure(row: dict) -> str | None:
     return None
 
 
-#: Below this share of boundary, ambiguous and adversarial rows the set is easy.
+# HARD_SHARE_FLOOR = 0.3: below this share of boundary, ambiguous and
+# adversarial rows the set is easy. The generator's own default mix draws
+# 40% from the hard tiers (``generate.diversity.HARD_SHARE``); 0.3 is that
+# less the share the mixer measurably loses to cells it never reaches, so
+# a run at the default mix does not warn about itself (#319; convention
+# on the exact floor).
 HARD_SHARE_FLOOR = 0.3
-#: Rows before the hard share is worth a warning.
+# HARD_SHARE_MIN_ROWS = 20: rows before the hard share is worth a warning;
+# under twenty one row moves the share by five points (convention).
 HARD_SHARE_MIN_ROWS = 20
+# UNLABELLED_SHARE_WARN = 0.1: share of rows with no stance before the
+# report says their difficulty is unknown, not ordinary (convention).
+UNLABELLED_SHARE_WARN = 0.1
+# THIN_POLICY_CHARS = 200: a system prompt shorter than this gives the
+# grid few rules to test; 200 characters is two or three rules
+# (convention, untested).
+THIN_POLICY_CHARS = 200
 
 
 def dataset_report(
-    rows: Sequence[dict], *, tools: Sequence[dict] | None = None, system_prompt: str = ""
+    rows: Sequence[dict],
+    *,
+    tools: Sequence[dict] | None = None,
+    system_prompt: str = "",
+    hard_share_floor: float = HARD_SHARE_FLOOR,
 ) -> dict[str, Any]:
-    """One report a developer reads after simulate/grade: size, signal, mix."""
+    """One report a developer reads after simulate/grade: size, signal, mix.
+    ``hard_share_floor`` (``HARD_SHARE_FLOOR``, 0.3) is the share of hard-
+    tier rows under which the set is called easy."""
     from ..generate.coverage import cell_key
     from ..generate.diversity import behavior_tier
     from .grading import behavior_signature
 
-    rows = [r for r in rows if isinstance(r, dict)]
+    if isinstance(rows, (str, bytes)):
+        raise TypeError(
+            "dataset_report takes the rows, not a dataset id: pull them first, "
+            f'wai.dataset_report(wai.pull("{rows if isinstance(rows, str) else "ds_..."}"))'
+        )
+    given = list(rows)
+    rows = [r for r in given if isinstance(r, dict)]
+    if given and not rows:
+        raise TypeError(
+            f"dataset_report takes a sequence of row dicts; got {type(given[0]).__name__} items"
+        )
     labeled = [r for r in rows if r.get("reward") in (0, 1)]
     passes = [r for r in labeled if r["reward"] == 1]
     fails = [r for r in labeled if r["reward"] == 0]
@@ -368,7 +428,7 @@ def dataset_report(
     }
     if (
         hard_share is not None
-        and hard_share < HARD_SHARE_FLOOR
+        and hard_share < hard_share_floor
         and len(rows) >= HARD_SHARE_MIN_ROWS
     ):
         report["warnings"].append(
@@ -380,7 +440,7 @@ def dataset_report(
             "dimensions={'stance': ['boundary', 'ambiguous', 'adversarial']} pins the axis "
             "to hard tiers only (rlhf-book ch. 7 on difficulty filtering)."
         )
-    if tiers.get("unlabelled") and tiers["unlabelled"] / max(1, len(rows)) > 0.1:
+    if tiers.get("unlabelled") and tiers["unlabelled"] / max(1, len(rows)) > UNLABELLED_SHARE_WARN:
         report["warnings"].append(
             f"{tiers['unlabelled']} rows carry no stance, so their difficulty is unknown, "
             "not ordinary. Label it with dimensions={'stance': [...]} on the run, or "
@@ -607,14 +667,16 @@ _GAP_STOP = frozenset(
 
 def _stem(word: str) -> str:
     """``refunds`` and ``orders`` overlap ``refund`` and ``order``."""
-    return word[:-1] if len(word) > 4 and word.endswith("s") else word
+    return (
+        word[:-1] if len(word) >= TEXT_HEURISTICS.plural_min_chars and word.endswith("s") else word
+    )
 
 
 def _content_words(text: str) -> set[str]:
     return {
         _stem(word)
         for word in _GAP_WORD.findall(str(text or "").lower())
-        if len(word) >= 3 and word not in _GAP_STOP
+        if len(word) >= TEXT_HEURISTICS.gap_word_min_chars and word not in _GAP_STOP
     }
 
 
@@ -741,22 +803,36 @@ def coverage_gap(
     tools: Sequence[dict],
     system_prompt: str = "",
     rows: Sequence[dict] | None = None,
+    rule_cap: int | None = RULE_AXIS_CAP_REPORT,
 ) -> dict[str, Any]:
-    """Which parts of an agent's policy the asks you already send never reach.
+    """List the parts of an agent's policy that the asks you already send never reach.
 
-    ``asks`` is what a suite asks the agent: a list of prompt strings, a
-    list of rows carrying ``prompt``, or a path to a ``.py`` or ``.jsonl``
-    file holding either. The axes come from ``build_dimensions``, the same
-    grid ``simulate`` covers, so the answer is in the engine's own
-    vocabulary: which tool, which policy rule, what stance the person
-    takes, what the world looks like, what condition the tool is in, what
-    happened before.
+    Reach for it before writing situations, with the test suite you
+    already have: it says which tools and which policy rules no ask
+    exercises, in the engine's own vocabulary. It returns a dict:
+    ``untested_rules`` and ``untested_tools`` (the lists worth reading),
+    ``rules`` (the policy clauses found), ``axes`` (each axis with the
+    count per value), ``stances``, ``pressure_asks``, ``single_shot``,
+    ``per_ask`` (where each ask landed), ``notes``, ``summary`` and
+    ``n_asks``. ``format_coverage_gap(report)`` prints it.
+
+    * ``asks``: what a suite asks the agent: a list of prompt strings, a
+      list of rows carrying ``prompt``, or a path to a ``.py`` or
+      ``.jsonl`` file holding either.
+    * ``tools`` and ``system_prompt``: the agent's tool schemas and
+      policy. The axes come from ``build_dimensions``, the same grid
+      ``simulate`` covers: which tool, which policy rule, what stance the
+      person takes, what the world looks like, what condition the tool is
+      in, what happened before.
+    * ``rows``: graded rollouts from a run. With them the report also
+      checks the world side: rules whose rows all ended in the same tool
+      fault are rules the asks reach but the fixtures never let happen
+      (``rules_the_world_never_triggers``, with ``rows_per_rule`` and
+      ``rules_with_no_rows``).
 
     Each ask is placed on the axes it touches with text heuristics, not a
     model: the tools its words name or imply, the rule clauses it shares
-    words with, and the stance its words show. ``untested_rules`` and
-    ``untested_tools`` are the parts of the policy no ask reaches, which
-    is the list worth reading. Two axes (``world_state``,
+    words with, and the stance its words show. Two axes (``world_state``,
     ``tool_condition``) cannot be read from an ask at all: a prompt never
     says the order is missing or the tool timed out, so a hand-written
     suite leaves them at one point and ``notes`` says so.
@@ -764,15 +840,30 @@ def coverage_gap(
     With ``rows`` (graded rollouts from a run) the report also checks the
     world side: rules whose rows all ended in the same tool fault are
     rules the asks reach but the fixtures never let happen.
+
+    The rule axis is every clause of the policy (``rule_cap=None``, the
+    default ``RULE_AXIS_CAP_REPORT``): a report over an existing suite
+    has no grid to bound. A number keeps the first that many clauses in
+    document order; ``n_rules_total`` and ``rules_truncated`` say what
+    was left off and ``notes`` carries the count (#391).
+    ```python
+    gap = wai.coverage_gap(["Where is order 4473?", "Cancel order 9911."],
+                           tools=TOOLS, system_prompt=POLICY)
+    print(gap["untested_rules"], gap["untested_tools"])
+    ```
     """
-    from ..generate.scenarios import build_dimensions
+    from ..generate.scenarios import build_dimensions, rule_axis
 
     tool_list = list(tools or [])
     policy = str(system_prompt or "")
     ask_list = _normalize_asks(asks)
-    dimensions = build_dimensions(tool_list, policy)
+    dimensions = build_dimensions(tool_list, policy, rule_cap=rule_cap)
+    _, n_rules_total = rule_axis(policy, cap=rule_cap)
     names = [n for n in (str(_fn(t).get("name") or "") for t in tool_list) if n]
     rules = [str(r) for r in dimensions.get("rule") or []]
+    cap_note = _rule_cap_note(
+        len(rules) if n_rules_total else 0, n_rules_total, rule_cap, where="coverage_gap"
+    )
     branch = {rule: _is_branch_rule(rule) for rule in rules}
     rule_words = {rule: _content_words(rule) for rule in rules}
     rule_tools = {rule: [n for n in names if _policy_mentions(n, rule)] for rule in rules}
@@ -785,7 +876,7 @@ def coverage_gap(
         hit_rules = []
         for rule in rules:
             if branch[rule]:
-                reached = len(words & rule_words[rule]) >= 2
+                reached = len(words & rule_words[rule]) >= 2  # noqa: PLR2004  # two shared words is the overlap floor (convention)
             elif rule_tools[rule]:
                 reached = any(n in hit_tools for n in rule_tools[rule])
             else:
@@ -820,6 +911,8 @@ def coverage_gap(
     pressure = sum(1 for entry in per_ask if entry["stance"] != "ordinary")
 
     notes: list[str] = []
+    if cap_note:
+        notes.append(cap_note)
     if untested_rules:
         n = len(untested_rules)
         notes.append(
@@ -849,16 +942,21 @@ def coverage_gap(
             "good day only. Add pressure asks, or take them from the stance axis"
         )
 
+    of_total = f" (of {n_rules_total} in the prompt)" if cap_note else ""
     summary_bits = [
         f"{len(ask_list)} ask{'s' if len(ask_list) != 1 else ''} cover "
         f"{len(rules) - len(untested_rules)} of {len(rules)} policy rule"
-        f"{'s' if len(rules) != 1 else ''} and "
+        f"{'s' if len(rules) != 1 else ''}{of_total} and "
         f"{len(names) - len(untested_tools)} of {len(names)} tool"
         f"{'s' if len(names) != 1 else ''}"
     ]
     if untested_rules:
-        shown = ", ".join(_short_rule(rule) for rule in untested_rules[:3])
-        more = f", and {len(untested_rules) - 3} more" if len(untested_rules) > 3 else ""
+        shown = ", ".join(_short_rule(rule) for rule in untested_rules[:_UNTESTED_SHOWN])
+        more = (
+            f", and {len(untested_rules) - _UNTESTED_SHOWN} more"
+            if len(untested_rules) > _UNTESTED_SHOWN
+            else ""
+        )
         summary_bits.append(f"untested: {shown}{more}")
     if untested_tools:
         summary_bits.append("no ask reaches " + ", ".join(untested_tools))
@@ -872,6 +970,9 @@ def coverage_gap(
         "asks": list(ask_list),
         "axes": axes,
         "rules": rules,
+        "n_rules_total": n_rules_total,
+        "rules_truncated": bool(cap_note),
+        "rule_cap": rule_cap,
         "untested_rules": untested_rules,
         "untested_tools": untested_tools,
         "stances": dict(touched["stance"]),
@@ -951,7 +1052,12 @@ def format_coverage_gap(report: dict[str, Any]) -> str:
         "",
         f"asks                  {report.get('n_asks', 0)}"
         + ("  (each one once)" if report.get("single_shot") else ""),
-        f"policy rules covered  {len(rules) - len(untested_rules)} of {len(rules)}",
+        f"policy rules covered  {len(rules) - len(untested_rules)} of {len(rules)}"
+        + (
+            f" (of {report['n_rules_total']} in the prompt; rule_cap={report.get('rule_cap')})"
+            if report.get("rules_truncated")
+            else ""
+        ),
         f"tools covered         {n_tools - len(untested_tools)} of {n_tools}",
         "stance                "
         + (

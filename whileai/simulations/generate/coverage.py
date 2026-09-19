@@ -5,9 +5,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
+# NEW_SIGNATURE_FLOOR = 0.02: a batch whose share of never-seen behavior
+# signatures is under this counts as flat (convention, untested).
 NEW_SIGNATURE_FLOOR = 0.02
-# A short unique-signature blip is not a plateau. Need a long stall.
+# FLAT_BATCHES = 12: flat batches in a row before the run calls the space
+# saturated. A short unique-signature blip is not a plateau; a long stall
+# is (convention, untested).
 FLAT_BATCHES = 12
+# SATURATION_COPIES = 5: rows every grid cell needs before saturation can
+# be declared, so a cell's verdict rests on more than one draw
+# (convention; the re-run floor in ``eval_variance`` is the measured
+# quantity a caller should size to).
 SATURATION_COPIES = 5
 
 

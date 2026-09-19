@@ -1,0 +1,53 @@
+---
+title: "Library and platform"
+sidebarTitle: "Overview"
+description: "The library runs on your machine with no account. The platform adds hosted models, storage, training, serving and tracking behind one key. Where the line is."
+---
+
+`whileai` is two things that share one import, and it helps to know which
+one you are using.
+
+| | Library | Platform |
+|---|---|---|
+| **What it is** | A scientific Python package. Simulate, grade, measure, select, export. | A hosted service. Models, storage, training, serving, tracking. |
+| **Where it runs** | Your machine. Offline with `simulator=False`. | Our GPUs and storage, behind the While API. |
+| **Needs a key** | No. Bring your own model provider keys if you use one. | Yes. `whileai login`. |
+| **Calls** | `simulate`, `grade`, `pass_at`, `delta_report`, `optimize`, `export_*`, `verify.*`, `judge_trust`, `hack_scan` | `push_rows`, `datasets`, `train`, `serve`, `cut`, `hf_publish`, `training_run`, `agents`, `whileai login`, the terminal verbs |
+| **Docs** | The Library tab | This tab |
+
+## What the platform adds
+
+- **Hosted models.** A situation writer and a judge you did not have to
+  stand up, on your key, with a daily allowance on the trial tier. Leave
+  `agent=` off `simulate()` and the hosted Qwen answers; leave `judge=` off
+  `grade()` and hosted Phi-4 grades.
+- **Storage.** `data.push("name")` stores a run as a dataset with its
+  holdout split, provenance and the analyzer report. Datasets are what
+  training reads.
+- **Training and serving.** `wai.train(dataset, method="sft" | "dpo" | "grpo" | "rm")`
+  runs on hosted GPUs; `wai.serve("name", run)` puts the adapter behind an
+  OpenAI-compatible endpoint you can hand to `local_model`.
+- **Tracking.** Agents, behaviors, runs and verdicts as objects the
+  terminal verbs read: `whileai agents`, `whileai verdict <id>`,
+  `whileai promote <id> <version>`.
+
+Everything the platform stores can be pulled back as JSONL, and every
+number it reports is computed by the same library code you can run
+locally.
+
+## Where to go
+
+<CardGroup cols={2}>
+  <Card title="Sign in and keys" icon="key" href="/get-started/your-model-and-key">
+    Where the key goes and how the SDK finds it.
+  </Card>
+  <Card title="Command line" icon="terminal" href="/get-started/cli">
+    login, status, init-evals, and the platform verbs.
+  </Card>
+  <Card title="Datasets, training, serving" icon="server" href="/reference/platform">
+    push, train, serve, cut, publish, in the order a run happens.
+  </Card>
+  <Card title="Platform API" icon="code" href="/api/ingest">
+    Every platform call with its signature.
+  </Card>
+</CardGroup>

@@ -21,12 +21,20 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from http import HTTPStatus
 from typing import Any
 
 from whileai._env import getenv
 
+# FLUSH_EVERY_S = 15 / FLUSH_EVERY_CALLS = 50: the meter posts what it
+# owes every fifteen seconds or fifty hosted calls, whichever comes first,
+# and once more at exit (convention; the platform Usage page is minute-
+# resolution).
 FLUSH_EVERY_S = 15.0
 FLUSH_EVERY_CALLS = 50
+# DROPPED_BEFORE_TAKE = 3: after this many dropped reports the meter takes
+# the flush lock itself instead of waiting for the next call (convention).
+DROPPED_BEFORE_TAKE = 3
 
 
 def _api_url() -> str:
@@ -104,7 +112,7 @@ class UsageMeter:
             self._in += tokens_in
             self._out += tokens_out
         self.dropped += 1
-        if self.dropped >= 3:
+        if self.dropped >= DROPPED_BEFORE_TAKE:
             self._take()
         return False
 
@@ -121,7 +129,7 @@ class UsageMeter:
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as res:
-                return 200 <= res.status < 300
+                return HTTPStatus.OK <= res.status < HTTPStatus.MULTIPLE_CHOICES
         except (urllib.error.URLError, OSError, ValueError):
             return False
 

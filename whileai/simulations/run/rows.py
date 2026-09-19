@@ -10,6 +10,13 @@ import re
 from typing import Any
 
 from ..data import SimulationData
+from ..defaults import (
+    FAULT_STATUSES,
+    PASS_THRESHOLD,
+    SHORT_HASH_CHARS,
+    SYSTEM_PROMPT_HEAD_CHARS,
+    TOOL_SCHEMA_SPAN_CHARS,
+)
 from ..generate.coverage import cell_key as _cell_key_from_row
 from ..generate.coverage import coverage_point
 from ..generate.diversity import (
@@ -27,9 +34,9 @@ _SEARCH_ARMS = dict(SEARCH_ARMS)
 _RAW_TOOL_MARKUP = re.compile(r"</?tool_call>", re.I)
 
 
+_SPAN = f"{{0,{TOOL_SCHEMA_SPAN_CHARS}}}"
 _TOOL_SCHEMA_DUMP = re.compile(
-    r'"name"\s*:\s*"[^"]+".{0,500}"description"\s*:'
-    r'.{0,500}"parameters"\s*:',
+    r'"name"\s*:\s*"[^"]+".' + _SPAN + r'"description"\s*:.' + _SPAN + r'"parameters"\s*:',
     re.I | re.S,
 )
 
@@ -83,9 +90,6 @@ def _collect_finished(pending: dict, wait_s: float, *, retry: bool = False):
     return results, jobs_for
 
 
-SYSTEM_PROMPT_HEAD_CHARS = 120
-
-
 def system_prompt_stamp(text: str | None) -> tuple[str, str, int]:
     """The short hash, the opening chars and the length of the system
     prompt a row was generated under (#296). The hash is the one
@@ -93,8 +97,42 @@ def system_prompt_stamp(text: str | None) -> tuple[str, str, int]:
     enough to tell a full numbered policy from a bare prompt at a glance
     without reading the run's record."""
     policy = str(text or "")
-    sha = hashlib.sha256(policy.encode("utf-8")).hexdigest()[:16]
+    sha = hashlib.sha256(policy.encode("utf-8")).hexdigest()[:SHORT_HASH_CHARS]
     return sha, policy[:SYSTEM_PROMPT_HEAD_CHARS], len(policy)
+
+
+def failed_criteria(row: dict) -> list[str]:
+    """Names of the rubric criteria this row failed, from ``markers``.
+
+    The scalar reward is a mean over criteria, and a mean hides the thing the
+    search needs to aim at. A rule that fails 5% of the time never drags a
+    three-criterion mean under a 0.5 threshold, so a failure test that reads
+    only the scalar cannot see it, and the situation is never re-rolled to
+    produce more of it. Measured (#285): the criteria that got aimed at were
+    the ones with a world condition behind them; four rules about how the
+    agent phrased its reply were missed entirely, and their failure rates in
+    the source traces were 4 to 10%.
+
+    A criterion nothing ever fails carries no gradient (rlhf-book ch. 6:
+    groups where every rollout scores the same have zero advantage), and
+    difficulty filtering wants the band measured on the thing being trained,
+    not on an average that spans it (ch. 7).
+    """
+    markers = row.get("markers")
+    if not isinstance(markers, dict):
+        return []
+    failed = []
+    for name, value in markers.items():
+        if isinstance(value, bool):
+            if not value:
+                failed.append(str(name))
+            continue
+        try:
+            if float(value) < PASS_THRESHOLD:
+                failed.append(str(name))
+        except (TypeError, ValueError):
+            continue
+    return sorted(failed)
 
 
 def mutation_worthy(row: dict) -> bool:
@@ -114,7 +152,7 @@ def mutation_worthy(row: dict) -> bool:
         if not isinstance(step, dict):
             continue
         status = str(as_dict(step.get("result")).get("status", "")).lower()
-        if status in {"error", "timeout", "not_found", "denied", "malformed"}:
+        if status in FAULT_STATUSES:
             return True
     return False
 

@@ -27,17 +27,35 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from ..defaults import HACK_THRESHOLD
 from .grading import behavior_signature, dead_tools, dead_tools_note, looks_finished, tool_outcomes
 from .optimize import _binary_label, _messages
 
-#: |corr(reward, feature)| at or above this is flagged. Chosen from the
-#: RLVR signal sweep where the endorsed feature cleared 0.5 and delimiter
-#: hacks sat near 0.9; 0.3 catches the hack before it dominates.
-HACK_THRESHOLD = 0.3
-#: max / median reply length within one ask before the spread is flagged.
+# HACK_THRESHOLD = 0.3 (``defaults``): |corr(reward, feature)| at or above
+# this is flagged. From the RLVR signal sweep where the endorsed feature
+# cleared 0.5 and delimiter hacks sat near 0.9; 0.3 catches the hack
+# before it dominates (Gao et al. arXiv:2210.10760 is the mechanism).
+# DEFAULT_MAX_SPREAD = 4.0: max / median reply length within one ask
+# before the spread is flagged; a reply four times its ask's median is a
+# different kind of reply, not a longer one (convention, untested).
 DEFAULT_MAX_SPREAD = 4.0
-#: token-set Jaccard at or above this makes two asks near-duplicates.
+# NEAR_DUP_JACCARD = 0.8: token-set Jaccard at or above this makes two
+# asks near-duplicates. Same 80% share as the decontamination overlap
+# rule (``DECONTAM_OVERLAP``), applied to token sets (convention).
 NEAR_DUP_JACCARD = 0.8
+# TRUNCATION_MIN_CHARS = 200: the shortest reply ``is_truncated`` will
+# read as cut. Looser than ``TRUNCATED_REPLY_CHARS`` (600, the grader's
+# verdict) on purpose: this is a report-only count and a 200-character
+# reply that stops mid-sentence is still worth listing (convention).
+TRUNCATION_MIN_CHARS = 200
+# SILENT_ROWS_MIN = 2 and SILENT_ROWS_SHARE = 0.1: rows that made no tool
+# call before the run is called part-hollow; two rows, or a tenth of them,
+# is enough to say so, one odd row is not worth the noise (convention).
+SILENT_ROWS_MIN = 2
+SILENT_ROWS_SHARE = 0.1
+# PEARSON_MIN_POINTS = 3: fewer points give a correlation of +/-1 by
+# construction.
+PEARSON_MIN_POINTS = 3
 
 _WORD = re.compile(r"[a-z0-9]+")
 
@@ -97,7 +115,7 @@ def is_truncated(row: dict) -> bool:
     if "truncat" in reason or "cut off" in reason:
         return True
     final = str(row.get("final_text") or "").rstrip()
-    return len(final) >= 200 and not looks_finished(final)
+    return len(final) >= TRUNCATION_MIN_CHARS and not looks_finished(final)
 
 
 def dedupe_groups(rows: Sequence[dict]) -> tuple[list[dict], dict[str, Any]]:
@@ -186,7 +204,7 @@ def length_report(
     spread_groups = 0
     multi = 0
     for members in _group(rows).values():
-        if len(members) < 2:
+        if len(members) < 2:  # noqa: PLR2004  # a duplicate needs a pair
             continue
         multi += 1
         group_lengths = [reply_length(r) for r in members]
@@ -212,7 +230,7 @@ def drop_truncated(rows: Sequence[dict]) -> tuple[list[dict], dict[str, Any]]:
 
 def pearson(xs: Sequence[float], ys: Sequence[float]) -> float | None:
     n = len(xs)
-    if n < 3 or n != len(ys):
+    if n < PEARSON_MIN_POINTS or n != len(ys):
         return None
     mx = sum(xs) / n
     my = sum(ys) / n
@@ -361,7 +379,7 @@ def coverage_warnings(
         # while measuring nothing. Two rows, or a tenth of them, is
         # enough to say so; one odd row is not worth the noise.
         silent = [r for r in row_list if tool_calls(r) == 0]
-        if silent and (len(silent) >= 2 or len(silent) / n >= 0.1):
+        if silent and (len(silent) >= SILENT_ROWS_MIN or len(silent) / n >= SILENT_ROWS_SHARE):
             asks = list(dict.fromkeys(str(r.get("prompt") or "") for r in silent))
             shown = "; ".join(a[:60] for a in asks[:3] if a)
             out.append(

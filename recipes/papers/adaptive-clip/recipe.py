@@ -765,6 +765,7 @@ def main() -> None:
                     "gpu_minutes": 0,
                 }
                 checks["run_std"] = run_std
+                checks["run_std_runs"] = int(noise["n_runs"])
                 checks["length_before"] = mean_length(base_runs[0])
             arm_rows[arm] = out["after_rows"]
             results["arms"][arm] = {
@@ -784,6 +785,7 @@ def main() -> None:
             arm_rows["recipe"],
             target="pass_at_1",
             run_std=run_std,
+            run_std_runs=int(checks.get("run_std_runs") or EVAL_RUNS),
             proxy=PROXY,
         )
         results["delta"] = {
