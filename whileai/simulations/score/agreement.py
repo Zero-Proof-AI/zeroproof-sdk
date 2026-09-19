@@ -154,7 +154,12 @@ def judge_agreement(
     second row list from another scoring pass, matched by rollout id,
     scenario id plus rollout index, or prompt plus final text. Only exact
     0/1 labels on both sides count; partial scores and unjudged rows are
-    reported as skipped, not guessed.
+    reported as skipped (``n_skipped``), not guessed. A fractional reward
+    is what a ``Rubric`` of plain principles returns (the mean of its
+    criteria), so a judge built that way loses every partially met row
+    here; ``judge_trust`` counts that share against ``MAX_SKIPPED_SHARE``
+    and says so, since the rows kept are the ones the judge was sure
+    about and agreement over them reads high by construction (#345).
 
     Returns ``n``, ``agreement``, ``kappa`` (Cohen, chance-corrected), the
     confusion counts, ``pass_when_gold_fail`` (the leak rate: gold

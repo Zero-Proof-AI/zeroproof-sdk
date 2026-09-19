@@ -23,6 +23,16 @@ Rules the tooling enforces (CI fails otherwise):
 - To see what a cut would ship without doing it:
   `uv run python .github/scripts/release.py --dry-run`
 
+## Coding standard
+
+`docs/reference/style.md` is the standard: PyTorch/DSPy ergonomics. One
+import (`import whileai as wai`), objects carry configuration and calls
+carry data, at most eight parameters on a public call, reports print
+themselves (no `format_*` twins), verbs a scientist says. New public
+names go one dot down or become methods on the rows object.
+`tests/api/test_style_ratchet.py` pins today's counts of the retired
+shapes; lower a pin when you retire a name, never raise one.
+
 ## Pull requests
 
 - `gh pr create` fails on this repo ("must be a collaborator"); open PRs

@@ -135,7 +135,12 @@ the field `attach_labels` fills when you hand-label a sample) or a
 second row list from another scoring pass, matched by rollout id,
 scenario id plus rollout index, or prompt plus final text. Only exact
 0/1 labels on both sides count; partial scores and unjudged rows are
-reported as skipped, not guessed.
+reported as skipped (`n_skipped`), not guessed. A fractional reward
+is what a `Rubric` of plain principles returns (the mean of its
+criteria), so a judge built that way loses every partially met row
+here; `judge_trust` counts that share against `MAX_SKIPPED_SHARE`
+and says so, since the rows kept are the ones the judge was sure
+about and agreement over them reads high by construction (#345).
 
 Returns `n`, `agreement`, `kappa` (Cohen, chance-corrected), the
 confusion counts, `pass_when_gold_fail` (the leak rate: gold
@@ -808,6 +813,7 @@ judge_trust(
     allow_model_gold: bool = False,
     length_gap_flag: float = 0.15,
     flip_flag: float = 0.1,
+    max_skipped_share: float = 0.1,
 ) -> dict[str, Any]
 ```
 
@@ -828,6 +834,14 @@ given, `disagreements` (the review queue of rows the judge and the
 humans disagree on), `floors`, `n_labeled` and `n_rows`.
 `format_judge_trust(report)` prints the whole thing. The module
 docstring lays out each check and its rlhf-book chapter.
+The floors and flags are keywords with their defaults in
+`whileai.simulations.defaults`: `min_agreement` (0.8, the
+human-human agreement of MT-Bench, arXiv:2306.05685), `min_kappa`
+(0.6, Landis and Koch "substantial"), `length_gap_flag` (0.15),
+`flip_flag` (0.10) and `max_skipped_share` (0.10, the share of
+labeled rows the judge may leave out of the agreement count with a
+fractional reward before `ok` is false; `report["skipped"]`
+carries the counts).
 
 * `rows`: graded rows carrying the judge's `reward`. Rows that also
   carry `gold` (0/1, default column `gold_reward`, what
@@ -1827,6 +1841,7 @@ coverage_gap(
     tools: Sequence[dict],
     system_prompt: str = '',
     rows: Sequence[dict] | None = None,
+    rule_cap: int | None = None,
 ) -> dict[str, Any]
 ```
 
@@ -1862,6 +1877,15 @@ words with, and the stance its words show. Two axes (`world_state`,
 says the order is missing or the tool timed out, so a hand-written
 suite leaves them at one point and `notes` says so.
 
+With `rows` (graded rollouts from a run) the report also checks the
+world side: rules whose rows all ended in the same tool fault are
+rules the asks reach but the fixtures never let happen.
+
+The rule axis is every clause of the policy (`rule_cap=None`, the
+default `RULE_AXIS_CAP_REPORT`): a report over an existing suite
+has no grid to bound. A number keeps the first that many clauses in
+document order; `n_rules_total` and `rules_truncated` say what
+was left off and `notes` carries the count (#391).
 ``python
 gap = wai.coverage_gap(["Where is order 4473?", "Cancel order 9911."],
                        tools=TOOLS, system_prompt=POLICY)
@@ -1894,14 +1918,24 @@ The gap report as the block a person actually reads.
 ### preflight
 
 ```python
-preflight(tools: Sequence[dict], system_prompt: str = '') -> dict[str, Any]
+preflight(
+    tools: Sequence[dict],
+    system_prompt: str = '',
+    rule_cap: int | None = None,
+) -> dict[str, Any]
 ```
 
 Spec-quality report for an agent. Report only; nothing is changed.
 
 `warnings` is the list a developer should read before generating
 thousands of rows; `cells` is the covering-grid size the same way
-`recommend` counts it.
+`recommend` counts it. `rules` is every clause of the policy
+(`rule_cap=None`, the default `RULE_AXIS_CAP_REPORT`); a number
+keeps the first that many in document order, `n_rules_total` says
+how many the policy has, `rules_truncated` whether any were left
+off, and a `warnings` line names the count (#391). The generation
+grid keeps its own cap (`RULE_AXIS_CAP_GRID`); `cells` is counted
+on the same axis `rules` shows.
 
 ## privileged
 
@@ -2160,6 +2194,23 @@ ungraded. The result carries `reward` (`Rubric.score`), `reason`,
 1.0 clean / 0.0 exhibited), `criteria` (the raw verdicts),
 `rubric_version` and the score breakdown. The judge's name folds the
 rubric version in when one is fixed.
+
+Two things about the verdict worth knowing before it is trusted. A
+rubric of plain principles scores the *mean* of its criteria, so three
+principles return 0, 1/3, 2/3 or 1, and `judge_agreement` /
+`judge_trust` count exact 0/1 rewards only: every partially met row
+is skipped, and the agreement number is read off the rows the judge
+was sure about (#345). Give each `Criterion` `kind="hard"` for a
+0/1 verdict (`Rubric.score`), or accept that `judge_trust` reports
+the skipped share and pulls `ok` when it passes
+`MAX_SKIPPED_SHARE`. And whether a tool was *called* is handed to
+the judge as a fact, not left for it to infer: the payload carries
+`tools_called` (steps that returned a result) and
+`tools_not_called`, and the system prompt says a reply that
+announces a call it never made has not made it (#346: without the
+list, a 4B judge passed 18 of 18 announced-but-never-made
+escalations). A criterion that must be exact belongs in a
+`grader=` that reads `steps` itself.
 
 The hosted judge scales to zero, so the first row through warms it once
 (`warm_judge`, a 600s budget) while the rest of the fan-out waits.

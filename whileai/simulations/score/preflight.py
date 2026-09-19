@@ -25,7 +25,7 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
-from ..defaults import MESSAGE_EXAMPLES, TEXT_HEURISTICS
+from ..defaults import MESSAGE_EXAMPLES, RULE_AXIS_CAP_REPORT, TEXT_HEURISTICS
 
 #: Untested policy rules named in the preflight summary before "and N more".
 _UNTESTED_SHOWN = 3
@@ -196,14 +196,36 @@ def _policy_mentions(name: str, policy: str) -> bool:
     return nouns_seen and verb_seen
 
 
-def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
+def _rule_cap_note(shown: int, total: int, cap: int | None, *, where: str) -> str | None:
+    """The line a report carries when its rule axis is shorter than the
+    policy: how many clauses are on it, how many the prompt has, and the
+    knob that widens it. ``None`` when nothing was dropped."""
+    if cap is None or total <= shown:
+        return None
+    dropped = total - shown
+    return (
+        f"{shown} of {total} policy clauses are on the rule axis (rule_cap={cap}); the other "
+        f"{dropped} are never checked, so '{shown} of {shown} rules covered' is not the "
+        f"policy. Pass rule_cap=None to {where} to check every clause, or a larger number."
+    )
+
+
+def preflight(
+    tools: Sequence[dict], system_prompt: str = "", *, rule_cap: int | None = RULE_AXIS_CAP_REPORT
+) -> dict[str, Any]:
     """Spec-quality report for an agent. Report only; nothing is changed.
 
     ``warnings`` is the list a developer should read before generating
     thousands of rows; ``cells`` is the covering-grid size the same way
-    ``recommend`` counts it.
+    ``recommend`` counts it. ``rules`` is every clause of the policy
+    (``rule_cap=None``, the default ``RULE_AXIS_CAP_REPORT``); a number
+    keeps the first that many in document order, ``n_rules_total`` says
+    how many the policy has, ``rules_truncated`` whether any were left
+    off, and a ``warnings`` line names the count (#391). The generation
+    grid keeps its own cap (``RULE_AXIS_CAP_GRID``); ``cells`` is counted
+    on the same axis ``rules`` shows.
     """
-    from ..generate.scenarios import build_dimensions, scenario_regions
+    from ..generate.scenarios import build_dimensions, rule_axis, scenario_regions
 
     tools = list(tools or [])
     policy = str(system_prompt or "")
@@ -265,7 +287,11 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
         for entry in per_tool
         if entry["name"] and not _policy_mentions(entry["name"], policy)
     )
-    dimensions = build_dimensions(tools, policy)
+    dimensions = build_dimensions(tools, policy, rule_cap=rule_cap)
+    rules, n_rules_total = rule_axis(policy, cap=rule_cap)
+    cap_note = _rule_cap_note(len(rules), n_rules_total, rule_cap, where="preflight")
+    if cap_note:
+        warnings.append(cap_note)
     cells = len(scenario_regions(tools, policy, mode="sft", dimensions=dimensions))
     return {
         "n_tools": len(tools),
@@ -274,6 +300,9 @@ def preflight(tools: Sequence[dict], system_prompt: str = "") -> dict[str, Any]:
         # The policy branches the engine extracted: the rule axis of the
         # grid, and what ``coverage_gap`` checks a test suite against.
         "rules": [str(rule) for rule in dimensions.get("rule") or []],
+        "n_rules_total": n_rules_total,
+        "rules_truncated": n_rules_total > len(rules),
+        "rule_cap": rule_cap,
         "tools": per_tool,
         "destructive_tools": destructive,
         "missing_result_shapes": missing_shapes,
@@ -764,6 +793,7 @@ def coverage_gap(
     tools: Sequence[dict],
     system_prompt: str = "",
     rows: Sequence[dict] | None = None,
+    rule_cap: int | None = RULE_AXIS_CAP_REPORT,
 ) -> dict[str, Any]:
     """List the parts of an agent's policy that the asks you already send never reach.
 
@@ -797,20 +827,33 @@ def coverage_gap(
     says the order is missing or the tool timed out, so a hand-written
     suite leaves them at one point and ``notes`` says so.
 
+    With ``rows`` (graded rollouts from a run) the report also checks the
+    world side: rules whose rows all ended in the same tool fault are
+    rules the asks reach but the fixtures never let happen.
+
+    The rule axis is every clause of the policy (``rule_cap=None``, the
+    default ``RULE_AXIS_CAP_REPORT``): a report over an existing suite
+    has no grid to bound. A number keeps the first that many clauses in
+    document order; ``n_rules_total`` and ``rules_truncated`` say what
+    was left off and ``notes`` carries the count (#391).
     ```python
     gap = wai.coverage_gap(["Where is order 4473?", "Cancel order 9911."],
                            tools=TOOLS, system_prompt=POLICY)
     print(gap["untested_rules"], gap["untested_tools"])
     ```
     """
-    from ..generate.scenarios import build_dimensions
+    from ..generate.scenarios import build_dimensions, rule_axis
 
     tool_list = list(tools or [])
     policy = str(system_prompt or "")
     ask_list = _normalize_asks(asks)
-    dimensions = build_dimensions(tool_list, policy)
+    dimensions = build_dimensions(tool_list, policy, rule_cap=rule_cap)
+    _, n_rules_total = rule_axis(policy, cap=rule_cap)
     names = [n for n in (str(_fn(t).get("name") or "") for t in tool_list) if n]
     rules = [str(r) for r in dimensions.get("rule") or []]
+    cap_note = _rule_cap_note(
+        len(rules) if n_rules_total else 0, n_rules_total, rule_cap, where="coverage_gap"
+    )
     branch = {rule: _is_branch_rule(rule) for rule in rules}
     rule_words = {rule: _content_words(rule) for rule in rules}
     rule_tools = {rule: [n for n in names if _policy_mentions(n, rule)] for rule in rules}
@@ -858,6 +901,8 @@ def coverage_gap(
     pressure = sum(1 for entry in per_ask if entry["stance"] != "ordinary")
 
     notes: list[str] = []
+    if cap_note:
+        notes.append(cap_note)
     if untested_rules:
         n = len(untested_rules)
         notes.append(
@@ -887,10 +932,11 @@ def coverage_gap(
             "good day only. Add pressure asks, or take them from the stance axis"
         )
 
+    of_total = f" (of {n_rules_total} in the prompt)" if cap_note else ""
     summary_bits = [
         f"{len(ask_list)} ask{'s' if len(ask_list) != 1 else ''} cover "
         f"{len(rules) - len(untested_rules)} of {len(rules)} policy rule"
-        f"{'s' if len(rules) != 1 else ''} and "
+        f"{'s' if len(rules) != 1 else ''}{of_total} and "
         f"{len(names) - len(untested_tools)} of {len(names)} tool"
         f"{'s' if len(names) != 1 else ''}"
     ]
@@ -914,6 +960,9 @@ def coverage_gap(
         "asks": list(ask_list),
         "axes": axes,
         "rules": rules,
+        "n_rules_total": n_rules_total,
+        "rules_truncated": bool(cap_note),
+        "rule_cap": rule_cap,
         "untested_rules": untested_rules,
         "untested_tools": untested_tools,
         "stances": dict(touched["stance"]),
@@ -993,7 +1042,12 @@ def format_coverage_gap(report: dict[str, Any]) -> str:
         "",
         f"asks                  {report.get('n_asks', 0)}"
         + ("  (each one once)" if report.get("single_shot") else ""),
-        f"policy rules covered  {len(rules) - len(untested_rules)} of {len(rules)}",
+        f"policy rules covered  {len(rules) - len(untested_rules)} of {len(rules)}"
+        + (
+            f" (of {report['n_rules_total']} in the prompt; rule_cap={report.get('rule_cap')})"
+            if report.get("rules_truncated")
+            else ""
+        ),
         f"tools covered         {n_tools - len(untested_tools)} of {n_tools}",
         "stance                "
         + (

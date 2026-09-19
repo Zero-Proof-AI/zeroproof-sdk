@@ -5,6 +5,45 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `coverage_gap` and `preflight` check every clause of the system prompt.
+  Both built their rule axis with the generation grid's cap, the first 16
+  clauses in document order, and said nothing, so a 68 KB production
+  policy with about 160 imperative clauses read as "14 of 16 policy rules
+  covered" with `Read it.` and `Follow it.` on the axis and every rule
+  further down never checked (#391). A report over an existing suite has
+  no grid to bound: the default is now every clause (`rule_cap=None`,
+  `defaults.RULE_AXIS_CAP_REPORT`). `rule_cap=` on either call sets a
+  number; the report then carries `n_rules_total`, `rules_truncated` and
+  `rule_cap`, the summary reads "16 of 16 policy rules (of 163 in the
+  prompt)", and a `warnings` (`preflight`) or `notes` (`coverage_gap`)
+  line says how many clauses were left off and how to widen the axis.
+  The grid keeps its cap under its own name (`defaults.RULE_AXIS_CAP_GRID`,
+  16, `ZP_RULE_CAP` overrides), and a run whose policy has more clauses
+  than that says so once in `data.warnings` with the count.
+  `policy_sections(cap=None)` returns every clause; `rule_axis(policy,
+  cap=)` returns the axis and the total.
+- Coding standard. `docs/reference/style.md` sets the ergonomics every
+  public name is held to, copied from PyTorch and DSPy: one import
+  (`import whileai as wai`), objects carry configuration and calls carry
+  data, at most eight parameters on a public call, one rows object
+  through every stage, reports that print themselves instead of
+  `format_*` twins, verbs a scientist says, settings once with per-call
+  override. The page ends with the target front-page program and the
+  migration order. `tests/api/test_style_ratchet.py` pins today's
+  counts of the retired shapes (212 flat exports, 13 `format_*`, the
+  calls over eight parameters) and fails a PR that raises any of them.
+  CLAUDE.md and CONTRIBUTING.md point at it.
+- Docs audit, three pages against 0.82. `concepts/engine.mdx` named
+  `persona` as a coverage axis and left out `stance`; the six are `tool`,
+  `rule`, `stance`, `world_state`, `tool_condition` and `history`
+  (`COVERAGE_AXES`). The same page twice said every row keeps temperature
+  and per-token logprobs, which needs `logprobs=True` on a model backend.
+  `concepts/faq.mdx` promised endpoints for Llama and Nemotron, but an
+  adapter is servable only on `SERVED_BASES` (`Qwen/Qwen3-4B`,
+  `microsoft/phi-4`), and said the SDK drafts the policy from your
+  sentence, when the sentence is the policy and `draft_tools` drafts the
+  tools. `character-training.md` was accurate; its two quoted outputs
+  re-run byte-identical and its dataset splits still measure 60/144/35.
 - `holdout_size(effect, before=rows)` on a saturated baseline no longer
   answers `n_tasks=2`. Rows whose tasks all pass gave `p = 1`, a binomial
   variance of 0 and the sizing formula's floor, with no warning; a golden
@@ -18,18 +57,30 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   baseline sits inside the 20-80% difficulty band, rlhfbook.com ch. 14;
   DAPO drops prompts at accuracy 0 and 1 for the same reason). Every path
   now returns `saturated` and `warnings`.
-
-- Docs audit, three pages against 0.82. `concepts/engine.mdx` named
-  `persona` as a coverage axis and left out `stance`; the six are `tool`,
-  `rule`, `stance`, `world_state`, `tool_condition` and `history`
-  (`COVERAGE_AXES`). The same page twice said every row keeps temperature
-  and per-token logprobs, which needs `logprobs=True` on a model backend.
-  `concepts/faq.mdx` promised endpoints for Llama and Nemotron, but an
-  adapter is servable only on `SERVED_BASES` (`Qwen/Qwen3-4B`,
-  `microsoft/phi-4`), and said the SDK drafts the policy from your
-  sentence, when the sentence is the policy and `draft_tools` drafts the
-  tools. `character-training.md` was accurate; its two quoted outputs
-  re-run byte-identical and its dataset splits still measure 60/144/35.
+- The rubric judge is told which tools were called instead of being asked
+  to notice which were not (#346). The judge payload carries
+  `tools_called` (the tool of every step that returned a result, in
+  order) and `tools_not_called` (declared tools with no such step) in its
+  head, where a long trajectory's cut cannot reach them, and
+  `RUBRIC_JUDGE_SYSTEM` says a reply that announces a call it never made
+  has not made it. On #346's billing agent the hosted 4B judge passed 18
+  of 18 rows whose reply said "I will escalate this" over a `steps` array
+  with no `escalate_to_human` in it, and spelling the rule out in the
+  criterion did not move that; the list is the fact it needed.
+  `grade_llm.tools_called(row)` is the helper. `rubric_judge`'s docstring
+  says both this and that a rubric of principles returns fractions.
+- `judge_trust` no longer prints `PASS` on the rows the judge was sure
+  about (#345). `judge_agreement` counts exact 0/1 rewards only, so a
+  `Rubric` of principles (the mean of its criteria) dropped every
+  partially met row, and 80 labeled rows read `PASS, agreement 100%,
+  n=40` with `ok` true. The report now carries `skipped` (labeled rows
+  with a fractional reward, the share, the floor); over
+  `max_skipped_share` (`MAX_SKIPPED_SHARE`, 0.10) `ok` is false, the
+  warning names the count, the floor constant and the fix
+  (`Criterion(kind="hard")`), and `format_judge_trust` prints
+  `INCONCLUSIVE: 40 of 80 labeled rows skipped (50%, over
+  MAX_SKIPPED_SHARE 10%); usable n=40` in place of the verdict. Under the
+  floor the count is still said next to `n`.
 
 ## 0.82 (2026-09-18)
 

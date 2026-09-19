@@ -183,7 +183,14 @@ case, not another ask.
 
 `preflight(tools, system_prompt)["rules"]` is the same rule axis on its
 own, which is the list of policy branches the engine extracted from your
-prompt.
+prompt. Both reports put every clause of the prompt on the axis
+(`rule_cap=None`, the default): a 160-clause production policy is checked
+as 160 rules, not the first 16. Pass `rule_cap=16` to keep the first
+sixteen in document order; the report then carries `n_rules_total`,
+`rules_truncated` and a line with the count it left off. The generation
+grid itself keeps its cap (`RULE_AXIS_CAP_GRID`, 16, `ZP_RULE_CAP`
+overrides) so the covering array stays bounded, and a run whose policy has
+more clauses than that says so in `data.warnings`.
 
 ## 4. Run it
 
