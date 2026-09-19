@@ -354,6 +354,11 @@ Keep the rows worth training on, for SFT or RL: `optimize` as an object.
   at the token cap (DAPO's overlong handling).
 * `output`: write the kept rows there as JSONL.
 
+In both modes a row whose reply quotes its own privileged context (the
+reference answer, the principle, the hidden world state) is dropped
+before any other gate and counted in the printed report, so `export`
+never refuses a row this kept.
+
 ## simulations.data
 
 SimulationData, conversation rebuild, row export, and the grade
@@ -647,8 +652,9 @@ With no `mode`: diverse pass-labeled demonstrations via
 `select_for_sft`, one of each distinct way of being right before
 any repeats, junk and duplicate prompts dropped. With
 `mode="rl"` or `"sft"`: `optimize`, the full gate sequence
-(difficulty band, unanimous groups, duplicates, truncation, hack
-scan), with `band`, `endorsed` and `truncated` as there.
+(privileged leaks, difficulty band, unanimous groups, duplicates,
+truncation, hack scan), with `band`, `endorsed` and
+`truncated` as there.
 Requires graded rows — grade in-loop (`grade=True`, `grader=`)
 or afterwards with `grade()`. The report lands in
 `search["selection"]` and on the result's `.report`.

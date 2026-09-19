@@ -63,9 +63,12 @@ your judge catches exactly those rows before you trust it on real ones.
     ```
   </Step>
   <Step title="Keep the rows worth training on">
-    `select` runs the gates: the 20 to 80% difficulty band, unanimous
-    groups, duplicates, truncation, a scan for what the reward is really
-    tracking. Print it and it says what each gate dropped and why.
+    `select` runs the gates: replies that quote the answer key the grader
+    was given, the 20 to 80% difficulty band, unanimous groups,
+    duplicates, truncation, a scan for what the reward is really tracking.
+    Print it and it says what each gate dropped and why. Four of the
+    stand-in's planted mistakes recite the answer key, and they never
+    reach the training file.
 
     ```python
     rows = scored.select(mode="rl")
@@ -74,12 +77,24 @@ your judge catches exactly those rows before you trust it on real ones.
     ```
 
     ```text
-    rl selection: kept 29 of 64 rows
+    rl selection: kept 27 of 64 rows
       band 20%..80% pass rate: 0 asks dropped (0 too easy, 0 too hard)
-      unanimous groups dropped: 5; duplicates dropped: 27; truncated drop: 0
-      groups kept: 11
+      unanimous groups dropped: 6; duplicates dropped: 27; truncated drop: 0
+      privileged leaks dropped: 4
+      groups kept: 10
       hack scan: train
+      warning: 27 duplicate rollout(s) within 13 ask(s) dropped
+      warning: reward punishes reply length (corr -0.74); check the judge before training
+      warning: reward punishes boilerplate (corr -0.32); check the judge before training
+      warning: reward punishes hedging (corr -0.37); check the judge before training
+      warning: 3 rollouts per ask at the median; the floor is coarse below 4, re-scan at repeats>=8 before acting on a close call
+      warning: Difficulty was measured from 4 rollouts per task, so a task's band assignment can be off by about ±0.3. Use repeats=16 for a firmer band (the count the 20-80 band is measured from, rlhfbook.com/c/07-reasoning).
     ```
+
+    The warnings are part of the answer. The judge here reads the label
+    the stand-in left behind, and the planted mistakes add words, so
+    shorter replies really are better; on a real judge that line means
+    check whether it grades the job or the word count.
   </Step>
 </Steps>
 

@@ -276,6 +276,51 @@ def filter_rl_rows(
     return kept, report
 
 
+def drop_privileged_leaks(rows: Sequence[dict]) -> tuple[list[dict], dict[str, Any]]:
+    """Drop rows whose reply quotes their own ``privileged`` block. Does
+    not mutate ``rows``.
+
+    The block (``reference``, ``principle``, ``hidden_state``) is what the
+    grader was told and the agent was not. A reply that recites it did not
+    earn its reward, and ``export_dataset`` refuses such rows under
+    ``validate=True`` because the scrub removes the key and not the reply.
+    So the gate runs first, in both modes, and a selection never keeps a
+    row the export will refuse. The report carries ``n_checked`` (rows that
+    carried the block), ``n_dropped``, ``leaked`` (up to 20 rows:
+    ``scenario_id``, ``rollout_index``, ``field``, ``needle``) and
+    ``checked`` (False when no row carried the block, so a zero is vacuous).
+    Same rule as ``leak_report`` (``LEAK_MIN_QUOTE_CHARS``).
+    """
+    from .privileged import row_leak  # style imports this module; keep the cycle lazy
+
+    kept: list[dict] = []
+    leaked: list[dict[str, Any]] = []
+    n_checked = 0
+    for row in rows:
+        found = row_leak(row) if isinstance(row, dict) else None
+        if found is None:
+            kept.append(row)
+            continue
+        n_checked += 1
+        if not found:
+            kept.append(row)
+            continue
+        leaked.append(
+            {
+                "scenario_id": row.get("scenario_id"),
+                "rollout_index": row.get("rollout_index"),
+                **found,
+            }
+        )
+    report = {
+        "checked": n_checked > 0,
+        "n_checked": n_checked,
+        "n_dropped": len(leaked),
+        "leaked": leaked[:20],
+    }
+    return kept, report
+
+
 def _group_label_lists(rows: Sequence[dict]) -> dict[str, list[int]]:
     """Binary labels per task (grouped by ``task_key``). Unlabeled rows skip."""
     groups: dict[str, list[int]] = {}
@@ -453,6 +498,10 @@ def select_for_sft(
     rng = random.Random(int(seed))
     scored: list[tuple[float, dict]] = []
     n_wrong = n_junk = 0
+    # A pass that recites the answer key is not a demonstration; the
+    # judge that read the same key could not tell (#249).
+    graded = rows  # every graded rollout: the count and completions-per-prompt read it
+    rows, leaks = drop_privileged_leaks(rows)
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -480,7 +529,7 @@ def select_for_sft(
         picked_overall = [row for _, row in scored[:limit]]
         pool = [row for _, row in scored]
         return picked_overall, _sft_report(
-            rows, pool, picked_overall, n_wrong, n_junk, goal, select, limit, min_reward
+            graded, leaks, pool, picked_overall, n_wrong, n_junk, goal, select, limit, min_reward
         )
     by_prompt: dict[str, list[tuple[float, dict]]] = {}
     for value, row in scored:
@@ -516,12 +565,13 @@ def select_for_sft(
             break
         round_i += 1
     return selected, _sft_report(
-        rows, eligible, selected, n_wrong, n_junk, goal, select, None, min_reward
+        graded, leaks, eligible, selected, n_wrong, n_junk, goal, select, None, min_reward
     )
 
 
 def _sft_report(
     rows: Sequence[dict],
+    leaks: dict[str, Any],
     eligible: Sequence[dict],
     selected: Sequence[dict],
     n_wrong: int,
@@ -538,6 +588,8 @@ def _sft_report(
     buckets = {behavior_signature(r) for r in eligible}
     report: dict[str, Any] = {
         "n": len(rows),
+        "privileged_leaks_dropped": leaks["n_dropped"],
+        "privileged_leaks": leaks,
         "n_eligible": len(eligible),
         "n_selected": len(selected),
         "n_not_pass": n_wrong,
@@ -877,6 +929,9 @@ def select_for_rl(
         }
         prior_report["rows_dropped"] = before_n - len(rows)
         prior_report["prompt_set_sha"] = plan["prompt_set_sha"]
+    n_in = len(rows)
+    graded_rows = rows  # every graded rollout, for the calibration stamp
+    rows, leak_rep = drop_privileged_leaks(rows)
     penalized = kept_overlong = 0
     if truncated != "drop":
         marked: list[dict] = []
@@ -1011,7 +1066,9 @@ def select_for_rl(
             break
         round_i += 1
     report = {
-        "n": len(rows),
+        "n": n_in,
+        "privileged_leaks_dropped": leak_rep["n_dropped"],
+        "privileged_leaks": leak_rep,
         "n_after_gates": base_report["n_kept"],
         "n_after_trim": len(kept),
         "unanimous_groups_dropped": trim_report["n_groups_dropped"],
@@ -1037,7 +1094,7 @@ def select_for_rl(
         "hack_scan": hack_scan(selected, endorsed=endorsed),
         "signal": group_signal(selected, lo=lo, hi=hi),
         "eval_sourced": eval_sourced(selected),
-        "calibration": carry_calibration(rows, selected),
+        "calibration": carry_calibration(graded_rows, selected),
     }
     report["hygiene_warnings"] = hygiene_warnings(
         duplicates=dup_report,
@@ -1304,7 +1361,10 @@ def optimize(
     * ``mode``: ``"sft"`` or ``"rl"``. Defaults to the run's own mode for a
       ``SimulationData`` and to ``"rl"`` otherwise. SFT picks diverse
       correct demonstrations (``select_for_sft``); RL keeps whole mixed
-      groups, never a split one (``select_for_rl``).
+      groups, never a split one (``select_for_rl``). Both drop a row whose
+      reply quotes its own privileged context first
+      (``drop_privileged_leaks``; ``privileged_leaks_dropped`` in the
+      report), so ``export_dataset`` never refuses what was kept.
     * ``target``: about how many rows to keep, 1000 by default.
     * ``band``: the RL difficulty band as a pass-rate range, ``(0.2, 0.8)``
       by default: asks the policy always or never solves carry no

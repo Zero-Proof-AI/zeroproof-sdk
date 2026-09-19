@@ -57,6 +57,7 @@ class Selection(RowList):
                 f"duplicates dropped: {(r.get('duplicates') or {}).get('n_dropped', 0)}; "
                 f"truncated {r.get('truncated_policy', 'drop')}: {r.get('truncated_dropped', 0)}"
             )
+            lines.append(f"  privileged leaks dropped: {r.get('privileged_leaks_dropped', 0)}")
             lines.append(f"  groups kept: {r.get('groups_selected', 0)}")
             scan = r.get("hack_scan") or {}
             if scan.get("regime"):
@@ -66,6 +67,7 @@ class Selection(RowList):
                 f"  eligible {r.get('n_eligible', 0)} (reward >= {r.get('min_reward', 1.0)}), "
                 f"junk {r.get('n_junk', 0)}, not passing {r.get('n_not_pass', 0)}"
             )
+            lines.append(f"  privileged leaks dropped: {r.get('privileged_leaks_dropped', 0)}")
             lines.append(
                 f"  distinct behaviors: {r.get('unique_behaviors', 0)}, "
                 f"covered: {r.get('behaviors_covered', 0)}"
@@ -141,6 +143,11 @@ def select(
     * ``truncated``: ``"drop"``, ``"keep"`` or ``"penalize"`` for rollouts cut
       at the token cap (DAPO's overlong handling).
     * ``output``: write the kept rows there as JSONL.
+
+    In both modes a row whose reply quotes its own privileged context (the
+    reference answer, the principle, the hidden world state) is dropped
+    before any other gate and counted in the printed report, so ``export``
+    never refuses a row this kept.
     """
     from .simulations.score.optimize import DEFAULT_BAND, optimize
 
