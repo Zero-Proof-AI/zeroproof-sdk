@@ -7,6 +7,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 - TrainerCallback forwards TRL's `completions/clipped_ratio` as `clip_ratio`,
   the length-cap share the platform's Rollouts tile draws.
+- Docs: the 30 recipes are pages on the site, under Recipes in the Library
+  tab, one page per `recipes/**/README.md` plus an index per step and for
+  the papers and community sections. `scripts/gen_recipe_docs.py` generates
+  them (title into frontmatter, relative links resolved to doc paths or
+  GitHub URLs, bare `<` and `{` escaped for MDX, untagged fences tagged),
+  and `--check` in the docs workflow fails a PR whose README edit did not
+  regenerate them. Three recipe READMEs had relative links one directory
+  short (`../grpo`, `../../docs/...`); they now resolve.
 
 ## 0.88 (2026-09-19)
 
