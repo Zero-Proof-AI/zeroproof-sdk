@@ -33,22 +33,39 @@ GENERATED = (
 )
 
 # Groups that lead the sidebar; everything else follows alphabetically.
-FIRST = ["whileai", "simulations"]
+FIRST = ["whileai", "simulations", "data", "score", "generate", "world", "verify"]
 
 GROUP_BLURB = {
-    "whileai": "The platform client: login, trace ingest, account.",
+    "whileai": "The platform client: sign in, push traces, read the account.",
     "simulations": "The top-level calls: simulate, grade, optimize, export, train.",
+    "data": "SimulationData: the object simulate() returns, and what it can do next.",
+    "score": "Grading, judge checks, pass@k, selection for SFT and RL, hack scans.",
+    "generate": "Situation writers, coverage axes, agent adapters, model backends.",
+    "world": "The mock world that answers tool calls and fails on schedule.",
+    "verify": "Verifiable rewards: programmatic checks a judge cannot game.",
+    "run": "The search loop that spends the budget.",
+    "ingest": "Platform calls: datasets, traces, cuts, training runs, hosted models.",
+    "training": "Training runs, trainer callbacks, TRL export.",
+    "export": "JSONL, preference pairs, and RL environments out of graded rows.",
+    "environment": "A verifiers environment for on-policy trainers.",
+    "monitor": "Watch a live training run for reward hacking.",
+    "schema": "The typed row schema and its conversions.",
     "constants": "Module-level constants and their defaults.",
 }
 
 
-def _module_group(root: str, name: str, obj: object) -> str:
+def _module_of(obj: object) -> str | None:
+    if inspect.ismodule(obj):
+        return obj.__name__
+    mod = getattr(obj, "__module__", None)
+    return mod if isinstance(mod, str) else None
+
+
+def _module_group(root: str, obj: object) -> str:
     if root == "whileai":
         return "whileai"
-    mod = getattr(obj, "__module__", None)
-    if inspect.ismodule(obj):
-        mod = obj.__name__
-    if not isinstance(mod, str) or not mod.startswith("whileai.simulations"):
+    mod = _module_of(obj)
+    if mod is None or not mod.startswith("whileai.simulations"):
         return "constants"
     rest = mod[len("whileai.simulations") :].lstrip(".")
     return rest.split(".")[0] if rest else "simulations"
@@ -113,8 +130,32 @@ def _docstring(obj: object) -> str:
     return "\n".join(out).strip()
 
 
+def _first_sentence(doc: str) -> str:
+    """The first sentence of a rendered docstring, on one line, for tables."""
+    para = doc.split("\n\n")[0].replace("\n", " ").strip()
+    m = re.match(r"(.+?\.)(\s|$)", para)
+    s = m.group(1) if m else para
+    return s.replace("|", "\\|")
+
+
+def _is_builtin_doc(obj: object) -> bool:
+    """Constants inherit the docstring of their type; that is not documentation."""
+    if inspect.isclass(obj):
+        # A dataclass without a docstring gets its signature as one.
+        return (inspect.getdoc(obj) or "").startswith(f"{obj.__name__}(")
+    if inspect.isroutine(obj) or inspect.ismodule(obj):
+        return False
+    return inspect.getdoc(type(obj)) == inspect.getdoc(obj)
+
+
+def _short_repr(obj: object) -> str:
+    r = repr(obj)
+    r = re.sub(r" at 0x[0-9a-fA-F]+", "", r)
+    return r if len(r) <= 200 else r[:197] + "..."
+
+
 def _section(name: str, obj: object, level: str) -> str:
-    parts = [f"{level} `{name}`", ""]
+    parts = [f"{level} {name}", ""]
     if inspect.ismodule(obj):
         parts.append(f"Module `{obj.__name__}`.")
     else:
@@ -124,7 +165,7 @@ def _section(name: str, obj: object, level: str) -> str:
         elif not (inspect.isclass(obj) or callable(obj)):
             parts += ["```python", f"{name.split('.')[-1]} = {_short_repr(obj)}", "```"]
     doc = _docstring(obj)
-    if doc and not _is_builtin_doc(obj, doc):
+    if doc and not _is_builtin_doc(obj):
         parts += ["", doc]
     if inspect.isclass(obj):
         for mname, member in sorted(vars(obj).items()):
@@ -136,51 +177,55 @@ def _section(name: str, obj: object, level: str) -> str:
     return "\n".join(parts)
 
 
-def _short_repr(obj: object) -> str:
-    r = repr(obj)
-    r = re.sub(r" at 0x[0-9a-fA-F]+", "", r)
-    return r if len(r) <= 200 else r[:197] + "..."
-
-
-def _is_builtin_doc(obj: object, doc: str) -> bool:
-    """Constants inherit the docstring of their type; that is not documentation."""
-    if inspect.isclass(obj) or inspect.isroutine(obj) or inspect.ismodule(obj):
-        return False
-    return inspect.getdoc(type(obj)) == inspect.getdoc(obj)
+def _submodule_intro(modname: str) -> str:
+    try:
+        mod = importlib.import_module(modname)
+    except ImportError:
+        return ""
+    doc = _docstring(mod)
+    return doc.split("\n\n")[0] if doc else ""
 
 
 def _render_page(root: str, group: str, names: list[tuple[str, object]]) -> str:
     modname = root if group in ("whileai", "simulations") else f"{root}.{group}"
-    title = modname
-    blurb = GROUP_BLURB.get(group, "")
-    intro = ""
-    if group not in ("constants",):
-        try:
-            mod = importlib.import_module(modname)
-            intro = _docstring(mod) if group not in ("whileai", "simulations") else ""
-        except ImportError:
-            intro = ""
-    desc = blurb or (intro.split("\n")[0][:150] if intro else f"Public names in {modname}.")
-    desc = desc.replace('"', "'")
+    blurb = GROUP_BLURB.get(group, f"Public names in {modname}.")
+    alias = "wai" if root.endswith("simulations") else root
     head = [
         "---",
-        f'title: "{title}"',
-        f'description: "{desc}"',
+        f'title: "{modname}"',
+        f'sidebarTitle: "{group}"',
+        f'description: "{blurb}"',
         "---",
         "",
         GENERATED,
         "",
+        blurb,
+        "",
+        f"{len(names)} public names. `import {root} as {alias}`, then `{alias}.name`."
+        if alias == "wai"
+        else f"{len(names)} public names. `import {root}`, then `{root}.name`.",
+        "",
+        "| Name | What it does |",
+        "|---|---|",
     ]
-    body: list[str] = []
-    if intro:
-        body += [intro, ""]
-    body.append(
-        f"{len(names)} public names. Import with `import {root} as wai`."
-        if root.endswith("simulations")
-        else f"{len(names)} public names. Import with `import {root}`."
-    )
     for name, obj in names:
-        body += ["", _section(name, obj, "###")]
+        first = "" if _is_builtin_doc(obj) else _first_sentence(_docstring(obj))
+        head.append(f"| [`{name}`](#{name.lower()}) | {first} |")
+    # One H2 per defining submodule, so a page with many names has structure.
+    by_module: dict[str, list[tuple[str, object]]] = defaultdict(list)
+    for name, obj in names:
+        by_module[_module_of(obj) or modname].append((name, obj))
+    body: list[str] = []
+    multi = len(by_module) > 1
+    for submod in sorted(by_module):
+        if multi:
+            short = submod[len(modname) :].lstrip(".") or "package"
+            body += ["", f"## {short}", ""]
+            intro = _submodule_intro(submod) if short != "package" else ""
+            if intro:
+                body += [intro, ""]
+        for name, obj in by_module[submod]:
+            body += ["", _section(name, obj, "###")]
     return "\n".join(head + body) + "\n"
 
 
@@ -193,7 +238,7 @@ def build() -> dict[str, str]:
             if name == "__version__":
                 continue
             obj = getattr(mod, name)
-            groups[(root, _module_group(root, name, obj))].append((name, obj))
+            groups[(root, _module_group(root, obj))].append((name, obj))
     for (root, group), names in groups.items():
         pages[f"api/{group}.mdx"] = _render_page(root, group, names)
     by_group = {g: names for (_, g), names in groups.items()}
@@ -204,12 +249,14 @@ def build() -> dict[str, str]:
     pages["api/index.mdx"] = (
         "---\n"
         'title: "API reference"\n'
+        'sidebarTitle: "Overview"\n'
         'description: "Every public name in whileai and whileai.simulations, with its signature and docstring, generated from the package."\n'
         "---\n\n"
         f"{GENERATED}\n\n"
-        "These pages are generated from the installed package on each change, so a\n"
-        "signature here is the signature the interpreter sees. The prose that says\n"
-        "when to use which call is in the [reference](/reference).\n\n"
+        "These pages are generated from the installed package on every change, so a\n"
+        "signature here is the signature the interpreter sees. When to use which\n"
+        "call, in the order a run happens, is on [the five calls](/reference/five-calls);\n"
+        "every knob with its default is on [parameters](/reference/parameters).\n\n"
         "| Page | Names | What it holds |\n|---|---|---|\n"
         f"{rows}\n"
     )
@@ -222,14 +269,29 @@ def nav_pages(pages: dict[str, str]) -> list[str]:
     return ["api/index"] + [f"api/{g}" for g in order]
 
 
+def _find_api_group(node: object) -> dict | None:
+    """The navigation group named "API", wherever docs.json nests it."""
+    if isinstance(node, dict):
+        if node.get("group") == "API" and "pages" in node:
+            return node
+        for v in node.values():
+            found = _find_api_group(v)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for v in node:
+            found = _find_api_group(v)
+            if found is not None:
+                return found
+    return None
+
+
 def updated_docs_json(pages: dict[str, str]) -> str:
     cfg = json.loads(DOCS_JSON.read_text(encoding="utf-8"))
-    for group in cfg["navigation"]["groups"]:
-        if group["group"] == "API":
-            group["pages"] = nav_pages(pages)
-            break
-    else:
+    group = _find_api_group(cfg.get("navigation"))
+    if group is None:
         raise SystemExit('docs/docs.json has no navigation group named "API"')
+    group["pages"] = nav_pages(pages)
     return json.dumps(cfg, indent=2) + "\n"
 
 

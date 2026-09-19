@@ -13,7 +13,7 @@ from pathlib import Path
 
 from whileai.simulations.run.config import resolve_run_config
 
-README = Path(__file__).resolve().parents[2] / "docs" / "reference.md"
+README = Path(__file__).resolve().parents[2] / "docs" / "reference" / "parameters.md"
 ROW = re.compile(r"^\| `([a-z_]+)` \| `([^`]*)` \|", re.M)
 
 # README knob -> how to read it off a RunConfig

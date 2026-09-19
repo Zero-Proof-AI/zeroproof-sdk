@@ -1,0 +1,149 @@
+---
+title: "The five calls"
+sidebarTitle: "Five calls"
+description: "Agent to gated dataset in five calls: simulate, grade, trust the judge, optimize, push. Plus the judge contract, verifiers, and the RL environment export."
+---
+
+Agent to gated dataset. Everything else in this reference is one layer down. `TOOLS` is the list from [Start here](/reference/overview#start-here-no-key-required); `POLICY` is the agent's system prompt.
+
+```python
+import whileai.simulations as wai
+
+data = wai.simulate(
+    agent="openai:gpt-4.1-mini",
+    tools=TOOLS,
+    system_prompt=POLICY,
+    mode="rl",
+    situations=200,
+    repeats=8,
+)  # 1 generate
+data.grade(rubric=RUBRIC)  # 2 grade against the task rubric: reward 0/1 on every row
+print(data.pass_at)
+wai.judge_trust(data.trajectories)  # 3 trust the numbers
+rows, report = wai.optimize(data, mode="rl")  # 4 prune to what carries gradient
+entry = wai.push_rows(rows, "my-agent-rl-v1", gate=True, mode="rl")  # 5 publish, gated
+```
+
+`situations=200, repeats=8` is a guess. `wai.recommend(tools=TOOLS, system_prompt=POLICY, mode="rl")` replaces it with numbers from this agent's own grid: [How much to run](/reference/what-to-run#how-much-to-run).
+
+| Call | What it decides | Reads |
+|---|---|---|
+| `simulate` | the situations, the users, the world, k rollouts per ask | your spec or tools + system prompt |
+| `data.grade(judge=)` | 0/1 per rollout. `data.grade()` uses the hosted judge instead | your judge callable, or your account key (`whileai login`) |
+| `pass_at` / `judge_trust` | pass@1 with an interval, headroom for RL, whether the judge can be trusted | graded rows, 30 to 100 hand labels as `gold_reward` |
+| `optimize(mode="rl")` | drops junk rows, duplicates, dead groups, and asks outside the difficulty band (pass rate 0.2 to 0.8); flags reward hacks | graded rows |
+| `push_rows(gate=True)` | refuses ungraded or gradient-free RL data; stamps calibration | pruned rows |
+
+A spec folder is `spec.json` (tools and policy) plus `rubric.md`: what doing the job means, in prose. `grade()` scores against it. The hosted judge writes `reward` and `reason` onto the run's rows and returns the judge report (a dict), so the numbers are read off `data`. `grade(judge=your_callable)` instead returns a `ScoredData` of graded copies, leaves the run untouched, and has its own `.push(name, ...)`. Without a rubric the hosted judge grades the conduct floor only (nothing invented, nothing skipped) and the report says so; pass `rubric=` to `simulate` or `data.grade` to supply one.
+
+After training, measure whether it landed: `wai.delta_report(before=scored.rows, after=after_rows, target="pass_at_1")`. Name the training reward too, `proxy="marker:first_action"`, and the report says whether the run over-optimized it: proxy up while the target did not follow fails the report (rlhf-book ch. 14). `wai.hack_scan_diff(before, after, endorsed=[...])` names what the update moved toward, and withholds the name when either side came back `degenerate`.
+
+Character training is the same loop aimed at how the model talks: a constitution in, graded replies, length-matched pairs and SFT rows out, and the judge checked against the constitution's own labels. Worked example [`recipes/03-select/character`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/character), guide [Character training](/character-training).
+
+## The judge contract
+
+Rows come back ungraded; your judge decides what good means. A judge is any callable that takes a row and returns a verdict. LLM judge, rules engine, reward model, human-label lookup, HTTP call: the SDK does not care how the reward was produced, only that the result honors this contract. The same contract is what `grade`, `run_judge`, `evaluate`, `grader=`, `optimize` and a gated `push` all read, and what every `verify` verifier and `wai.reward_model(run)` already honors.
+
+```python
+judge(row) -> {"reward": 0 or 1}              # the minimum
+judge(row) -> {"reward": 0.7,                 # floats allowed
+               "reason": "...",               # optional, kept on the row
+               "markers": {"grounded": 1.0},  # optional, -> row["markers"]
+               "failure_class": "...",        # optional
+               ...anything else}              # kept as judge metadata
+judge(row) -> 0 or 1 or 0.7                   # a bare number works
+```
+
+**Failure modes.** Anything else (a missing `reward`, an unsupported type, an exception, a timeout) marks the row with a `judge_status` of `missing_reward`, `invalid_result`, `error` or `timeout`, and sets `reward=None`. Nothing is silently scored zero, so a broken judge shows up as unjudged rows rather than as a policy that looks bad.
+
+**Marker polarity, the rule for every marker you define.** `1.0` is the good outcome; higher is better; a significant drop is the regression. `delta_report`, `must_not_regress=` and the run page all assume it. Name a marker for the behavior you want (`refund_correct`, not `false_refund_success`), or a fix reads as `DOWN`, and listing the marker in `must_not_regress=` fails the report on the run that repaired the bug. More on the four marker families: [the platform page](/reference/platform).
+
+**The loop, closed in five lines.**
+
+```python
+import whileai.simulations as wai
+
+judge = lambda row: {"reward": int("sorry" not in row["final_text"])}
+scored = wai.run_judge(data.trajectories, judge)  # or data.grade(judge=judge)
+wai.export_dataset(scored.passes(), output="train.jsonl", system_prompt=POLICY, tools=TOOLS)
+# ...train externally, roll the tuned model on a holdout...
+evald = wai.evaluate(rollouts, judge, model="my-tuned-v1")
+nxt = wai.simulate(tools=TOOLS, system_prompt=POLICY, traces=evald.failed_traces())
+```
+
+The full contract, with every status and the rest of the loop, is the module docstring of `whileai.simulations.score.judging` (note the `score.`; there is no `whileai.simulations.judging`).
+
+Writing the judge is half of it; knowing whether to believe it is the other half. `wai.judge_trust(rows, judge=...)` and `wai.judge_probes(rows, judge)` are on [the platform page](/reference/platform). With no `gold_reward` labels on the rows, `judge_trust` returns `ok: False` with a warning that the judge is unmeasured, not failed.
+
+## Verifiers: when the reward is a program, not a judge
+
+For a verifiable task the reward is a checker, not an opinion (RLHF book ch. 7, 13). `whileai.simulations.verify` gives you one, and because a verifier honors the same judge contract it drops into `grade`, `evaluate`, `optimize` and a gated `push` exactly where an LLM judge would.
+
+```python
+from whileai.simulations.verify import MathEqual, CodeExec, JSONSchema, Regex, All
+
+data = wai.simulate(
+    tools=MATH_TOOLS, system_prompt=MATH_POLICY, mode="rl", situations=200, repeats=8
+)
+scored = data.grade(judge=MathEqual())  # the verifier is the reward
+rows, _ = wai.optimize(scored, mode="rl")  # GRPO data, gradient checked
+```
+
+The candidate is the rollout's `final_text`; the gold is read from the row's `privileged.reference`, which the training export never projects, so the answer key cannot leak into a training file (flat `answer`/`target`/... fields work too, or point at any column with `field=`). Built in: `ExactMatch`, `Includes`, `Regex`, `MultipleChoice`, `Numeric`, `MathEqual`, `JSONValid`, `JSONSchema`, `JSONField`, and `CodeExec` (runs the candidate against hidden tests in a sandboxed subprocess with a timeout). Compose with `All` (right answer and right format), `Any`, or a graded `Weighted` rubric; wrap your own with `@verifier`. Worked example: [`recipes/01-simulate/verifiers`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/01-simulate/verifiers).
+
+## Export an RL environment
+
+On-policy RL (GRPO, RLOO, PPO) samples its own rollouts from the policy under training, so what it needs is not rows but what the rows came from: the task set, the world that answers tool calls, and the reward that grades a finished trajectory. `export_environment` writes those three as an installable `verifiers` package, the shape Prime Intellect and TRL read.
+
+```python
+data = wai.simulate(my_agent, tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=8)
+data.grade()
+# reward and world must import by name in the trainer: a module-level function or "module:attr"
+wai.export_environment(data, "envs/my-agent", reward=my_verifier)
+# pip install -e envs/my-agent
+# vf-eval my_agent -a '{"split": "holdout"}' -m <policy> -b <base url> -k <key var>
+```
+
+The package is `pyproject.toml`, a README, and a module named after the environment holding `spec.json` (system prompt, the tool schemas verbatim, the turn cap, and dotted references to the reward and the world) and `data/train.jsonl` plus `data/holdout.jsonl` (one task per prompt in the verifiers shape, with the task's fault plan, world state, privileged reference and calibration in `info`, read on the server and never in the prompt). The README carries the gate: the difficulty band applied when the rows were graded (prompts the policy always or never solved carry no advantage and are dropped), the split by scenario, and the train-against-holdout decontamination. A run whose prompts all fall outside the band raises `no train tasks` instead of writing an empty environment.
+
+The environment class lives in the SDK and is tested there: a `StatefulToolEnv` whose world is the mock world seeded per task, or your own `execute=`, and whose rubric is the reward through the judge contract, so a `Verifier` such as `CodeExec`, your judge callable, or `conduct_grade` all work unchanged. The default reward is `task_checklist`: the conduct grade as an honesty gate, times an outcome the world can verify from the task's own coordinates on the grid. A target tool must succeed; a missing entity must be reported and not acted on; an already-done action must be acknowledged and not repeated; an adversarial ask must not produce a write; an unrelated ask must produce no call; a vague ask must be asked back; prior partial action needs a read before the write; a fault on the target must be acknowledged. No model in the loop, and `markers` say which check ran (rlhf-book ch. 12 rubrics, computed from state rather than written by a judge). When the rows carry none of that metadata the export warns: the reward reduces to `conduct_grade`, a process reward, and a policy trained on it alone learns to call nothing ([`recipes/03-select/prime-intellect-rl`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/03-select/prime-intellect-rl)). `wai.load_environment(spec)` builds the environment in a process that has `verifiers` (`pip install 'whileai[rl]'`). The [tool-call-efficiency](https://huggingface.co/datasets/zero-proof-ai/tool-call-efficiency) dataset is the same shape built by hand over an executable world with a hidden test suite.
+
+<Warning>
+Install `whileai` from PyPI, not from a path or a git URL, if you build a Prime Intellect environment on it. The Environments Hub installs a pushed env with plain pip, so a `[tool.uv.sources]` git pin resolves locally and then fails on their runtime with a `ModuleNotFoundError`.
+</Warning>
+
+Training notes, each with the chapter of rlhfbook.com behind it:
+
+- Calibrate difficulty with 8 to 16 rollouts per task before exporting, so the band is a measurement, not a guess (ch. 7). The export report's `graded_mixed` is the number of tasks that carry an advantage at all (ch. 6).
+- Sample at temperature near 1.0 with 8 or more generations per prompt; within-group contrast is what the update learns from (ch. 6).
+- A rollout cut at the turn or token cap scores 0 and is logged as `truncated` (ch. 6).
+- Use per-token loss aggregation rather than per-sequence, so long rollouts are not favoured or punished by length alone (ch. 6).
+- Keep a small KL to the reference or, if the recipe drops it, watch KL drift on the dashboard (ch. 15).
+- `n_calls`, `judge_ok`, `truncated` and `trace_clean` are logged at weight 0: they are the over-optimization symptoms to watch, never the objective (ch. 14).
+- Retire tasks the policy now always solves and re-export between rounds (`curriculum`, `retire_solved`; ch. 7).
+- If `reward=` is a judge rather than a program, validate it first with `judge_trust` and `judge_agreement`, and keep it in a different model family from the policy (ch. 5, 12).
+- Measure the held-out set before and after with `delta_report` and a `must_not_regress` list, and report pass^k (every one of k tries right) alongside pass@1 for reliability (ch. 13, 16).
+
+## Where the tools and policy come from
+
+Pass `spec=` if you have a local tools-and-system-prompt folder of your own: a directory (or a JSON/YAML file) holding `tools` and `policy` / `system_prompt`, optionally with seed `situations` and a `rubric.md` (what doing the job means, for `grade()`). No spec folders ship with this package, so every snippet here uses `tools=` + `system_prompt=`. The two are interchangeable, and `spec=` is only a way to keep them in a file. The generated datasets are on Hugging Face in the [Post-Training Foundational Datasets](https://huggingface.co/collections/zero-proof-ai/whileai-post-training-foundational-datasets-6aa0b9c040ff8591988696dc) collection, not stored in this repo: [agent-simulations](https://huggingface.co/datasets/zero-proof-ai/agent-simulations) by agent type, [tool-call-efficiency](https://huggingface.co/datasets/zero-proof-ai/tool-call-efficiency) (SFT, preference, GRPO and eval splits), and [tau2-simulated](https://huggingface.co/datasets/zero-proof-ai/tau2-simulated), among others.
+
+## Knobs these calls read
+
+The full list is on [Parameters](/reference/parameters). These are the ones that change what a row contains.
+
+| Knob | Default | |
+|---|---|---|
+| `requests_per_situation` | from mode | Phrasings: ways to ask one situation. Alias `phrasings=` |
+| `rollouts_per_request` | from mode | Repeats: reruns of one phrasing. Alias `repeats=` |
+| `fault_rate` | `0.5`, `0.8` under `mode="rl"` | Share of fault-tagged grid cells that keep their fault. `0` off. Applied by the mock world, so a callable `agent=` that answers its own tool calls never sees one |
+| `simulator` | hosted Qwen | Situation writer. `False` uses the built-in template writer (no model, less variety); a model spec runs it on your endpoint |
+| `user_model` | `None` | Who plays the simulated user in follow-up turns. `None` is the agent's own model; a model spec moves that job to another model |
+| `traces` | `None` | Graded traces of the deployed agent, a list of plain row dicts or a JSONL path. Aims the coverage grid at the behaviors those traces show and keeps the sources out of the generated rows. See [Close the loop](/reference/what-to-run#close-the-loop-aim-the-budget-with-traces) |
+| `tasks` | `None` | Re-run a previous run's task set instead of drawing a new one: that run, its rows, or its JSONL path. k is not inherited; pass `repeats=` again |
+| `timeout` | `300` | Seconds per agent completion, for `local_model` and every model spec. A served model that scaled to zero takes two to three minutes to answer its first request, so a shorter value drops the first pass; a timed-out call is named in `data.warnings` with the fix |
+| `logprobs` | `False` | Ask the rollout model for the log-probability of every token it generates. Each agent turn's step gets `logprob` and `n_tokens`, the row gets the totals. `"tokens"` keeps the per-token list. Model backends only |
+| `sampling` | `None` | How your own callable agent samples, `{"temperature": 0.7, "max_tokens": 1024, "model": "my-model"}`, recorded on every row as given. A model backend records its own and ignores this |
+| `reproducible` | `False` | Same seed, same concurrency, same agent: same rows. Runs batch by batch, so uneven latency costs throughput. Needs the clock off. `concurrency: 1` always runs this way |
+| `grade` | `False` | Legacy: `True` writes the deterministic conduct score at simulation time. Grade after with `data.grade(...)` instead |
+| `llm_grade` | `False` | Extra LLM judge. Needs `OPENAI_API_KEY` |

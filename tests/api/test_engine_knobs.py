@@ -24,7 +24,7 @@ from whileai.simulations.run import engine
 from whileai.simulations.run.config import resolve_run_config
 from whileai.simulations.run.engine import Run, _graded_failure
 
-REFERENCE = Path(__file__).resolve().parents[2] / "docs" / "reference.md"
+REFERENCE = Path(__file__).resolve().parents[2] / "docs" / "reference" / "parameters.md"
 
 
 def _cfg(**advanced):
@@ -116,13 +116,13 @@ def test_readme_lists_every_knob_with_its_default():
     text = REFERENCE.read_text(encoding="utf-8")
     rows = dict(re.findall(r"^\| `([a-z_]+)` \| `([^`]*)` \|", text, re.M))
     missing = [n for n in knob_names() if n not in rows]
-    assert not missing, f"docs/reference.md advanced table lacks {missing}"
+    assert not missing, f"docs/reference/parameters.md advanced table lacks {missing}"
     wrong = {}
     for name in knob_names():
         documented = ast.literal_eval(rows[name])
         if documented != knob_default(name):
             wrong[name] = (documented, knob_default(name))
-    assert not wrong, f"docs/reference.md says / defaults.py says: {wrong}"
+    assert not wrong, f"docs/reference/parameters.md says / defaults.py says: {wrong}"
 
 
 # ------------------------------------------------- the engine reads it
