@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import re
 from collections import defaultdict
@@ -201,24 +202,41 @@ def rate_with_interval(flags: list[bool]):
     }
 
 
-def _boot(flags, n_boot=4000, seed=0, note=""):
-    """Independent bootstrap cross-check of the SDK's ci95.
+def _boot(flags, note=""):
+    """Independent cross-check of the SDK's ci95, from the standard library.
 
-    Resampling a Bernoulli sample is a Binomial draw, so this is one
-    vectorised draw rather than n_boot passes over the flags.
+    Resampling a Bernoulli sample is a Binomial draw, so the bootstrap
+    distribution of the proportion is exactly Binomial(n, p_hat) / n. That
+    is computed here rather than sampled: no numpy, no resampling noise,
+    and the same answer every run.
     """
-    import numpy as np
-
     n = len(flags)
     if n == 0:
         return {"rate": None, "lo": None, "hi": None, "n": 0, "via": "boot", "note": note}
     point = sum(flags) / n
-    draws = np.random.default_rng(seed).binomial(n, point, size=n_boot) / n
-    lo, hi = np.quantile(draws, [0.025, 0.975])
+    if point in (0.0, 1.0):  # degenerate: the draw is a point mass
+        return {"rate": point, "lo": point, "hi": point, "n": n, "via": "boot", "note": note}
+
+    # log pmf in closed form, so large n does not underflow
+    log_p, log_q = math.log(point), math.log1p(-point)
+    base = math.lgamma(n + 1)
+
+    def log_pmf(k):
+        return base - math.lgamma(k + 1) - math.lgamma(n - k + 1) + k * log_p + (n - k) * log_q
+
+    lo = hi = None
+    cdf = 0.0
+    for k in range(n + 1):
+        cdf += math.exp(log_pmf(k))
+        if lo is None and cdf >= 0.025:
+            lo = k / n
+        if cdf >= 0.975:
+            hi = k / n
+            break
     return {
         "rate": point,
-        "lo": float(lo),
-        "hi": float(hi),
+        "lo": lo if lo is not None else 0.0,
+        "hi": hi if hi is not None else 1.0,
         "n": n,
         "via": "boot",
         "note": note,
