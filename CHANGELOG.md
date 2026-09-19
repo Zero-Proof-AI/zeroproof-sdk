@@ -12,6 +12,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   enforced. Linked from CLAUDE.md, CONTRIBUTING.md, README and the style
   guide. Paper recipes gain `post.md`: the verified result as a post under
   280 characters, the metric with its interval and the links.
+- Docs: the constitution is a page under Concepts on the docs site, and the
+  README's Documentation section links `CONSTITUTION.md`.
 - The front door, step one of the style migration (`docs/reference/style.md`).
   `import whileai as wai` is now the library: `simulate`, `Judge`, `select`,
   `pass_at`, `judge_trust`, `compare`, `decontaminate`, `hack_scan`,
