@@ -768,6 +768,29 @@ def bootstrap_ci(
     return (stats[max(0, lo_i)], stats[min(n_boot - 1, hi_i)])
 
 
+def no_interval_note(n_tasks: int, *, quantity: str = "the mean") -> str:
+    """One sentence for a report whose ``bootstrap_ci`` came back ``None``.
+
+    ``bootstrap_ci`` withholds an interval below ``MIN_CI_TASKS`` tasks,
+    and a report that prints the bare mean next to that silence reads
+    like a result (#490). This is the sentence that goes in the report's
+    note: the task count, the threshold, and the one thing to change.
+    The bootstrap resamples tasks, so the fix is more tasks, or one
+    ``task_id`` per row when the rows are separate items that collapsed
+    into one group under ``task_key``. ``marker_summary`` writes the same
+    sentence in its own words, naming the marker instead.
+
+    >>> no_interval_note(1, quantity="pass@1")[:24]
+    'no interval on pass@1: 1'
+    """
+    counted = f"{n_tasks} task" if n_tasks == 1 else f"{n_tasks} tasks"
+    return (
+        f"no interval on {quantity}: {counted}, and a bootstrap needs "
+        f"{MIN_CI_TASKS}; it resamples tasks, so run more tasks, or give each row "
+        "its own task_id when the rows are separate items"
+    )
+
+
 def task_key(row: dict) -> str:
     """The one name every report groups a row's rollouts under.
 

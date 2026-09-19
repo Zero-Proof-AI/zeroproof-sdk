@@ -136,8 +136,42 @@ def test_uneven_groups_name_the_k_that_scores_them():
 
 
 def test_even_groups_keep_the_plain_note():
-    rows = [{"prompt": p, "reward": r} for p in "ab" for r in (1, 0)]
+    # three tasks, so the interval lands and the k note stands alone
+    rows = [{"prompt": p, "reward": r} for p in "abc" for r in (1, 0)]
     assert pass_at(rows).note == "set repeats>=4 for pass^k and pass@k"
+
+
+def test_too_few_tasks_for_an_interval_says_so_and_names_the_fix():
+    """pass@1 with ci95 None and an empty note is a mean printed as a
+    result. Two eval runs quoted one-task pass@1 before noticing (#490)."""
+    rows = [{"prompt": "a", "reward": r} for r in (1, 1, 0, 1)]
+    out = pass_at(rows)
+    assert out.pass_at_1 == pytest.approx(0.75) and out.ci95 is None
+    assert "no interval on pass@1: 1 task," in out.note
+    assert "task_id" in out.note and "3" in out.note
+    assert out.note in str(out)
+    # the note stacks after the k note rather than replacing it
+    two = pass_at([{"prompt": p, "reward": r} for p in "ab" for r in (1, 0)])
+    assert two.note.startswith("set repeats>=4 for pass^k and pass@k; ")
+    assert "2 tasks" in two.note
+
+
+def test_an_interval_leaves_the_note_alone():
+    rows = _rows({"a": [1, 0, 1, 1], "b": [0, 0, 0, 1], "c": [1, 1, 0, 1]})
+    out = pass_at(rows)
+    assert out.ci95 is not None and "no interval" not in out.note
+
+
+def test_one_task_id_per_row_is_the_fix_the_note_names():
+    """The note's second branch, run: the same ten graded rows read as one
+    task with no interval, and as ten tasks with one."""
+    labels = [1, 1, 0, 1, 0, 1, 1, 0, 1, 1]
+    one = pass_at([{"prompt": "a", "task_id": "t", "reward": r} for r in labels])
+    many = pass_at([{"prompt": "a", "task_id": f"t{i}", "reward": r} for i, r in enumerate(labels)])
+    assert one.n_groups == 1 and one.ci95 is None
+    assert many.n_groups == 10 and many.ci95 is not None
+    assert one.pass_at_1 == many.pass_at_1 == pytest.approx(0.7)
+    assert "no interval" not in many.note
 
 
 def test_unanimous_short_groups_count_as_unanimous_when_asked():
