@@ -29,7 +29,8 @@ Rules the tooling enforces (CI fails otherwise):
 
 ## Coding standard
 
-`docs/reference/style.md` is the standard: PyTorch/DSPy ergonomics. One
+`.claude/agents/` holds the three agents that apply the constitution on
+demand (`style-guide`, `docs-designer`, `user-sim`). `docs/reference/style.md` is the standard: PyTorch/DSPy ergonomics. One
 import (`import whileai as wai`), objects carry configuration and calls
 carry data, at most eight parameters on a public call, reports print
 themselves (no `format_*` twins), verbs a scientist says. New public

@@ -187,11 +187,20 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 - `post.md` for the four existing paper recipes (filter-metric moved; adaptive-clip,
   endpoint-sft and gmts-token-select flat), each under 280 characters, numbers copied
   from their Result tables.
+- `@wai.tool`: a typed Python function is the tool. The signature is the
+  schema, the docstring the description, `Annotated[T, "note"]` or an
+  `Args:` block the parameter notes; a default makes a parameter
+  optional. `simulate(tools=)` and `seeded_agent(tools)` take decorated
+  functions, plain functions and raw schema dicts in one list;
+  `wai.Tool.dispatch([...])` is an `execute=` that runs the bodies. The
+  README and the getting-started pages no longer show a hand-written
+  schema.
 - README badges are all live. Coverage is the number CI measured on the last
   green main, published to the `badges` branch by `.github/scripts/badge.py`
   and rendered through a shields endpoint; the version badge reads the
   release tag, which shields refreshes in five minutes where its PyPI badge
   lagged by twelve hours; the license badge reads the repo.
+
 
 ## 0.82 (2026-09-18)
 

@@ -8,7 +8,7 @@ description: "The platform client: sign in, push traces, read the account."
 
 The platform client: sign in, push traces, read the account.
 
-28 public names. `import whileai`, then `whileai.name`.
+29 public names. `import whileai`, then `whileai.name`.
 
 | Name | What it does |
 |---|---|
@@ -38,6 +38,7 @@ The platform client: sign in, push traces, read the account.
 | [`select`](#select) | Keep the rows worth training on, for SFT or RL: `optimize` as an object. |
 | [`settings`](#settings) |  |
 | [`simulate`](#simulate) | Generate situations for an agent, roll them out, and return the rows. |
+| [`tool`](#tool) | Turn a typed function into a `Tool`: signature to schema, docstring to text. |
 | [`verifier`](#verifier) | Decorator: turn `fn(candidate, reference, row) -> score` into a Verifier. |
 | [`verify`](#verify) | Verifiers: programmatic, verifiable rewards (RLHF book ch. |
 
@@ -1701,6 +1702,28 @@ rerun = wai.simulate(agent, tools=TOOLS, simulator=False, seed=0,
                      tasks=base, mode="rl")  # same tasks, k=4 inherited
 print(base.stopped_because, len(base.rows()), base.warnings)
 ``
+
+## simulations.tools
+
+`@tool`: a typed Python function is the tool.
+
+
+### tool
+
+```python
+tool(
+    fn: Callable[..., Any] | None = None,
+    name: str | None = None,
+    description: str | None = None,
+) -> Any
+```
+
+Turn a typed function into a `Tool`: signature to schema, docstring to text.
+
+Use bare (`@wai.tool`) or with arguments (`@wai.tool(name="lookup")`).
+`self` and `cls` are skipped, `*args`/`**kwargs` are ignored, a
+parameter with a default is optional, and `Annotated[T, "note"]` or a
+docstring `Args:` block gives a parameter its description.
 
 ## simulations.verify
 

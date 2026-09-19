@@ -17,26 +17,18 @@ failed. Each row records what it did in `seeded`, so you can check that
 your judge catches exactly those rows before you trust it on real ones.
 
 <Steps>
-  <Step title="Describe the tools">
-    Tools go in OpenAI function-calling shape. One is enough.
+  <Step title="Write a tool">
+    A tool is a typed function. The signature is the schema, the
+    docstring is the description. One is enough.
 
     ```python
     import whileai as wai
 
-    TOOLS = [
-        {
-            "type": "function",
-            "function": {
-                "name": "get_order",
-                "description": "Look up an order by id.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"order_id": {"type": "string"}},
-                    "required": ["order_id"],
-                },
-            },
-        }
-    ]
+
+    @wai.tool
+    def get_order(order_id: str) -> dict:
+        """Look up an order by id."""
+        ...
     ```
   </Step>
   <Step title="Simulate">
@@ -46,8 +38,8 @@ your judge catches exactly those rows before you trust it on real ones.
 
     ```python
     data = wai.simulate(
-        wai.seeded_agent(TOOLS),
-        tools=TOOLS,
+        wai.seeded_agent([get_order]),
+        tools=[get_order],
         system_prompt="Help customers with orders.",
         simulator=False,  # no model
         mode="rl",
@@ -108,7 +100,7 @@ wai.configure(
 )
 print(wai.settings)
 
-data = wai.simulate(tools=TOOLS, system_prompt="Help customers with orders.", mode="rl", repeats=8)
+data = wai.simulate(tools=[get_order], system_prompt="Help customers with orders.", mode="rl", repeats=8)
 scored = data.grade(wai.Judge(rubric="Look up the order before answering."))
 ```
 

@@ -44,6 +44,8 @@ except PackageNotFoundError:  # running from a source tree that was never instal
 _LAZY: dict[str, tuple[str, str | None]] = {
     # the loop
     "simulate": ("whileai.simulations.simulation", "simulate"),
+    "tool": ("whileai.simulations.tools", "tool"),
+    "Tool": ("whileai.simulations.tools", "Tool"),
     "seeded_agent": ("whileai.simulations.generate.offline_agent", "seeded_agent"),
     "Judge": ("whileai.judge", "Judge"),
     "Verifier": ("whileai.simulations.verify", "Verifier"),
@@ -119,6 +121,7 @@ if TYPE_CHECKING:  # so editors and mypy see the lazy names
     from .simulations.score.preflight import preflight
     from .simulations.score.stats import decontaminate
     from .simulations.simulation import simulate
+    from .simulations.tools import Tool, tool
     from .simulations.verify import Verifier, verifier
 
 # The front door: under thirty names, the loop and its nouns. The platform
@@ -152,6 +155,7 @@ __all__ = [
     "select",
     "settings",
     "simulate",
+    "tool",
     "verifier",
     "verify",
 ]
