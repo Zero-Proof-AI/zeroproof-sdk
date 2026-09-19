@@ -5,6 +5,19 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- `select()` drops a row whose reply quotes its own privileged context
+  (the reference answer, the principle, the hidden world state) before any
+  other gate, in both modes, and the printed report says
+  `privileged leaks dropped: N` (`privileged_leaks_dropped` and
+  `privileged_leaks` in the report; `optimize`, `select_for_rl` and
+  `select_for_sft` carry the same). The landing and quickstart program,
+  `scored.select(mode="rl").export("train.jsonl")`, raised
+  `privileged_leak` on the released package because `export` refused rows
+  `select` had kept; it now runs end to end and the quickstart prints what
+  it really prints (27 of 64 kept, 4 leaks dropped). `row_leak(row)` in
+  `whileai.simulations.score.privileged` is the per-row verdict the gate
+  and `leak_report` share.
+
 ## 0.87 (2026-09-19)
 
 - Recipe `02-measure/compare-judges`: six judges on the same 300 labeled

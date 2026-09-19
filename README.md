@@ -152,17 +152,19 @@ print(rows)
 
 ```
 pass@1 0.67 [0.55..0.78] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.33 (16 groups, k=4)
-rl selection: kept 29 of 64 rows
+rl selection: kept 27 of 64 rows
   band 20%..80% pass rate: 0 asks dropped (0 too easy, 0 too hard)
-  unanimous groups dropped: 5; duplicates dropped: 27; truncated drop: 0
-  groups kept: 11
+  unanimous groups dropped: 6; duplicates dropped: 27; truncated drop: 0
+  privileged leaks dropped: 4
+  groups kept: 10
   hack scan: train
 ```
 
 pass@1 is the pass rate over tasks with a bootstrap interval. pass^4 is
 how often all four rollouts of a task pass. Headroom is pass@4 minus
 pass@1, the gap an RL update could close. `select` prints what each gate
-dropped and why; `rows.export(path)` writes them trainer-ready.
+dropped and why (the warnings that follow are cut here; the quickstart
+shows them all); `rows.export(path)` writes them trainer-ready.
 
 To use your own agent, pass any callable that takes the user message and
 returns `{"steps": [...], "final_text": "..."}`, or a backend object from
