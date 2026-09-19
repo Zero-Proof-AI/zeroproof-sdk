@@ -38,6 +38,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   and the platform is separate and optional, and moves the platform
   section under that heading. Docs gain `get-started/your-model-and-key`
   (second in the nav, a card on the index, a note on the quickstart).
+- Docs: two tabs, Library and Platform, with a platform overview page that
+  draws the line between the offline package and the hosted service; the
+  API reference is its own tab. "Your model and your key" gains the While
+  key's resolution order and the argument each of the three model strings
+  (agent, writer, judge) goes in.
 - `coverage_gap` and `preflight` check every clause of the system prompt.
   Both built their rule axis with the generation grid's cap, the first 16
   clauses in document order, and said nothing, so a 68 KB production
