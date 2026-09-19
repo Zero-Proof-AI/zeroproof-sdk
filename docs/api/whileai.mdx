@@ -389,6 +389,7 @@ grade(
     judge=None,
     llm: bool = False,
     llm_spec: str | None = None,
+    spec: str | None = None,
     api_key: str | None = None,
     path: str | None = None,
     concurrency: int = 32,
@@ -445,6 +446,10 @@ Arguments that matter:
   `"warn"` (the default) logs one line when the check failed or no
   labels exist, `"require"` raises instead, `"off"` skips it.
 * `path`: write the graded run's JSONL there afterwards.
+* `spec`: which model judges on the hosted path, as a backend spec
+  (`"typesafe:jev-latest"`, `"openai:gpt-4.1-mini"`); the same
+  keyword `grade_llm`, `pairwise_judge` and `rubric_judge`
+  take. `llm_spec` is its older name and still works.
 
 ``python
 data = wai.simulate(agent, tools=TOOLS, simulator=False, budget=16)
@@ -1016,6 +1021,7 @@ judge_trust(
     allow_model_gold: bool = False,
     length_gap_flag: float = 0.15,
     flip_flag: float = 0.1,
+    max_skipped_share: float = 0.1,
 ) -> dict[str, Any]
 ```
 
@@ -1036,6 +1042,14 @@ given, `disagreements` (the review queue of rows the judge and the
 humans disagree on), `floors`, `n_labeled` and `n_rows`.
 `format_judge_trust(report)` prints the whole thing. The module
 docstring lays out each check and its rlhf-book chapter.
+The floors and flags are keywords with their defaults in
+`whileai.simulations.defaults`: `min_agreement` (0.8, the
+human-human agreement of MT-Bench, arXiv:2306.05685), `min_kappa`
+(0.6, Landis and Koch "substantial"), `length_gap_flag` (0.15),
+`flip_flag` (0.10) and `max_skipped_share` (0.10, the share of
+labeled rows the judge may leave out of the agreement count with a
+fractional reward before `ok` is false; `report["skipped"]`
+carries the counts).
 
 * `rows`: graded rows carrying the judge's `reward`. Rows that also
   carry `gold` (0/1, default column `gold_reward`, what
@@ -1141,10 +1155,12 @@ push(self, name: str, **kwargs: Any) -> dict
 Upload the scored rows to the platform: `push_rows(self.rows, name, ...)`.
 
 Same keywords as `push_rows` (`gate=`, `mode=`, `agent=`,
-`purpose=`, `parent=`, `endorsed=`, `strict_hacks=`). The
-graded copy is what a gated RL push needs, and `SimulationData.push`
-cannot see it: `grade(judge=)` leaves the run's trajectories
-ungraded on purpose.
+`purpose=`, `parent=`, `endorsed=`, `strict_hacks=`,
+`holdout=` for a linked holdout set split by task, `publish=`
+for a public card, `timeout=` for the upload). The graded copy is
+what a gated RL push needs, and `SimulationData.push` cannot see
+it: `grade(judge=)` leaves the run's trajectories ungraded on
+purpose.
 
 #### ScoredData.select
 
@@ -1299,14 +1315,24 @@ Inspect the agent before spending simulation budget, and report after.
 ### preflight
 
 ```python
-preflight(tools: Sequence[dict], system_prompt: str = '') -> dict[str, Any]
+preflight(
+    tools: Sequence[dict],
+    system_prompt: str = '',
+    rule_cap: int | None = None,
+) -> dict[str, Any]
 ```
 
 Spec-quality report for an agent. Report only; nothing is changed.
 
 `warnings` is the list a developer should read before generating
 thousands of rows; `cells` is the covering-grid size the same way
-`recommend` counts it.
+`recommend` counts it. `rules` is every clause of the policy
+(`rule_cap=None`, the default `RULE_AXIS_CAP_REPORT`); a number
+keeps the first that many in document order, `n_rules_total` says
+how many the policy has, `rules_truncated` whether any were left
+off, and a `warnings` line names the count (#391). The generation
+grid keeps its own cap (`RULE_AXIS_CAP_GRID`); `cells` is counted
+on the same axis `rules` shows.
 
 ## simulations.score.stats
 
