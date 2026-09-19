@@ -243,7 +243,7 @@ def tool(
         if required:
             parameters["required"] = required
         return Tool(
-            name=name or f.__name__,
+            name=name or str(getattr(f, "__name__", "tool")),
             description=(description if description is not None else desc)[:1000],
             parameters=parameters,
             fn=f,
