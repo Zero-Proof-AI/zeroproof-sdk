@@ -70,6 +70,35 @@ def _with_files(img: modal.Image) -> modal.Image:
 
 image = _with_files(_base)
 image_vllm = _with_files(_vllm_base)
+# --stack new: the current releases, for checkpoints the 2025 pins cannot load
+# (Qwen3.5-* are model_type qwen3_5, Qwen3_5ForConditionalGeneration). Same
+# script, same knobs; TRL >= 1.0 has its own chunked log-prob pass, so the
+# 0.19 monkeypatch below is skipped there.
+_base_new = (
+    # vLLM >= 0.26 compiles kernels at start and needs nvcc: CUDA devel base.
+    modal.Image.from_registry("nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.12")
+    # apt on the ubuntu base stops at tzdata's "Geographic area:" prompt without this
+    .env({"DEBIAN_FRONTEND": "noninteractive", "TZ": "UTC"})
+    .apt_install("postgresql", "postgresql-contrib")
+    .pip_install(
+        "vllm==0.29.0",
+        "transformers==5.17.0",
+        "trl==1.13.0",
+        "peft==0.21.0",
+        "datasets>=3.6.0",
+        "accelerate>=1.8.1",
+        "psycopg[binary]==3.2.9",
+        "whileai>=0.51",
+    )
+    .env(
+        {
+            "HF_HOME": "/root/.cache/huggingface",
+            "TOKENIZERS_PARALLELISM": "false",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    )
+)
+image_vllm_new = _with_files(_base_new)
 
 runs_volume = modal.Volume.from_name("whileai-train-runs", create_if_missing=True)
 hf_cache = modal.Volume.from_name("whileai-hf-cache", create_if_missing=True)
@@ -123,6 +152,62 @@ def _sample(
             out.append(decoded[i * n : (i + 1) * n])
     model.train()
     return out
+
+
+def _guard_vllm_weight_sync(trainer) -> None:
+    """Colocate weight sync for VLM-style checkpoints (Qwen3.5-*).
+
+    TRL hands vLLM the Hugging Face parameter names one at a time; vLLM maps
+    them with the model's ``hf_to_vllm_mapper`` and raises on any name it
+    cannot place. On Qwen3_5ForConditionalGeneration that killed the run at
+    step 0 ("no module or parameter named 'model'"). The LoRA only touches
+    the language layers, so a name vLLM cannot place is a tensor that never
+    changed: skip it, say which, keep going.
+    """
+    holder = None
+    for v in vars(trainer).values():
+        if hasattr(v, "llm") and hasattr(v.llm, "llm_engine"):
+            holder = v
+            break
+    if holder is None:
+        print("weight-sync guard: no colocated vLLM found on the trainer; not installed")
+        return
+    vmodel = holder.llm.llm_engine.model_executor.driver_worker.model_runner.model
+    have = {n for n, _ in vmodel.named_parameters()}
+    orig = vmodel.load_weights
+    skipped: list[str] = []
+
+    def _candidates(name: str) -> list[str]:
+        out = [name]
+        # transformers 5 exposes the text stack as "model.layers..." on the
+        # conditional-generation class; vLLM keeps it under language_model.
+        if name.startswith("model.") and not name.startswith(
+            ("model.language_model.", "model.visual.")
+        ):
+            out.append("model.language_model." + name[len("model.") :])
+        return out
+
+    def load_weights(weights):
+        loaded: set[str] = set()
+        for name, tensor in weights:
+            ok = False
+            for cand in _candidates(name):
+                # vLLM's loader also folds stacked projections (gate/up,
+                # q/k/v) into their fused parameter, so let it decide.
+                try:
+                    loaded |= set(orig([(cand, tensor)]) or ())
+                    ok = True
+                    break
+                except (ValueError, KeyError):
+                    continue
+            if not ok:
+                if len(skipped) < 8:
+                    print(f"weight-sync guard: skipping {name!r}")
+                skipped.append(name)
+        return loaded
+
+    vmodel.load_weights = load_weights
+    print(f"weight-sync guard installed on {type(vmodel).__name__} ({len(have)} params)")
 
 
 def _train(
@@ -187,9 +272,19 @@ def _train(
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model, torch_dtype=torch.bfloat16, device_map="cuda"
-    )
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model, torch_dtype=torch.bfloat16, device_map="cuda"
+        )
+    except ValueError:
+        # qwen3_5-style checkpoints register only as image-text-to-text; the
+        # text stack trains the same way and the vision tower is never used.
+        from transformers import AutoModelForImageTextToText
+
+        model = AutoModelForImageTextToText.from_pretrained(
+            base_model, torch_dtype=torch.bfloat16, device_map="cuda"
+        )
+        print(f"loaded {base_model} as {type(model).__name__}")
     if from_run:
         # continue from a previous round's LoRA adapter (same base)
         from peft import PeftModel
@@ -282,7 +377,9 @@ def _train(
             for t in train_tasks
         ]
     )
-    grpo = GRPOConfig(
+    import trl as _trl
+
+    grpo_kwargs = dict(
         output_dir=os.path.join(out_dir, "checkpoints"),
         max_steps=steps,
         num_generations=num_generations,
@@ -330,6 +427,13 @@ def _train(
         report_to=[],
         seed=17,
     )
+    import inspect as _inspect
+
+    _accepted = set(_inspect.signature(GRPOConfig).parameters)
+    _dropped = sorted(k for k in grpo_kwargs if k not in _accepted)
+    if _dropped:
+        print(f"GRPOConfig ({_trl.__version__}) does not take {_dropped}; dropped")
+    grpo = GRPOConfig(**{k: v for k, v in grpo_kwargs.items() if k in _accepted})
     lora = LoraConfig(
         r=lora_rank,
         lora_alpha=2 * lora_rank,
@@ -346,7 +450,7 @@ def _train(
             "down_proj",
         ],
     )
-    if use_vllm:
+    if use_vllm and _trl.__version__.startswith("0."):
         # TRL 0.19.1 scores the old/reference log-probs over the whole
         # generation batch in one forward (32 sequences x 3k tokens x 152k
         # vocab = 28 GB of logits); chunk it at the micro-batch size.
@@ -373,6 +477,8 @@ def _train(
     )
     if run is not None:
         trainer.add_callback(wai.TrainerCallback(run, finish=False))
+    if use_vllm and not _trl.__version__.startswith("0."):
+        _guard_vllm_weight_sync(trainer)
     try:
         trainer.train()
     except Exception as exc:
@@ -459,6 +565,11 @@ def train_vllm(**kwargs) -> dict:
     return _train(use_vllm=True, **kwargs)
 
 
+@app.function(image=image_vllm_new, **_FN)
+def train_vllm_new(**kwargs) -> dict:
+    return _train(use_vllm=True, **kwargs)
+
+
 @app.local_entrypoint()
 def main(
     run_name: str = "text-to-sql-shop-grpo-v1",
@@ -487,6 +598,7 @@ def main(
     save_every: int = 0,
     task_ids: str = "",
     vllm_mem: float = 0.25,
+    stack: str = "pinned",
 ):
     import hashlib
     import json
@@ -513,7 +625,8 @@ def main(
     if limit:
         train_tasks, holdout_tasks = train_tasks[:limit], holdout_tasks[: max(4, limit // 4)]
     print(f"{len(tasks)} tasks: {len(train_tasks)} train, {len(holdout_tasks)} holdout")
-    base_fn = train_vllm if use_vllm else train
+    # the new stack only has the vLLM path
+    base_fn = train_vllm_new if stack == "new" else (train_vllm if use_vllm else train)
     fn = base_fn if gpu == DEFAULT_GPU else base_fn.with_options(gpu=gpu)
     kwargs = dict(
         train_tasks=train_tasks,

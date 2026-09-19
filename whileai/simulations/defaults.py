@@ -48,7 +48,7 @@ DEFAULT_CONCURRENCY = 32
 
 # PASS_THRESHOLD = 0.5: a reward under this is a failure. The outcome
 # label is binary, r in {0, 1} (rlhfbook.com/c/07-reward-models.html,
-# outcome reward models; rlhfbook.com/c/14-reasoning.html, verifiable
+# outcome reward models; rlhfbook.com/c/07-reasoning, verifiable
 # rewards gate on all assertions passing), so 0.5 is its midpoint and a
 # partial rubric score (or the conduct advisory 0.5 for a truncated reply)
 # rounds to the nearer verdict. No source names another cut. The run loop's
@@ -146,7 +146,7 @@ DEFAULT_PROBE = 2
 DEFAULT_FAULT_RATE = 0.5
 
 # RL_FAULT_RATE = 0.8: the same share under mode="rl". RL raises it because
-# the faulted cells are where a base fails (rlhfbook.com/c/14-reasoning.html,
+# the faulted cells are where a base fails (rlhfbook.com/c/07-reasoning,
 # difficulty filtering) and PALADIN trains on an 80/20 composition of
 # recovery-bearing to clean traces (arXiv 2509.25238, appendix I.4: a
 # dataset mix, not a keep rate), which is the shape 0.8 gives the tagged
@@ -320,6 +320,14 @@ MAX_SAMPLES_PER_CALL = MAX_COMPLETIONS_PER_REQUEST
 # is a fragment the junk gate drops anyway. Both HTTP backends read it
 # (convention, untested).
 MIN_REPLY_TOKENS = 256
+# DECISION_TIMEOUT_S = 30: seconds one TypeSafe decision request may
+# take (``typesafe:`` judge, typesafe_backend.py). Jev's stated end-to-end
+# latency is 70 to 500 ms and its own SDK's default timeout is 10 s;
+# 30 s leaves room for a queue behind its 1,200-requests-a-minute limit
+# without a stuck request holding a judge worker for the chat judge's
+# 120 s (convention, untested; the vendor numbers are from
+# typesafe.ai/blog/introducing-system-one-models-and-jev).
+DECISION_TIMEOUT_S = 30.0
 
 # SAMPLING_TEMPERATURE_MAX = 2.0: the ceiling every temperature knob is
 # validated against (user_temperature, the hosted trainer's rollout
@@ -422,7 +430,7 @@ ROLLOUTS_PER_TASK = 4
 # ---------------------------------------------------------------------
 #
 # DIFFICULTY_BAND = (0.2, 0.8): keep tasks the current policy passes between
-# 20% and 80% of the time. rlhfbook.com/c/14-reasoning.html ("Common
+# 20% and 80% of the time. rlhfbook.com/c/07-reasoning ("Common
 # Practices in Training Reasoning Models"): difficulty filtering restricts
 # RL prompts to those
 # the starting model solves 20-80% of the time, measured from N=16
@@ -431,7 +439,7 @@ ROLLOUTS_PER_TASK = 4
 # reported practice, not an ablation, so every selector takes ``band=``.
 DIFFICULTY_BAND: tuple[float, float] = (0.2, 0.8)
 # DIFFICULTY_BAND_ROLLOUTS = 16: rollouts per task the band is measured
-# from in the sources above (rlhfbook.com/c/14-reasoning.html N=16; DAPO
+# from in the sources above (rlhfbook.com/c/07-reasoning N=16; DAPO
 # G=16). Below it
 # a task's band assignment carries a Wilson half-width near 0.3 at k=8.
 DIFFICULTY_BAND_ROLLOUTS = 16
@@ -564,6 +572,15 @@ JUDGE_MAX_TOKENS = 120
 # to improve the robustness of LLM-as-a-judge workflows is to use a
 # sampling temperature of 0").
 JUDGE_TEMPERATURE = 0.0
+# DECISION_UNSURE_BAND = 0.1: a decision judge's (``typesafe:``) verdict
+# probability within this of PASS_THRESHOLD, so 0.4 to 0.6, marks the row
+# ``unsure`` in its judge_meta and the grade report counts them. Jev's
+# stated property is calibration, higher confidence means higher accuracy
+# (typesafe.ai/blog/introducing-system-one-models-and-jev), so a
+# near-even probability is a row for a person to read, not a label to
+# train on. The width is a convention, untested against gold;
+# ``judge_trust`` on labeled rows is how to check it.
+DECISION_UNSURE_BAND = 0.1
 
 # ---------------------------------------------------------------------
 # score: reply truncation
@@ -984,7 +1001,7 @@ MONITOR_WINDOW = 3
 # rlhfbook.com/c/16-evaluation.html reports; convention for the number.
 MONITOR_DELTA = 0.1
 # MONITOR_LENGTH_PCT = 0.25: completion-length growth that counts.
-# rlhfbook.com/c/17-over-optimization.html lists the qualitative
+# rlhfbook.com/c/14-over-optimization lists the qualitative
 # signatures (stock phrases, hedging and repetition, sycophancy,
 # over-refusal) and does not name length; length growth is the bias Dr.
 # GRPO removes from the GRPO objective (arXiv:2503.20783), which is why
@@ -1342,7 +1359,7 @@ class RunKnobs:
     # (n + 2a), for the group hazard and the mixed rate; a = 1 is the
     # uniform prior on a rate, one pseudo-observation each way. Why
     # unanimous groups are stopped at all: they carry no gradient (DAPO,
-    # arXiv 2503.14476; rlhfbook.com/c/14-reasoning.html). No paper states a prior for
+    # arXiv 2503.14476; rlhfbook.com/c/07-reasoning). No paper states a prior for
     # the decision; this is the engine's own, untested against a = 0.5.
     smoothing_alpha: float = knob(1.0, lo=0.0)
 
@@ -1460,6 +1477,8 @@ __all__ = [
     "CI_LEVEL",
     "DEAD_AGENT_BUDGET_MULTIPLE",
     "DEAD_AGENT_MIN_ERRORS",
+    "DECISION_TIMEOUT_S",
+    "DECISION_UNSURE_BAND",
     "DECONTAM_NGRAM",
     "DECONTAM_OVERLAP",
     "DEFAULT_AVG_TURNS",

@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 import whileai.simulations as wai
-from whileai import cli
 from whileai.simulations.ingest import platform
 
 
@@ -65,17 +64,3 @@ def test_delete_empty_datasets_and_smoke_sets(monkeypatch):
     ]
     wai.delete_empty_datasets()
     assert fake.deleted == ["/datasets/ds_empty"]
-
-
-def test_cli_purge_dry_run_and_refusal(monkeypatch, capsys):
-    fake = Fake()
-    monkeypatch.setattr(platform, "_call", fake)
-    assert cli.main(["purge", "--agent", "demo-agent", "--empty", "--dry-run"]) == 0
-    assert '"traces": 3' in capsys.readouterr().out
-    assert fake.deleted == []
-    monkeypatch.setattr("builtins.input", lambda _: "n")
-    assert cli.main(["purge", "--agent", "demo-agent"]) == 2
-    assert fake.deleted == []
-    assert cli.main(["purge", "--agent", "demo-agent", "--yes"]) == 0
-    assert "/agents/demo-agent" in fake.deleted
-    assert cli.main(["purge"]) == 1

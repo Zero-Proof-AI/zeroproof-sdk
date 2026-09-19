@@ -17,6 +17,8 @@ from ..defaults import (
     JUDGE_TEMPERATURE,
 )
 from ..generate.agents import complete, parse_backend_spec
+from ..generate.typesafe_backend import is_typesafe_url
+from . import decision_judge
 
 DEFAULT_JUDGE_SPEC = "openai:gpt-4o-mini"
 MISSING_JUDGE_KEY = "LLM grading needs an API key (pass api_key= or set OPENAI_API_KEY)."
@@ -46,6 +48,10 @@ def resolve_judge_key(api_key: str | None = None, backend_spec: str | None = Non
         from ..generate.anthropic_backend import resolve_key as anthropic_key
 
         return anthropic_key() or None
+    if spec.startswith("typesafe:"):
+        from ..generate.typesafe_backend import resolve_key as typesafe_key
+
+        return typesafe_key() or None
     env = str(os.environ.get("OPENAI_API_KEY") or "").strip()
     if env:
         return env
@@ -155,6 +161,14 @@ def judge_one(
     spec = backend_spec or DEFAULT_JUDGE_SPEC
     url, model = parse_backend_spec(spec)
     payload = _render_payload(trajectory, policy=policy, tools=tools, payload_chars=payload_chars)
+    if is_typesafe_url(url):
+        # the three-level score question, expected level scaled to [0, 1]
+        try:
+            return decision_judge.advisory_decision(
+                url, model, system=JUDGE_SYSTEM, payload=payload, api_key=api_key, timeout=timeout
+            )
+        except Exception:
+            return {"llm_reward": None, "llm_reason": None}
     try:
         reply = complete(
             url,

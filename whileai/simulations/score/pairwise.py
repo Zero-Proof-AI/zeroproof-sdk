@@ -28,6 +28,8 @@ from ..defaults import (
     POSITION_FLIP_FLAG,
 )
 from ..generate.agents import complete, parse_backend_spec
+from ..generate.typesafe_backend import is_typesafe_url
+from . import decision_judge
 from .grade_llm import _render_payload, judge_spec, judge_version
 
 PAIRWISE_SYSTEM = (
@@ -101,15 +103,22 @@ def pairwise_judge(
 
     def judge(a: dict, b: dict) -> Verdict:
         request = str(a.get("prompt") or b.get("prompt") or "")[:request_chars]
-        user = json.dumps(
-            {
-                "request": request,
-                "A": json.loads(_render_payload(a, policy=policy, tools=tools)),
-                "B": json.loads(_render_payload(b, policy=policy, tools=tools)),
-            },
-            default=str,
-        )
+        a_record = json.loads(_render_payload(a, policy=policy, tools=tools))
+        b_record = json.loads(_render_payload(b, policy=policy, tools=tools))
+        user = json.dumps({"request": request, "A": a_record, "B": b_record}, default=str)
         try:
+            if is_typesafe_url(url):
+                # one choice question, A / B / tie, with its distribution
+                return decision_judge.pairwise_decision(
+                    url,
+                    model,
+                    system=system,
+                    request=request,
+                    a=a_record,
+                    b=b_record,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
             reply = complete(
                 url,
                 model,

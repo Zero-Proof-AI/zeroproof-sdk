@@ -103,7 +103,9 @@ returns `{"steps": [...], "final_text": "..."}`. To use a model, pass a
 spec string: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
 or `ollama:<model>`. With no `agent=` at all, the run uses the Qwen we
 host, on your key from `whileai login`, and Phi-4 grades. The judge is
-never the model it is judging.
+never the model it is judging. `data.grade(spec="typesafe:jev-latest")` grades
+with TypeSafe's Jev instead: typed questions, a probability on every verdict,
+no output tokens (judge only, on `TYPESAFE_API_KEY`).
 
 ## The loop
 
@@ -187,6 +189,21 @@ need, and how long it takes. All of them run in CI.
 ## Platform
 
 Push a graded run to your While account, train on it, serve the result.
+
+From a terminal, for a coding agent that manages the account:
+
+```bash
+whileai login                    # or: whileai signup --email you@example.com
+whileai agents                   # what is tracked, what each one serves
+whileai agent refund-bot         # record, behaviors, verdict
+whileai runs refund-bot          # the version table
+whileai verdict refund-bot       # does the candidate beat the served version, and is it real
+whileai promote refund-bot v4    # usually the person's button on the platform
+whileai live refund-bot --day 2026-09-17 --version v3 --replies 2400 --flagged 98
+whileai keys                     # names and prefixes; create or revoke under Account
+```
+
+Every command takes `--json`. They are thin calls into `whileai.platform`.
 `push` refuses RL data with no mixed groups, since a trainer would learn
 nothing from it.
 
@@ -204,7 +221,7 @@ points the next simulation at the situations that failed.
 ## Documentation
 
 [docs.withwhile.com](https://docs.withwhile.com): the guides and the generated API reference, rebuilt on every merge.
-[docs/reference.md](docs/reference.md): every call, knob, report and gate.
+[docs.withwhile.com/reference/overview](https://docs.withwhile.com/reference/overview): every call, knob, report and gate.
 [docs/engine.md](docs/engine.md): how a row is made.
 [CHANGELOG.md](CHANGELOG.md): one entry per release.
 

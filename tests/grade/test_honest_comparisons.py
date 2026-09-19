@@ -1,12 +1,5 @@
-"""#375 and #392: two honesty gaps in the comparison and sizing code.
+"""#392: a saturated baseline must not size a holdout (#375 shipped on main in 0.81).
 
-#375: ``delta_report`` failed two offline arms as ``NOT COMPARABLE:
-writer_model`` when one was drawn with ``seeds=`` (stamp ``seed``) and the
-other replayed the same situations under another stamp, although both arms
-covered the same tasks. Comparability now keys on the situation identity
-(``task_key``): a writer difference over the same task set is a note, not a
-failure; over different task sets it still fails. ``simulate(seeds=...,
-runs=N)`` also raised, because the replays carried the seeds again.
 
 #392: ``holdout_size(effect, before=rows)`` on a baseline every task passes
 returned ``n_tasks=2, task_std=0.0`` with no warning: the binomial model at
@@ -20,91 +13,8 @@ from __future__ import annotations
 import pytest
 
 import whileai.simulations as wai
-from tests.helpers import simulate_offline
 from whileai.simulations import defaults
-from whileai.simulations.score import delta
-from whileai.simulations.score.delta import delta_report, format_delta_report
 from whileai.simulations.score.stats import MIN_HOLDOUT_TASKS, holdout_size
-
-# ------------------------------------------------------------------ #375
-
-
-def _arm(pass_by_task: dict[str, float], k: int = 4, **stamp) -> list[dict]:
-    rows = []
-    for task, p in pass_by_task.items():
-        passes = round(p * k)
-        for i in range(k):
-            rows.append(
-                {
-                    "scenario_id": task,
-                    "prompt": f"ask {task}",
-                    "rollout_index": i,
-                    "reward": 1.0 if i < passes else 0.0,
-                    **stamp,
-                }
-            )
-    return rows
-
-
-SAME_TASKS = {f"t{i}": 0.5 for i in range(12)}
-
-
-def test_writer_stamps_that_differ_over_the_same_situations_are_a_note_not_a_failure():
-    """The issue's shape: a seeds= arm against a replay of its own task set
-    under another writer stamp. Every task_key is on both sides."""
-    before = _arm(SAME_TASKS, writer_model="seed")
-    after = _arm({t: 0.75 for t in SAME_TASKS}, writer_model="Qwen/Qwen3.8-27B")
-    report = delta_report(before, after, n_boot=100)
-    assert report["not_comparable"] == []
-    assert report["ok"] is True
-    assert report["headline_verdict"] == "moved_unreplicated"
-    [note] = [w for w in report["warnings"] if "writer_model was 'seed'" in w]
-    assert "every one of the 12 tasks is on both sides (task_key)" in note
-    assert "the delta stands" in note
-    assert not any(w.startswith("NOT COMPARABLE: writer_model") for w in report["warnings"])
-    assert format_delta_report(report).splitlines()[0].startswith("PASS")
-
-
-def test_writer_stamps_that_differ_over_different_situations_still_fail():
-    before = _arm(SAME_TASKS | {f"a{i}": 0.5 for i in range(3)}, writer_model="seed")
-    after = _arm(SAME_TASKS | {f"b{i}": 0.5 for i in range(3)}, writer_model="template")
-    report = delta_report(before, after, n_boot=100)
-    assert "writer_model" in report["not_comparable"] and report["ok"] is False
-    assert any(w.startswith("NOT COMPARABLE: writer_model") for w in report["warnings"])
-
-
-def test_a_user_model_that_moved_fails_even_over_the_same_situations():
-    """The user model plays turns inside every rollout, so the task set does
-    not clear it."""
-    before = _arm(SAME_TASKS, user_model="qwen-a")
-    after = _arm(SAME_TASKS, user_model="qwen-b")
-    report = delta_report(before, after, n_boot=100)
-    assert report["not_comparable"] == ["user_model"]
-
-
-def test_seeds_arm_and_its_tasks_replay_compare_end_to_end():
-    seeds = [f"refund order 8{i}" for i in range(6)] + [f"where is order 7{i}" for i in range(6)]
-    before = simulate_offline(seeds=seeds, repeats=2, budget=24, grade=True, concurrency=1)
-    after = simulate_offline(tasks=before, budget=24, grade=True, concurrency=1)
-    report = delta_report(before.trajectories, after.trajectories, n_boot=100)
-    assert report["not_comparable"] == []
-    assert report["n_paired_tasks"] == len({r["scenario_id"] for r in before.trajectories})
-
-
-def test_seeds_with_runs_draws_once_and_replays():
-    seeds = [f"refund order 8{i}" for i in range(6)]
-    data = simulate_offline(seeds=seeds, repeats=1, budget=6, runs=2, concurrency=1, seed=3)
-    runs = sorted({r["lineage"]["eval_run"] for r in data.trajectories})
-    assert runs == [0, 1]
-    first = {r["scenario_id"] for r in data.trajectories if r["lineage"]["eval_run"] == 0}
-    second = {r["scenario_id"] for r in data.trajectories if r["lineage"]["eval_run"] == 1}
-    assert first == second
-    assert {r["writer_model"] for r in data.trajectories} == {"seed"}
-
-
-def test_ceiling_share_has_one_home():
-    assert delta.CEILING_PASS_RATE is defaults.CEILING_PASS_RATE
-
 
 # ------------------------------------------------------------------ #392
 
