@@ -954,6 +954,23 @@ what a gated RL push needs, and `SimulationData.push` cannot see
 it: `grade(judge=)` leaves the run's trajectories ungraded on
 purpose.
 
+#### ScoredData.select
+
+```python
+select(
+    self,
+    mode: str = 'rl',
+    target: int = 1000,
+    band: tuple[float, float] | None = None,
+    endorsed: Sequence[str] = (),
+    truncated: str = 'drop',
+)
+```
+
+The rows worth training on, as a `Selection` that prints its
+report: `optimize` over the graded copies, `mode="rl"` by
+default. `band`, `endorsed` and `truncated` as there.
+
 #### ScoredData.select_by_reward_range
 
 ```python

@@ -7,32 +7,33 @@ description: "Agent to gated dataset in five calls: simulate, grade, trust the j
 Agent to gated dataset. Everything else in this reference is one layer down. `TOOLS` is the list from [Start here](/reference/overview#start-here-no-key-required); `POLICY` is the agent's system prompt.
 
 ```python
-import whileai.simulations as wai
+import whileai as wai
+
+wai.configure(agent=wai.OpenAI("gpt-4.1-mini"), judge=wai.Anthropic("claude-haiku-4-5"))
 
 data = wai.simulate(
-    agent="openai:gpt-4.1-mini",
-    tools=TOOLS,
-    system_prompt=POLICY,
-    mode="rl",
-    situations=200,
-    repeats=8,
+    tools=TOOLS, system_prompt=POLICY, mode="rl", situations=200, repeats=8
 )  # 1 generate
-data.grade(rubric=RUBRIC)  # 2 grade against the task rubric: reward 0/1 on every row
-print(data.pass_at)
-wai.judge_trust(data.trajectories)  # 3 trust the numbers
-rows, report = wai.optimize(data, mode="rl")  # 4 prune to what carries gradient
-entry = wai.push_rows(rows, "my-agent-rl-v1", gate=True, mode="rl")  # 5 publish, gated
+scored = data.grade(
+    wai.Judge(rubric=RUBRIC)
+)  # 2 grade against the task rubric: reward 0/1 on every row
+print(scored.pass_at)
+print(wai.judge_trust(scored.rows))  # 3 trust the numbers
+rows = scored.select(
+    mode="rl"
+)  # 4 keep what carries gradient; print(rows) says what each gate dropped
+rows.push("my-agent-rl-v1")  # 5 publish, gated (whileai.platform)
 ```
 
-`situations=200, repeats=8` is a guess. `wai.recommend(tools=TOOLS, system_prompt=POLICY, mode="rl")` replaces it with numbers from this agent's own grid: [How much to run](/reference/what-to-run#how-much-to-run).
+`situations=200, repeats=8` is a guess. `wai.simulations.recommend(tools=TOOLS, system_prompt=POLICY, mode="rl")` replaces it with numbers from this agent's own grid: [How much to run](/reference/what-to-run#how-much-to-run).
 
 | Call | What it decides | Reads |
 |---|---|---|
 | `simulate` | the situations, the users, the world, k rollouts per ask | your spec or tools + system prompt |
 | `data.grade(judge=)` | 0/1 per rollout. `data.grade()` uses the hosted judge instead | your judge callable, or your account key (`whileai login`) |
 | `pass_at` / `judge_trust` | pass@1 with an interval, headroom for RL, whether the judge can be trusted | graded rows, 30 to 100 hand labels as `gold_reward` |
-| `optimize(mode="rl")` | drops junk rows, duplicates, dead groups, and asks outside the difficulty band (pass rate 0.2 to 0.8); flags reward hacks | graded rows |
-| `push_rows(gate=True)` | refuses ungraded or gradient-free RL data; stamps calibration | pruned rows |
+| `scored.select(mode="rl")` | drops junk rows, duplicates, dead groups, and asks outside the difficulty band (pass rate 0.2 to 0.8); flags reward hacks. `optimize` underneath | graded rows |
+| `rows.push(name)` | refuses ungraded or gradient-free RL data; stamps calibration. `platform.push` underneath | the selection |
 
 A spec folder is `spec.json` (tools and policy) plus `rubric.md`: what doing the job means, in prose. `grade()` scores against it. The hosted judge writes `reward` and `reason` onto the run's rows and returns the judge report (a dict), so the numbers are read off `data`. `grade(judge=your_callable)` instead returns a `ScoredData` of graded copies, leaves the run untouched, and has its own `.push(name, ...)`. Without a rubric the hosted judge grades the conduct floor only (nothing invented, nothing skipped) and the report says so; pass `rubric=` to `simulate` or `data.grade` to supply one.
 

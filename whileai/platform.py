@@ -56,7 +56,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
@@ -985,6 +985,97 @@ def tracked_agents(api_key: str | None = None) -> list[TrackedInfo]:
     return [TrackedInfo.model_validate(a) for a in out.get("agents") or []]
 
 
+# ---------------------------------------------------------------------
+# The rest of the platform: sign in, datasets, hosted training and
+# serving, traces. Loaded on first use so ``from whileai import platform``
+# stays cheap and the engine is not imported for a login.
+# ---------------------------------------------------------------------
+
+_LAZY: dict[str, tuple[str, str]] = {
+    "login": ("whileai.auth", "login"),
+    "logout": ("whileai.auth", "logout"),
+    "signup": ("whileai.auth", "signup"),
+    "account": ("whileai.auth", "account"),
+    "LoginError": ("whileai.auth", "LoginError"),
+    "push": ("whileai.simulations.ingest.platform", "push_rows"),
+    "push_file": ("whileai.simulations.ingest.platform", "push_file"),
+    "pull": ("whileai.simulations.ingest.platform", "pull"),
+    "datasets": ("whileai.simulations.ingest.platform", "datasets"),
+    "catalog": ("whileai.simulations.ingest.platform", "catalog"),
+    "preview": ("whileai.simulations.ingest.platform", "preview"),
+    "publish": ("whileai.simulations.ingest.platform", "publish"),
+    "unpublish": ("whileai.simulations.ingest.platform", "unpublish"),
+    "agents": ("whileai.simulations.ingest.platform", "agents"),
+    "register_agent": ("whileai.simulations.ingest.platform", "register_agent"),
+    "cuts": ("whileai.simulations.ingest.platform", "cuts"),
+    "cut": ("whileai.simulations.ingest.platform", "cut"),
+    "hf_publish": ("whileai.simulations.ingest.platform", "hf_publish"),
+    "import_hf": ("whileai.simulations.ingest.platform", "import_hf"),
+    "train": ("whileai.simulations.training", "train"),
+    "training_run": ("whileai.simulations.training", "training_run"),
+    "runs": ("whileai.simulations.training", "list_runs"),
+    "get_run": ("whileai.simulations.training", "get_run"),
+    "serve": ("whileai.simulations.training", "serve"),
+    "unserve": ("whileai.simulations.training", "unserve"),
+    "models": ("whileai.simulations.training", "models"),
+    "reward_model": ("whileai.simulations.training", "reward_model"),
+    "TrainerCallback": ("whileai.simulations.training", "TrainerCallback"),
+    "TrainingRun": ("whileai.simulations.training", "TrainingRun"),
+    "send_traces": ("whileai.ingest", "send_traces"),
+    "list_traces": ("whileai.ingest", "list_traces"),
+    "otel_env": ("whileai.ingest", "otel_env"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name, attr = _LAZY[name]
+    except KeyError:
+        raise AttributeError(f"module 'whileai.platform' has no attribute {name!r}") from None
+    import importlib
+
+    value = getattr(importlib.import_module(module_name), attr)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY))
+
+
+if TYPE_CHECKING:  # the lazy names above, visible to editors and mypy
+    from .auth import LoginError, account, login, logout, signup
+    from .ingest import list_traces, otel_env, send_traces
+    from .simulations.ingest.platform import (
+        agents,
+        catalog,
+        cut,
+        cuts,
+        datasets,
+        hf_publish,
+        import_hf,
+        preview,
+        publish,
+        pull,
+        push_file,
+        register_agent,
+        unpublish,
+    )
+    from .simulations.ingest.platform import push_rows as push
+    from .simulations.training import (
+        TrainerCallback,
+        TrainingRun,
+        get_run,
+        models,
+        reward_model,
+        serve,
+        train,
+        training_run,
+        unserve,
+    )
+    from .simulations.training import list_runs as runs
+
+
 __all__ = [
     "DEFAULT_PLATFORM_URL",
     "Behavior",
@@ -996,6 +1087,7 @@ __all__ = [
     "Judge",
     "LiveDay",
     "LiveSeries",
+    "LoginError",
     "PlatformError",
     "Run",
     "RunSpec",
@@ -1004,10 +1096,41 @@ __all__ = [
     "TrackedInfo",
     "TrainCurve",
     "TrainPoint",
+    "TrainerCallback",
+    "TrainingRun",
     "Verdict",
     "VersionScore",
+    "account",
+    "agents",
+    "catalog",
+    "cut",
+    "cuts",
+    "datasets",
     "describe",
+    "get_run",
+    "hf_publish",
+    "import_hf",
+    "list_traces",
+    "login",
+    "logout",
+    "models",
+    "otel_env",
     "platform_url",
+    "preview",
+    "publish",
+    "pull",
+    "push",
+    "push_file",
+    "register_agent",
+    "reward_model",
+    "runs",
+    "send_traces",
+    "serve",
+    "signup",
     "track",
     "tracked_agents",
+    "train",
+    "training_run",
+    "unpublish",
+    "unserve",
 ]

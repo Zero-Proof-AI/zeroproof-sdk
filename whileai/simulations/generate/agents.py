@@ -116,8 +116,17 @@ def parse_backend_spec(spec: str) -> tuple[str, str]:
     )
 
 
+def _settings():
+    """The settings ``wai.configure`` / ``wai.context`` hold. Imported late:
+    ``whileai.config`` is dependency-free, this module is not."""
+    from ...config import current
+
+    return current()
+
+
 def _account_key() -> str:
-    """The account's zp_ key: WHILEAI_API_KEY, else what `whileai login` saved."""
+    """The account's zp_ key: ``wai.configure(api_key=)``, else
+    WHILEAI_API_KEY, else what `whileai login` saved."""
     from ...auth import resolve_api_key
 
     return str(resolve_api_key() or "").strip()
@@ -138,20 +147,35 @@ def _account_route() -> bool:
 
 
 def default_agent_spec() -> str:
-    """Tool-using rollout model. WHILEAI_AGENT if set; else the shared
-    pool with VLLM_API_KEY; else the account endpoint on the account key."""
-    return getenv("AGENT") or (ACCOUNT_AGENT if _account_route() else DEFAULT_AGENT)
+    """Tool-using rollout model. ``wai.configure(agent=)`` if set; else
+    WHILEAI_AGENT; else the shared pool with VLLM_API_KEY; else the account
+    endpoint on the account key."""
+    return (
+        _settings().agent
+        or getenv("AGENT")
+        or (ACCOUNT_AGENT if _account_route() else DEFAULT_AGENT)
+    )
 
 
 def default_judge_spec() -> str:
-    """Grader model. WHILEAI_JUDGE if set; else hosted Phi-4 on the same
-    route as the agent. Never the policy model by default: see DEFAULT_JUDGE."""
-    return getenv("JUDGE") or (ACCOUNT_JUDGE if _account_route() else DEFAULT_JUDGE)
+    """Grader model. ``wai.configure(judge=)`` if set; else WHILEAI_JUDGE;
+    else hosted Phi-4 on the same route as the agent. Never the policy
+    model by default: see DEFAULT_JUDGE."""
+    return (
+        _settings().judge
+        or getenv("JUDGE")
+        or (ACCOUNT_JUDGE if _account_route() else DEFAULT_JUDGE)
+    )
 
 
 def default_simulator_spec() -> str:
-    """User-message writer. Same hosted Qwen as the agent unless overridden."""
-    return getenv("SURROGATE") or (ACCOUNT_AGENT if _account_route() else DEFAULT_SIMULATOR)
+    """User-message writer. ``wai.configure(simulator=)`` if set; else
+    WHILEAI_SURROGATE; else the same hosted Qwen as the agent."""
+    return (
+        _settings().simulator
+        or getenv("SURROGATE")
+        or (ACCOUNT_AGENT if _account_route() else DEFAULT_SIMULATOR)
+    )
 
 
 #: Working context estimate for the rollout backend. Sized to hosted Qwen
@@ -279,6 +303,26 @@ def _hosted_qwen_url(base_url: str | None) -> bool:
     return host.endswith("modal.run") or "zeroproof" in host
 
 
+def _configured_key(base_url: str | None) -> str | None:
+    """The key a backend object registered for this URL's provider, if any
+    (``wai.OpenAI("gpt-4.1-mini", api_key=...)`` keeps its key for every
+    OpenAI call in the process). ``None`` falls through to the environment."""
+    keys = _settings().keys
+    if not keys:
+        return None
+    if is_anthropic_url(base_url):
+        return keys.get("anthropic")
+    if is_typesafe_url(base_url):
+        return keys.get("typesafe")
+    if _account_url(base_url) or not base_url:
+        return None
+    if _hosted_qwen_url(base_url):
+        return keys.get("vllm")
+    if _local_url(base_url):
+        return keys.get("vllm")
+    return keys.get("openai") or keys.get("vllm")
+
+
 def resolve_completion_key(base_url: str | None = None, api_key: str | None = None) -> str:
     """Key for an OpenAI-compatible completion URL.
 
@@ -287,6 +331,9 @@ def resolve_completion_key(base_url: str | None = None, api_key: str | None = No
     """
     if api_key:
         return str(api_key).strip()
+    configured = _configured_key(base_url)
+    if configured:
+        return configured
     if is_anthropic_url(base_url):
         return anthropic_key()
     if is_typesafe_url(base_url):

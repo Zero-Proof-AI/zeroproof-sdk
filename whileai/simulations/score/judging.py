@@ -249,6 +249,9 @@ class ScoredData:
         self.eval_coverage: dict[str, Any] | None = None
         self.judge_name = judge_name
         self.model = model
+        # the AgentProfile of the run these rows came from, when grade()
+        # made them; select() and export read the prompt and tools off it
+        self.profile: Any = None
         # Plain-words notes on whether the score means anything: no row
         # called a tool, a marker that never fired, a unanimous verdict.
         # Filled by ``run_judge`` from ``coverage_warnings``; printed once.
@@ -314,6 +317,24 @@ class ScoredData:
     def unjudged(self) -> list[dict]:
         """Rows the judge could not score. Never treated as failures."""
         return [r for r in self.rows if r.get("judge_status") != "ok"]
+
+    def select(
+        self,
+        *,
+        mode: str = "rl",
+        target: int = 1000,
+        band: tuple[float, float] | None = None,
+        endorsed: Sequence[str] = (),
+        truncated: str = "drop",
+    ):
+        """The rows worth training on, as a ``Selection`` that prints its
+        report: ``optimize`` over the graded copies, ``mode="rl"`` by
+        default. ``band``, ``endorsed`` and ``truncated`` as there."""
+        from ...selection import select
+
+        return select(
+            self, mode=mode, target=target, band=band, endorsed=endorsed, truncated=truncated
+        )
 
     def select_for_sft(self, *, target: int = 1000) -> tuple[list[dict], dict[str, Any]]:
         """Diverse correct demonstrations: 1-labeled, deduped by behavior."""

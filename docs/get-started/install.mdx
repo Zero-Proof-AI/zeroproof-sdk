@@ -52,6 +52,21 @@ machine. No browser? `whileai signup --email you@example.com` creates an
 account and a key in one step. The full list of commands is on the
 [command line](/get-started/cli) page.
 
+In code, the same key and any provider key go through `configure`, once:
+
+```python
+import whileai as wai
+
+wai.configure(
+    api_key="zp_...",                                        # the While account key
+    agent=wai.OpenAI("gpt-4.1-mini", api_key="sk-..."),      # or OPENAI_API_KEY
+)
+print(wai.settings)                                          # says which model and key each role uses
+```
+
+[Connect your agent](/get-started/connect-your-agent) has the table of
+backends and which key each one reads.
+
 <Note>
 This package used to be called `zeroproof`. `pip install zeroproof` still
 installs it and `import zeroproof.simulations` still works; both give you
