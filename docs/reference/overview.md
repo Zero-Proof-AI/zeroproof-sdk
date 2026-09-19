@@ -52,22 +52,18 @@ This runs offline, in seconds, on nothing but the package. It is the fastest way
 
 ```python
 import whileai.simulations as wai
+from whileai import tool
 
-# 1. Your tools, in OpenAI function-calling shape. This is all `tools=` wants.
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_order",
-            "description": "Look up an order by id.",
-            "parameters": {
-                "type": "object",
-                "properties": {"order_id": {"type": "string"}},
-                "required": ["order_id"],
-            },
-        },
-    }
-]
+
+# 1. Your tools: typed functions. The signature is the schema, the
+#    docstring the description. Schema dicts work in the same list.
+@tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+TOOLS = [get_order]
 
 
 # 2. Your agent: one call per rollout, in with the situation text,
@@ -103,7 +99,7 @@ print(scored.pass_at)
 pass@1 1.00 [1.00..1.00] | pass^2 (pass_pow_k) n/a | pass@2 n/a | headroom n/a (18 groups, k=2; set repeats>=4 for pass^k and pass@k)
 ```
 
-The bare `function` dict without the `{"type": "function", ...}` wrapper works too; both shapes are normalized. The template writer needs no model and runs in seconds, but its situations are less varied than a model writes, so it is for wiring up your agent and grader, not for a training set. For that, [bring a model](#bring-a-model).
+`tools=` takes `@wai.tool` functions, plain typed functions, OpenAI schema dicts (with or without the `{"type": "function", ...}` wrapper) and Anthropic `input_schema` dicts in one list; every call that takes `tools=` normalizes them the same way. The template writer needs no model and runs in seconds, but its situations are less varied than a model writes, so it is for wiring up your agent and grader, not for a training set. For that, [bring a model](#bring-a-model).
 
 If your agent raises, the rollout is dropped and the run says so: `data.stopped_because == "agent_failed"` when no row survived, with the count and the first error in `data.search["agent_errors"]` and `data.search["first_agent_error"]`. An agent that fails every call is called off after `max(16, 2 * budget)` lost rollouts, so a dead endpoint costs a handful of calls, not hundreds.
 

@@ -28,6 +28,7 @@ from ..defaults import (
     TRANSIENT_TRIES,
 )
 from ..text import split_reasoning
+from ..tools import schemas as _tool_schemas
 from ..world.sandbox import MockEnvironment, WorldOptions
 from .anthropic_backend import ANTHROPIC_BASE_URL, is_anthropic_url
 from .anthropic_backend import DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL
@@ -2059,6 +2060,7 @@ def local_model(
     data = wai.simulate(agent, tools=TOOLS, system_prompt=POLICY, budget=100)
     ```
     """
+    tools = _tool_schemas(tools) or []
     hazards = patience_hazards(patience)
     world_opts = WorldOptions.coerce(world_options)
     may_leave = patience_may_leave(patience)

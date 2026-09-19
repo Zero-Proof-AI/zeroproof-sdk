@@ -65,6 +65,7 @@ from .export import _resolve
 from .score.checklist import _task_has_outcome_rule
 from .score.judging import normalize_judge_result
 from .score.stats import decontaminate
+from .tools import schemas as _tool_schemas
 
 SPEC_FILE = "spec.json"
 DEFAULT_REWARD = "whileai.simulations.score.checklist:task_checklist"
@@ -546,6 +547,7 @@ def export_environment(
     print(report["train"], report["holdout"], report["path"])
     ```
     """
+    tools = _tool_schemas(tools)
     from .world.sandbox import WorldOptions
 
     world_options = dict(world) if world else None

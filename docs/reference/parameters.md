@@ -12,7 +12,7 @@ Every knob `simulate()` takes. The defaults below are checked against the code b
 |---|---|---|
 | `agent` | hosted Qwen | Rollout model: a callable, a model spec (`openai:`, `vllm:`, `ollama:`, `anthropic:`), or nothing for the hosted default |
 | `spec` | | Local tools and system prompt path. None ship with the package; `tools=` + `system_prompt=` is the same thing inline |
-| `tools`, `system_prompt` | from spec or agent | Tool list and agent system prompt. `tools` is OpenAI function-calling shape, `[{"type": "function", "function": {"name", "description", "parameters"}}]`; the bare `function` dict works too |
+| `tools`, `system_prompt` | from spec or agent | Tool list and agent system prompt. `tools` is a list of `@wai.tool` functions (the signature is the schema); OpenAI function-calling dicts, with or without the `{"type": "function", ...}` wrapper, and Anthropic `input_schema` dicts work in the same list |
 | `situations` | | Distinct situations (N) |
 | `traces` | `None` | Graded traces (row dicts or a JSONL path) that aim the coverage grid at observed failures. [Close the loop](/reference/what-to-run) |
 | `tasks` | `None` | Re-run a previous run's task set: that run, its rows, or its JSONL path. Copies the prompts and, unless you pass `repeats=`, the pinned run's k. [Same tasks, new prompt](/reference/platform#trust-the-numbers) |

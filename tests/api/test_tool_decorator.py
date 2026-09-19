@@ -139,3 +139,26 @@ def test_a_decorated_tool_runs_through_the_seeded_loop_offline():
     assert "get_order" in names
     scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})
     assert scored.pass_at is not None
+
+
+def test_every_tools_keyword_takes_a_decorated_function():
+    from whileai.simulations import coverage_gap, evaluate, preflight, world
+
+    w = world([get_order])
+    assert "get_order" in {t["function"]["name"] for t in w.tools} or w.call(
+        "get_order", {"order_id": "1"}
+    )
+    report = preflight([get_order], "Help customers with orders.")
+    assert isinstance(report, dict)
+    gap = coverage_gap(["Where is order 4473?"], tools=[get_order], system_prompt="Help customers.")
+    assert isinstance(gap, dict)
+    data = wai.simulate(
+        wai.seeded_agent([get_order]),
+        tools=[get_order],
+        system_prompt="Help customers with orders.",
+        simulator=False,
+        budget=4,
+        seed=0,
+    )
+    scored = evaluate(data.rows, lambda row: {"reward": 1}, tools=[get_order])
+    assert len(scored.rows) == len(data.rows)

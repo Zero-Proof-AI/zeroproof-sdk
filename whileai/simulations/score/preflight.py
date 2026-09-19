@@ -26,6 +26,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..defaults import MESSAGE_EXAMPLES, RULE_AXIS_CAP_REPORT, TEXT_HEURISTICS
+from ..tools import schemas as _tool_schemas
 
 #: Untested policy rules named in the preflight summary before "and N more".
 _UNTESTED_SHOWN = 3
@@ -225,6 +226,7 @@ def preflight(
     grid keeps its own cap (``RULE_AXIS_CAP_GRID``); ``cells`` is counted
     on the same axis ``rules`` shows.
     """
+    tools = _tool_schemas(tools) or []
     from ..generate.scenarios import build_dimensions, rule_axis, scenario_regions
 
     tools = list(tools or [])
@@ -364,6 +366,7 @@ def dataset_report(
     """One report a developer reads after simulate/grade: size, signal, mix.
     ``hard_share_floor`` (``HARD_SHARE_FLOOR``, 0.3) is the share of hard-
     tier rows under which the set is called easy."""
+    tools = _tool_schemas(tools)
     from ..generate.coverage import cell_key
     from ..generate.diversity import behavior_tier
     from .grading import behavior_signature
@@ -852,6 +855,7 @@ def coverage_gap(
     print(gap["untested_rules"], gap["untested_tools"])
     ```
     """
+    tools = _tool_schemas(tools) or []
     from ..generate.scenarios import build_dimensions, rule_axis
 
     tool_list = list(tools or [])

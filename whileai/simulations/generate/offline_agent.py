@@ -36,6 +36,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from ..defaults import TEXT_HEURISTICS
+from ..tools import schemas as _tool_schemas
 from ..world.sandbox import MockEnvironment
 from .agents import current_rollout
 
@@ -157,6 +158,7 @@ def world(tools: Sequence[dict] | None = None, *, seed: int = 0) -> World:
     through this sees them, and the row's ``faults`` stop being a label
     with no effect.
     """
+    tools = _tool_schemas(tools)
     return World(tools, seed=seed)
 
 
@@ -230,8 +232,6 @@ def seeded_agent(
         raise ValueError(
             f"unknown seeded behaviors {unknown}; choose from {list(SEEDED_BEHAVIORS)}"
         )
-    from ..tools import schemas as _tool_schemas
-
     tool_list = [dict(t) for t in (_tool_schemas(tools) or [])]
     if not tool_list:
         raise ValueError("seeded_agent needs tools=[...] (the same list you pass simulate)")

@@ -75,11 +75,27 @@ Three things to know about a callable agent:
   A1002, ...") or in `seeds=`, or the writer invents ids, every rollout
   is "not found", and the run is hollow.
 
-Tools go in OpenAI function-calling shape
-(`{"type": "function", "function": {"name", "description", "parameters"}}`);
-a bare `{"name", "description", "parameters"}` dict works too, and so does
-the Anthropic shape `{"name", "description", "input_schema"}`
-(`input_schema` is read as `parameters`). If your bot records calls
+A tool is a typed function under `@wai.tool`: the signature is the
+schema and the docstring the description, so nothing is written by hand.
+
+```python
+from whileai import tool
+
+
+@tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+TOOLS = [get_order]
+```
+
+Schema dicts still work in the same list: OpenAI function-calling shape
+(`{"type": "function", "function": {"name", "description", "parameters"}}`),
+the bare `{"name", "description", "parameters"}` dict, and the Anthropic
+shape `{"name", "description", "input_schema"}` (`input_schema` is read as
+`parameters`). If your bot records calls
 through a shared global, wrap the recorder in a `threading.local`:
 `concurrency` defaults to 32, so 32 threads call your function at once
 and one shared list interleaves calls from different rollouts into each

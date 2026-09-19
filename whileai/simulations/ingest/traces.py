@@ -41,6 +41,7 @@ from ..defaults import (
 from ..generate.embeddings import resolve_embedder
 from ..generate.scenarios import build_dimensions
 from ..score.grading import NO_FAULT, _fault_from_result, behavior_signature, trace_fault
+from ..tools import schemas as _tool_schemas
 
 #: Observed fault chip -> the grid axis and value that reproduces it. The
 #: chip names are what ``trace_fault`` reads off a result; the values are
@@ -890,6 +891,7 @@ def trace_report(traces, tools: list[dict] | None = None, policy: str = "") -> d
     "ungraded". ``dropped`` counts input rows that carried no usable
     signal and were discarded by normalization.
     """
+    tools = _tool_schemas(tools)
     from pathlib import Path as _Path
 
     if isinstance(traces, (str, _Path)):
