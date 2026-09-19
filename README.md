@@ -33,9 +33,16 @@ rewards the policy can game. Every method says where it comes from
 ```python
 import whileai as wai
 
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""  # the function is the tool; its signature is the schema
+    ...
+
+
 wai.configure(agent=wai.OpenAI("gpt-4.1-mini"), judge=wai.Anthropic("claude-haiku-4-5"))
 
-data = wai.simulate(tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=8)
+data = wai.simulate(tools=[get_order], system_prompt=POLICY, mode="rl", repeats=8)
 scored = data.grade(wai.Judge(rubric=RUBRIC))  # or a verifier, or any callable
 print(scored.pass_at)  # pass@1 0.61 [0.54..0.68] | pass@8 0.93 | headroom 0.32
 print(wai.judge_trust(scored.rows))  # does the judge agree with people
@@ -82,9 +89,13 @@ configured, every role uses the model While hosts on the key from
 The spec strings the objects stand for (`"openai:<model>"`,
 `"anthropic:<model>"`, `"vllm:<model>@<url>"`, `"ollama:<model>"`) work
 anywhere a backend does, and `OPENAI_BASE_URL` points `OpenAI` at a
-compatible server. No tool schemas yet? `wai.simulations.draft_tools("a
-support agent that looks up orders and issues refunds")` drafts them on
-the agent's key. Three things reach While, and only when you ask: leaving
+compatible server. A tool is a typed function under `@wai.tool`: the
+signature is the schema, the docstring the description, `Annotated[str,
+"note"]` or an `Args:` block the parameter notes. The mock world answers
+the calls, faults first; `execute=wai.Tool.dispatch([get_order])` has the
+bodies answer instead. Raw schema dicts still work. No tools at all yet?
+`wai.simulations.draft_tools("a support agent that looks up orders and
+issues refunds")` drafts them on the agent's key. Three things reach While, and only when you ask: leaving
 the agent on `Hosted()`, the hosted situation writer, and
 `whileai.platform`. `whileai status` prints which key the SDK will use and
 where it came from.
@@ -116,24 +127,16 @@ your judge catches exactly those rows before you trust it on real ones.
 ```python
 import whileai as wai
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_order",
-            "description": "Look up an order by id.",
-            "parameters": {
-                "type": "object",
-                "properties": {"order_id": {"type": "string"}},
-                "required": ["order_id"],
-            },
-        },
-    }
-]
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
 
 data = wai.simulate(
-    wai.seeded_agent(TOOLS),
-    tools=TOOLS,
+    wai.seeded_agent([get_order]),
+    tools=[get_order],
     system_prompt="Help customers with orders.",
     simulator=False,  # situations from templates, no model
     mode="rl",

@@ -44,6 +44,7 @@ from .run.spec import (  # noqa: F401
     backend_spec,
     kind_from_spec,
 )
+from .tools import schemas as _tool_schemas
 
 _SEARCH_ARMS = dict(SEARCH_ARMS)
 _reallocate = reallocate_search_arms
@@ -315,6 +316,7 @@ def simulate(
         raise ValueError("runs= is how many times to replay the task set, 1 or more")
     # Named knobs travel the same road as before (``advanced`` / aliases),
     # so nothing downstream changes; they are in the signature to be seen.
+    tools = _tool_schemas(tools)
     for _name, _val in (
         ("repeats", repeats),
         ("phrasings", phrasings),
