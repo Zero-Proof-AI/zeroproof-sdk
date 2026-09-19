@@ -5,6 +5,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- TrainerCallback forwards TRL's `completions/clipped_ratio` as `clip_ratio`,
+  the length-cap share the platform's Rollouts tile draws.
+
 ## 0.88 (2026-09-19)
 
 - `select()` drops a row whose reply quotes its own privileged context

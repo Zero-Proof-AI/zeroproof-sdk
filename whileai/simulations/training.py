@@ -1344,6 +1344,9 @@ _LOG_KEYS = {
     "entropy": "entropy",
     "completion_length": "completion_length",
     "completions/mean_length": "completion_length",
+    # Share of rollouts that hit max_completion_length: the length-cap share the
+    # platform's Rollouts tile draws as clip_ratio, not the policy-ratio clip.
+    "completions/clipped_ratio": "clip_ratio",
     "clip_ratio": "clip_ratio",
     "policy_loss": "policy_loss",
     "value_loss": "value_loss",
