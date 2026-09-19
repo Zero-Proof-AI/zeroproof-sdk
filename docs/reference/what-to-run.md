@@ -157,7 +157,7 @@ Before you spend on training, ask the base run whether the held-out set can
 show a difference at all:
 
 ```python
-rep = wai.eval_power(base.rows())
+rep = wai.score.eval_power(base.rows())
 print(rep)  # verdict usable / underpowered / saturated / floored, in_band, resolvable, n_needed
 ```
 
