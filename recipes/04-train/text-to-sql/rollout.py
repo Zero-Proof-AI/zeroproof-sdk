@@ -148,6 +148,11 @@ def main() -> int:
         "--max-tokens", type=int, default=4096, help="agent reply budget (whileai >= 0.47)"
     )
     ap.add_argument("--timeout", type=float, default=300, help="seconds per agent call")
+    ap.add_argument(
+        "--no-writer",
+        action="store_true",
+        help="simulator=False: no scene briefs or result shapes; the prompts are pinned",
+    )
     ap.add_argument("--limit", type=int, default=0, help="first N tasks only (smoke)")
     args = ap.parse_args()
 
@@ -198,6 +203,10 @@ def main() -> int:
         temperature=args.temperature,
         concurrency=args.concurrency,
         budget=len(todo) * args.k,
+        # Pinned prompts need no situation writer. With agent="vllm:..." the
+        # engine otherwise drafts scene briefs and result shapes on the same
+        # server, which doubled a 2,400-row run (whilehq/whileai-sdk#470).
+        **({"simulator": False} if args.no_writer else {}),
     )
     try:
         # a reasoning model thinks for 1-3k tokens before the query (whileai >= 0.47)
@@ -240,6 +249,16 @@ def main() -> int:
             f"  agent errors {data.search['agent_errors']}; first: {data.search.get('first_agent_error')}",
             flush=True,
         )
+    # why a run took longer than rows / throughput: re-rolls and lost rows
+    for key in ("lost", "rerolled", "cap_lifted", "degraded"):
+        val = data.search.get(key) if isinstance(data.search, dict) else None
+        if val is None:
+            val = getattr(data, key, None)
+        if val:
+            print(f"  {key}: {val}", flush=True)
+    if getattr(data, "warnings", None):
+        for w in list(data.warnings)[:3]:
+            print(f"  warning: {str(w)[:200]}", flush=True)
     return 0
 
 
