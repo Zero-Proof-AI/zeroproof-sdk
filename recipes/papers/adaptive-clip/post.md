@@ -1,1 +1,1 @@
-Reproduced Jia et al. (2609.00444) with whileai, one L40S, 20 min: pass@1 0.47 -> 0.52 (+0.050 [0.000, +0.100], flat) on 120 held-out tasks, Qwen2.5-1.5B-Instruct. Recipe: https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers/adaptive-clip Paper: https://arxiv.org/abs/2609.00444
+Reproduced Jia et al. (2609.00444), one L40S, 20 min: pass@1 0.47 -> 0.52 (+0.050 [0.000, +0.100], flat) on 120 held-out tasks, Qwen2.5-1.5B. Recipe: https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers/adaptive-clip Paper: https://arxiv.org/abs/2609.00444
