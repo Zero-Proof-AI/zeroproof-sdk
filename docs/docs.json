@@ -43,68 +43,89 @@
     }
   },
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Get started",
-        "pages": [
-          "index",
-          "get-started/install",
-          "get-started/your-model-and-key",
-          "get-started/quickstart",
-          "get-started/connect-your-agent",
-          "get-started/cli"
+        "tab": "Library",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "get-started/install",
+              "get-started/your-model-and-key",
+              "get-started/quickstart",
+              "get-started/connect-your-agent"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "evals",
+              "simulations",
+              "engine",
+              "character-training",
+              "reward-hacking",
+              "safety-evals"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/how-it-works",
+              "concepts/engine",
+              "concepts/faq"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/overview",
+              "reference/five-calls",
+              "reference/style",
+              "reference/what-to-run",
+              "reference/parameters",
+              "reference/development"
+            ]
+          }
         ]
       },
       {
-        "group": "Guides",
-        "pages": [
-          "evals",
-          "simulations",
-          "engine",
-          "character-training",
-          "reward-hacking",
-          "safety-evals"
+        "tab": "Platform",
+        "groups": [
+          {
+            "group": "Platform",
+            "pages": [
+              "platform/index",
+              "get-started/cli",
+              "reference/platform"
+            ]
+          }
         ]
       },
       {
-        "group": "Concepts",
-        "pages": [
-          "concepts/how-it-works",
-          "concepts/engine",
-          "concepts/faq"
-        ]
-      },
-      {
-        "group": "Reference",
-        "pages": [
-          "reference/overview",
-          "reference/five-calls",
-          "reference/style",
-          "reference/what-to-run",
-          "reference/platform",
-          "reference/parameters",
-          "reference/development"
-        ]
-      },
-      {
-        "group": "API",
-        "pages": [
-          "api/index",
-          "api/whileai",
-          "api/data",
-          "api/score",
-          "api/generate",
-          "api/world",
-          "api/verify",
-          "api/constants",
-          "api/environment",
-          "api/export",
-          "api/ingest",
-          "api/monitor",
-          "api/run",
-          "api/schema",
-          "api/simulation",
-          "api/training"
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "API",
+            "pages": [
+              "api/index",
+              "api/whileai",
+              "api/data",
+              "api/score",
+              "api/generate",
+              "api/world",
+              "api/verify",
+              "api/constants",
+              "api/environment",
+              "api/export",
+              "api/ingest",
+              "api/monitor",
+              "api/run",
+              "api/schema",
+              "api/simulation",
+              "api/training"
+            ]
+          }
         ]
       }
     ]

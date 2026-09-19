@@ -60,6 +60,35 @@ string on its own key. The judge is never the model it is judging; the
 [evals guide](/evals) shows how to check it against people before you
 trust it.
 
+## Three models, three arguments
+
+Three models can take part in a run. A model string can name each one,
+and each goes in a different place.
+
+| Role | What it does | Where the string goes | Default |
+|---|---|---|---|
+| **Agent** | Answers the customer and calls tools. The thing under test. | First argument of `simulate()`, or `backend=` | The hosted Qwen, on your While key |
+| **Writer** | Writes the situations and plays the customer in follow-up turns. | `simulator=` on `simulate()`; `user_model=` for the customer alone | Same model as the agent; `simulator=False` is the offline template writer |
+| **Judge** | Grades the finished conversation. | `data.grade(llm_spec=...)`, or `wai.grade(rows, spec=...)` | Hosted Phi-4, a different family from the agent |
+
+Set them once for a machine with `WHILEAI_AGENT`, `WHILEAI_SURROGATE`
+(the writer) and `WHILEAI_JUDGE` instead. If agent and judge end up the
+same model, `data.degraded` carries `same_model` and the warning says so.
+
+## The While key
+
+Only the hosted parts need it. The SDK looks in this order and stops at
+the first it finds:
+
+| Order | Where | How |
+|---|---|---|
+| 1 | `api_key=` on the call | `wai.simulate(..., api_key="zp_...")`, `data.grade(api_key=...)` |
+| 2 | Environment | `export WHILEAI_API_KEY=zp_...` |
+| 3 | Saved credentials | `whileai login`, or `whileai signup --email you@example.com` |
+
+Keys start with `zp_`. Every `WHILEAI_*` variable also reads its old
+`ZEROPROOF_*` name.
+
 ## What reaches While
 
 Three things, and only when you ask for them:
