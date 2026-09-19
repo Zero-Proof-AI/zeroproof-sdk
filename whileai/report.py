@@ -20,8 +20,6 @@ The ``format_*`` functions stay: they take a dict, and a report is one.
 
 from __future__ import annotations
 
-from typing import Any
-
 
 class Report(dict):
     """A measurement. A dict for reading keys, an object for printing.
@@ -45,7 +43,3 @@ class Report(dict):
     def __repr__(self) -> str:
         bits = ", ".join(f"{k}={self[k]!r}" for k in self._summary_keys if k in self)
         return f"{type(self).__name__}({bits})"
-
-    def dict(self) -> dict[str, Any]:
-        """The plain dict, for callers that want to serialize or mutate it."""
-        return dict(self)
