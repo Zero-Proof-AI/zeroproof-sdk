@@ -1,0 +1,80 @@
+{
+  "recipe": "zero-rl-format-reward",
+  "title": "Zero RL on a base model: a rigid format reward costs accuracy",
+  "paper": "https://arxiv.org/abs/2503.18892",
+  "book": "ch. 7 Reasoning",
+  "base_model": "Qwen/Qwen3.5-4B-Base",
+  "metric": "pass@1",
+  "n_holdout": 160,
+  "k": 4,
+  "arms": {
+    "base": {
+      "score": 0.509375,
+      "ci": [
+        0.45,
+        0.5703125
+      ],
+      "pass_at_k": 0.74375,
+      "steps": 0,
+      "gpu_minutes": 0
+    },
+    "baseline": {
+      "score": 0.6265625,
+      "ci": [
+        0.56875,
+        0.684375
+      ],
+      "pass_at_k": 0.8,
+      "steps": 30,
+      "gpu_minutes": 26.4
+    },
+    "recipe": {
+      "score": 0.7203125,
+      "ci": [
+        0.6640625,
+        0.7734375
+      ],
+      "pass_at_k": 0.875,
+      "steps": 30,
+      "gpu_minutes": 19.8
+    }
+  },
+  "delta": {
+    "recipe_vs_baseline": 0.09375,
+    "ci": [
+      0.0515625,
+      0.1390625
+    ],
+    "verdict": "moved"
+  },
+  "checks": {
+    "run_std": 0.011,
+    "run_std_runs": 3,
+    "decontaminated_dropped": 0,
+    "over_optimized": false,
+    "length_before": 1387.440625,
+    "length_after": {
+      "baseline": 1336.440625,
+      "recipe": 1927.8625
+    },
+    "hack_scan_top": "contains:let",
+    "seed": 0,
+    "boxed_after": {
+      "baseline": 0.959375,
+      "recipe": 0.828125
+    },
+    "pins": {
+      "torch": "2.13.0",
+      "transformers": "5.17.0",
+      "trl": "1.13.0",
+      "peft": "0.21.0",
+      "vllm": "0.29.0"
+    },
+    "boxed_before": 0.9140625
+  },
+  "gpu": "H100",
+  "usd": 3.08,
+  "verified": "2026-09-18",
+  "whileai": "0.83",
+  "run_url": "https://www.zeroproofai.com/platform/training/run_064f9185fdf88eef"
+}

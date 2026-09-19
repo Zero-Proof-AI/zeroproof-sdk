@@ -104,3 +104,6 @@ recipes/04-train/text-to-sql/serve_config.json
 # checked-in data, named in its README
 !recipes/02-measure/compare-judges/rows/labeled.jsonl
 recipes/02-measure/compare-judges/out/
+
+# paper recipes cache each arm's rows locally for --reuse; never committed
+recipes/papers/*/.cache/

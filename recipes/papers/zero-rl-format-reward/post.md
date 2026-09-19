@@ -1,0 +1,1 @@
+Reproduced SimpleRL-Zoo (2503.18892) on Qwen3.5-4B-Base, 1 H100, 46 min: reward the answer, not the \boxed{} format. pass@1 0.63 -> 0.72 (+0.094 [+0.052, +0.139], moved) on 160 MATH-500 tasks. https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers/zero-rl-format-reward
