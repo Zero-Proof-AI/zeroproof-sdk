@@ -23,6 +23,20 @@ jobs:
       #   uv run python scripts/gen_api_docs.py
       - run: uv run python scripts/gen_api_docs.py --check
 
+  recipe-pages:
+    name: docs/recipes matches the recipe READMEs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      # docs/recipes/*.mdx are generated from recipes/**/README.md.
+      # A PR that edits a recipe README regenerates them in the same diff:
+      #   uv run python scripts/gen_recipe_docs.py
+      - run: uv run python scripts/gen_recipe_docs.py --check
+
   docs-follow-code:
     name: code change carries a docs change
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-docs')
