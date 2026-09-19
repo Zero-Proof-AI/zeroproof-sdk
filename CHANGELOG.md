@@ -312,6 +312,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `MONITOR_LENGTH_PCT` / `RUBRIC_WEIGHTS` notes cite
   `rlhfbook.com/c/14-over-optimization`; the old link named chapter 17
   (the product chapter) and the `.html` form the site now redirects.
+- `mode="sft"` samples four completions per phrasing instead of one
+  (`SFT_COMPLETIONS_PER_PROMPT`, `repeats=` moves it), so
+  `select_for_sft` has something to choose among. At k=1 `top_per_prompt`
+  was a pass/fail filter wearing rejection sampling's name and
+  `random_per_prompt`, the chance control rlhf-book ch. 10 asks for,
+  returned the same rows. With a binary judge best-of-k is a pass@k yield:
+  a prompt the policy passes 30% of the time ships a demonstration 76% of
+  the time at k=4 instead of 30%, so the set keeps its in-band prompts.
+  Cost is 12 rollouts per situation instead of 3; 3 phrasings stay. The
+  SFT report now carries `completions_per_prompt_mean`, `_median`,
+  `prompts_with_one_completion` and `selection_effective` (`pass_filter`
+  when the median prompt has one completion), and its note reads the mean
+  rather than the max, which one well-sampled prompt used to silence for
+  500 singles. The engine's `mode="sft"` only; `train(method="sft")` row
+  selection on the hosted path is #396.
 
 ## 0.78 (2026-09-18)
 

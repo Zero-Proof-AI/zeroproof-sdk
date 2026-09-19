@@ -121,6 +121,25 @@ RL_ROLLOUTS_PER_PROMPT = 8
 # situation count. (convention, untested)
 SFT_PHRASINGS_PER_SITUATION = 3
 
+# SFT_COMPLETIONS_PER_PROMPT = 4: k under mode="sft", the completions of
+# one phrasing that ``select_for_sft(select="top_per_prompt")`` chooses
+# among. It was 1, and at k=1 there is nothing to choose: the pick is a
+# pass/fail filter, and ``random_per_prompt``, the control
+# rlhfbook.com/c/10-rejection-sampling.html asks for, returns the same rows,
+# so a claimed gain from selection could not be checked against chance.
+# With a binary judge best-of-k is a pass@k yield: a prompt the policy
+# passes 30% of the time ships a demonstration 30% of the time at k=1 and
+# 76% at k=4 (1 - 0.7^4), so the set keeps the prompts inside the 20-80
+# band instead of the easy ones (rlhfbook.com/c/14-reasoning.html,
+# difficulty filtering). Four is under the 10 to 30 the book and Llama 3
+# (arXiv:2407.21783, section 4.2.2) sample per prompt, on purpose: it is
+# the smallest k the package already reports a k-way number on
+# (ROLLOUTS_PER_TASK, tau2-bench's pass^4) at four times the rollouts, not
+# ten. ``repeats=`` moves it; the SFT report says ``pass_filter`` when the
+# rows it was given still carry one completion per prompt. (convention,
+# untested against 1 or 10 on an SFT delta)
+SFT_COMPLETIONS_PER_PROMPT = 4
+
 # DEFAULT_PROBE = 2: rollouts a prompt gets before the run decides whether
 # its group splits; two is the least that can disagree. A unanimous group
 # carries no gradient, so DAPO (arXiv 2503.14476, eq. 11) and ProRL (arXiv
@@ -1640,6 +1659,7 @@ __all__ = [
     "SATURATION_CAP",
     "SCENARIO_ID_CHARS",
     "SEMANTIC_SIMILARITY",
+    "SFT_COMPLETIONS_PER_PROMPT",
     "SFT_PHRASINGS_PER_SITUATION",
     "SHORT_HASH_CHARS",
     "STOP_GRACE_S",

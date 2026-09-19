@@ -36,6 +36,7 @@ from ..defaults import (
     RL_ROLLOUTS_PER_PROMPT,
     SAMPLING_TEMPERATURE_MAX,
     SATURATION_CAP,
+    SFT_COMPLETIONS_PER_PROMPT,
     SFT_PHRASINGS_PER_SITUATION,
     STOP_GRACE_S,
     RunKnobs,
@@ -65,7 +66,15 @@ __all__ = [
 
 _MODE_PRESETS: dict[str, dict[str, Any]] = {
     "explore": {"n_req": 1, "k": 1, "repeat_policy": "none"},
-    "sft": {"n_req": SFT_PHRASINGS_PER_SITUATION, "k": 1, "repeat_policy": "adaptive"},
+    # n_req is distinct phrasings, k is completions per phrasing: only k is
+    # what select_for_sft's top_per_prompt chooses among, and at k=1 the
+    # mode could not do the selection it is named for (see
+    # SFT_COMPLETIONS_PER_PROMPT in defaults.py; repeats= moves it).
+    "sft": {
+        "n_req": SFT_PHRASINGS_PER_SITUATION,
+        "k": SFT_COMPLETIONS_PER_PROMPT,
+        "repeat_policy": "adaptive",
+    },
     "rl": {"n_req": 1, "k": RL_ROLLOUTS_PER_PROMPT, "repeat_policy": "successive"},
     "adaptive": {"n_req": 1, "k": 1, "repeat_policy": "adaptive"},
 }
