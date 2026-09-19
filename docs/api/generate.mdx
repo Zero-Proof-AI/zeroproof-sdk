@@ -386,10 +386,18 @@ Coverage cells from the agent's tools and policy, plus offline fallback wording.
 ### build_dimensions
 
 ```python
-build_dimensions(tools: list[dict], policy: str = '') -> dict[str, list[str]]
+build_dimensions(
+    tools: list[dict],
+    policy: str = '',
+    rule_cap: int | None = 16,
+) -> dict[str, list[str]]
 ```
 
 Coverage axes from this agent. Length and vagueness are writer-only.
+
+`rule_cap` is the most policy clauses on the rule axis: the grid's
+`RULE_CAP` by default, `None` for every clause (what a report over
+an existing suite passes, `RULE_AXIS_CAP_REPORT`).
 
 ### novelty
 
@@ -415,13 +423,15 @@ Taxonomy-free probes. Wording rotates with seed.
 ### policy_sections
 
 ```python
-policy_sections(policy: str, cap: int = 16) -> list[str]
+policy_sections(policy: str, cap: int | None = 16) -> list[str]
 ```
 
 Split policy text into short rule clauses used as coverage cells.
 
 Identity / system-prompt preambles are not clauses. A long unsplit
 paragraph is dropped rather than truncated mid-word into `rule`.
+`cap` is the most clauses returned, in document order; `None` is
+every clause. `rule_axis` says how many a cap left out.
 
 ### scenario_regions
 
