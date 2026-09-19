@@ -18,37 +18,70 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-3f8f6b?labelColor=0b1220" alt="License"></a>
 </p>
 
-`whileai` makes training and eval data for agents that call tools. Give it
-an agent, or just the agent's tools and system prompt. It writes the
-situations the agent might meet, runs the agent through them against a fake
-world that fails on purpose, and hands back every conversation as a row.
-You grade the rows with your own judge or a verifier. The package then does
-the bookkeeping that is easy to skip and expensive to get wrong: pass rates
-with intervals, difficulty bands for RL, a check that your judge agrees with
-people, decontamination against your eval set, and a scan for rewards the
+Building RL and SFT datasets for agents is hard. `whileai` is the library
+that does it, and that measures whether training on them worked. Point it
+at your agent: a model string, a callable, or an endpoint. It writes the
+situations the agent has not met, runs the agent through them against a
+mock world that fails on purpose, grades every rollout with your judge or
+a verifier, and keeps the rows that carry signal. Then the bookkeeping
+that is easy to skip and expensive to get wrong: pass rates with
+intervals, difficulty bands for RL, a check that your judge agrees with
+people, decontamination against your eval set, a scan for rewards the
 policy can game. Every method says where it comes from
 ([References](#references)).
+
+The library runs on your machine with your keys. The
+[platform](#the-platform) is a separate, optional service for hosted
+training and serving; nothing in the library needs it.
 
 ```bash
 uv add whileai
 ```
 
-Or `pip install whileai`. Python 3.10 to 3.13, one dependency, typed.
+Or `pip install whileai`. Python 3.10 to 3.13, two dependencies, typed.
 This package used to be called `zeroproof`; that name still installs it.
 
-## Two ways in
+## Your model, your key
 
-**You only want evals.** Plenty of teams cannot train and still need to
-know whether the last prompt edit helped. Run `whileai init-evals` in your
-project. It finds your agent, writes a judge and a runner around it, and
-gives you a pass rate with a 95% interval, a table of where the agent
-fails, and a test that goes red in CI when it gets worse. `coverage_gap`
-tells you which situations your tests never reach. `compare_runs` reruns
-the same tasks after a prompt or tool change and says whether the change
-helped. Start at [docs/evals.md](docs/evals.md).
+Pass the model as a string. The key comes from that provider's usual
+environment variable, and every request goes straight to that provider.
+The situation writer runs on the same model, so no While key is involved.
 
-**You want to train.** Grade the same rows, keep the ones that carry
-signal, export. That is the rest of this page.
+```python
+import whileai.simulations as wai
+
+data = wai.simulate(
+    "openai:gpt-4.1-mini",  # the agent; key from OPENAI_API_KEY
+    tools=TOOLS,  # OpenAI function-calling schemas; see below for none yet
+    system_prompt="Help customers with orders.",
+    mode="rl",  # k rollouts per prompt
+    repeats=4,
+    budget=64,
+)
+scored = data.grade(judge=my_judge)  # any callable over a row, or a verifier
+print(scored.pass_at)
+```
+
+| Agent | Key | Requests go to |
+|---|---|---|
+| `"openai:<model>"` | `OPENAI_API_KEY` (`OPENAI_BASE_URL` for a compatible server) | api.openai.com, or the base URL you set |
+| `"anthropic:<model>"` | `ANTHROPIC_API_KEY` | api.anthropic.com |
+| `"vllm:<model>@<url>"` | `OPENAI_API_KEY`; none for localhost or plain http | `<url>` |
+| `"ollama:<model>"` | none | localhost:11434 |
+| `my_agent(message) -> {"steps": [...], "final_text": "..."}` | yours | wherever your code goes |
+| `wai.seeded_agent(TOOLS)` | none | nowhere: an offline stand-in |
+
+No tool schemas yet? `wai.draft_tools("a support agent that looks up
+orders and issues refunds", backend_spec="openai:gpt-4.1-mini")` drafts
+them on the same key. Judges are the same shape: a callable, a verifier
+(`wai.verify.MathEqual()`, `wai.verify.CodeExec(tests=...)`), or a model
+string on its own key. The judge is never the model it is judging.
+
+Three things reach While, and only when you ask: leaving `agent=` out (the
+Qwen we host, on your `whileai login` key), `simulator=False` turned back
+to `"hosted"` for the hosted situation writer, and `push`, `train`,
+`serve`. `whileai status` prints which key the SDK will use and where it
+came from.
 
 ## Sixty seconds, offline
 
@@ -80,7 +113,7 @@ data = wai.simulate(
     wai.seeded_agent(TOOLS),
     tools=TOOLS,
     system_prompt="Help customers with orders.",
-    simulator=False,  # no model
+    simulator=False,  # situations from templates, no model
     mode="rl",
     repeats=4,
     repeat_policy="fixed",
@@ -98,14 +131,21 @@ pass@1 is the pass rate over tasks with a bootstrap interval. pass^4 is
 how often all four rollouts of a task pass. Headroom is pass@4 minus
 pass@1, the gap an RL update could close.
 
-To use your own agent, pass any callable that takes the user message and
-returns `{"steps": [...], "final_text": "..."}`. To use a model, pass a
-spec string: `openai:<model>`, `anthropic:<model>`, `vllm:<model>@<url>`,
-or `ollama:<model>`. With no `agent=` at all, the run uses the Qwen we
-host, on your key from `whileai login`, and Phi-4 grades. The judge is
-never the model it is judging. `data.grade(spec="typesafe:jev-latest")` grades
-with TypeSafe's Jev instead: typed questions, a probability on every verdict,
-no output tokens (judge only, on `TYPESAFE_API_KEY`).
+## Two ways in
+
+**You only want evals.** Plenty of teams cannot train and still need to
+know whether the last prompt edit helped. Run `whileai init-evals` in your
+project. It finds your agent, writes a judge and a runner around it, and
+gives you a pass rate with a 95% interval, a table of where the agent
+fails, and a test that goes red in CI when it gets worse. `coverage_gap`
+tells you which situations your tests never reach. `compare_runs` reruns
+the same tasks after a prompt or tool change and says whether the change
+helped. Start at [docs/evals.md](docs/evals.md).
+
+**You want to train.** Grade the same rows, keep the ones that carry
+signal, export to your trainer. That is the rest of this page. The
+[platform](#the-platform) at the end is where hosted training lives, if
+you want it.
 
 ## The loop
 
@@ -186,9 +226,11 @@ need, and how long it takes. All of them run in CI.
 | [05-export](recipes/05-export) | Hugging Face datasets and adapters |
 | [papers](recipes/papers) | one recent paper per recipe, the number it moved with its interval |
 
-## Platform
+## The platform
 
-Push a graded run to your While account, train on it, serve the result.
+Separate from the library, and optional. Sign in once and the same rows
+push to an account, train on hosted GPUs, and come back as an
+OpenAI-compatible endpoint. Everything above this heading runs without it.
 
 From a terminal, for a coding agent that manages the account:
 
