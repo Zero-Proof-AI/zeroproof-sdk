@@ -167,6 +167,11 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `SimulationData.push`, which gives a graded RL set a route to a linked
   holdout (#408). The by-task split is `ingest.platform.split_holdout`,
   one function for both entry points.
+- `CONSTITUTION.md` at the repo root: what the library is for and the six
+  rules every contributor and agent works under; `CLAUDE.md` points at it.
+  Paper recipes now ship a `POST.md`, the X thread for the reproduction
+  written from `results.json` (template in `recipes/papers/_template/`,
+  threads for the four existing recipes).
 
 ## 0.82 (2026-09-18)
 
