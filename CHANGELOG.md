@@ -5,6 +5,17 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+- Coding standard. `docs/reference/style.md` sets the ergonomics every
+  public name is held to, copied from PyTorch and DSPy: one import
+  (`import whileai as wai`), objects carry configuration and calls carry
+  data, at most eight parameters on a public call, one rows object
+  through every stage, reports that print themselves instead of
+  `format_*` twins, verbs a scientist says, settings once with per-call
+  override. The page ends with the target front-page program and the
+  migration order. `tests/api/test_style_ratchet.py` pins today's
+  counts of the retired shapes (212 flat exports, 13 `format_*`, the
+  calls over eight parameters) and fails a PR that raises any of them.
+  CLAUDE.md and CONTRIBUTING.md point at it.
 - `train` reads the set's profile before the GPU is spent (#396, #397).
   `method="sft"` on a set with failing rows is refused with
   `TrainingSelectionError`: the hosted trainer clones every row, so the
@@ -26,7 +37,6 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   function behind it and lands on `run.selection`. The `train` docstring
   now says what each method trains on and that hosted GRPO's reward is
   the trainer's own.
-
 - Docs audit, three pages against 0.82. `concepts/engine.mdx` named
   `persona` as a coverage axis and left out `stance`; the six are `tool`,
   `rule`, `stance`, `world_state`, `tool_condition` and `history`
