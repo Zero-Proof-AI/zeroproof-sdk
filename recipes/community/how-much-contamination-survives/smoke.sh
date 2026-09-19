@@ -4,4 +4,4 @@
 # the harness and the controls without the datasets dependency.
 set -eu
 cd "$(dirname "$0")"
-python run.py --dry-run --limit 40 --out /tmp/decon-smoke.json
+python run.py --dry-run --limit 40 --out out/smoke.json

@@ -18,6 +18,7 @@ import math
 import random
 import re
 from collections import defaultdict
+from pathlib import Path
 
 import whileai as wai
 
@@ -336,8 +337,9 @@ def run_all(
                 cache.update(zip(missing, vecs))
             return [cache[t] for t in texts]
 
-        for thr in (0.85, 0.80, 0.75, 0.70):
-            run(f"semantic bge@{thr}", embedder=emb, similarity=thr)
+        # the thresholds the README's sweep reports, 0.85 being the SDK default
+        for thr in (0.95, 0.90, 0.85, 0.80, 0.75):
+            run(f"semantic bge@{thr:.2f}", embedder=emb, similarity=thr)
 
     return {
         "n_pairs": pairs,
@@ -361,13 +363,19 @@ def main():
         "Exercises the harness; its recall numbers are not results.",
     )
     ap.add_argument("--limit", type=int, default=None, help="cap --pairs (smoke runs)")
-    ap.add_argument("--out", default="results.json")
+    ap.add_argument(
+        "--out",
+        default=None,
+        help="where to write the arm-by-arm numbers (default out/results.seed<seed>.json; "
+        "out/ is gitignored, so a run never overwrites the published results.json)",
+    )
     a = ap.parse_args()
     pairs = min(a.pairs, a.limit) if a.limit else a.pairs
     res = run_all(pairs, a.seed, a.semantic, dry_run=a.dry_run)
-    with open(a.out, "w") as f:
-        json.dump(res, f, indent=2)
-    print("wrote", a.out)
+    out = Path(a.out) if a.out else Path("out") / f"results.seed{a.seed}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res, indent=2))
+    print("wrote", out)
 
 
 if __name__ == "__main__":

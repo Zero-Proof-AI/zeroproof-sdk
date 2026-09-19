@@ -28,6 +28,12 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   generated from `recipes/**/README.md` by `scripts/gen_recipe_docs.py`,
   with an index grouped by step and a clone-the-repo note on every page;
   `docs.yml` checks the pages stay in sync with the READMEs (#492).
+- Community recipe `recipes/community/how-much-contamination-survives`: the
+  default lexical `decontaminate()` rule catches 0.087 [0.076, 0.097] of
+  human-labelled paraphrase leaks (QQP and PAWS, 2,700 leaks over three
+  seeds) and the `embedder=` pass at 0.85 catches 0.900 [0.877, 0.923]
+  while dropping half of the hard negatives; controls under every arm,
+  `--dry-run` runs offline.
 
 ## 0.88 (2026-09-19)
 

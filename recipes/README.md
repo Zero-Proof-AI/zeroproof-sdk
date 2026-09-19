@@ -103,6 +103,21 @@ a baseline arm, the paper's one change, the same holdout, a paired delta.
 Index and contract in [`papers/README.md`](papers/README.md); the table there
 is generated from each recipe's `results.json`.
 
+## community
+
+Runs contributed by people trying the SDK on their own problems: the script that
+ran, the numbers with intervals, and what did not work. Not maintained by While;
+each README names the version it ran against. Index in
+[`community/README.md`](community/README.md).
+
+| Recipe | What you learn | Needs | Takes |
+|---|---|---|---|
+| [`same-entrypoint-before-after`](community/same-entrypoint-before-after) | pin a task set across a model swap and run both arms of a before/after through one entry point, so the delta measures the model and not the SDK; the noise floor from base re-runs | `WHILEAI_API_KEY`; `--dry-run` needs nothing | about 33 minutes of warm A10G, seconds offline |
+| [`force-the-branch`](community/force-the-branch) | force a policy branch with `result_shapes=` so a marker scores the decision and not the agent's mood; whether a reported regression survives a forced holdout | `WHILEAI_API_KEY`; `--dry-run` needs nothing | about 7 minutes of warm A10G, seconds offline |
+| [`can-the-judge-be-trusted`](community/can-the-judge-be-trusted) | a gold label a machine can compute, what `judge_agreement` and `judge_trust` measure, why a judge's errors matter by shape more than by rate | `WHILEAI_API_KEY`; `--dry-run` needs nothing | about 25 minutes of warm A10G, seconds offline |
+| [`hosted-grpo-vs-sft`](community/hosted-grpo-vs-sft) | what the hosted `sft`, `grpo` and `dpo` methods consume, hosted SFT and GRPO on the same rows against one base, pulling the adapter back into PEFT form | `WHILEAI_API_KEY`; `--dry-run` needs nothing | two hosted runs under $1, seconds offline |
+| [`how-much-contamination-survives`](community/how-much-contamination-survives) | how much human-labelled paraphrase contamination (QQP, PAWS) the lexical `decontaminate()` rule removes (about 9%) and the `embedder=` pass removes (about 90%), at what false-positive cost, with controls under every arm | `datasets` and one Hub download; `--dry-run` needs nothing | ten minutes of CPU, seconds offline |
+
 ## Where the main README's pieces live
 
 - **Simulate and grade:** `01-simulate/bring-your-own-agent` (callable),
