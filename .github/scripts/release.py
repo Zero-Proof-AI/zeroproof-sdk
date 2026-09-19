@@ -1,0 +1,132 @@
+"""Cut the next release from whatever is under ``## Unreleased``.
+
+One command does the whole bump so two people (or two agents) cannot do it
+two different ways:
+
+    uv run python .github/scripts/release.py            # bump, relock
+    uv run python .github/scripts/release.py --dry-run  # say what would happen
+
+What it does, in order:
+
+1. Reads the version from ``pyproject.toml`` and steps it by one hundredth
+   (``0.80`` -> ``0.81``, ``0.99`` -> ``1.00``), the same rule
+   ``check_version.py`` enforces at publish time.
+2. In ``CHANGELOG.md`` renames ``## Unreleased`` to ``## <version> (<date>)``
+   and puts a fresh, empty ``## Unreleased`` above it. That empty header is
+   the whole fix for release collisions: a PR that adds its entry under
+   ``## Unreleased`` still lands under ``## Unreleased`` when it merges a
+   minute after a cut, instead of sliding under a version that shipped
+   without it.
+3. Sets the same version in ``compat/zeroproof/pyproject.toml`` and its
+   ``whileai>=`` floor, then runs ``uv lock`` so ``uv.lock`` agrees.
+
+It refuses to cut when ``## Unreleased`` is missing or has no entries
+(exit code 3), so a run with nothing to ship is a no-op, not an empty
+release. The release workflow (``.github/workflows/release.yml``) runs
+this on main and serializes concurrent runs; that workflow is how a
+release is cut, not a hand edit.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+PYPROJECT = ROOT / "pyproject.toml"
+COMPAT = ROOT / "compat" / "zeroproof" / "pyproject.toml"
+CHANGELOG = ROOT / "CHANGELOG.md"
+UNRELEASED = "## Unreleased"
+NOTHING_TO_SHIP = 3
+
+VERSION_LINE = re.compile(r'^version = "(\d+)\.(\d\d)"$', re.MULTILINE)
+FLOOR = re.compile(r'"whileai>=\d+\.\d\d"')
+
+
+def next_version(current: str) -> str:
+    """One hundredth up; 99 rolls the major (``check_version.next_allowed``)."""
+    major, minor = (int(p) for p in current.split("."))
+    if minor >= 99:  # hundredths run 00..99, then the major steps
+        return f"{major + 1}.00"
+    return f"{major}.{minor + 1:02d}"
+
+
+def read_version(path: Path) -> str:
+    m = VERSION_LINE.search(path.read_text(encoding="utf-8"))
+    if not m:
+        sys.exit(f'{path}: no `version = "X.YY"` line')
+    return f"{m.group(1)}.{m.group(2)}"
+
+
+def unreleased_entries(text: str) -> str | None:
+    """The body under ``## Unreleased``, or None when the header is missing."""
+    start = text.find(f"{UNRELEASED}\n")
+    if start < 0:
+        return None
+    body_start = start + len(UNRELEASED) + 1
+    nxt = text.find("\n## ", body_start)
+    return text[body_start : nxt + 1 if nxt >= 0 else len(text)]
+
+
+def cut_changelog(text: str, version: str, today: str) -> str:
+    body = unreleased_entries(text)
+    if body is None:
+        sys.exit(f"CHANGELOG.md has no `{UNRELEASED}` section; add one with the entries to ship")
+    if not any(line.startswith("- ") for line in body.splitlines()):
+        print(f"{UNRELEASED} has no entries; nothing to ship")
+        sys.exit(NOTHING_TO_SHIP)
+    header = f"## {version} ({today})"
+    return text.replace(f"{UNRELEASED}\n", f"{UNRELEASED}\n\n{header}\n", 1)
+
+
+def bump(path: Path, version: str, *, floor: bool = False) -> None:
+    text = path.read_text(encoding="utf-8")
+    text, n = VERSION_LINE.subn(f'version = "{version}"', text, count=1)
+    if n != 1:
+        sys.exit(f"{path}: no version line to bump")
+    if floor:
+        text, n = FLOOR.subn(f'"whileai>={version}"', text, count=1)
+        if n != 1:
+            sys.exit(f"{path}: no `whileai>=` floor to bump")
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--dry-run", action="store_true", help="print the plan, change nothing")
+    ap.add_argument("--no-lock", action="store_true", help="skip `uv lock` (tests)")
+    ap.add_argument("--date", default=dt.date.today().isoformat(), help="header date (tests)")
+    args = ap.parse_args()
+
+    current = read_version(PYPROJECT)
+    compat = read_version(COMPAT)
+    if compat != current:
+        sys.exit(
+            f"pyproject.toml is at {current}, {COMPAT.name} (compat) at {compat}; fix that first"
+        )
+    version = next_version(current)
+    changelog = cut_changelog(CHANGELOG.read_text(encoding="utf-8"), version, args.date)
+    entries = unreleased_entries(CHANGELOG.read_text(encoding="utf-8")) or ""
+    shipped = [line[2:60] for line in entries.splitlines() if line.startswith("- ")]
+
+    print(f"{current} -> {version} with {len(shipped)} entr{'y' if len(shipped) == 1 else 'ies'}:")
+    for line in shipped:
+        print(f"  - {line}")
+    if args.dry_run:
+        return 0
+
+    CHANGELOG.write_text(changelog, encoding="utf-8", newline="\n")
+    bump(PYPROJECT, version)
+    bump(COMPAT, version, floor=True)
+    if not args.no_lock:
+        subprocess.run(["uv", "lock"], cwd=ROOT, check=True)
+    print(f"version={version}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

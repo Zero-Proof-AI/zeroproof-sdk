@@ -1,0 +1,91 @@
+---
+title: "Quickstart"
+sidebarTitle: "Quickstart"
+description: "Sixty seconds, offline: simulate a stand-in agent, grade it with a one-line judge, read pass@1 with an interval."
+---
+
+No key, no network. `seeded_agent` is a stand-in agent. It answers
+honestly most of the time and, on a labeled fraction of rollouts, does one
+thing wrong on purpose: hedges, flatters, or claims success after a tool
+failed. Each row records what it did in `seeded`, so you can check that
+your judge catches exactly those rows before you trust it on real ones.
+
+<Steps>
+  <Step title="Describe the tools">
+    Tools go in OpenAI function-calling shape. One is enough.
+
+    ```python
+    import whileai.simulations as wai
+
+    TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_order",
+                "description": "Look up an order by id.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"order_id": {"type": "string"}},
+                    "required": ["order_id"],
+                },
+            },
+        }
+    ]
+    ```
+  </Step>
+  <Step title="Simulate">
+    `simulator=False` writes the customers from templates, so no model is
+    called. `mode="rl"` with `repeats=4` plays every ask four times, which
+    is what pass@k needs.
+
+    ```python
+    data = wai.simulate(
+        wai.seeded_agent(TOOLS),
+        tools=TOOLS,
+        system_prompt="Help customers with orders.",
+        simulator=False,  # no model
+        mode="rl",
+        repeats=4,
+        repeat_policy="fixed",
+        budget=64,
+    )
+    ```
+  </Step>
+  <Step title="Grade and read the number">
+    Any callable that takes a row and returns a reward is a judge. This
+    one uses the label the stand-in agent left behind.
+
+    ```python
+    scored = data.grade(judge=lambda row: {"reward": int(not row["seeded"])})
+    print(scored.pass_at)
+    ```
+
+    ```text
+    pass@1 0.67 [0.55..0.78] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.33 (16 groups, k=4)
+    ```
+  </Step>
+</Steps>
+
+pass@1 is the pass rate over tasks with a bootstrap interval. pass^4 is
+how often all four rollouts of a task pass. Headroom is pass@4 minus
+pass@1, the gap an RL update could close.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Connect your agent" icon="plug" href="/get-started/connect-your-agent">
+    A callable, an OpenAI-compatible endpoint, a model spec string, or the
+    hosted model. Plus traces to aim the run.
+  </Card>
+  <Card title="Evals" icon="flask" href="/evals">
+    A pass rate with an interval, a table of where the agent fails, and a
+    CI check that turns red when it gets worse.
+  </Card>
+  <Card title="Simulations" icon="dice" href="/simulations">
+    How the engine picks situations, plays the customer, and breaks the
+    tools on purpose.
+  </Card>
+  <Card title="The five calls" icon="list-ol" href="/reference/five-calls">
+    simulate, grade, optimize, export, train: the run in order.
+  </Card>
+</CardGroup>

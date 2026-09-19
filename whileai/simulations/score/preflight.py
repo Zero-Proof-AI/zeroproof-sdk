@@ -795,21 +795,34 @@ def coverage_gap(
     rows: Sequence[dict] | None = None,
     rule_cap: int | None = RULE_AXIS_CAP_REPORT,
 ) -> dict[str, Any]:
-    """Which parts of an agent's policy the asks you already send never reach.
+    """List the parts of an agent's policy that the asks you already send never reach.
 
-    ``asks`` is what a suite asks the agent: a list of prompt strings, a
-    list of rows carrying ``prompt``, or a path to a ``.py`` or ``.jsonl``
-    file holding either. The axes come from ``build_dimensions``, the same
-    grid ``simulate`` covers, so the answer is in the engine's own
-    vocabulary: which tool, which policy rule, what stance the person
-    takes, what the world looks like, what condition the tool is in, what
-    happened before.
+    Reach for it before writing situations, with the test suite you
+    already have: it says which tools and which policy rules no ask
+    exercises, in the engine's own vocabulary. It returns a dict:
+    ``untested_rules`` and ``untested_tools`` (the lists worth reading),
+    ``rules`` (the policy clauses found), ``axes`` (each axis with the
+    count per value), ``stances``, ``pressure_asks``, ``single_shot``,
+    ``per_ask`` (where each ask landed), ``notes``, ``summary`` and
+    ``n_asks``. ``format_coverage_gap(report)`` prints it.
+
+    * ``asks``: what a suite asks the agent: a list of prompt strings, a
+      list of rows carrying ``prompt``, or a path to a ``.py`` or
+      ``.jsonl`` file holding either.
+    * ``tools`` and ``system_prompt``: the agent's tool schemas and
+      policy. The axes come from ``build_dimensions``, the same grid
+      ``simulate`` covers: which tool, which policy rule, what stance the
+      person takes, what the world looks like, what condition the tool is
+      in, what happened before.
+    * ``rows``: graded rollouts from a run. With them the report also
+      checks the world side: rules whose rows all ended in the same tool
+      fault are rules the asks reach but the fixtures never let happen
+      (``rules_the_world_never_triggers``, with ``rows_per_rule`` and
+      ``rules_with_no_rows``).
 
     Each ask is placed on the axes it touches with text heuristics, not a
     model: the tools its words name or imply, the rule clauses it shares
-    words with, and the stance its words show. ``untested_rules`` and
-    ``untested_tools`` are the parts of the policy no ask reaches, which
-    is the list worth reading. Two axes (``world_state``,
+    words with, and the stance its words show. Two axes (``world_state``,
     ``tool_condition``) cannot be read from an ask at all: a prompt never
     says the order is missing or the tool timed out, so a hand-written
     suite leaves them at one point and ``notes`` says so.
@@ -823,6 +836,11 @@ def coverage_gap(
     has no grid to bound. A number keeps the first that many clauses in
     document order; ``n_rules_total`` and ``rules_truncated`` say what
     was left off and ``notes`` carries the count (#391).
+    ```python
+    gap = wai.coverage_gap(["Where is order 4473?", "Cancel order 9911."],
+                           tools=TOOLS, system_prompt=POLICY)
+    print(gap["untested_rules"], gap["untested_tools"])
+    ```
     """
     from ..generate.scenarios import build_dimensions, rule_axis
 

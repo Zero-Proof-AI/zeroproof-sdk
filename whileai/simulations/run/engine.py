@@ -3336,6 +3336,19 @@ class Run:
                 data.degraded.append("rollouts_lost")
             data.warnings.append(note)
             log.warning(note)
+        empty = int(self.lost_by.get("empty_reply", 0))
+        if not data.trajectories and empty and empty >= sum(self.lost_by.values()) * 0.9:
+            # Every rollout came back without a reply, so the run spent its
+            # budget on nothing. Name the cause and the one fix (#375).
+            self._all_replies_empty = True
+            note = (
+                f"no rows: the agent returned an empty reply on all {empty} rollouts; "
+                "return {'final_text': <what it said>, 'steps': [...]} from the agent "
+                "callable (or check the endpoint answers) and run again"
+            )
+            if note not in data.warnings:
+                data.warnings.append(note)
+            log.warning(note)
         if self.agent_errors:
             # The callable raised (or returned nothing usable). The rows
             # were built and dropped; without this the run reports zero
@@ -3538,6 +3551,10 @@ class Run:
             )
         self._record_tier_mix()
         data.writer_model = self.writer_model
+        if not data.trajectories and getattr(self, "_all_replies_empty", False):
+            # Set last: earlier wrap-up names the writer, but the writer did
+            # its job; the agent never answered (#375).
+            data.stopped_because = "empty_replies"
         data.user_model = self.user_model
         # One model writing the exam, sitting it, and playing the examiner's
         # stand-in is the regime the rlhf-book warns about (ch. 12: a model

@@ -23,7 +23,86 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `policy_sections(cap=None)` returns every clause; `rule_axis(policy,
   cap=)` returns the axis and the total.
 
-## 0.76 (2026-09-18)
+- Docs audit, three pages against 0.82. `concepts/engine.mdx` named
+  `persona` as a coverage axis and left out `stance`; the six are `tool`,
+  `rule`, `stance`, `world_state`, `tool_condition` and `history`
+  (`COVERAGE_AXES`). The same page twice said every row keeps temperature
+  and per-token logprobs, which needs `logprobs=True` on a model backend.
+  `concepts/faq.mdx` promised endpoints for Llama and Nemotron, but an
+  adapter is servable only on `SERVED_BASES` (`Qwen/Qwen3-4B`,
+  `microsoft/phi-4`), and said the SDK drafts the policy from your
+  sentence, when the sentence is the policy and `draft_tools` drafts the
+  tools. `character-training.md` was accurate; its two quoted outputs
+  re-run byte-identical and its dataset splits still measure 60/144/35.
+
+## 0.82 (2026-09-18)
+
+- Releases are cut by one command, `gh workflow run release.yml`, which
+  runs `.github/scripts/release.py` on main under a concurrency group:
+  next hundredth, both pyprojects, `uv lock`, and a fresh `## Unreleased`
+  header above the version just cut. That header is the fix for today's
+  collisions, where a PR merged a minute after a cut filed its entry under
+  a version that had already shipped without it. CI now refuses a PR that
+  bumps the version alongside code, or drops the header. CLAUDE.md and
+  CONTRIBUTING.md carry the rule.
+
+## 0.81 (2026-09-18)
+
+- `export_environment(reward=<verifier>)` finds the name your module bound
+  the verifier to, so a `@wai.verifier` or `All([...])` in your own file
+  works as an object (#374). `delta_report` no longer calls two offline
+  arms (seed, template, replay) not comparable; `simulate(seeds=, runs=N)`
+  replays the drawn task set instead of raising; an agent that returns an
+  empty reply on every rollout stops with `stopped_because="empty_replies"`
+  and a warning that names the fix (#375).
+
+## 0.80 (2026-09-18)
+
+- The reasoning cites in `whileai/simulations/` (`defaults.py`,
+  `environment.py`, `generate/diversity.py`, `score/optimize.py`) and the
+  `environment` and `what-to-run` docs pages point at
+  `rlhfbook.com/c/07-reasoning`; the old link named chapter 14
+  (over-optimization) and the `.html` form the site now redirects.
+
+## 0.79 (2026-09-18)
+
+- `typesafe:<model>` is a judge backend spec: TypeSafe's Jev, a decision
+  model that answers typed questions with a probability each and writes
+  no text. `data.grade(spec="typesafe:jev-latest")` sends the judge the
+  same evidence and rubric as state and asks two questions: did the
+  agent do what it should (a yes/no, answered as a probability) and, if
+  not, which failure class (a choice over the `FAILURE_CLASSES`
+  vocabulary). The reward is the more probable outcome; every graded
+  row's `judge_meta` carries `confidence`; a probability within
+  `DECISION_UNSURE_BAND` (0.1) of even marks the row `unsure` and the
+  report counts them; a failing row's `failure_class` is the judge's own
+  choice instead of a regex over its sentence. The audit
+  (`audit_grades`, asked blind), `pairwise_judge` (A / B / tie as one
+  choice), `rubric_judge` (one yes/no per item) and the advisory
+  `llm_grade` (a three-level score) take the same spec, and
+  `judge_version` folds the questions in beside the prompt. The key is
+  `TYPESAFE_API_KEY` (`WHILEAI_TYPESAFE_API_KEY` overrides it,
+  `TYPESAFE_BASE_URL` points at a gateway); the warm-up is
+  `GET /v1/models`, so a bad key fails once, before the fan-out;
+  `DECISION_TIMEOUT_S` (30 s) is the request timeout. `agent=`,
+  `simulator=` and `user_model=` refuse the spec with the fix named, and
+  so does `complete()`. Built offline against `typesafe-sdk` 0.7's
+  request and response shapes; Jev is waitlisted early access and no
+  call here has run against the live API yet.
+
+- `delta_report` warnings, the `trace_clean` rubric docstring and the
+  `MONITOR_LENGTH_PCT` / `RUBRIC_WEIGHTS` notes cite
+  `rlhfbook.com/c/14-over-optimization`; the old link named chapter 17
+  (the product chapter) and the `.html` form the site now redirects.
+
+## 0.78 (2026-09-18)
+
+- `whileai agents | agent <id> | runs <id> | verdict <id> | promote <id> <v> |
+  keys | live <id> ...`: the platform objects a coding agent manages from a
+  terminal, each a thin call into `whileai.platform`, `--json` on every one.
+  `whileai purge` (ZeroProof traces and datasets) is removed.
+
+## 0.77 (2026-09-18)
 
 - `ty` type-checks the package in CI beside mypy (`uv run ty check`,
   under a second cold, where mypy takes about six). mypy stays the gate
@@ -33,6 +112,9 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   integrity floor in `hack_scan.py`, the audit-reason join in
   `grade_llm.py`, the calibration report in `optimize.py`, and the
   packaged schema path in `schema.py`.
+
+
+## 0.76 (2026-09-18)
 
 - A `run_std` handed to `delta_report` carries where it came from.
   `delta_report(run_std=x)` read `x` as the eval's exact spread and used

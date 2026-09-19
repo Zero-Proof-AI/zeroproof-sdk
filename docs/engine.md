@@ -1,23 +1,24 @@
 ---
 title: "The engine on one page"
+sidebarTitle: "The engine"
 description: "How simulate() makes evals and training data in eight steps: coverage, a sandbox world with failure modes, and a judge validated before training."
 ---
 
 How `simulate()` makes evals and training data. Combinatorial coverage of
 situations, a sandbox world with failure modes, and a judge validated
-before training. The longer read is [simulations.md](/simulations); the
-animated version is at
-[zeroproofai.com/docs/engine](https://zeroproofai.com/docs/engine).
+before training. The longer read is [Simulations](/simulations); the
+short version with references is [the engine](/concepts/engine) under
+Concepts.
 
 ## Eight steps
 
 | # | Step | What happens | Code |
 |---|------|--------------|------|
-| 01 | Axes | Declare what varies: tool, policy clause, world state, fault, persona, history. A situation is a point in that space, not a prompt. | `generate/scenarios.py` |
-| 02 | Cover | Plan cells so every pair of axis values co-occurs at least once (a pairwise covering array). Most failures are two-factor interactions [6]. `data.coverage["pairwise"]` is planned pairs, covered pairs, and the fraction: pairwise cells of the 6-axis grid, which is training-data coverage, not policy coverage. A low fraction on a short run is a small sample of a large grid, not a failed eval; for policy coverage use `coverage_gap`. | `generate/coverage.py` |
-| 03 | Search | Five situation writers fill the grid. Each batch, weights move toward the arms that produced new behavior signatures: `w' = w(1 + 0.5 * yield)`, renormalized, with variety floors and rare caps. Novelty search, not importance sampling [7]. Stops at saturation. | `generate/scenarios.py`, `generate/diversity.py` |
+| 01 | Axes | Declare what varies: tool, policy rule, user stance, world state, tool condition, history. A situation is a point in that space, not a prompt. | `generate/scenarios.py` |
+| 02 | Cover | Plan cells so every pair of axis values co-occurs at least once (a pairwise covering array). Most failures are two-factor interactions [6]. `data.coverage["pairwise"]` is `pairs_planned`, `pairs_covered` and `fraction`: pairwise cells of the six-axis grid, which is training-data coverage, not policy coverage. A low fraction on a short run is a small sample of a large grid, not a failed eval; for policy coverage use `coverage_gap`. | `generate/coverage.py` |
+| 03 | Search | Five search arms fill the grid, starting at `structured` 42%, `llm_guided` 42%, `open_ended` 10%, `behavior_targeted` 3%, `failure_mutation` 3%. Each batch, weights move toward the arms that produced new behavior signatures and cells: `w *= 1 + 0.5 * yield`, renormalized, with floors (15% for each grid arm, 1% for the rare arms) and caps (8% for the rare arms, 10% for open-ended). Novelty search, not importance sampling [7]. Stops at saturation. | `generate/scenarios.py`, `generate/generator.py` |
 | 04 | World | Tools answer from schema-shaped state. Deterministic per seed. Unknown id: not found. An argument that echoes the schema instead of the customer: refused with a hint. Every dial (fault modes, hit counts, id and date ranges, name pools, the result-kind routing table) is a `WorldOptions` field with its reason in `defaults.py`; `advanced={"world": {...}}` or `MockEnvironment(options=)` turns it. | `world/sandbox.py`, `defaults.py` |
-| 05 | Rollout | Run the agent on N tasks x n phrasings x k samples. With `logprobs=True` every row keeps the policy's per-token log-probabilities, token count, policy version and temperature. | `run/engine.py` |
+| 05 | Rollout | Run the agent on N situations x n phrasings x k samples. With `logprobs=True` every row keeps the policy's summed log-probability and token count, the per-token list when the backend returns one, the policy version and the sampling settings. | `run/engine.py` |
 | 06 | Grade | Deterministic conduct rules first, then your judge. The judge is scored against gold labels before its grades are trusted. | `score/grading.py`, `score/judge_trust.py` |
 | 07 | Cut | SFT rows (reward=1, loss mask on agent turns), DPO pairs with margin, GRPO groups in the 20 to 80 percent band [4, 5], or a reward-model set. | `score/optimize.py`, `score/publish_gate.py`, `export.py` |
 | 08 | Delta | Re-run held-out tasks after training. A paired difference per task with a bootstrap interval and a sign-flip permutation p [1]. | `score/delta.py`, `score/stats.py` |
@@ -46,8 +47,8 @@ animated version is at
   paired difference with a sign-flip permutation p [1]. Ship when the
   interval excludes zero. `score/stats.py`.
 - **Judge.** Agreement and kappa against gold labels, Wilson interval,
-  split-half, length perturbation, probes. Different model family than the
-  policy [8]. Rubric hash on every label. `score/judge_trust.py`.
+  held-out halves, length perturbation, probes. Different model family
+  than the policy [8]. Rubric hash on every label. `score/judge_trust.py`.
 - **Hack scan.** `Var(r) = E[Var(r | task)] + Var(E[r | task])`. Only the
   first term is GRPO gradient. The top within-task feature is compared to
   a permutation floor from reward shuffled within task [9].
@@ -57,16 +58,17 @@ animated version is at
 
 **Do you use importance sampling?** No. Importance sampling corrects an
 estimator for a wrong proposal distribution; we are not estimating
-production, we are covering the failure space. Each row keeps per-token
-logprobs, policy version and temperature, so an asynchronous trainer can
-form the truncated ratio `exp(log pi_new - log pi_old)` itself [10, 11].
-`score/logprobs.py` and `score/reference.py` score the same tokens under a
-reference model for the KL side.
+production, we are covering the failure space. Each row keeps its
+logprobs, policy version and sampling settings, so an asynchronous
+trainer can form the truncated ratio `exp(log pi_new - log pi_old)`
+itself [10, 11]. `score/logprobs.py` and `score/reference.py` score the
+same tokens under a reference model for the KL side.
 
-**SFT or RL?** Both, from the same graded rows. `select_for_sft` takes
-reward=1 rows deduplicated by behavior shape, with a loss mask on agent
-turns. `preference_pairs` takes pairs. `select_for_rl` takes whole groups.
-A reward model takes all graded rows.
+**SFT or RL?** Both, from the same graded rows. `select_for_sft` keeps
+each prompt's best reward=1 row and spreads its picks across behavior
+signatures, with a loss mask on agent turns. `build_preference_pairs`
+takes length-matched pairs with a margin. `select_for_rl` takes whole
+groups. A reward model takes all graded rows.
 
 **Isn't the judge just another LLM?** Yes. So it is measured against gold
 labels (`judge_agreement`), probed with known hacks (`judge_trust`),
@@ -92,4 +94,5 @@ marker whose interval sits below zero fails the run [1].
 10. Schulman, J. et al. Proximal Policy Optimization Algorithms. arXiv:1707.06347, 2017.
 11. Noukhovitch, M. et al. Asynchronous RLHF: Faster and More Efficient Off-Policy RL for Language Models. ICLR, 2025.
 
-Code paths are relative to `whileai/simulations/`.
+Code paths are relative to
+[whileai/simulations/](https://github.com/whilehq/whileai-sdk/tree/main/whileai/simulations).
