@@ -6,6 +6,10 @@ description: "Which mode fits the use case, how recommend() sizes a run from the
 
 Depends on the use case. How each scenario is built is in [The recipe](/reference/overview#the-recipe).
 
+The `simulate` blocks below write their situations on a hosted model, so they
+need `WHILEAI_API_KEY` in the environment, or `whileai login`. Pass
+`simulator=False` to run the same call offline with no key.
+
 | You want | Mode | What happens |
 |---|---|---|
 | Many distinct situations | `explore` (default) | New situation every row |
@@ -158,6 +162,7 @@ Before you spend on training, ask the base run whether the held-out set can
 show a difference at all:
 
 ```python
+base = wai.evaluate(data, judge)  # the base run, graded, before any training
 rep = wai.score.eval_power(base.rows())
 print(rep)  # verdict usable / underpowered / saturated / floored, in_band, resolvable, n_needed
 ```

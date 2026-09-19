@@ -128,6 +128,8 @@ the judge (`spec=` on `grade()`). Each one takes the same backend spec.
 | `typesafe:<model>` | TypeSafe's Jev, a decision model; the judge only (`spec=`) | `TYPESAFE_API_KEY`, or `WHILEAI_TYPESAFE_API_KEY` to override it |
 
 ```python
+import whileai.simulations as wai
+
 data = wai.simulate(
     agent="anthropic:claude-haiku-4-5",
     tools=my_tools,
@@ -191,9 +193,13 @@ see a paraphrase; the embedder does.
 A graded set can leave for a Hugging Face dataset repo you own, and any
 Hub split can come onto your account to be measured before you train on
 it. Connect the account once on any dataset page; the platform holds the
-token, the SDK never sees it.
+token, the SDK never sees it. Both directions go through the platform, so
+this section needs `WHILEAI_API_KEY` in the environment, or `whileai login`.
 
 ```python
+import whileai.simulations as wai
+
+
 wai.hf_status()  # connected? namespaces
 hf = wai.hf_publish("ds_...", repo="airline-refunds", wait=True)
 hf["commit"], hf["tag"]  # one commit per push, tagged zp-<dataset id>

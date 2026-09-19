@@ -306,14 +306,20 @@ A judge is a claim until it is measured. Label a sample by hand, attach
 the labels as human, and ask:
 
 ```python
+labels = [
+    # your verdict on each row you read, 0 or 1
+    {"scenario_id": r["scenario_id"], "rollout_index": r["rollout_index"], "label": hand_label(r)}
+    for r in scored.rows[:30]
+]
 wai.attach_labels(scored.rows, labels, kind="human")
 print(wai.judge_trust(scored.rows, judge))  # the report prints itself
 ```
 
-`labels` is a `{key: 0/1}` dict, a list of dicts, or a JSONL path. The
-key names the row: `rollout_id` when the row has one, else
+`labels` is a list of dicts as above, a `{key: 0/1}` dict, or a JSONL path.
+The key names the row: `rollout_id` when the row has one, else
 `scenario_id#rollout_index` (what a `simulate` row carries), else the
-row's `prompt` plus `final_text`.
+row's `prompt` plus `final_text`. A `simulate` row has no `rollout_id`, which
+is why the list form above names the two fields it does carry.
 
 `judge_trust` reads `gold_reward` (which `attach_labels` writes) and
 reports agreement with its Wilson lower bound (the bottom of the 95%
@@ -326,14 +332,18 @@ way count as model-made and keep `ok` false unless you say
 
 Two or more judges in the running (a decision model, a hosted model, a
 frontier model, your own rules)? Compare them on the same labeled rows in
-one call instead of running `judge_trust` once per judge:
+one call instead of running `judge_trust` once per judge. Each model judge
+needs its provider's key, `TYPESAFE_API_KEY`, `WHILEAI_API_KEY` and
+`ANTHROPIC_API_KEY` here; the rules judge needs none:
 
 ```python
+import whileai  # the backend classes are on whileai, not whileai.simulations
+
 table = scored.compare_judges(
     {
         "jev": "typesafe:jev-latest",
-        "phi-4": wai.Hosted(),
-        "haiku": wai.Anthropic("claude-haiku-4-5"),
+        "phi-4": whileai.Hosted(),
+        "haiku": whileai.Anthropic("claude-haiku-4-5"),
         "rules": my_verifier,
     },
 )
@@ -342,9 +352,12 @@ table.best.name  # the first judge that clears the floors, else the top one
 table["jev"].rows  # that judge's graded copies, for reading the disagreements
 ```
 
-Spec strings and backends run the package's conduct-floor judge prompt
-under the run's system prompt and tools, so every model reads the same
-evidence; a callable is used as given. A bare row list takes the same
+A judge is a spec string, a callable of your own, or a backend object. The
+backend classes sit on the front door (`whileai.Hosted`, `whileai.OpenAI`,
+`whileai.Anthropic`) rather than on `whileai.simulations`, which is why the
+block imports both. Spec strings and backends run the package's
+conduct-floor judge prompt under the run's system prompt and tools, so every
+model reads the same evidence; a callable is used as given. A bare row list takes the same
 call as `whileai.judge_comparison.compare_judges(rows, judges)`. The
 floors are `judge_trust`'s (`floors=(0.8, 0.6)`); model-made gold keeps
 every `ok` false unless `allow_model_gold=True`.

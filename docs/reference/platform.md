@@ -393,13 +393,14 @@ Every object is a pydantic model that validates before it leaves the process, an
 ```python
 monitor = wai.HackMonitor(
     run,
-    holdout=holdout_rows,             # prompts or {"prompt": ..., <columns the reward reads>}
-    gold=wai.reward_model(rm_run),    # or the hosted judge, or a second rule; any judge callable
-    every=10, k=4,                    # sample the holdout from the live policy every 10 steps
-    endorsed=["tool:lookup_order"],   # what the reward should track
-    stop_on="divergence",             # or "length", "drift", "feature", "any"; default: log only
+    holdout=holdout_rows,  # prompts or {"prompt": ..., <columns the reward reads>}
+    gold=wai.reward_model(rm_run),  # or the hosted judge, or a second rule; any judge callable
+    every=10,
+    k=4,  # sample the holdout from the live policy every 10 steps
+    endorsed=["tool:lookup_order"],  # what the reward should track
+    stop_on="divergence",  # or "length", "drift", "feature", "any"; default: log only
 )
-trainer = GRPOTrainer(model, reward_funcs=[monitor.wrap(rule_reward)], ...)
+trainer = GRPOTrainer(model, reward_funcs=[monitor.wrap(rule_reward)], **grpo_config)
 trainer.add_callback(monitor)
 trainer.add_callback(wai.TrainerCallback(run))
 ```

@@ -150,7 +150,7 @@ print(scored.pass_at)
 ```
 
 ```text
-pass@1 0.66 [0.50..0.80] | pass^4 (pass_pow_k) 0.31 [0.12..0.56] | pass@4 0.94 [0.81..1.00] | headroom 0.28 (16 groups, k=4)
+pass@1 0.66 [0.55..0.75] | pass^4 (pass_pow_k) 0.19 [0.00..0.38] | pass@4 1.00 [1.00..1.00] | headroom 0.34 (16 groups, k=4)
 ```
 
 When groups are uneven (the `rl` default allocates rollouts where groups split), k defaults to the smallest group and the line says which groups it left out; `repeat_policy="fixed"` gives every prompt the same k.

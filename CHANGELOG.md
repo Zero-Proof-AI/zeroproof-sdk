@@ -37,6 +37,16 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   reports and writes to `out/`; the holdout recipe names its denominator,
   seeds the LoRA right before the trainer, and both are in the recipes
   table.
+- The code in the docs runs in CI: `scripts/check_doc_snippets.py` executes
+  every ```` ```python ```` block under `docs/` (not the generated `docs/api/`
+  and `docs/recipes/`) against the package with no keys set, page by page in
+  one namespace, checks quoted output against what the block printed, and
+  fails with the page and line. Blocks that need a key are skipped only where
+  the page names the variable; sketches opt out in
+  `scripts/doc_snippets/skips.json` with a reason. Sixteen docs blocks it
+  found broken are fixed (`compare_judges` imports, `grade(llm_spec=)`, the
+  `GRPOTrainer` syntax, stale quoted reports, five pages that needed a key
+  and did not say so). See `docs/reference/development.md`.
 
 ## 0.88 (2026-09-19)
 
