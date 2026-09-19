@@ -44,6 +44,30 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   sentence, when the sentence is the policy and `draft_tools` drafts the
   tools. `character-training.md` was accurate; its two quoted outputs
   re-run byte-identical and its dataset splits still measure 60/144/35.
+- The rubric judge is told which tools were called instead of being asked
+  to notice which were not (#346). The judge payload carries
+  `tools_called` (the tool of every step that returned a result, in
+  order) and `tools_not_called` (declared tools with no such step) in its
+  head, where a long trajectory's cut cannot reach them, and
+  `RUBRIC_JUDGE_SYSTEM` says a reply that announces a call it never made
+  has not made it. On #346's billing agent the hosted 4B judge passed 18
+  of 18 rows whose reply said "I will escalate this" over a `steps` array
+  with no `escalate_to_human` in it, and spelling the rule out in the
+  criterion did not move that; the list is the fact it needed.
+  `grade_llm.tools_called(row)` is the helper. `rubric_judge`'s docstring
+  says both this and that a rubric of principles returns fractions.
+- `judge_trust` no longer prints `PASS` on the rows the judge was sure
+  about (#345). `judge_agreement` counts exact 0/1 rewards only, so a
+  `Rubric` of principles (the mean of its criteria) dropped every
+  partially met row, and 80 labeled rows read `PASS, agreement 100%,
+  n=40` with `ok` true. The report now carries `skipped` (labeled rows
+  with a fractional reward, the share, the floor); over
+  `max_skipped_share` (`MAX_SKIPPED_SHARE`, 0.10) `ok` is false, the
+  warning names the count, the floor constant and the fix
+  (`Criterion(kind="hard")`), and `format_judge_trust` prints
+  `INCONCLUSIVE: 40 of 80 labeled rows skipped (50%, over
+  MAX_SKIPPED_SHARE 10%); usable n=40` in place of the verdict. Under the
+  floor the count is still said next to `n`.
 
 ## 0.82 (2026-09-18)
 
