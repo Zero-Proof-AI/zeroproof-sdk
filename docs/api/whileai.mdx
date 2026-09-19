@@ -261,7 +261,15 @@ describe it by hand::
     run = tracked.run("v4", method="GRPO", targets=["refunds"], trained_on=["refunds-grpo"])
     run.log(10, reward=0.41, kl=0.01)       # or trainer.add_callback(wai.TrainerCallback(run))
     run.score("refunds", 83, ci=2.7, n=240)  # every behavior, not only the targets
-    run.finish(hours=2.1, gpu="1xH100", cost_usd=31)
+    run.finish(
+        hours=2.1, gpu="1xH100", cost_usd=31,
+        record=RunRecord(                    # the scientific record, drawn as a table on the Runs page
+            data=Data(train="refunds-grpo", n_train=1024, holdout="refunds-test-v2", n_holdout=240, decontaminated_dropped=0),
+            optimizer=Optimizer(loss_type="dapo", lr=5e-5, beta=1e-4, epsilon=0.2, num_generations=8, seed=17),
+            eval=EvalSetup(metric="pass@1", k=4, run_std=0.02, run_std_runs=3),
+            provenance=Provenance(pins={"trl": "1.13.0", "vllm": "0.29.0"}, paper="2503.18892"),
+        ),
+    )
 
     print(tracked.verdict())  # refunds: v4 beats v3 by 5 (interval excludes zero); 1 regression
 
