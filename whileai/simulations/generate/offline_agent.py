@@ -230,7 +230,9 @@ def seeded_agent(
         raise ValueError(
             f"unknown seeded behaviors {unknown}; choose from {list(SEEDED_BEHAVIORS)}"
         )
-    tool_list = [dict(t) for t in tools]
+    from ..tools import schemas as _tool_schemas
+
+    tool_list = [dict(t) for t in (_tool_schemas(tools) or [])]
     if not tool_list:
         raise ValueError("seeded_agent needs tools=[...] (the same list you pass simulate)")
     w = World(tool_list, seed=seed)
