@@ -170,7 +170,7 @@ The platform's "Make training data" button, as one line:
 ```python
 wai.send_score("4bf92f3577b34da6", 1.0)  # this run passed
 summary = wai.cuts(agent="my-agent")  # what a cut would hold
-print(wai.format_cuts(summary, agent="my-agent"))  # the traces page's sentence
+print(wai.format_cuts(summary))  # the traces page's sentence
 made = wai.cut(agent="my-agent", kind="rl")  # make it
 wai.pull(made["train"]["datasetId"], "train.jsonl")
 made["holdout"]["datasetId"]  # measure on this, never train on it
