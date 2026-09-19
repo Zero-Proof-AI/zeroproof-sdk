@@ -1557,6 +1557,14 @@ DELIVERED_FAULT_LEAK = 0.01
 # Convention, untested.
 DELIVERED_STANCE_MIN_SHARE = 0.5
 
+# DELIVERED_TURNS_MIN_REQUEST = 2: an ``avg_turns`` request below this is
+# not checked against the delivered mean (one turn cannot fall short).
+# Convention, untested.
+DELIVERED_TURNS_MIN_REQUEST = 2
+# DELIVERED_TURNS_SHORTFALL = 0.5: a delivered mean under this fraction of
+# the requested ``avg_turns`` is reported as a gap. Convention, untested.
+DELIVERED_TURNS_SHORTFALL = 0.5
+
 __all__ = [
     "AGENT_MAX_TOKENS_FLOOR",
     "ALLOC_GAIN",
@@ -1589,6 +1597,8 @@ __all__ = [
     "DELIVERED_FAULT_SHORTFALL",
     "DELIVERED_LONG_CONVERSATION_TURNS",
     "DELIVERED_STANCE_MIN_SHARE",
+    "DELIVERED_TURNS_MIN_REQUEST",
+    "DELIVERED_TURNS_SHORTFALL",
     "DIFFICULTY_BAND",
     "DIFFICULTY_BAND_ROLLOUTS",
     "ENV_DECONTAMINATION_EXAMPLES",

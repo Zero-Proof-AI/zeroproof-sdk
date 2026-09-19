@@ -39,6 +39,8 @@ from ..defaults import (
     DELIVERED_FAULT_SHORTFALL,
     DELIVERED_LONG_CONVERSATION_TURNS,
     DELIVERED_STANCE_MIN_SHARE,
+    DELIVERED_TURNS_MIN_REQUEST,
+    DELIVERED_TURNS_SHORTFALL,
     FINGERPRINT_STEM_MIN_LEN,
     MAX_COMPLETIONS_PER_REQUEST,
     OK_STATUSES,
@@ -1408,8 +1410,8 @@ class Run:
         if (
             isinstance(want_turns, (int, float))
             and isinstance(got_turns, (int, float))
-            and want_turns >= 2
-            and got_turns < want_turns * 0.5
+            and want_turns >= DELIVERED_TURNS_MIN_REQUEST
+            and got_turns < want_turns * DELIVERED_TURNS_SHORTFALL
         ):
             gaps.append(f"avg_turns={want_turns:g} but the mean is {got_turns} user turns")
         asked = requested.get("stance")
