@@ -34,7 +34,12 @@ describe it by hand::
     run = tracked.run("v4", method="GRPO", targets=["refunds"], trained_on=["refunds-grpo"])
     run.log(10, reward=0.41, kl=0.01)       # or trainer.add_callback(wai.TrainerCallback(run))
     run.score("refunds", 83, ci=2.7, n=240)  # every behavior, not only the targets
-    run.finish(hours=2.1, gpu="1xH100", cost_usd=31)
+    run.finish(hours=2.1, gpu="1xH100", cost_usd=31, record=RunRecord(  # drawn as one table
+        data=Data(train="refunds-grpo", n_train=1024, holdout="refunds-test-v2", n_holdout=240),
+        optimizer=Optimizer(loss_type="dapo", lr=5e-5, beta=1e-4, num_generations=8, seed=17),
+        eval=EvalSetup(metric="pass@1", k=4, run_std=0.02, run_std_runs=3),
+        provenance=Provenance(pins={"trl": "1.13.0"}, paper="2503.18892"),
+    ))
 
     print(tracked.verdict())  # refunds: v4 beats v3 by 5 (interval excludes zero); 1 regression
 
@@ -204,6 +209,101 @@ class Behavior(_Wire):
     description: str | None = Field(default=None, max_length=400)
 
 
+class Data(_Wire):
+    """What the run trained on and what it was scored against, as ids and
+    counts a reader can check, not as a sentence.
+
+    rlhfbook.com, "Evaluation": a score means nothing without the held-out
+    set it came from and proof the training data did not contain it.
+    ``decontaminated_dropped`` is that proof as a count; ``hash`` fields
+    pin the exact rows (sha256 of the ordered ids, or a dataset revision).
+    """
+
+    train: str | None = None
+    train_hash: str | None = None
+    n_train: int | None = Field(default=None, ge=0)
+    difficulty: str | None = None
+    holdout: str | None = None
+    holdout_hash: str | None = None
+    n_holdout: int | None = Field(default=None, ge=0)
+    decontaminated_dropped: int | None = Field(default=None, ge=0)
+
+
+class Optimizer(_Wire):
+    """The knobs that decide what the policy gradient does, named the way
+    the papers name them so two runs can be compared knob by knob.
+
+    rlhfbook.com, "Policy Gradients": ``epsilon`` and ``epsilon_high`` are
+    the clip range (DAPO's clip-higher when they differ), ``beta`` the KL
+    coefficient, ``loss_type`` which normalisation the objective uses (GRPO's
+    per-sequence mean, Dr. GRPO / DAPO's token sum). ``num_generations`` is
+    the group size the advantage is relative to. ``seed`` is the one number
+    a re-run needs first.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
+
+    loss_type: str | None = None
+    lr: float | None = None
+    beta: float | None = Field(default=None, ge=0)
+    epsilon: float | None = Field(default=None, ge=0)
+    epsilon_high: float | None = Field(default=None, ge=0)
+    num_generations: int | None = Field(default=None, ge=1)
+    prompts_per_step: int | None = Field(default=None, ge=1)
+    max_completion_tokens: int | None = Field(default=None, ge=1)
+    temperature: float | None = Field(default=None, ge=0)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    lora_rank: int | None = Field(default=None, ge=0)
+    seed: int | None = None
+
+
+class EvalSetup(_Wire):
+    """How the held-out score was produced: the metric, samples per task,
+    and the eval's own re-run noise.
+
+    rlhfbook.com, "Evaluation": one evaluation is one draw. ``run_std`` is
+    the standard deviation of the untrained base's score over
+    ``run_std_runs`` re-runs of the same eval, the floor a delta has to
+    clear before it is a result. ``reader`` names how the answer span was
+    read (``boxed``, ``lenient``, a judge name).
+    """
+
+    metric: str | None = None
+    k: int | None = Field(default=None, ge=1)
+    run_std: float | None = Field(default=None, ge=0)
+    run_std_runs: int | None = Field(default=None, ge=1)
+    reader: str | None = None
+
+
+class Provenance(_Wire):
+    """What it takes to run this again: library versions, the image, the
+    recipe and commit, the paper, where the weights landed.
+
+    rlhfbook.com, appendix C (practical): pin the seed and the versions;
+    a run that cannot be repeated is not a result.
+    """
+
+    pins: dict[str, str] = Field(default_factory=dict)
+    image: str | None = None
+    recipe: str | None = None
+    commit: str | None = None
+    paper: str | None = None
+    adapter: str | None = None
+
+
+class RunRecord(_Wire):
+    """The scientific record of one run: data, optimizer, eval setup and
+    provenance, each a typed block. Attach it when the run opens
+    (``tracked.run(..., record=)``) or when it closes (``run.finish(record=)``).
+    The Runs page draws it as one table next to the curve.
+    """
+
+    data: Data | None = None
+    optimizer: Optimizer | None = None
+    eval: EvalSetup | None = None
+    provenance: Provenance | None = None
+
+
 class RunSpec(_Wire):
     """What one training job is: the version it produces, the base it starts
     from, the method, which behaviors it aims at, and which datasets it
@@ -221,6 +321,7 @@ class RunSpec(_Wire):
     trained_on: list[str] = Field(default_factory=list)
     harness: str | None = None
     gpu: str | None = None
+    record: RunRecord | None = None
     id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -304,6 +405,12 @@ class TrainCurve(_Wire):
     reward: list[float | None] = Field(default_factory=list)
     kl: list[float | None] = Field(default_factory=list)
     loss: list[float | None] = Field(default_factory=list)
+    #: mean completion length per step, and the share of rollouts that hit
+    #: the length cap: the two curves that show a reasoning run growing or
+    #: collapsing before the score does ("Over-Optimization").
+    completion_length: list[float | None] = Field(default_factory=list)
+    clip_ratio: list[float | None] = Field(default_factory=list)
+    record: RunRecord | None = None
 
 
 class Delta(_Wire):
@@ -674,10 +781,16 @@ class Run:
         cost_usd: float | None = None,
         steps: int | None = None,
         summary: Mapping[str, Any] | None = None,
+        record: RunRecord | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Flush, then close the run with a status and what it cost."""
+        """Flush, then close the run with a status, what it cost, and the
+        ``RunRecord`` (data, optimizer, eval, provenance) if it was not
+        given when the run opened."""
         self.flush()
         patch: dict[str, Any] = {"status": status}
+        if record is not None:
+            item = record if isinstance(record, RunRecord) else RunRecord.model_validate(record)
+            patch["record"] = item.wire()
         if hours is not None:
             patch["hours"] = float(hours)
         if gpu is not None:
@@ -1080,16 +1193,21 @@ __all__ = [
     "DEFAULT_PLATFORM_URL",
     "Behavior",
     "Dashboard",
+    "Data",
     "Delta",
     "Described",
+    "EvalSetup",
     "Frontier",
     "Harness",
     "Judge",
     "LiveDay",
     "LiveSeries",
     "LoginError",
+    "Optimizer",
     "PlatformError",
+    "Provenance",
     "Run",
+    "RunRecord",
     "RunSpec",
     "Score",
     "Tracked",

@@ -1,0 +1,141 @@
+---
+title: "Training is done when the held-out score moved"
+sidebarTitle: "7. Train and prove"
+description: "Lesson 7. Export the rows, train on your own compute, and prove the change with a paired before and after on the held-out set."
+---
+
+You have rows worth training on and a locked test set. Three steps are
+left. Write the rows to a file a trainer reads. Train, on your own GPU,
+on Modal, or on Prime Intellect, with your own keys. Then prove it: run
+the old model and the new one on the same held-out tasks, and check that
+the difference is bigger than the noise. If it is not, nothing happened,
+and saying so is the result.
+
+## The mechanism
+
+`export` writes one JSON object per line, in the shape trainers read,
+and refuses a broken row. The training itself is a recipe, not a call in
+this course, because it needs a GPU: the
+[GRPO recipe](https://github.com/whilehq/whileai-sdk/tree/main/recipes/04-train/grpo)
+runs on Modal on one A10G in under fifteen minutes, on your Modal account.
+
+The proof is a **paired comparison**. Every held-out task is run by both
+models, the difference is taken task by task, and the interval on the
+average difference has to exclude zero. Paired, because the same hard
+task is hard for both models, and pairing cancels that out. The library
+also refuses to compare two runs that were not on the same tasks.
+
+## Run it
+
+There is no trained model in this course, so the two arms below are two
+stand-in agents: one that plants a mistake on half its rows, and one that
+plants it on a tenth. Everything else is exactly what you run after a
+real training job. `tasks=before` pins the second run to the first run's
+tasks, and `model_version` names the arms.
+
+```python
+import whileai as wai
+from whileai.simulations import format_delta_report
+
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+common = dict(
+    tools=[get_order],
+    system_prompt="Help customers with orders.",
+    simulator=False,
+    mode="rl",
+    repeats=4,
+    repeat_policy="fixed",
+    seed=0,
+)
+
+
+def judge(row):
+    return {"reward": int(not row["seeded"])}
+
+
+# 1. Export. The passes from lesson 6, as a file for your trainer.
+data = wai.simulate(wai.seeded_agent([get_order]), budget=64, **common)
+scored = data.grade(judge=judge)
+report = scored.select(mode="sft").export("train.jsonl")
+print(report["n"], "rows written")
+
+# 2. Train. See recipes/04-train. This course skips it.
+
+# 3. Prove. The same held-out tasks, before and after, paired.
+before = wai.simulate(
+    wai.seeded_agent([get_order], rate=0.5),
+    budget=64,
+    advanced={"model_version": "v1"},
+    **common,
+)
+after = wai.simulate(
+    wai.seeded_agent([get_order], rate=0.1),
+    tasks=before,  # the same tasks
+    advanced={"model_version": "v2"},
+    **common,
+)
+b = before.grade(judge=judge)
+a = after.grade(judge=judge)
+print("before:", b.pass_at)
+print("after: ", a.pass_at)
+print(format_delta_report(wai.compare(b.rows, a.rows)))
+```
+
+```text
+16 rows written
+before: pass@1 0.56 [0.44..0.69] | pass^4 (pass_pow_k) 0.06 [0.00..0.19] | pass@4 0.94 [0.81..1.00] | headroom 0.38 (16 groups, k=4)
+after:  pass@1 0.91 [0.83..0.97] | pass^4 (pass_pow_k) 0.69 [0.44..0.88] | pass@4 1.00 [1.00..1.00] | headroom 0.09 (16 groups, k=4)
+PASS
+answered: 100.0% before, 100.0% after
+  pass_at_1                    0.562 -> 0.906  +0.344 [+0.234..+0.469]  up  (16 paired)
+```
+
+Read the last line. Sixteen tasks, paired. The after arm is 34 points
+higher, and the interval on that difference runs from 23 to 47 points.
+It does not touch zero, so the verdict is PASS. Had it read
+`+0.05 [-0.03..+0.13]`, the verdict would be no difference, and the
+honest sentence is "training did not move it".
+
+<Note>
+One PASS is one PASS. The report's own verdict for this run is
+"moved, unreplicated": it moved once. Run it again with a different seed
+before you tell anyone. A result you can repeat is the only kind this
+library is built to produce.
+</Note>
+
+## Then it starts again
+
+The model you served is now the agent. Its traffic is the next set of
+rows. Lesson 2 to lesson 7, again, on what it still gets wrong. That is
+the loop, and the reason the agent gets better while it works.
+
+## Where to go now
+
+- [Quickstart](/get-started/quickstart): the same program, with your own
+  agent and your own judge.
+- [Your model and your key](/get-started/your-model-and-key): name the
+  model as a string, keep the key in the provider's own variable.
+- [Evals](/evals): the measurement half on its own, for a team that is
+  not ready to train.
+- [Train on your own GPU](https://github.com/whilehq/whileai-sdk/tree/main/recipes/04-train):
+  GRPO and DPO recipes on Modal, with the paired delta at the end.
+- [Papers, reproduced](https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers):
+  one recent post-training paper per recipe, each with its verdict.
+
+## Where it comes from
+
+1. Miller, E. Adding Error Bars to Evals. arXiv:2411.00640, 2024. The
+   paired difference, and why it is the right test for before and after.
+2. Rafailov, R. et al. Direct Preference Optimization: Your Language
+   Model is Secretly a Reward Model. NeurIPS, 2023. arXiv:2305.18290. The
+   DPO recipe above.
+3. Shao, Z. et al. DeepSeekMath. arXiv:2402.03300, 2024. The GRPO recipe
+   above.
+4. Lambert, N. Reinforcement Learning from Human Feedback. arXiv:2504.12501,
+   2025. Chapters *Direct-Alignment Algorithms* and *Evaluation*.

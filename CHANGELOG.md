@@ -5,6 +5,30 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.85 (2026-09-19)
+
+- `scored.compare_judges(judges=)` (and on `SimulationData`): several
+  judges, the same rows, one table. `judges` maps a name to a spec string
+  (`"typesafe:jev-latest"`, `"anthropic:claude-haiku-4-5"`), a backend
+  object, a `wai.Judge`, or any judge callable; each grades its own copy of
+  the rows under the run's system prompt and tools and is scored against
+  the gold labels the way `judge_trust` scores one judge (agreement with a
+  Wilson interval, kappa, leak rate, unsure and unjudged counts, seconds
+  per row). `print(table)` ranks them by kappa and names the first judge
+  that clears the floors; `table["name"].rows` holds that judge's graded
+  copies for reading the disagreements. A bare row list takes the same
+  call as `whileai.judge_comparison.compare_judges(rows, judges)`.
+
+## 0.84 (2026-09-19)
+
+- Platform runs carry a scientific record. `RunRecord` = `Data` (train
+  and holdout ids, hashes, counts, decontamination drop), `Optimizer`
+  (loss type, lr, beta, clip range, group size, tokens, seed), `EvalSetup`
+  (metric, k, re-run noise) and `Provenance` (pins, image, recipe, commit,
+  paper, adapter); pass it as `tracked.run(..., record=)` or
+  `run.finish(record=)`. `TrainCurve` reads back `completion_length`,
+  `clip_ratio` and the record; the Runs page draws them.
+
 - Reports print themselves, step two of the style migration
   (`docs/reference/style.md` rule 5). `judge_trust`, `hack_scan`,
   `compare` (`delta_report`) and `leak_report` return a `Report`: still
@@ -288,6 +312,21 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   `MONITOR_LENGTH_PCT` / `RUBRIC_WEIGHTS` notes cite
   `rlhfbook.com/c/14-over-optimization`; the old link named chapter 17
   (the product chapter) and the `.html` form the site now redirects.
+- `mode="sft"` samples four completions per phrasing instead of one
+  (`SFT_COMPLETIONS_PER_PROMPT`, `repeats=` moves it), so
+  `select_for_sft` has something to choose among. At k=1 `top_per_prompt`
+  was a pass/fail filter wearing rejection sampling's name and
+  `random_per_prompt`, the chance control rlhf-book ch. 10 asks for,
+  returned the same rows. With a binary judge best-of-k is a pass@k yield:
+  a prompt the policy passes 30% of the time ships a demonstration 76% of
+  the time at k=4 instead of 30%, so the set keeps its in-band prompts.
+  Cost is 12 rollouts per situation instead of 3; 3 phrasings stay. The
+  SFT report now carries `completions_per_prompt_mean`, `_median`,
+  `prompts_with_one_completion` and `selection_effective` (`pass_filter`
+  when the median prompt has one completion), and its note reads the mean
+  rather than the max, which one well-sampled prompt used to silence for
+  500 singles. The engine's `mode="sft"` only; `train(method="sft")` row
+  selection on the hosted path is #396.
 - `eval_power(rows)`: can this held-out set prove a gain, asked of the
   base run before any training spend. It reads `holdout_size` and
   `detectable_effect` off the same rows (one model, `_paired_task_sd`), so
@@ -639,6 +678,14 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 ## 0.70 (2026-09-18)
 
 - README: the wordmark links to withwhile.com, matching the repo homepage.
+- `whileai.send_runs(rows, agent=...)`: the rows your eval loop already has,
+  sent as traces. The inverse of `rows_from_otel` — you hand over
+  `{scenario_id, prompt, final_text, reward}` and the OTLP envelope is written
+  for you, so an agent that emits no OpenTelemetry still lands on the traces
+  page and `wai.cuts()` can answer what is worth training on. Repeats of one
+  prompt group by `scenario_id`, or by the prompt text when there is none;
+  `reward` is judged against `pass_at` (1.0 by default) and a row without one
+  stays ungraded.
 
 ## 0.69 (2026-09-18)
 

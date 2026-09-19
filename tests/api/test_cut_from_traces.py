@@ -78,6 +78,15 @@ def test_cuts_reads_the_summary_without_making_anything(calls):
     assert calls[0]["method"] == "GET"
     assert calls[0]["path"] == "/traces/cuts?agent=a&from=24h"
     assert summary["rl"]["prompts"] == 30
+    # The report says what it was read for, so the next line cuts the same traces.
+    assert summary["filter"] == {"agent": "a", "from": "24h"}
+
+
+def test_the_next_line_cuts_the_agent_the_report_was_read_for(calls):
+    """Run the printed line as printed and it must not cut every agent."""
+    out = wai.format_cuts(wai.cuts(agent="tool-choice"))
+
+    assert 'next: wai.cut(agent="tool-choice", kind="rl")' in out
 
 
 # ---- format_cuts: the summary as the sentence the traces page leads with ----

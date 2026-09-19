@@ -308,6 +308,31 @@ and the report line says how many to label. Labels attached any other
 way count as model-made and keep `ok` false unless you say
 `allow_model_gold=True`.
 
+Two or more judges in the running (a decision model, a hosted model, a
+frontier model, your own rules)? Compare them on the same labeled rows in
+one call instead of running `judge_trust` once per judge:
+
+```python
+table = scored.compare_judges(
+    {
+        "jev": "typesafe:jev-latest",
+        "phi-4": wai.Hosted(),
+        "haiku": wai.Anthropic("claude-haiku-4-5"),
+        "rules": my_verifier,
+    },
+)
+print(table)  # ranked by kappa; agreement [95% CI], leak, unsure, s/row
+table.best.name  # the first judge that clears the floors, else the top one
+table["jev"].rows  # that judge's graded copies, for reading the disagreements
+```
+
+Spec strings and backends run the package's conduct-floor judge prompt
+under the run's system prompt and tools, so every model reads the same
+evidence; a callable is used as given. A bare row list takes the same
+call as `whileai.judge_comparison.compare_judges(rows, judges)`. The
+floors are `judge_trust`'s (`floors=(0.8, 0.6)`); model-made gold keeps
+every `ok` false unless `allow_model_gold=True`.
+
 ## 7. Return shapes
 
 The names in the print and the names on the object are not always the

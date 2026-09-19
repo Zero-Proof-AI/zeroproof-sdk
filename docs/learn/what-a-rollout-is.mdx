@@ -1,0 +1,91 @@
+---
+title: "One saved conversation is a rollout"
+sidebarTitle: "2. What a rollout is"
+description: "Lesson 2. The row a model trains on: the ask, the tool calls, the reply. Where rows come from when you have no traffic yet."
+---
+
+To train on examples you need examples. One example is one full attempt
+at the job: what the customer asked, what state the world was in, every
+tool the agent called and what came back, and what it finally said. Saved
+together, that is one row. A training set is a pile of rows.
+
+## The mechanism
+
+The field calls one saved attempt a **rollout**. The word comes from
+rolling the dice once: same ask, and the model may answer differently
+each time. Rows come from two places.
+
+- **Your traffic.** Real conversations, read from your logs. Best when you
+  have them, because they are the failures you actually see.
+- **Simulation.** When you have little traffic, or want the situations
+  your traffic has not hit yet, the library writes them. It reads your
+  agent's tools and system prompt, writes asks a customer might send,
+  plays the agent through them against a fake world where the tools
+  sometimes fail on purpose, and saves every attempt as a row.
+
+The stand-in agent below is `seeded_agent`. It does the job honestly most
+of the time and, on a known share of rows, does one thing wrong on
+purpose and writes what it did in the row's `seeded` field. That field is
+the answer key you will check everything against in the next lessons.
+
+`repeats=4` plays every ask four times. Lesson 4 needs that.
+
+## Run it
+
+```python
+import whileai as wai
+
+
+@wai.tool
+def get_order(order_id: str) -> dict:
+    """Look up an order by id."""
+    ...
+
+
+data = wai.simulate(
+    wai.seeded_agent([get_order]),  # the stand-in agent
+    tools=[get_order],
+    system_prompt="Help customers with orders.",
+    simulator=False,  # situations from templates: no model, no network
+    mode="rl",
+    repeats=4,  # every ask, four times
+    repeat_policy="fixed",
+    budget=64,  # rows
+    seed=0,
+)
+
+row = data.rows[0]
+print(len(data.rows), "rows")
+print("prompt:", row["prompt"])
+print("steps:", row["steps"])
+print("reply:", row["final_text"])
+print("planted:", row["seeded"])
+```
+
+```text
+64 rows
+prompt: Can someone check an order for me? I have the details ready. ORD-4550 is half done. The first step went through, the rest did not. Last time I was told this needs someone with more access. I am on the road for the next hour, so email is best.
+steps: [{'tool': 'get_order', 'arguments': {'order_id': 'ORD-4550'}, 'result': {'status': 'permission_denied'}}]
+reply: I apologize for any confusion, and sorry for the wait. I do not have permission to run get_order for ORD-4550, so nothing was changed.
+planted: ['apology']
+```
+
+Read the row top to bottom. The customer asked about an order. The agent
+called the one tool it has, and the fake world refused it, on purpose.
+The agent told the truth about that, and also apologized twice, which is
+the mistake the stand-in planted. Sixty-four of these, sixteen asks times
+four tries, took a few seconds and no key.
+
+## Where it comes from
+
+1. Yao, S. et al. τ-bench: A Benchmark for Tool-Agent-User Interaction in
+   Real-World Domains. arXiv:2406.12045, 2024. The shape of a row here: an
+   agent, a simulated user, tools, and world state.
+2. Lambert, N. Reinforcement Learning from Human Feedback. arXiv:2504.12501,
+   2025. Chapter *Reinforcement Learning*: a rollout is one sample from
+   the policy, the model being trained.
+
+## Next
+
+[A reward is a score you can defend](/learn/what-a-reward-is): which of
+the 64 rows are good.

@@ -10,6 +10,7 @@ import pytest
 
 import whileai.simulations as wai
 from tests.helpers import GITHUB_SPEC, POLICY, TOOLS, offline, scripted_agent
+from whileai.simulations import defaults
 from whileai.simulations.generate.scenarios import (
     SEARCH_ARMS,
     build_dimensions,
@@ -54,7 +55,13 @@ def test_resolve_topology_defaults_and_aliases():
     assert explore["n_req"] == explore["k"] == 1
 
     sft = wai.resolve_topology(mode="sft")
-    assert sft["n_req"] == 3 and sft["k"] == 1
+    # k is completions per phrasing and is what top_per_prompt selects
+    # among; at k=1 the mode could not do the rejection sampling it is
+    # named for (rlhfbook.com/c/10-rejection-sampling.html). Phrasing
+    # diversity stays at 3, and repeats= moves k.
+    assert sft["n_req"] == defaults.SFT_PHRASINGS_PER_SITUATION == 3
+    assert sft["k"] == defaults.SFT_COMPLETIONS_PER_PROMPT == 4
+    assert wai.resolve_topology(mode="sft", repeats=10)["k"] == 10
     rl = wai.resolve_topology(mode="rl")
     assert rl["n_req"] == 1 and rl["k"] == 8 and rl["k_explicit"] is False
     assert wai.resolve_topology(mode="rl", rollouts_per_request=16)["k"] == 16
@@ -173,9 +180,12 @@ def test_public_n_is_requests_per_situation_not_completions(monkeypatch):
 def test_mode_sft_rl_explore_change_n_and_k():
     sft = wai.simulate(scripted_agent, mode="sft", budget=12, **offline())
     assert sft.mode == "sft"
-    assert sft.rollouts_per_request == 1
+    assert sft.rollouts_per_request == 4
     assert sft.requests_per_situation == 3
-    assert len({t["prompt"] for t in sft.trajectories}) == len(sft.trajectories)
+    # k=4 means several completions share a prompt on purpose: that is the
+    # distribution top_per_prompt selects from. Prompts are no longer unique,
+    # and were never meant to be once the mode can select (rlhf-book ch. 9).
+    assert len({t["prompt"] for t in sft.trajectories}) < len(sft.trajectories)
 
     rl = wai.simulate(scripted_agent, mode="rl", budget=16, **offline())
     assert rl.mode == "rl"

@@ -152,3 +152,98 @@ def test_list_traces_reads_with_the_key_and_surfaces_a_rejection(monkeypatch):
     monkeypatch.setattr(ingest.requests, "get", lambda *a, **k: Reply(401, text="bad key"))
     with pytest.raises(ingest.WhileIngestError, match="HTTP 401"):
         ingest.list_traces("zp_abc")
+
+
+# ------------------------------------------------------------------ send_runs
+
+
+def _spans(seen):
+    sent = json.loads(seen["data"])
+    return sent["resourceSpans"][0]["scopeSpans"][0]["spans"]
+
+
+def _attrs(span):
+    out = {}
+    for a in span["attributes"]:
+        out[a["key"]] = next(iter(a["value"].values()))
+    return out
+
+
+def test_send_runs_turns_scored_rows_into_a_batch_the_gate_can_cut(monkeypatch):
+    seen = _capture_post(monkeypatch, Reply(202, {"datasetId": "ds_1", "rows": 2}))
+    rows = [
+        {"scenario_id": "case-1", "prompt": "refund 8812", "final_text": "done", "reward": 1.0},
+        {"scenario_id": "case-1", "prompt": "refund 8812", "final_text": "no", "reward": 0.0},
+    ]
+    out = ingest.send_runs(rows, agent="refund-triage", api_key="zp_abc")
+    assert out["datasetId"] == "ds_1"
+    first = _attrs(_spans(seen)[0])
+    # The four attributes a cut needs: the agent, the group, the score, the bar.
+    assert first["gen_ai.agent.name"] == "refund-triage"
+    assert first["test.case.name"] == "case-1"
+    assert first["zeroproof.score"] == 1.0
+    assert first["zeroproof.score.pass_at"] == 1.0
+    assert first["gen_ai.prompt"] == "refund 8812"
+    assert first["gen_ai.completion"] == "done"
+    # Nanoseconds, in the order the loop produced them.
+    starts = [int(s["startTimeUnixNano"]) for s in _spans(seen)]
+    assert starts[0] < starts[1] and starts[0] > 10**18
+
+
+def test_send_runs_groups_repeats_of_one_prompt_without_a_scenario_id(monkeypatch):
+    seen = _capture_post(monkeypatch, Reply(202, {"datasetId": "ds_2"}))
+    rows = [
+        {"prompt": "same task", "final_text": "a", "reward": 1},
+        {"prompt": "same task", "final_text": "b", "reward": 0},
+        {"prompt": "other task", "final_text": "c", "reward": 1},
+    ]
+    ingest.send_runs(rows, agent="a", api_key="zp_abc")
+    cases = [_attrs(s)["test.case.name"] for s in _spans(seen)]
+    assert cases[0] == cases[1] != cases[2], "same prompt is one group, not three groups of one"
+
+
+def test_send_runs_takes_what_pull_hands_back(monkeypatch):
+    seen = _capture_post(monkeypatch, Reply(202, {"datasetId": "ds_3"}))
+    ingest.send_runs(
+        [
+            {
+                "scenario_id": "c1",
+                "prompt": "p",
+                "final_text": "f",
+                "reward": 1,
+                "info": {"model": "qwen3-4b", "duration_ms": 500},
+            }
+        ],
+        agent="a",
+        api_key="zp_abc",
+    )
+    span = _spans(seen)[0]
+    assert _attrs(span)["gen_ai.request.model"] == "qwen3-4b"
+    assert int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"]) == 500_000_000
+
+
+def test_send_runs_leaves_an_unscored_row_ungraded(monkeypatch):
+    seen = _capture_post(monkeypatch, Reply(202, {"datasetId": "ds_4"}))
+    ingest.send_runs([{"prompt": "p", "final_text": "f"}], agent="a", api_key="zp_abc")
+    attrs = _attrs(_spans(seen)[0])
+    assert "zeroproof.score" not in attrs and "zeroproof.score.pass_at" not in attrs
+
+
+def test_send_runs_names_the_dataset_under_both_keys(monkeypatch):
+    seen = _capture_post(monkeypatch, Reply(202, {"datasetId": "ds_5"}))
+    ingest.send_runs([{"prompt": "p", "reward": 1}], agent="a", dataset="week-1", api_key="zp_abc")
+    attrs = json.loads(seen["data"])["resourceSpans"][0]["resource"]["attributes"]
+    named = {a["key"]: a["value"]["stringValue"] for a in attrs}
+    assert named["zeroproof.dataset"] == named["whileai.dataset"] == "week-1"
+
+
+def test_send_runs_says_which_row_is_wrong(monkeypatch):
+    monkeypatch.setattr(ingest.requests, "post", lambda *a, **k: Reply(202, {}))
+    with pytest.raises(ingest.WhileIngestError, match="row 1 has no prompt"):
+        ingest.send_runs([{"prompt": "p"}, {"final_text": "f"}], agent="a", api_key="zp_abc")
+    with pytest.raises(ingest.WhileIngestError, match="not a number"):
+        ingest.send_runs([{"prompt": "p", "reward": "good"}], agent="a", api_key="zp_abc")
+    with pytest.raises(ingest.WhileIngestError, match="no rows"):
+        ingest.send_runs([], agent="a", api_key="zp_abc")
+    with pytest.raises(ingest.WhileIngestError, match="agent="):
+        ingest.send_runs([{"prompt": "p"}], agent="", api_key="zp_abc")

@@ -721,9 +721,16 @@ def cuts(
     holdout counts), ``sft``, and ``more`` (prompts that need more runs).
     Read it before ``cut()`` when you want to know what you would get.
     ``format_cuts()`` prints it as the three lines the traces page shows.
+
+    The report carries the ``filter`` it was read for, so the next line
+    ``format_cuts()`` prints cuts the same traces this counted.
     """
-    query = urllib.parse.urlencode(_trace_filter(agent, since, filters))
-    return _call("GET", f"/traces/cuts?{query}", api_key)
+    sent = _trace_filter(agent, since, filters)
+    query = urllib.parse.urlencode(sent)
+    report = _call("GET", f"/traces/cuts?{query}", api_key)
+    if isinstance(report, dict):
+        report.setdefault("filter", sent)
+    return report
 
 
 def format_cuts(report: Mapping[str, Any], *, agent: str | None = None) -> str:
@@ -734,6 +741,9 @@ def format_cuts(report: Mapping[str, Any], *, agent: str | None = None) -> str:
         3 prompts are worth training on
         9 runs · 3 train · none held out
         next: wai.cut(agent="my-agent", kind="rl")
+
+    The agent comes from the report's own ``filter`` — the line printed cuts
+    what was counted — and ``agent=`` overrides it.
     """
     rl = report.get("rl") or {}
     sft = report.get("sft") or {}
@@ -777,7 +787,9 @@ def format_cuts(report: Mapping[str, Any], *, agent: str | None = None) -> str:
         nxt = "send more runs of the same prompts, then read wai.cuts() again"
 
     if kind:
-        where = f'agent="{agent}", ' if agent else ""
+        filt = report.get("filter")
+        on = agent or (filt.get("agent") if isinstance(filt, Mapping) else None)
+        where = f'agent="{on}", ' if on else ""
         nxt = f'wai.cut({where}kind="{kind}")'
     return f"  {say}\n  {counts}\n  next: {nxt}"
 

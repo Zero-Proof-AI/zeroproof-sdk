@@ -1,0 +1,67 @@
+---
+title: "Learn post-training from zero"
+sidebarTitle: "Start here"
+description: "Seven short lessons for an engineer who has never trained a model. Each one runs offline, with no key, in under a minute."
+---
+
+You can read Python and run a script. You have never trained a model, and
+the words in the quickstart (rollout, reward, held-out, pass@1) are a
+jump. These seven lessons close that jump one word at a time.
+
+Each lesson says the idea in plain words first, then names the term the
+field uses for it, then runs it. Every snippet runs on a laptop with no
+key and no network, and the output shown is what it printed. At the end
+you will be able to read the [quickstart](/get-started/quickstart) and
+know what every line is for.
+
+<Steps>
+  <Step title="A model learns from examples, not from instructions">
+    What training changes that a prompt cannot. Pretraining, post-training,
+    SFT and RL, in one page. [Read it](/learn/what-training-does).
+  </Step>
+  <Step title="One saved conversation is a rollout">
+    The row: the ask, the tool calls, the reply. Where rows come from when
+    you have no traffic. [Read it](/learn/what-a-rollout-is).
+  </Step>
+  <Step title="A reward is a score you can defend">
+    A program that checks the answer, or a model that reads it. How to
+    check the checker. [Read it](/learn/what-a-reward-is).
+  </Step>
+  <Step title="A pass rate without an interval is a guess">
+    pass@1, the interval, and how many tasks a real result needs.
+    [Read it](/learn/why-one-number-is-not-a-result).
+  </Step>
+  <Step title="The test the model never sees is the only score that counts">
+    The held-out set, and the check that no training row is a copy of a
+    test row. [Read it](/learn/the-held-out-set).
+  </Step>
+  <Step title="Train on what the model gets right sometimes">
+    Which rows to keep for SFT, which for RL, and why a task the model
+    always passes teaches nothing. [Read it](/learn/which-rows-to-train-on).
+  </Step>
+  <Step title="Training is done when the held-out score moved">
+    Export, train on your own compute, and prove the change with a paired
+    before and after. [Read it](/learn/train-and-prove).
+  </Step>
+</Steps>
+
+## What you need
+
+```bash
+pip install whileai
+```
+
+Python 3.10 to 3.13. No account, no key. The lessons use a stand-in agent
+that makes mistakes on purpose and records them, so there is always an
+answer key to check against.
+
+## The whole course in one paragraph
+
+A language model has read the internet and never worked at your company.
+A prompt is a note on its monitor. Training changes what it knows how to
+do. To train it you need rows (one saved conversation each), a score per
+row (a program if one can check, a model if not, and you check the
+model), and a test set the model never sees. You keep the rows that
+teach something, train on your own compute, and the result counts only
+when the score on the test set moves by more than the noise. Then the
+next day's traffic is the next training set.

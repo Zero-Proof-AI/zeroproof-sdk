@@ -86,7 +86,7 @@ report["band_dropped"]  # {"too_easy": n, "too_hard": n}
 
 Each kept row's `calibration` stamp carries `pass_rate_ci95`, the interval on that pass rate, and the report says so when the band was measured from fewer than 16 rollouts per task, since at 8 a task's band assignment can be off by about 0.3. The prune shrinks every group, so the k-way reliability numbers do not survive it: `pass_at` on the selection reports `pass^k` and `pass@k` as `n/a` where the graded rows had them, which is why you print `pass_at` before this call. The report says so in `hygiene_warnings`, and the carried `calibration` stamp keeps the graded per-task measurement.
 
-`optimize(mode="sft")` is rejection sampling (rlhf-book ch. 9): `select="top_per_prompt"` keeps each prompt's highest-reward completion above `min_reward` (default 1.0; lower it for a partial-credit grader), `"top_k_overall"` the best `k` across prompts, and the `random_*` rules are the matching chance controls. Exported groups carry `n0`/`n1` (fail/pass, partial credit splits at 0.5) and `reward_mean`/`reward_std`. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter.
+`optimize(mode="sft")` is rejection sampling (rlhf-book ch. 9). The engine samples four completions per phrasing (`SFT_COMPLETIONS_PER_PROMPT` in `defaults.py`; `repeats=` moves it) so there is something to choose among; the report's `completions_per_prompt_mean` and `selection_effective` say whether that happened. `select="top_per_prompt"` keeps each prompt's highest-reward completion above `min_reward` (default 1.0; lower it for a partial-credit grader), `"top_k_overall"` the best `k` across prompts, and the `random_*` rules are the matching chance controls. Exported groups carry `n0`/`n1` (fail/pass, partial credit splits at 0.5) and `reward_mean`/`reward_std`. The band is the offline difficulty filter from the reasoning-model recipes (keep prompts the policy solves 20-80% of the time); it is a heuristic, so it is a parameter.
 
 Every selector report (`select_for_rl`, `select_for_sft`, `build_preference_pairs`) carries `eval_sourced`, the rows or pairs whose reward came from `evaluate()` (`lineage.source == "eval"`), with a warning when it is non-zero: a held-out score that becomes the reward makes the scorer you report the one you optimised against. Nothing is dropped; grade the training set with `run_judge` or `data.grade` and keep `evaluate` for held-out rows.
 
@@ -170,7 +170,7 @@ The platform's "Make training data" button, as one line:
 ```python
 wai.send_score("4bf92f3577b34da6", 1.0)  # this run passed
 summary = wai.cuts(agent="my-agent")  # what a cut would hold
-print(wai.format_cuts(summary, agent="my-agent"))  # the traces page's sentence
+print(wai.format_cuts(summary))  # the traces page's sentence
 made = wai.cut(agent="my-agent", kind="rl")  # make it
 wai.pull(made["train"]["datasetId"], "train.jsonl")
 made["holdout"]["datasetId"]  # measure on this, never train on it
@@ -436,3 +436,15 @@ wai.profile(row["datasetId"])  # profiled before you train on it
 ```
 
 Every push is one commit tagged `zp-<id>`, so `load_dataset(repo, split, revision="zp-ds_...")` pins the exact push; the repo's `whileai.json` maps each split to its While dataset with history. Worked example: [`recipes/05-export/hugging-face`](https://github.com/whilehq/whileai-sdk/tree/main/recipes/05-export/hugging-face).
+
+## Rows without OpenTelemetry
+
+A loop that calls a model `k` times a prompt and scores it has rows, not
+spans. `whileai.send_runs(rows, agent="refunds")` writes the OTLP envelope
+for you: each row is `{scenario_id, prompt, final_text, reward}`, repeats of
+one prompt group by `scenario_id` (or by the prompt text when there is none),
+and `reward` is judged against `pass_at` (1.0 by default). A row without a
+reward stays ungraded. It is the inverse of `rows_from_otel`, so an agent
+that emits no OpenTelemetry still lands on the traces page and `wai.cuts()`
+can answer what is worth training on. `send_traces` remains the call for
+OTLP bytes you already have.

@@ -17,6 +17,7 @@ from whileai.platform import (
     LiveDay,
     PlatformError,
     Run,
+    RunRecord,
     RunSpec,
     Score,
     Tracked,
@@ -435,3 +436,41 @@ def test_missing_key_names_the_fix(monkeypatch, tmp_path):
     with pytest.raises(PlatformError) as e:
         track("a")
     assert "whileai login" in str(e.value)
+
+
+def test_run_record_rides_on_the_spec_and_on_finish():
+    """A run carries its scientific record: data, optimizer, eval setup and
+    provenance as typed blocks, camelCase on the wire, at open or at close."""
+    fake = Fake()
+    t = track("a", transport=fake)
+    record = RunRecord(
+        data={"train": "MATH lv3-5", "n_train": 1024, "holdout": "MATH-500", "n_holdout": 160},
+        optimizer={"loss_type": "dapo", "lr": 5e-5, "beta": 1e-4, "num_generations": 8, "seed": 17},
+        eval={"metric": "pass@1", "k": 4, "run_std": 0.02, "run_std_runs": 3},
+        provenance={"pins": {"trl": "1.13.0"}, "paper": "2503.18892"},
+    )
+    run = t.run("lenient", method="grpo", record=record, flush_every=100)
+    _, _, body = fake.calls[-1]
+    assert body["record"]["data"] == {
+        "train": "MATH lv3-5",
+        "nTrain": 1024,
+        "holdout": "MATH-500",
+        "nHoldout": 160,
+    }
+    assert body["record"]["optimizer"]["lossType"] == "dapo"
+    assert body["record"]["eval"]["runStdRuns"] == 3
+    assert body["record"]["provenance"]["pins"] == {"trl": "1.13.0"}
+    assert run.spec.record is record
+
+    run.finish(record={"provenance": {"adapter": "vol:/lenient/adapter"}})
+    _, path, body = fake.calls[-1]
+    assert path == "/runs/run_abc" and body["record"] == {
+        "provenance": {"pins": {}, "adapter": "vol:/lenient/adapter"}
+    }
+
+
+def test_run_record_validates():
+    with pytest.raises(ValidationError):
+        RunRecord(optimizer={"top_p": 1.5})
+    with pytest.raises(ValidationError):
+        RunRecord(data={"n_holdout": -1})

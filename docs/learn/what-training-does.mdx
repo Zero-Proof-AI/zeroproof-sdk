@@ -1,0 +1,70 @@
+---
+title: "A model learns from examples, not from instructions"
+sidebarTitle: "1. What training does"
+description: "Lesson 1. What a prompt cannot change and training can. Pretraining, post-training, SFT and RL, in plain words."
+---
+
+A language model out of the box has read a large share of the internet
+and has never worked a day at your company. A system prompt is a note
+stuck to its monitor. It reads the note before every reply and still
+makes the same mistake every day, because a note does not change what it
+knows how to do. Training does. Training shows the model examples of the
+job done right and adjusts its weights, so the next reply comes out more
+like those examples without anyone telling it to.
+
+## The mechanism
+
+The first training, on the internet, is called **pretraining**. It gives
+the model language and general knowledge. Everything you do to the model
+after that is **post-training**. That is the part this library is for.
+
+There are two families of post-training, and you will use both.
+
+| What you want | What you do | The term |
+|---|---|---|
+| The model to reply the way these good examples reply | Show it the good examples. It copies them. | Supervised fine-tuning, **SFT** |
+| The model to prefer its own better tries over its worse ones | Let it try, score each try, push it toward the higher scores. | Reinforcement learning, **RL** |
+
+SFT teaches what a good reply looks like. RL teaches the model to tell
+its own good replies from its bad ones, which is how it learns things
+nobody wrote an example for. Both need the same two ingredients: rows to
+learn from, and a score that says which rows are good. Making those two
+things well, and proving they worked, is the whole job.
+
+<Note>
+A prompt edit and a training run are not rivals. Edit the prompt when
+the fix is a fact the model did not have. Train when the fix is a habit:
+the model has the facts and still does the wrong thing.
+</Note>
+
+## Run it
+
+```bash
+pip install whileai
+```
+
+```python
+import whileai
+
+print(whileai.__version__)
+```
+
+```text
+0.83
+```
+
+## Where it comes from
+
+1. Ouyang, L. et al. Training Language Models to Follow Instructions with
+   Human Feedback. NeurIPS, 2022. arXiv:2203.02155. The SFT-then-RL
+   recipe most chat models follow.
+2. Lambert, N. Reinforcement Learning from Human Feedback. arXiv:2504.12501,
+   2025. Chapters *Instruction Fine-Tuning* and *Reinforcement Learning*.
+3. Lambert, N. et al. Tülu 3: Pushing Frontiers in Open Language Model
+   Post-Training. arXiv:2411.15124, 2024. A full open post-training run,
+   SFT then preference tuning then RL.
+
+## Next
+
+[One saved conversation is a rollout](/learn/what-a-rollout-is): where the
+rows come from.
