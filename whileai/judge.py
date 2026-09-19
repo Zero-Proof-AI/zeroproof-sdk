@@ -55,6 +55,8 @@ class Judge:
         name: str | None = None,
     ):
         self.rubric = rubric
+        # a misspelled model string is refused here, not when the judge runs
+        spec_of(model, kwarg="model")
         self._model = model
         self.api_key = api_key or getattr(model, "api_key", None)
         self.policy = policy
@@ -66,7 +68,7 @@ class Judge:
     @property
     def spec(self) -> str | None:
         """The spec string this judge calls, resolved now."""
-        explicit = spec_of(self._model)
+        explicit = spec_of(self._model, kwarg="model")
         if isinstance(explicit, str):
             return explicit
         return current().judge

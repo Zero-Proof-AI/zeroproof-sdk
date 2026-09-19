@@ -268,6 +268,18 @@ def test_the_writer_sentinels_are_not_model_strings():
         wai.configure(agent="hosted")
 
 
+def test_judge_model_is_refused_where_it_was_typed():
+    """``wai.Judge(model="openai/x")`` raises in the constructor and names
+    ``model=``, not later when the judge first runs."""
+    with pytest.raises(ValueError, match=r"model='openai/gpt-4.1-mini'") as caught:
+        wai.Judge("be brief", model="openai/gpt-4.1-mini")
+    assert "model='openai:gpt-4.1-mini'" in str(caught.value)
+    assert (
+        wai.Judge("be brief", model="anthropic:claude-haiku-4-5").spec
+        == "anthropic:claude-haiku-4-5"
+    )
+
+
 def test_a_bad_role_leaves_no_half_applied_settings():
     wai.configure(agent="openai:gpt-4.1-mini")
     with pytest.raises(ValueError, match="judge="):
@@ -292,5 +304,8 @@ def test_spec_forms_match_the_engine():
         spec = f"{provider}:m@http://x/v1" if provider == "vllm" else f"{provider}:m"
         url, model = parse_backend_spec(spec)
         assert url and model == "m"
-    with pytest.raises(ValueError, match="unsupported backend spec"):
+    with pytest.raises(ValueError, match="unsupported backend spec") as caught:
         parse_backend_spec("together:llama-3")
+    # the engine's own message is built from the same dict, so one list
+    for form in SPEC_FORMS.values():
+        assert form in str(caught.value)

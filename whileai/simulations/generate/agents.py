@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from whileai._env import getenv
 from whileai.auth import SIGN_IN_URL
+from whileai.config import SPEC_FORMS
 
 from ..defaults import (
     CHARS_PER_TOKEN,
@@ -110,11 +111,10 @@ def parse_backend_spec(spec: str) -> tuple[str, str]:
         # probabilities, so a judge spec only. The URL is the API root
         # (TYPESAFE_BASE_URL overrides it) and the spec is the model name.
         return typesafe_base_url(), rest or TYPESAFE_DEFAULT_MODEL
-    raise ValueError(
-        f"unsupported backend spec {spec!r}; use ollama:<model>, "
-        "vllm:<model>@<url>, openai:<model>, anthropic:<model>, or "
-        "typesafe:<model> (judge only)"
-    )
+    # One vocabulary: ``SPEC_FORMS`` in ``whileai.config`` names the forms,
+    # the branches above read them, and ``tests/api/test_facade.py`` pins
+    # the two together.
+    raise ValueError(f"unsupported backend spec {spec!r}; use {', '.join(SPEC_FORMS.values())}")
 
 
 def _settings():
