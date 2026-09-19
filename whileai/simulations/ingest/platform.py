@@ -16,6 +16,7 @@ Stdlib only, matching the package's no-dependencies rule.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import time
@@ -30,6 +31,7 @@ from whileai._env import getenv
 from whileai.auth import stored_api_key
 
 from ..defaults import (
+    HOLDOUT_BUCKET_HEX_CHARS,
     PLATFORM_CREDENTIAL_TTL_S,
     PLATFORM_ERROR_DETAIL_CHARS,
     PLATFORM_HF_DATASET_TIMEOUT_S,
@@ -40,6 +42,8 @@ from ..defaults import (
     PLATFORM_IMPORT_MAX_ROWS,
     PLATFORM_IMPORT_POLL_S,
     PLATFORM_IMPORT_TIMEOUT_S,
+    PLATFORM_PUT_S_PER_MB,
+    PLATFORM_PUT_TIMEOUT_S,
     PLATFORM_REQUEST_TIMEOUT_S,
     PLATFORM_STUDIO_MAX_ROWS,
     PLATFORM_TRACE_PAGE_SIZE,
@@ -304,6 +308,60 @@ def _warn_small_holdout(
         )
 
 
+def split_holdout(rows: list[dict], fraction: float | None) -> tuple[list[dict], list[dict]]:
+    """Split rows by task so a task is wholly train or wholly holdout.
+
+    Deterministic: the same ``scenario_id`` lands on the same side every
+    run, which is what makes a before/after comparison honest.
+    """
+    if not fraction:
+        return rows, []
+    if not 0 < fraction < 1:
+        raise ValueError("holdout must be a fraction between 0 and 1")
+    train: list[dict] = []
+    held: list[dict] = []
+    for r in rows:
+        key = str(r.get("scenario_id") or r.get("task_id") or r.get("prompt") or "")
+        digits = hashlib.sha256(key.encode()).hexdigest()[:HOLDOUT_BUCKET_HEX_CHARS]
+        bucket = int(digits, 16) / (16**HOLDOUT_BUCKET_HEX_CHARS - 1)
+        (held if bucket < fraction else train).append(r)
+    if not train:
+        raise ValueError("holdout fraction leaves no training rows")
+    return train, held
+
+
+def put_timeout_for(n_bytes: int) -> float:
+    """Seconds one presigned upload may take: ``PLATFORM_PUT_TIMEOUT_S`` plus
+    ``PLATFORM_PUT_S_PER_MB`` for every megabyte, so a 117 MB eval set of
+    long-reasoning rollouts gets minutes where a 4 KB set gets the floor
+    (#386)."""
+    return PLATFORM_PUT_TIMEOUT_S + PLATFORM_PUT_S_PER_MB * n_bytes / 1_000_000
+
+
+def _put_payload(
+    upload_url: str, payload: bytes, api_key: str | None, timeout: float | None = None
+) -> None:
+    """One presigned PUT of the JSONL bytes, with a timeout sized to the payload
+    and a failure that names the size and the knob."""
+    cap = float(timeout) if timeout is not None else put_timeout_for(len(payload))
+    try:
+        _call(
+            "PUT",
+            "",
+            api_key,
+            raw_url=upload_url,
+            data=payload,
+            content_type="application/jsonl",
+            timeout=cap,
+        )
+    except PlatformError as err:
+        mb = len(payload) / 1_000_000
+        raise PlatformError(
+            f"upload of {mb:.0f} MB failed after {cap:.0f}s: {err}. Pass timeout= "
+            "for a longer cap, or split the push (push_rows on a slice)."
+        ) from None
+
+
 def push_rows(
     rows: list[dict],
     name: str,
@@ -318,6 +376,9 @@ def push_rows(
     endorsed: Sequence[str] = (),
     strict_hacks: bool = False,
     prove_effect: float = PLATFORM_HOLDOUT_PROVE_EFFECT,
+    holdout: float | None = None,
+    publish: bool = False,
+    timeout: float | None = None,
 ) -> dict:
     """Upload rows as JSONL to your While account.
 
@@ -335,8 +396,20 @@ def push_rows(
     does not, because the caller may already have run ``optimize``. A
     ``purpose="holdout"`` push warns when the set is too small to prove a
     ``prove_effect`` gain (5 points) at 80% power.
+
+    ``holdout=0.2`` keeps a fifth of the tasks (by ``scenario_id``) out of
+    the set and pushes them as a second, linked dataset with purpose
+    ``"holdout"``; the entry carries it as ``["holdout"]``. ``publish=True``
+    with an ``agent`` name also puts the set on the public catalog as a card
+    (``["card"]``). Both are what ``SimulationData.push`` takes, so a graded
+    RL push (``scored.push``) has the same route to a linked holdout (#408).
+    ``timeout`` caps the upload in seconds; the default grows with the
+    payload (``put_timeout_for``).
     """
     from ..schema import check
+
+    if publish and not agent:
+        raise ValueError("publish=True needs agent=..., cards are grouped by agent")
 
     gate_report = None
     if gate:
@@ -352,19 +425,39 @@ def push_rows(
     }
     if parent:
         body["parentDatasetId"] = parent
+    train_rows, holdout_rows = split_holdout(list(rows), holdout)
     created = _call("POST", "/datasets", api_key, body)
-    payload = "".join(json.dumps(r, default=str) + "\n" for r in rows).encode()
-    _call(
-        "PUT",
-        "",
-        api_key,
-        raw_url=created["uploadUrl"],
-        data=payload,
-        content_type="application/jsonl",
-    )
+    payload = "".join(json.dumps(r, default=str) + "\n" for r in train_rows).encode()
+    _put_payload(created["uploadUrl"], payload, api_key, timeout)
     final = _call("POST", f"/datasets/{created['datasetId']}/finalize", api_key)
+    if holdout_rows:
+        held = push_rows(
+            holdout_rows,
+            f"{name}-holdout",
+            api_key=api_key,
+            parent=str(final.get("datasetId") or created["datasetId"]),
+            purpose="holdout",
+            mode=mode,
+            agent=agent,
+            description=description,
+            prove_effect=prove_effect,
+            timeout=timeout,
+        )
+        final = {
+            **final,
+            "holdout": held,
+            "holdout_tasks": len({r.get("scenario_id") for r in holdout_rows}),
+        }
     if gate_report is not None:
         final = {**final, "gate": gate_report}
+    if publish:
+        card = publish_dataset(
+            str(final.get("datasetId") or created["datasetId"]),
+            agent or "",
+            description,
+            api_key=api_key,
+        )
+        final = {**final, "card": card}
     return final
 
 
@@ -403,14 +496,7 @@ def push_file(
     if parent:
         body["parentDatasetId"] = parent
     created = _call("POST", "/datasets", api_key, body)
-    _call(
-        "PUT",
-        "",
-        api_key,
-        raw_url=created["uploadUrl"],
-        data=payload,
-        content_type="application/jsonl",
-    )
+    _put_payload(created["uploadUrl"], payload, api_key)
     final = _call("POST", f"/datasets/{created['datasetId']}/finalize", api_key)
     if gate_report is not None:
         final = {**final, "gate": gate_report}
@@ -439,6 +525,11 @@ def publish(
     if description:
         body["description"] = description
     return _call("POST", f"/datasets/{dataset_id}/publish", api_key, body)
+
+
+#: The function under a name ``push_rows`` can reach while its own
+#: ``publish=`` keyword shadows ``publish``.
+publish_dataset = publish
 
 
 def agents(*, api_key: str | None = None) -> list[dict]:

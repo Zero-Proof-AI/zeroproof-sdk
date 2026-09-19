@@ -414,6 +414,9 @@ push_rows(
     endorsed: Sequence[str] = (),
     strict_hacks: bool = False,
     prove_effect: float = 0.05,
+    holdout: float | None = None,
+    publish: bool = False,
+    timeout: float | None = None,
 ) -> dict
 ```
 
@@ -433,6 +436,15 @@ best explained by something else.
 does not, because the caller may already have run `optimize`. A
 `purpose="holdout"` push warns when the set is too small to prove a
 `prove_effect` gain (5 points) at 80% power.
+
+`holdout=0.2` keeps a fifth of the tasks (by `scenario_id`) out of
+the set and pushes them as a second, linked dataset with purpose
+`"holdout"`; the entry carries it as `["holdout"]`. `publish=True`
+with an `agent` name also puts the set on the public catalog as a card
+(`["card"]`). Both are what `SimulationData.push` takes, so a graded
+RL push (`scored.push`) has the same route to a linked holdout (#408).
+`timeout` caps the upload in seconds; the default grows with the
+payload (`put_timeout_for`).
 
 ### refresh_delegated_credential
 

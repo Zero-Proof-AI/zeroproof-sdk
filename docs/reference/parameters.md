@@ -127,7 +127,7 @@ You should not need these. Every other number the engine uses is an `advanced` k
 | `followup_starved_divisor` | `4` | See `followup_starved_min` |
 | `semantic_duplicate_novelty` | `0.05` | A row under this semantic novelty counts as a duplicate |
 | `idle_judge_share` | `0.1` | An rl pool idle on verdicts for more than this share of the run gets the add-situations note |
-| `progress_every_s` | `10.0` | Never more than this long between progress lines |
+| `progress_every_s` | `10.0` | Never more than this long between progress lines (INFO on the `whileai.simulations` logger; on stderr too when no handler is attached) |
 | `progress_every_rows` | `10` | Never more than this many finished rollouts between progress lines |
 | `flush_report_rows` | `25` | The streamed-output log line is written every this many rows |
 | `flush_report_s` | `5.0` | Or every this many seconds |

@@ -933,10 +933,12 @@ push(self, name: str, **kwargs: Any) -> dict
 Upload the scored rows to the platform: `push_rows(self.rows, name, ...)`.
 
 Same keywords as `push_rows` (`gate=`, `mode=`, `agent=`,
-`purpose=`, `parent=`, `endorsed=`, `strict_hacks=`). The
-graded copy is what a gated RL push needs, and `SimulationData.push`
-cannot see it: `grade(judge=)` leaves the run's trajectories
-ungraded on purpose.
+`purpose=`, `parent=`, `endorsed=`, `strict_hacks=`,
+`holdout=` for a linked holdout set split by task, `publish=`
+for a public card, `timeout=` for the upload). The graded copy is
+what a gated RL push needs, and `SimulationData.push` cannot see
+it: `grade(judge=)` leaves the run's trajectories ungraded on
+purpose.
 
 #### ScoredData.select_by_reward_range
 

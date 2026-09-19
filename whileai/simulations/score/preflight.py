@@ -339,7 +339,17 @@ def dataset_report(
     from ..generate.diversity import behavior_tier
     from .grading import behavior_signature
 
-    rows = [r for r in rows if isinstance(r, dict)]
+    if isinstance(rows, (str, bytes)):
+        raise TypeError(
+            "dataset_report takes the rows, not a dataset id: pull them first, "
+            f'wai.dataset_report(wai.pull("{rows if isinstance(rows, str) else "ds_..."}"))'
+        )
+    given = list(rows)
+    rows = [r for r in given if isinstance(r, dict)]
+    if given and not rows:
+        raise TypeError(
+            f"dataset_report takes a sequence of row dicts; got {type(given[0]).__name__} items"
+        )
     labeled = [r for r in rows if r.get("reward") in (0, 1)]
     passes = [r for r in labeled if r["reward"] == 1]
     fails = [r for r in labeled if r["reward"] == 0]

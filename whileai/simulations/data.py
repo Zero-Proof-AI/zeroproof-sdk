@@ -17,7 +17,6 @@ from .defaults import (
     DEFAULT_CONCURRENCY,
     DEFAULT_LLM_JUDGE_CONCURRENCY,
     DEFAULT_SELECT_TARGET,
-    HOLDOUT_BUCKET_HEX_CHARS,
     JUDGE_CONCURRENCY_CAP,
     JUDGE_MAX_TOKENS,
     JUDGE_PAYLOAD_CHARS,
@@ -27,7 +26,7 @@ from .defaults import (
 )
 from .export import export_training
 from .generate.adapters import AgentProfile
-from .ingest.platform import push_rows
+from .ingest.platform import push_rows, split_holdout
 from .schema import SCHEMA_KEY, SCHEMA_VERSION, check, stamp
 from .score.grade_llm import apply_grade_llm, require_judge_key, rubric_prompt
 from .score.judge_trust import trust_after_grade
@@ -146,26 +145,10 @@ def _prompt_hash(policy: str) -> str | None:
     return hashlib.sha256(policy.encode("utf-8")).hexdigest()[:SHORT_HASH_CHARS]
 
 
-def _split_holdout(rows: list[dict], fraction: float | None) -> tuple[list[dict], list[dict]]:
-    """Split rows by task so a task is wholly train or wholly holdout.
-
-    Deterministic: the same ``scenario_id`` lands on the same side every
-    run, which is what makes a before/after comparison honest.
-    """
-    if not fraction:
-        return rows, []
-    if not 0 < fraction < 1:
-        raise ValueError("holdout must be a fraction between 0 and 1")
-    train: list[dict] = []
-    held: list[dict] = []
-    for r in rows:
-        key = str(r.get("scenario_id") or r.get("task_id") or r.get("prompt") or "")
-        digits = hashlib.sha256(key.encode()).hexdigest()[:HOLDOUT_BUCKET_HEX_CHARS]
-        bucket = int(digits, 16) / (16**HOLDOUT_BUCKET_HEX_CHARS - 1)
-        (held if bucket < fraction else train).append(r)
-    if not train:
-        raise ValueError("holdout fraction leaves no training rows")
-    return train, held
+#: The by-task split lives with ``push_rows`` now (``ingest.platform
+#: .split_holdout``), so a row-level push and ``SimulationData.push`` cut the
+#: same holdout; this name stays for callers and tests that reach it here.
+_split_holdout = split_holdout
 
 
 #: Keys that must never reach an exported row, at any depth, whatever the
@@ -432,6 +415,7 @@ class SimulationData:
         judge=None,
         llm: bool = False,
         llm_spec: str | None = None,
+        spec: str | None = None,
         api_key: str | None = None,
         path: str | None = None,
         concurrency: int = DEFAULT_CONCURRENCY,
@@ -486,6 +470,10 @@ class SimulationData:
           ``"warn"`` (the default) logs one line when the check failed or no
           labels exist, ``"require"`` raises instead, ``"off"`` skips it.
         * ``path``: write the graded run's JSONL there afterwards.
+        * ``spec``: which model judges on the hosted path, as a backend spec
+          (``"typesafe:jev-latest"``, ``"openai:gpt-4.1-mini"``); the same
+          keyword ``grade_llm``, ``pairwise_judge`` and ``rubric_judge``
+          take. ``llm_spec`` is its older name and still works.
 
         ```python
         data = wai.simulate(agent, tools=TOOLS, simulator=False, budget=16)
@@ -493,6 +481,8 @@ class SimulationData:
         print(data.pass_at)
         ```
         """
+        if spec is not None:
+            llm_spec = spec
         if judge is not None:
             from .score.judging import run_judge
 
