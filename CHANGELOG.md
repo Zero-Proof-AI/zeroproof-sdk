@@ -5,6 +5,8 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
 
 ## Unreleased
 
+## 0.86 (2026-09-19)
+
 - `tools=` takes `@wai.tool` functions everywhere, not only in `simulate`
   and `seeded_agent`: `world`, `local_model` and `hosted_model`,
   `evaluate`, `coverage_gap`, `preflight`, `dataset_report`, `recommend`,
