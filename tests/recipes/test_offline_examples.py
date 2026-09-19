@@ -56,6 +56,7 @@ CLI_EXAMPLES = [
     "community/force-the-branch/run.py",
     "community/can-the-judge-be-trusted/run.py",
     "community/hosted-grpo-vs-sft/run.py",
+    "community/who-protects-the-holdout/run.py",
 ]
 
 # Need the ``modal`` client, which is not a dev dependency. Compiled, not run.
@@ -68,6 +69,7 @@ NEEDS_MODAL = {
     "04-train/text-to-sql/author.py",
     "04-train/text-to-sql/train_grpo_modal.py",
     "04-train/resist-planted-instruction/modal_train_eval.py",
+    "community/who-protects-the-holdout/inflation_modal.py",
 }
 
 
