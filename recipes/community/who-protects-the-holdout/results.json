@@ -107,15 +107,22 @@
     "notes_field_empty_in_both_regimes": true
   },
   "gpu_half": {
-    "status": "incomplete - runner terminated mid-arm; see README 'What did not work'",
+    "status": "incomplete - the base noise floor replicated across two runs (6 evals); both runs' training arms were lost to the app-name collision described in the README",
     "base": "Qwen/Qwen2.5-1.5B-Instruct",
     "gpu": "A10G",
     "holdout_n": 200,
-    "base_noise_floor": [
-      0.555,
-      0.525,
-      0.49
-    ],
+    "base_noise_floor": {
+      "run_1": [
+        0.555,
+        0.525,
+        0.49
+      ],
+      "run_2": [
+        0.515,
+        0.535,
+        0.54
+      ]
+    },
     "base_noise_band": 0.065,
     "arms_setup": {
       "default": {
@@ -146,6 +153,16 @@
       }
     },
     "n_leak_planted": 60,
-    "arm_pass_rates": null
+    "arm_pass_rates": null,
+    "base_noise_all": [
+      0.555,
+      0.525,
+      0.49,
+      0.515,
+      0.535,
+      0.54
+    ],
+    "base_noise_mean": 0.5267,
+    "base_noise_sd": 0.0225
   }
 }

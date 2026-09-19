@@ -116,9 +116,19 @@ gold solutions, into an 800-row GSM8K training pool, then cleans it twice:
 | `default` | lexical, `n=8`, `overlap=0.8` | 20/60 (0.333) | **40** | 0 |
 | `semantic` | `embedder=bge-small-en-v1.5`, `similarity=0.85` | 58/60 (0.967) | **2** | 11 |
 
-Base noise floor, the untrained model evaluated three times on the same 200 held-out
-questions at temperature 0.7: **0.555 / 0.525 / 0.490** (mean 0.523, band 0.065). Any
-arm-to-arm difference has to clear that band to mean anything.
+Base noise floor, the untrained model on the same 200 held-out questions at temperature
+0.7. I ended up measuring it twice, on two separate A10G containers, which makes it a
+replication rather than a single triple:
+
+| run | three evals | mean |
+|---|---|---|
+| 1 | 0.555 / 0.525 / 0.490 | 0.523 |
+| 2 | 0.515 / 0.535 / 0.540 | 0.530 |
+
+Six evals, all in **[0.490, 0.555]** — mean 0.527, sd 0.021, band 0.065. The two runs'
+means differ by 0.007, well inside the within-run spread, so the floor is stable across
+containers and not an artefact of one. Any arm-to-arm difference has to clear that band
+to mean anything.
 
 **This half did not finish inside the session** — the arm numbers are not in this
 directory. See [What did not work](#what-did-not-work). The scripts run as written and
@@ -131,12 +141,15 @@ and any inflation measured from it is a lower bound.
 
 ## What did not work
 
-- **I killed my own GPU run.** Two `modal run` invocations of the same script were live
-  at once (the first launch succeeded although its shell reported an error, so I did not
-  know it existed). They share an app *name*, so `modal app stop` on the one I thought
-  was the orphan terminated the other one's runner too, eight steps into the first arm.
-  The base noise floor above survived; the arms did not. If you run this, check
-  `modal app list` before you stop anything.
+- **I killed my own GPU run, twice, the same way.** Two `modal run` invocations of the
+  same script were live at once (the first launch succeeded although its shell reported
+  an error, so I did not know it existed). They share an app *name*, so `modal app stop`
+  on the one I believed was the orphan terminated the other one's runner too, eight steps
+  into the first arm. I relaunched; that container's stdout had not reached my log by the
+  time the session's clock ran out, so I stopped it for the spend guardrail — and its
+  base eval turned out to have completed and flushed a moment earlier. Hence two noise
+  floors and no arms. If you run this: `modal app list` **before** you stop anything, and
+  give each run a distinct `app` name.
 - **`wai.pass_at(rows, k=1).ci95` returns `None`** when every row shares a task id, with
   no warning and a valid-looking `pass_at_1` beside it. It groups by task, so a
   proportion over rows needs one group per row — `proportion()` in `run.py` does that.
