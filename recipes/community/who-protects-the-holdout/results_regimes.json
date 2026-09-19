@@ -1,0 +1,99 @@
+{
+  "whileai": "0.86",
+  "budget": 120,
+  "trials": {
+    "0v1": {
+      "native": {
+        "caught": 105,
+        "n_train": 107,
+        "rate": 0.9813,
+        "ci95": [
+          0.953,
+          1.0
+        ],
+        "same_task": 104,
+        "exact": 0,
+        "near": 1,
+        "notes": []
+      },
+      "id_less": {
+        "caught": 19,
+        "n_train": 107,
+        "rate": 0.1776,
+        "ci95": [
+          0.112,
+          0.252
+        ],
+        "same_task": 0,
+        "exact": 14,
+        "near": 5,
+        "notes": []
+      },
+      "train_seed": 0,
+      "holdout_seed": 1,
+      "n_holdout": 107
+    },
+    "2v3": {
+      "native": {
+        "caught": 105,
+        "n_train": 106,
+        "rate": 0.9906,
+        "ci95": [
+          0.972,
+          1.0
+        ],
+        "same_task": 104,
+        "exact": 0,
+        "near": 1,
+        "notes": []
+      },
+      "id_less": {
+        "caught": 29,
+        "n_train": 106,
+        "rate": 0.2736,
+        "ci95": [
+          0.198,
+          0.358
+        ],
+        "same_task": 0,
+        "exact": 17,
+        "near": 12,
+        "notes": []
+      },
+      "train_seed": 2,
+      "holdout_seed": 3,
+      "n_holdout": 107
+    },
+    "4v5": {
+      "native": {
+        "caught": 105,
+        "n_train": 105,
+        "rate": 1.0,
+        "ci95": [
+          1.0,
+          1.0
+        ],
+        "same_task": 103,
+        "exact": 0,
+        "near": 2,
+        "notes": []
+      },
+      "id_less": {
+        "caught": 31,
+        "n_train": 105,
+        "rate": 0.2952,
+        "ci95": [
+          0.219,
+          0.381
+        ],
+        "same_task": 0,
+        "exact": 17,
+        "near": 14,
+        "notes": []
+      },
+      "train_seed": 4,
+      "holdout_seed": 5,
+      "n_holdout": 103
+    }
+  }
+}
