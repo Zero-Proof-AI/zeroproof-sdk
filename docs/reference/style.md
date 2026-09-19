@@ -30,13 +30,13 @@ import whileai as wai
 
 wai.configure(agent="openai:gpt-4.1-mini", judge="anthropic:claude-haiku-4-5")
 
-data   = wai.simulate(tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=8)
-scored = data.grade(wai.verify.MathEqual())          # any judge object or callable
-print(scored.pass_at())                              # pass@1 0.67 [0.55..0.78] ...
+data = wai.simulate(tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=8)
+scored = data.grade(wai.verify.MathEqual())  # any judge object or callable
+print(scored.pass_at())  # pass@1 0.67 [0.55..0.78] ...
 
-trust  = wai.judge_trust(scored, gold=LABELS)        # kappa vs people, length bias
-rows   = scored.select(mode="rl")                    # 20..80% band, drop unanimous groups
-rows.export("trl")                                   # or rows.push("my-agent-rl-v1")
+trust = wai.judge_trust(scored, gold=LABELS)  # kappa vs people, length bias
+rows = scored.select(mode="rl")  # 20..80% band, drop unanimous groups
+rows.export("trl")  # or rows.push("my-agent-rl-v1")
 ```
 
 Today the same program is `import whileai.simulations as wai`, a
