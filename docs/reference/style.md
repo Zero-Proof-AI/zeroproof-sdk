@@ -37,12 +37,19 @@ wai.configure(agent="openai:gpt-4.1-mini", judge="anthropic:claude-haiku-4-5")
 
 data = wai.simulate(tools=TOOLS, system_prompt=POLICY, mode="rl", repeats=8)
 scored = data.grade(wai.verify.MathEqual())  # any judge object or callable
-print(scored.pass_at())  # pass@1 0.67 [0.55..0.78] ...
+print(scored.pass_at)  # pass@1 0.67 [0.55..0.78] ...
 
-trust = wai.judge_trust(scored, gold=LABELS)  # kappa vs people, length bias
+print(wai.judge_trust(scored.rows))  # kappa vs people, length bias
 rows = scored.select(mode="rl")  # 20..80% band, drop unanimous groups
-rows.export("trl")  # or rows.push("my-agent-rl-v1")
+rows.export("train.jsonl")  # or rows.push("my-agent-rl-v1")
 ```
+
+Every line above runs today. Three of them did not when this page was
+written: `pass_at` is a property, not a call; `judge_trust` takes rows and
+a judge, and its `gold=` names the label key rather than the labels; and
+`export` takes a path, with `format="trl"` for the shape `SFTTrainer`
+loads. A bar nobody can run is a wish, so the snippet is kept executable
+and the delta below says what is still missing.
 
 Today the same program is `import whileai.simulations as wai`, a
 `(rows, report)` tuple out of `optimize`, and `format_*` twins to print
@@ -100,6 +107,13 @@ object's job. No public call returns a `(rows, report)` tuple or a bare
 dict the user has to know the keys of. *(PassAt already prints
 `pass@1 0.67 [0.55..0.78]`; do that everywhere.)*
 
+A report that was a dict first becomes a `whileai.report.Report`, which
+*is* a dict: every key, `.get`, `json.dumps` and `==` against a plain dict
+keep working, and `__str__` is the block the `format_*` twin writes. That
+is the migration step that costs a caller nothing. `judge_trust`,
+`hack_scan`, `delta_report` (`wai.compare`) and `leak_report` are through
+it; `decontaminate`, `export` and `preflight` are not.
+
 **6. Public names are the verb a scientist says.** `simulate`, `grade`,
 `select`, `compare`, `train`, `serve`, `push`. Implementation words are
 private: `run_judge`, `normalize_judge_result`, `resolve_topology`,
@@ -148,6 +162,8 @@ grows:
 | Count | Rule | Today |
 |---|---|---|
 | names in `whileai.simulations.__all__` | 1 | 212 |
+| names in `whileai.__all__` (the front door) | 1 | 30 |
+| front-door calls returning a bare `dict` or tuple | 5 | 3 |
 | public calls or constructors with more than 8 parameters (record dataclasses exempt) | 3 | 27 |
 | public names starting `format_` | 5 | 13 |
 | public names starting `attach_` or `stamp_` | 4 | 6 |

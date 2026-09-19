@@ -352,7 +352,7 @@ delta_report(
     ceiling_pass_rate: float = 0.9,
     answered_gap_points: float = 0.1,
     answered_alpha: float = 0.01,
-) -> dict[str, Any]
+) -> DeltaReport
 ```
 
 Defined in [`whileai/simulations/score/delta.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/delta.py).
@@ -362,7 +362,8 @@ Compare an `after` run to a `before` run on pass@1 and every shared marker, and 
 Reach for it after a change (a prompt edit, a trained adapter, a model
 swap): both sides are graded rows, ideally on the same pinned tasks
 (`simulate(tasks=before)`) with the same rollouts per task. It
-returns a dict. The keys a caller reads first: `headline_verdict`
+returns a `DeltaReport`, a dict that prints itself. The keys a
+caller reads first: `headline_verdict`
 (`PASS` only for a gain the report supports, `NO DIFFERENCE` for
 an interval over zero, `NOT COMPARABLE (causes)` when the arms
 cannot be compared, `FAIL` for a regression, a failed guard, or
@@ -370,8 +371,9 @@ over-optimization), `ok` (the gate: no regression, no failed guard,
 comparable arms; it does not say the change helped), `metrics` (one
 entry per metric with its delta, interval and verdict), `warnings`
 (each naming its fix), `not_comparable`, `n_paired_tasks` and
-`n_unpaired_tasks`. `format_delta_report(report)` prints it with
-`headline_verdict` on the first line.
+`n_unpaired_tasks`. `print(report)` writes it with
+`headline_verdict` on the first line
+(`format_delta_report(report)` is the same string).
 
 Arguments that matter:
 
@@ -639,7 +641,7 @@ hack_scan(
     seed: int = 0,
     top_features: int | None = 20,
     alpha: float = 0.05,
-) -> dict[str, Any]
+) -> HackScanReport
 ```
 
 Defined in [`whileai/simulations/score/hack_scan.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/hack_scan.py).
@@ -648,7 +650,8 @@ Rank the features that separate reward within each ask, against a permutation no
 
 Reach for it before an RL run, and again after, to check that the
 reward tracks the behavior you meant rather than a shortcut. It
-returns a dict: `regime` (`train`, `reward_hack`,
+returns a `HackScanReport`, a dict that prints itself: `regime`
+(`train`, `reward_hack`,
 `pool_exhausted`, `no_signal`, `degenerate`, `unknown`),
 `tau` (the floor), `features` ranked by |within-ask correlation|
 with the pooled correlation beside each, `top_feature`,
@@ -868,7 +871,7 @@ judge_trust(
     length_gap_flag: float = 0.15,
     flip_flag: float = 0.1,
     max_skipped_share: float = 0.1,
-) -> dict[str, Any]
+) -> JudgeTrustReport
 ```
 
 Defined in [`whileai/simulations/score/judge_trust.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/judge_trust.py).
@@ -876,8 +879,9 @@ Defined in [`whileai/simulations/score/judge_trust.py`](https://github.com/while
 Measure whether the judge can be trusted, against human labels and under attack.
 
 Reach for it before training on a judge's rewards: the reward is only
-as good as the judge. It returns a dict. The keys a caller reads
-first: `ok` (measured and clean), `agreement["agreement"]` and
+as good as the judge. It returns a `JudgeTrustReport`: print it for
+the block, read it as the dict it has always been. The keys a caller
+reads first: `ok` (measured and clean), `agreement["agreement"]` and
 `agreement["ci95"]` (the number and its Wilson interval, not
 `ci`), `agreement["n"]` (labels compared), `gold_kind` (where
 the labels came from), and `warnings`, where every line names its
@@ -888,7 +892,8 @@ among rows humans agreed on, a length bias the labels rule out as
 real), `perturbation` and `probes` when a judge callable is
 given, `disagreements` (the review queue of rows the judge and the
 humans disagree on), `floors`, `n_labeled` and `n_rows`.
-`format_judge_trust(report)` prints the whole thing. The module
+`print(report)` writes the whole thing
+(`format_judge_trust(report)` is the same string). The module
 docstring lays out each check and its rlhf-book chapter.
 The floors and flags are keywords with their defaults in
 `whileai.simulations.defaults`: `min_agreement` (0.8, the
@@ -2094,7 +2099,7 @@ One line per fact, the summary first.
 ### leak_report
 
 ```python
-leak_report(rows: Any, min_len: int = 12) -> dict[str, Any]
+leak_report(rows: Any, min_len: int = 12) -> LeakReport
 ```
 
 Defined in [`whileai/simulations/score/privileged.py`](https://github.com/whilehq/whileai-sdk/blob/main/whileai/simulations/score/privileged.py).

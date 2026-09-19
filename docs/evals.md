@@ -291,7 +291,7 @@ the labels as human, and ask:
 
 ```python
 wai.attach_labels(scored.rows, labels, kind="human")
-print(wai.format_judge_trust(wai.judge_trust(scored.rows, judge)))
+print(wai.judge_trust(scored.rows, judge))  # the report prints itself
 ```
 
 `labels` is a `{key: 0/1}` dict, a list of dicts, or a JSONL path. The

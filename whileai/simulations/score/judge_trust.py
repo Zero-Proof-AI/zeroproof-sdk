@@ -68,6 +68,7 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ...report import Report
 from ..defaults import (
     FLIP_FLAG,
     JUDGE_CHECK_SAMPLE,
@@ -549,12 +550,13 @@ def judge_trust(
     length_gap_flag: float = LENGTH_GAP_FLAG,
     flip_flag: float = FLIP_FLAG,
     max_skipped_share: float = MAX_SKIPPED_SHARE,
-) -> dict[str, Any]:
+) -> JudgeTrustReport:
     """Measure whether the judge can be trusted, against human labels and under attack.
 
     Reach for it before training on a judge's rewards: the reward is only
-    as good as the judge. It returns a dict. The keys a caller reads
-    first: ``ok`` (measured and clean), ``agreement["agreement"]`` and
+    as good as the judge. It returns a ``JudgeTrustReport``: print it for
+    the block, read it as the dict it has always been. The keys a caller
+    reads first: ``ok`` (measured and clean), ``agreement["agreement"]`` and
     ``agreement["ci95"]`` (the number and its Wilson interval, not
     ``ci``), ``agreement["n"]`` (labels compared), ``gold_kind`` (where
     the labels came from), and ``warnings``, where every line names its
@@ -565,7 +567,8 @@ def judge_trust(
     real), ``perturbation`` and ``probes`` when a judge callable is
     given, ``disagreements`` (the review queue of rows the judge and the
     humans disagree on), ``floors``, ``n_labeled`` and ``n_rows``.
-    ``format_judge_trust(report)`` prints the whole thing. The module
+    ``print(report)`` writes the whole thing
+    (``format_judge_trust(report)`` is the same string). The module
     docstring lays out each check and its rlhf-book chapter.
     The floors and flags are keywords with their defaults in
     ``whileai.simulations.defaults``: ``min_agreement`` (0.8, the
@@ -794,27 +797,29 @@ def judge_trust(
         else:
             warnings.append(line)
     ok = bool(labeled) and trusted and not flagged
-    return {
-        "ok": ok,
-        "n_rows": len(rows),
-        "n_labeled": len(labeled),
-        "gold_kind": gold_kind,
-        "gold_degenerate": degenerate_gold,
-        "floors": {
-            "min_agreement": min_agreement,
-            "min_kappa": min_kappa,
-            "max_skipped_share": max_skipped_share,
-        },
-        "skipped": skipped,
-        "agreement": agree,
-        "held_out_halves": halves,
-        "length_sensitivity": length,
-        "perturbation": perturb,
-        "probes": probed,
-        "exploitable_by": list(probed["exploitable_by"]) if probed else [],
-        "disagreements": queue,
-        "warnings": warnings,
-    }
+    return JudgeTrustReport(
+        {
+            "ok": ok,
+            "n_rows": len(rows),
+            "n_labeled": len(labeled),
+            "gold_kind": gold_kind,
+            "gold_degenerate": degenerate_gold,
+            "floors": {
+                "min_agreement": min_agreement,
+                "min_kappa": min_kappa,
+                "max_skipped_share": max_skipped_share,
+            },
+            "skipped": skipped,
+            "agreement": agree,
+            "held_out_halves": halves,
+            "length_sensitivity": length,
+            "perturbation": perturb,
+            "probes": probed,
+            "exploitable_by": list(probed["exploitable_by"]) if probed else [],
+            "disagreements": queue,
+            "warnings": warnings,
+        }
+    )
 
 
 def _flagged(warnings: Sequence[str]) -> bool:
@@ -887,6 +892,20 @@ def trust_after_grade(rows: Sequence[dict], *, mode: str = "warn") -> dict[str, 
     if mode == "require" and note:
         raise ValueError(note)
     return {"trust": summary, "note": note}
+
+
+class JudgeTrustReport(Report):
+    """What ``judge_trust`` measured, as an object that prints itself.
+
+    Still the dict it always was: ``report["agreement"]["kappa"]`` and
+    ``report["warnings"]`` read the same. ``print(report)`` is now the
+    block ``format_judge_trust`` writes, not the dict literal.
+    """
+
+    _summary_keys = ("ok", "n_labeled")
+
+    def __str__(self) -> str:
+        return format_judge_trust(self)
 
 
 def format_judge_trust(report: dict[str, Any]) -> str:
