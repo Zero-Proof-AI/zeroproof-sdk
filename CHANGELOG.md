@@ -18,6 +18,13 @@ Versions move in hundredths (`0.04` then `0.05`). PyPI normalizes them, so
   that clears the floors; `table["name"].rows` holds that judge's graded
   copies for reading the disagreements. A bare row list takes the same
   call as `whileai.judge_comparison.compare_judges(rows, judges)`.
+- `tools=` takes `@wai.tool` functions everywhere, not only in `simulate`
+  and `seeded_agent`: `world`, `local_model` and `hosted_model`,
+  `evaluate`, `coverage_gap`, `preflight`, `dataset_report`, `recommend`,
+  `trace_report` and `export_environment` normalise the same list. Every
+  hand-written schema dict is gone from the docs site; the pages say
+  dicts still work.
+
 
 ## 0.84 (2026-09-19)
 
