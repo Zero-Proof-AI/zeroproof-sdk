@@ -190,7 +190,7 @@ labels = "labels.jsonl"
 _const = Path(__file__).resolve().parents[2] / "recipes/03-select/character/constitution.json"
 _dest = Path("recipes/03-select/character")
 _dest.mkdir(parents=True, exist_ok=True)
-(_dest / "constitution.json").write_text(_const.read_text())
+(_dest / "constitution.json").write_text(_const.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 # A served model's endpoint and a pinned task set, for the before/after section.

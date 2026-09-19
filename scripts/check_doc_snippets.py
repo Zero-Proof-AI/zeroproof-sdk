@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 """Run the code in the docs and check it still works.
 
-Every ```python block under docs/ (except the generated docs/api/ pages) is
-executed against the installed package. A page is one program: blocks run in
+Every ```python block under docs/ is executed against the installed package,
+except on the two generated trees: docs/api/ (from the package's docstrings)
+and docs/recipes/ (from the recipe READMEs, whose scripts live in a clone and
+are smoke-tested by their own CI job). A page is one program: blocks run in
 order, in one namespace, in one scratch directory, so a later block can use a
 name an earlier block defined. That is how a reader reads the page, so that is
 how it is checked.
@@ -113,7 +115,14 @@ def printed(text: str) -> str:
     return "\n".join(ln[pad:] for ln in lines).strip()
 
 
-SKIPS = json.loads((FIXTURES / "skips.json").read_text())["skips"]
+SKIPS = json.loads((FIXTURES / "skips.json").read_text(encoding="utf-8"))["skips"]
+# Generated trees under docs/, never run: docs/api/ is the package's own
+# docstrings, docs/recipes/ is the recipe READMEs, whose blocks assume a clone
+# and are covered by the recipe smoke job.
+GENERATED = ("api/", "recipes/")
+# BLOCK_TIMEOUT = 180: seconds one block may run. The slowest honest block is
+# a seeded simulate() at budget=64 with repeats=4, which takes about 20 s on the
+# CI runner; nine times that is a hang, not a slow machine.
 BLOCK_TIMEOUT = 180
 
 
@@ -151,7 +160,11 @@ def pages(only: str | None) -> list[Path]:
         return [p] if p.exists() else []
     found: list[Path] = []
     for pattern in ("**/*.md", "**/*.mdx"):
-        found += [p for p in DOCS.glob(pattern) if "/api/" not in p.as_posix()]
+        found += [
+            p
+            for p in DOCS.glob(pattern)
+            if not any(p.relative_to(DOCS).as_posix().startswith(g) for g in GENERATED)
+        ]
     return sorted(set(found))
 
 
@@ -162,7 +175,7 @@ def language(info: str) -> str:
 
 def parse(page: Path) -> list[Block]:
     """Pull every fenced block out of a page, in order."""
-    lines = page.read_text().splitlines()
+    lines = page.read_text(encoding="utf-8").splitlines()
     raw: list[tuple[int, str, str]] = []  # (line, lang, body)
     fenced = [False] * len(lines)  # a '#' in here is a comment, not a heading
     i = 0
@@ -222,30 +235,60 @@ def parse(page: Path) -> list[Block]:
 
 
 DRIVER = r"""
-import io, json, sys, traceback
+import io, json, os, sys, threading, time, traceback
 from contextlib import redirect_stdout, redirect_stderr
 
 blocks = json.loads(sys.argv[1])
 fixture = sys.argv[2]
 FIXTURES_ROOT = sys.argv[3]
+BLOCK_TIMEOUT = float(sys.argv[4])
 ns = {"__name__": "__main__"}
-out = []
+real_out = sys.stdout
+
+
+def emit(rec):
+    # One record per block, written the moment the block finishes, so a page
+    # that dies or hangs later still reports every block that ran.
+    real_out.write("\x00REC\x00" + json.dumps(rec) + "\n")
+    real_out.flush()
+
+
 if fixture:
     try:
         ns["__file__"] = fixture
         sys.path.insert(0, FIXTURES_ROOT)
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            exec(compile(open(fixture).read(), fixture, "exec"), ns)
+            exec(compile(open(fixture, encoding="utf-8").read(), fixture, "exec"), ns)
         ns.pop("__file__", None)
     except BaseException:
-        print("\x00REPORT\x00" + json.dumps(
-            [{"line": b["line"], "status": "failed", "stdout": "",
-              "detail": "the page fixture failed:\n" + traceback.format_exc(limit=4)[-900:]}
-             for b in blocks]))
+        for b in blocks:
+            emit({"line": b["line"], "status": "failed", "stdout": "", "stderr": "",
+                  "detail": "the page fixture failed:\n" + traceback.format_exc(limit=4)[-900:]})
         raise SystemExit(0)
+
+# The watchdog: one block may run for BLOCK_TIMEOUT seconds. Past that, the
+# block is reported as timed out and the process stops, because the page's
+# namespace after a hung block is not one worth continuing in.
+current = {"line": None, "started": 0.0}
+
+
+def watch():
+    while True:
+        time.sleep(1)
+        line, started = current["line"], current["started"]
+        if line is not None and time.monotonic() - started > BLOCK_TIMEOUT:
+            emit({"line": line, "status": "failed", "stdout": "", "stderr": "",
+                  "detail": "timed out after %d s" % BLOCK_TIMEOUT})
+            real_out.flush()
+            os._exit(0)
+
+
+threading.Thread(target=watch, daemon=True).start()
+
 for b in blocks:
     buf, errbuf = io.StringIO(), io.StringIO()
     rec = {"line": b["line"], "status": "ok", "detail": "", "stdout": "", "stderr": ""}
+    current["line"], current["started"] = b["line"], time.monotonic()
     try:
         # stdout and stderr apart: a page quotes what the block printed, and a
         # warning the package writes to stderr is not that. stderr is kept
@@ -255,13 +298,11 @@ for b in blocks:
             exec(compile(b["code"], "<%s:%s>" % (b["page"], b["line"]), "exec"), ns)
     except BaseException:
         rec["status"] = "failed"
-        rec["detail"] = traceback.format_exc(limit=6).strip().splitlines()[-1]
-        tb = traceback.format_exc(limit=6).strip()
-        rec["detail"] = tb[-1200:]
+        rec["detail"] = traceback.format_exc(limit=6).strip()[-1200:]
+    current["line"] = None
     rec["stdout"] = buf.getvalue()
     rec["stderr"] = errbuf.getvalue()
-    out.append(rec)
-print("\x00REPORT\x00" + json.dumps(out))
+    emit(rec)
 """
 
 
@@ -279,40 +320,62 @@ def run_page(page: Path, blocks: list[Block], python: str, verbose: bool) -> lis
     if runnable:
         env = clean_env()
         env["WHILEAI_DOCS_CHECK"] = "1"
+        # The child reads and writes UTF-8 whatever the host's locale, so a page
+        # with a non-ASCII character gives the same answer on Windows as on the
+        # CI runner.
+        env["PYTHONUTF8"] = "1"
         with tempfile.TemporaryDirectory(prefix="docsnip-") as tmp:
             env["HOME"] = tmp
+            env["USERPROFILE"] = tmp  # what Path.home() reads on Windows
             payload = json.dumps(
                 [{"line": b.line, "code": b.code, "page": page.name} for b in runnable]
             )
             fixture = FIXTURES / page.relative_to(DOCS).with_suffix(".py")
+            argv = [
+                python,
+                "-c",
+                DRIVER,
+                payload,
+                str(fixture) if fixture.exists() else "",
+                str(FIXTURES),
+                str(BLOCK_TIMEOUT),
+            ]
+            # The driver stops itself one block past BLOCK_TIMEOUT; this outer
+            # limit is the backstop for a block that also wedged the watchdog.
             try:
                 proc = subprocess.run(
-                    [
-                        python,
-                        "-c",
-                        DRIVER,
-                        payload,
-                        str(fixture) if fixture.exists() else "",
-                        str(FIXTURES),
-                    ],
+                    argv,
                     cwd=tmp,
                     env=env,
                     capture_output=True,
-                    text=True,
-                    timeout=BLOCK_TIMEOUT * max(1, len(runnable)),
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=BLOCK_TIMEOUT * (len(runnable) + 1),
                 )
-                marker = proc.stdout.rsplit("\x00REPORT\x00", 1)
-                recs = json.loads(marker[1]) if len(marker) == 2 else []
-            except subprocess.TimeoutExpired:
-                recs = []
-                for b in runnable:
-                    results.append(Result(b, "failed", "timed out"))
+                raw_out = proc.stdout or ""
+            except subprocess.TimeoutExpired as e:
+                raw_out = (
+                    e.stdout.decode("utf-8", "replace")
+                    if isinstance(e.stdout, bytes)
+                    else (e.stdout or "")
+                )
+            recs = []
+            for chunk in raw_out.split("\x00REC\x00")[1:]:
+                try:
+                    recs.append(json.loads(chunk.strip().splitlines()[0]))
+                except (ValueError, IndexError):
+                    continue
             by_line = {r["line"]: r for r in recs}
+            stopped = any(r["status"] == "failed" for r in recs)
             for b in runnable:
                 rec = by_line.get(b.line)
                 if rec is None:
-                    if not any(r.block is b for r in results):
-                        results.append(Result(b, "failed", "did not run"))
+                    why = (
+                        "did not run: the page stopped at an earlier block"
+                        if stopped
+                        else "did not run: the page's process ended without reporting"
+                    )
+                    results.append(Result(b, "failed", why))
                     continue
                 if rec["status"] == "failed":
                     if NEEDS_KEY.search(rec["detail"]):
@@ -410,12 +473,12 @@ def main() -> int:
 
     if args.all:
         for r in report.results:
-            rel = r.block.page.relative_to(REPO)
+            rel = r.block.page.relative_to(REPO).as_posix()
             print(f"{r.status:9s} {rel}:{r.block.line}  {r.detail[:90]}")
 
     bad = [r for r in report.results if r.status in ("failed", "mismatch")]
     for r in bad:
-        rel = r.block.page.relative_to(REPO)
+        rel = r.block.page.relative_to(REPO).as_posix()
         print(f"\n{rel}:{r.block.line}  {r.status.upper()}  ({r.block.lang})")
         for line in r.detail.splitlines():
             print(f"  {line}")
@@ -430,7 +493,7 @@ def main() -> int:
     if warned:
         print(f"\n{len(warned)} block(s) ran clean but warned the reader:")
         for r in warned:
-            rel = r.block.page.relative_to(REPO)
+            rel = r.block.page.relative_to(REPO).as_posix()
             first = next(
                 (ln for ln in r.stderr.splitlines() if "Warning:" in ln),
                 "",
