@@ -118,9 +118,14 @@ def printed(text: str) -> str:
 
 
 SKIPS = json.loads((FIXTURES / "skips.json").read_text(encoding="utf-8"))["skips"]
-# Generated trees under docs/, never run: docs/api/ is the package's own
-# docstrings, docs/recipes/ is the recipe READMEs, whose blocks assume a clone
-# and are covered by the recipe smoke job.
+# Generated trees under docs/, never run, because a broken block in either is
+# fixed at its source and not on the page: docs/api/ comes from __all__ and the
+# docstrings, docs/recipes/ from recipes/**/README.md. A recipe page also
+# excerpts a script that runs inside its own directory, with that directory's
+# files importable and names bound higher up the script; run here, in a
+# scratch directory with only the package, those excerpts fail for reasons the
+# page never claimed otherwise. Running them honestly needs a per-recipe
+# working directory, which is #499. The recipe smoke job covers them until then.
 GENERATED = ("api/", "recipes/")
 # BLOCK_TIMEOUT = 180: seconds one block may run. The slowest honest block is
 # a seeded simulate() at budget=64 with repeats=4, which takes about 20 s on the
