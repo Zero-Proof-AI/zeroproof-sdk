@@ -1,0 +1,106 @@
+---
+title: "The engine"
+sidebarTitle: "The engine"
+description: "How the simulation engine makes evals and training data: a pairwise covering array over situation axes, a novelty-weighted search, a sandbox world with failure modes, and a judge validated before training. With references."
+---
+
+Cover the situations. Run them in a sandbox that can fail. Grade with a
+checked judge. The one-page PDF is at
+[withwhile.com/while-simulation-engine.pdf](https://withwhile.com/while-simulation-engine.pdf).
+
+## Eight steps
+
+<Steps>
+  <Step title="Axes">
+    What varies: tool, policy clause, user stance, world state, tool
+    condition, history. A situation is a point in that space.
+  </Step>
+  <Step title="Cover">
+    Every pair of axis values appears together at least once (a pairwise
+    covering array). Most failures are two-factor interactions [6].
+  </Step>
+  <Step title="Search">
+    Five situation writers fill the grid. Each batch, the budget follows
+    the writers that found new behavior [7]. Stops when nothing new turns
+    up.
+  </Step>
+  <Step title="World">
+    Tools answer from schema-shaped state. Same seed, same reply. Unknown
+    id: not found. An argument copied from the schema instead of the
+    customer: refused.
+  </Step>
+  <Step title="Rollout">
+    N tasks × n phrasings × k samples. Every row keeps the policy version.
+    Pass `logprobs=True` on a model backend and the row also keeps the
+    sampling settings and each turn's summed log-probability.
+  </Step>
+  <Step title="Grade">
+    Conduct rules first, then the judge. The judge is scored against gold
+    labels before its grades count.
+  </Step>
+  <Step title="Cut">
+    SFT rows (reward=1, loss on agent turns). DPO pairs with margin. GRPO
+    groups in the 20 to 80 percent band [4, 5]. Or a reward-model set.
+  </Step>
+  <Step title="Delta">
+    Re-run the held-out tasks. Paired difference per task, bootstrap
+    interval, permutation p [1].
+  </Step>
+</Steps>
+
+## Measurement
+
+| Number | What it is |
+|---|---|
+| **pass@1 / pass^k / pass@k** | Headline, reliability, RL headroom. Unbiased estimators over k samples per task [2, 3]. |
+| **Intervals** | Bootstrap over tasks, not rollouts. Before and after is a paired difference with a permutation p [1]. Ship when the interval excludes zero. |
+| **Judge** | Agreement and kappa against gold labels. Length perturbation. Different model family than the policy [8]. |
+| **Hack scan** | Var(r) = E[Var(r given task)] + Var(E[r given task]). Only the first term is GRPO gradient. The top within-task feature is compared to a permutation floor [9]. |
+
+<Note>
+The held-out tasks are the only number that counts. Everything else on
+this page exists to make that number mean something.
+</Note>
+
+## Questions
+
+**Importance sampling?** No. We are covering the failure space, not
+estimating production. A row carries the policy version, and with
+`logprobs=True` the log-probabilities an off-policy trainer needs to form
+the ratio itself [10, 11].
+
+**SFT or RL?** Both, from the same graded rows. Reward=1 rows for SFT,
+pairs for DPO, groups for GRPO, everything for a reward model.
+
+**The judge is another LLM.** Yes. So it is measured against gold labels,
+probed with known hacks, versioned by rubric hash, and drawn from a
+different model family than the policy [8].
+
+**How do you know training helped?** Paired before and after on held-out
+tasks with a bootstrap interval. Markers such as argument grounding catch
+what pass@1 hides [1].
+
+## Code
+
+| Step | Module |
+|---|---|
+| Generate | [whileai/simulations/generate](https://github.com/whilehq/whileai-sdk/tree/main/whileai/simulations/generate) |
+| World | [whileai/simulations/world](https://github.com/whilehq/whileai-sdk/tree/main/whileai/simulations/world) |
+| Score | [whileai/simulations/score](https://github.com/whilehq/whileai-sdk/tree/main/whileai/simulations/score) |
+
+The same eight steps with the exact estimators and knob names are on
+[the engine on one page](/engine) in the guides.
+
+## References
+
+1. Lambert, N. [Reinforcement Learning from Human Feedback](https://rlhfbook.com). 2025.
+2. Chen, M. et al. [Evaluating Large Language Models Trained on Code](https://arxiv.org/abs/2107.03374). 2021.
+3. Yao, S. et al. [τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains](https://arxiv.org/abs/2406.12045). 2024.
+4. Shao, Z. et al. [DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models](https://arxiv.org/abs/2402.03300). 2024.
+5. Yu, Q. et al. [DAPO: An Open-Source LLM Reinforcement Learning System at Scale](https://arxiv.org/abs/2503.14476). 2025.
+6. Kuhn, D. R., Wallace, D. R., Gallo, A. M. [Software Fault Interactions and Implications for Software Testing](https://doi.org/10.1109/TSE.2004.24). IEEE TSE 30(6), 2004.
+7. Lehman, J., Stanley, K. O. [Abandoning Objectives: Evolution Through the Search for Novelty Alone](https://doi.org/10.1162/EVCO_a_00025). Evolutionary Computation 19(2), 2011.
+8. Zheng, L. et al. [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685). NeurIPS 2023.
+9. Gao, L., Schulman, J., Hilton, J. [Scaling Laws for Reward Model Overoptimization](https://arxiv.org/abs/2210.10760). ICML 2023.
+10. Schulman, J. et al. [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347). 2017.
+11. Noukhovitch, M. et al. [Asynchronous RLHF: Faster and More Efficient Off-Policy RL for Language Models](https://arxiv.org/abs/2410.18252). ICLR 2025.

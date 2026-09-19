@@ -35,6 +35,11 @@ from .anthropic_backend import complete as anthropic_complete
 from .anthropic_backend import missing_key as missing_anthropic_key
 from .anthropic_backend import resolve_key as anthropic_key
 from .diversity import DEFAULT_AVG_TURNS, running_turn_mean, sample_turn_budget
+from .typesafe_backend import DEFAULT_MODEL as TYPESAFE_DEFAULT_MODEL
+from .typesafe_backend import base_url as typesafe_base_url
+from .typesafe_backend import is_typesafe_url, no_chat_error
+from .typesafe_backend import missing_key as missing_typesafe_key
+from .typesafe_backend import resolve_key as typesafe_key
 from .usage_meter import report_usage
 
 DEFAULT_AGENT = (
@@ -78,7 +83,9 @@ current_rollout = _CurrentRollout()
 
 
 def parse_backend_spec(spec: str) -> tuple[str, str]:
-    """Return (base_url, model) for ollama:/vllm:/openai:/anthropic: specs."""
+    """Return (base_url, model) for ollama:/vllm:/openai:/anthropic:/typesafe:
+    specs. ``typesafe:`` is judge-only: ``complete()`` refuses it and says
+    where it goes."""
     kind, _, rest = str(spec).partition(":")
     if kind == "ollama":
         return "http://localhost:11434/v1", rest or "llama3.1:8b"
@@ -97,14 +104,29 @@ def parse_backend_spec(spec: str) -> tuple[str, str]:
         # spec is just the model name and every caller (writer, user model,
         # agent, judge) records that name the way the other backends do.
         return ANTHROPIC_BASE_URL, rest or ANTHROPIC_DEFAULT_MODEL
+    if kind == "typesafe":
+        # TypeSafe's Jev, on TYPESAFE_API_KEY: typed decisions with
+        # probabilities, so a judge spec only. The URL is the API root
+        # (TYPESAFE_BASE_URL overrides it) and the spec is the model name.
+        return typesafe_base_url(), rest or TYPESAFE_DEFAULT_MODEL
     raise ValueError(
         f"unsupported backend spec {spec!r}; use ollama:<model>, "
-        "vllm:<model>@<url>, openai:<model>, or anthropic:<model>"
+        "vllm:<model>@<url>, openai:<model>, anthropic:<model>, or "
+        "typesafe:<model> (judge only)"
     )
 
 
+def _settings():
+    """The settings ``wai.configure`` / ``wai.context`` hold. Imported late:
+    ``whileai.config`` is dependency-free, this module is not."""
+    from ...config import current
+
+    return current()
+
+
 def _account_key() -> str:
-    """The account's zp_ key: WHILEAI_API_KEY, else what `whileai login` saved."""
+    """The account's zp_ key: ``wai.configure(api_key=)``, else
+    WHILEAI_API_KEY, else what `whileai login` saved."""
     from ...auth import resolve_api_key
 
     return str(resolve_api_key() or "").strip()
@@ -125,20 +147,35 @@ def _account_route() -> bool:
 
 
 def default_agent_spec() -> str:
-    """Tool-using rollout model. WHILEAI_AGENT if set; else the shared
-    pool with VLLM_API_KEY; else the account endpoint on the account key."""
-    return getenv("AGENT") or (ACCOUNT_AGENT if _account_route() else DEFAULT_AGENT)
+    """Tool-using rollout model. ``wai.configure(agent=)`` if set; else
+    WHILEAI_AGENT; else the shared pool with VLLM_API_KEY; else the account
+    endpoint on the account key."""
+    return (
+        _settings().agent
+        or getenv("AGENT")
+        or (ACCOUNT_AGENT if _account_route() else DEFAULT_AGENT)
+    )
 
 
 def default_judge_spec() -> str:
-    """Grader model. WHILEAI_JUDGE if set; else hosted Phi-4 on the same
-    route as the agent. Never the policy model by default: see DEFAULT_JUDGE."""
-    return getenv("JUDGE") or (ACCOUNT_JUDGE if _account_route() else DEFAULT_JUDGE)
+    """Grader model. ``wai.configure(judge=)`` if set; else WHILEAI_JUDGE;
+    else hosted Phi-4 on the same route as the agent. Never the policy
+    model by default: see DEFAULT_JUDGE."""
+    return (
+        _settings().judge
+        or getenv("JUDGE")
+        or (ACCOUNT_JUDGE if _account_route() else DEFAULT_JUDGE)
+    )
 
 
 def default_simulator_spec() -> str:
-    """User-message writer. Same hosted Qwen as the agent unless overridden."""
-    return getenv("SURROGATE") or (ACCOUNT_AGENT if _account_route() else DEFAULT_SIMULATOR)
+    """User-message writer. ``wai.configure(simulator=)`` if set; else
+    WHILEAI_SURROGATE; else the same hosted Qwen as the agent."""
+    return (
+        _settings().simulator
+        or getenv("SURROGATE")
+        or (ACCOUNT_AGENT if _account_route() else DEFAULT_SIMULATOR)
+    )
 
 
 #: Working context estimate for the rollout backend. Sized to hosted Qwen
@@ -266,6 +303,26 @@ def _hosted_qwen_url(base_url: str | None) -> bool:
     return host.endswith("modal.run") or "zeroproof" in host
 
 
+def _configured_key(base_url: str | None) -> str | None:
+    """The key a backend object registered for this URL's provider, if any
+    (``wai.OpenAI("gpt-4.1-mini", api_key=...)`` keeps its key for every
+    OpenAI call in the process). ``None`` falls through to the environment."""
+    keys = _settings().keys
+    if not keys:
+        return None
+    if is_anthropic_url(base_url):
+        return keys.get("anthropic")
+    if is_typesafe_url(base_url):
+        return keys.get("typesafe")
+    if _account_url(base_url) or not base_url:
+        return None
+    if _hosted_qwen_url(base_url):
+        return keys.get("vllm")
+    if _local_url(base_url):
+        return keys.get("vllm")
+    return keys.get("openai") or keys.get("vllm")
+
+
 def resolve_completion_key(base_url: str | None = None, api_key: str | None = None) -> str:
     """Key for an OpenAI-compatible completion URL.
 
@@ -274,8 +331,13 @@ def resolve_completion_key(base_url: str | None = None, api_key: str | None = No
     """
     if api_key:
         return str(api_key).strip()
+    configured = _configured_key(base_url)
+    if configured:
+        return configured
     if is_anthropic_url(base_url):
         return anthropic_key()
+    if is_typesafe_url(base_url):
+        return typesafe_key()
     vllm = str(os.environ.get("VLLM_API_KEY") or "").strip()
     if not base_url:
         # no URL means the default agent, whichever route that resolves to
@@ -315,6 +377,8 @@ def missing_hosted_key(base_url: str | None = None, api_key: str | None = None) 
     """
     if is_anthropic_url(base_url):
         return missing_anthropic_key(api_key)
+    if is_typesafe_url(base_url):
+        return missing_typesafe_key(api_key)
     key = resolve_completion_key(base_url, api_key)
     if key:
         return None
@@ -640,6 +704,11 @@ def complete(
     and from this same shape by ``anthropic_backend``. That API returns no
     log-probabilities, so ``logprobs`` yields no ``_logprobs`` there.
     """
+    if is_typesafe_url(base_url):
+        # A decision model has no chat completion. The judges route to
+        # score.decision_judge before they get here; a writer, agent or
+        # simulated user on this spec is a configuration error, named.
+        raise ValueError(no_chat_error(f"typesafe:{model}"))
     if is_anthropic_url(base_url):
         # The Messages API, translated at the boundary. It runs before the
         # context squeeze below because that budget is sized to hosted Qwen's
@@ -1909,69 +1978,86 @@ def local_model(
     user_temperature: float | None = None,
     world_options: WorldOptions | Mapping[str, Any] | None = None,
 ) -> Callable:
-    """An agent that talks to an OpenAI-compatible endpoint (a served
-    adapter, a local vLLM, any chat server) for ``simulate(agent=...)``.
+    """Build an agent that talks to any OpenAI-compatible endpoint for ``simulate(agent=...)``.
 
-    ``thinking`` is for reasoning bases such as Qwen3: ``False`` sends
-    ``chat_template_kwargs={"enable_thinking": False}`` so the reply is
-    the answer, not the reasoning, the way the hosted Qwen path already
-    does; ``True`` asks for it; ``None`` (the default) sends nothing and
-    leaves the server's default. The same field goes to the simulated
-    user when the agent's own model plays it (the default) or
-    ``user_model`` sits on the same endpoint, so the customer is asked
-    not to reason either; a ``user_model`` on another endpoint keeps
-    that server's default. Either way ``<think>`` markup never reaches
-    ``step["text"]``, ``final_text``, or a user turn (``step["user"]`` and
-    the ``messages`` history): what the user model still emits as
-    reasoning is stripped before it becomes speech, and a turn that was
-    reasoning with no spoken line is retried, then dropped (#284). The run
-    reports those under ``search["user_think"]``: ``user_turns``,
-    ``stripped`` and ``unclosed`` as counts, ``stripped_share`` and
-    ``unclosed_share`` as shares of the user turns, zeros when none.
+    Reach for it when the policy under test is a served model: a trained
+    adapter behind vLLM, a local server, any chat endpoint. It returns a
+    callable that plays the multi-turn agent (tool calls, the simulated
+    user, faults) against ``model`` at ``base_url`` with ``tools`` and the
+    ``system`` prompt, and every rollout comes back as a row.
 
-    ``result_shapes`` pins what a tool returns: ``{tool_name: example
-    result dict}``. The sandbox fills the example on every call instead
-    of inventing a record, so a policy branch that only exists for some
-    tool results (a credit over $200 must be escalated) is reached on
-    purpose rather than by luck. Field names and free text stay as
-    written; ids, dates and people are re-drawn per call, and a number
-    moves by up to about a third of itself (``900.0`` lands in roughly
-    600 to 1200, ``90.0`` in 60 to 120), so pick a template value whose
-    whole range sits on the side of the threshold you want. An argument
-    that shares a key with the template is echoed back (``invoice_id``
-    in, same ``invoice_id`` out). To measure a branch, run the same
-    pinned tasks under two shapes, one per side of the rule. Without it
-    the situation writer drafts an example per tool (``write_result_shapes``)
-    and the branch is exercised at random.
+    * ``base_url``, ``model``, ``api_key``: where the model is served and
+      what to call it.
+    * ``thinking``: for reasoning bases such as Qwen3. ``False`` sends
+      ``chat_template_kwargs={"enable_thinking": False}`` so the reply is
+      the answer, not the reasoning, the way the hosted Qwen path already
+      does; ``True`` asks for it; ``None`` (the default) sends nothing and
+      leaves the server's default. The same field goes to the simulated
+      user when the agent's own model plays it (the default) or
+      ``user_model`` sits on the same endpoint, so the customer is asked
+      not to reason either; a ``user_model`` on another endpoint keeps
+      that server's default. Either way ``<think>`` markup never reaches
+      ``step["text"]``, ``final_text``, or a user turn (``step["user"]``
+      and the ``messages`` history): what the user model still emits as
+      reasoning is stripped before it becomes speech, and a turn that was
+      reasoning with no spoken line is retried, then dropped. The run
+      reports those under ``search["user_think"]``: ``user_turns``,
+      ``stripped`` and ``unclosed`` as counts, ``stripped_share`` and
+      ``unclosed_share`` as shares of the user turns, zeros when none.
+    * ``result_shapes``: pins what a tool returns, as
+      ``{tool_name: example result dict}``. The sandbox fills the example
+      on every call instead
+      of inventing a record, so a policy branch that only exists for some
+      tool results (a credit over $200 must be escalated) is reached on
+      purpose rather than by luck. Field names and free text stay as
+      written; ids, dates and people are re-drawn per call, and a number
+      moves by up to about a third of itself (``900.0`` lands in roughly
+      600 to 1200, ``90.0`` in 60 to 120), so pick a template value whose
+      whole range sits on the side of the threshold you want. An argument
+      that shares a key with the template is echoed back (``invoice_id``
+      in, same ``invoice_id`` out). To measure a branch, run the same
+      pinned tasks under two shapes, one per side of the rule. Without it
+      the situation writer drafts an example per tool
+      (``write_result_shapes``) and the branch is exercised at random.
+    * ``fault_plans``: schedules faults per ask, as
+      ``{message: {tool_name: {"mode": "timeout", "rate": 1.0}}}``, keyed
+      by the exact user message, with ``mode`` one of ``timeout``,
+      ``malformed``, ``stale``
+      or ``permission_denied`` and ``rate`` the chance the fault fires on
+      a call. The plan may also carry ``world_state``, ``stance``,
+      ``tone`` and ``texture``, which are popped off and shape the world
+      and the simulated user for that ask. ``simulate()`` writes these
+      itself from ``fault_rate=``; pass your own only to replay a known
+      plan (``tasks=`` does this for you).
+    * ``timeout``: seconds per completion, ``LOCAL_MODEL_TIMEOUT`` (300)
+      by default: a served model that scaled to zero takes two to three
+      minutes to answer its first request, and a timeout under that drops
+      every rollout of the first pass. When a call still times out the
+      run says so in ``data.warnings`` with the fix (raise ``timeout=``,
+      or send one throwaway request first so the endpoint is warm).
+    * ``patience``: a level name (``PATIENCE_LEVELS``, ``"normal"`` by
+      default) or a table ``{"second": p, "later": q}``: the chance the
+      person leaves at the agent's second question and at every later
+      one, fitted from your own traces (see ``PATIENCE_HAZARDS``).
+    * ``user_model`` and ``user_temperature``: the simulated person's
+      model (the agent's own by default) and the sampling temperature of
+      every simulated-user line, follow-ups (``USER_TURN_TEMPERATURE``)
+      and human-tool answers (``HUMAN_TOOL_TEMPERATURE``) alike; ``None``
+      keeps those two defaults.
+    * ``world_options``: the mock world's dials (a ``WorldOptions`` or the
+      same fields as a dict: fault modes, hit counts, name pools, ...);
+      ``simulate(advanced={"world": {...}})`` lands here. ``None`` is the
+      defaults in ``defaults.py``.
+    * ``execute``: your own world ``(tool, arguments) -> result`` in place
+      of the mock one. ``max_turns`` / ``avg_turns`` (12.0) cap and shape
+      the conversation length; ``temperature`` (0.8), ``max_tokens`` and
+      ``logprobs`` are the agent's own sampling, recorded on every row.
 
-    ``fault_plans`` schedules faults per ask: ``{message: {tool_name:
-    {"mode": "timeout", "rate": 1.0}}}``, keyed by the exact user message,
-    with ``mode`` one of ``timeout``, ``malformed``, ``stale`` or
-    ``permission_denied`` and ``rate`` the chance the fault fires on a
-    call. The plan may also carry ``world_state``, ``stance``, ``tone``
-    and ``texture``, which are popped off and shape the world and the
-    simulated user for that ask. ``simulate()`` writes these itself from
-    ``fault_rate=``; pass your own only to replay a known plan (``tasks=``
-    does this for you).
-
-    ``timeout`` is seconds per completion, ``LOCAL_MODEL_TIMEOUT`` (300)
-    by default: a served model that scaled to zero takes two to three
-    minutes to answer its first request, and a timeout under that drops
-    every rollout of the first pass. When a call still times out the run
-    says so in ``data.warnings`` with the fix (raise ``timeout=``, or send
-    one throwaway request first so the endpoint is warm).
-
-    ``patience`` is a level name (``PATIENCE_LEVELS``) or a table
-    ``{"second": p, "later": q}``: the chance the person leaves at the
-    agent's second question and at every later one, fitted from your own
-    traces (see ``PATIENCE_HAZARDS``). ``user_temperature`` is the
-    sampling temperature of every simulated-user line, follow-ups
-    (``USER_TURN_TEMPERATURE``) and human-tool answers
-    (``HUMAN_TOOL_TEMPERATURE``) alike; ``None`` keeps those two defaults.
-    ``world_options`` is the mock world's dials (a ``WorldOptions`` or the
-    same fields as a dict: fault modes, hit counts, name pools, ...);
-    ``simulate(advanced={"world": {...}})`` lands here. ``None`` is the
-    defaults in ``defaults.py``.
+    ```python
+    agent = wai.local_model("http://localhost:8000/v1", "my-adapter",
+                            tools=TOOLS, system=POLICY, thinking=False)
+    data = wai.simulate(agent, tools=TOOLS, system_prompt=POLICY, budget=100)
+    ```
     """
     hazards = patience_hazards(patience)
     world_opts = WorldOptions.coerce(world_options)

@@ -17,6 +17,33 @@ uv run ty check             # faster mypy pass; mypy stays the gate until ty is 
 python -m build && python -m twine check dist/*   # if you touched packaging or imports
 ```
 
+## Coding standard
+
+[CONSTITUTION.md](CONSTITUTION.md) is what the library is and what we
+believe; read it once.
+
+Read [`docs/reference/style.md`](docs/reference/style.md) before adding
+a public name. The short form: `import whileai as wai` is the one
+prefix; a judge, verifier, selector or trainer is an object whose
+constructor takes the configuration and whose call takes the rows; a
+public call takes at most eight parameters; a report prints itself
+(`__str__`, `_repr_html_`), so there is no `format_*` twin; public
+names are the verb a scientist says. `tests/api/test_style_ratchet.py`
+fails a PR that adds one of the retired shapes.
+
+## Shipping a release
+
+```bash
+gh workflow run release.yml
+```
+
+That cuts the next hundredth from the entries under `## Unreleased`, lands
+the bump on main and starts the publish workflow; runs queue, so two
+people shipping at once get two releases in order. Do not bump `version`
+by hand, and keep the `## Unreleased` header (the cut renames it and puts
+a fresh one above). `uv run python .github/scripts/release.py --dry-run`
+shows what a cut would ship.
+
 ## Contributing a recipe
 
 Recipes are the part of this repo most worth adding to, and the easiest to

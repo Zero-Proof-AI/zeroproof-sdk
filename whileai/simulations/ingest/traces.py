@@ -792,14 +792,30 @@ def _coerce_reward(value: Any) -> int | None:
 
 
 def load_traces(source) -> list[dict]:
-    """Normalize any supported trace source to the canonical schema above.
+    """Normalize any supported trace source to the one trajectory schema the SDK reads.
 
-    ``source`` is a JSONL path or an iterable of dicts. Rows carrying
-    ``tool_trace``/``trace`` instead of ``steps``, ``final``/``output``/
-    ``response`` instead of ``final_text``, or only OpenAI-style
-    ``messages`` are converted; ``reward`` is kept only when it coerces
-    cleanly to 0 or 1, and its absence is fine. Rows that are not dicts or
-    carry neither an ask nor any steps are dropped.
+    Reach for it when you have traces from somewhere else (a production
+    log, an eval harness, an OpenAI-style ``messages`` export) and want
+    ``simulate(traces=...)``, ``evaluate`` or ``decontaminate`` to read
+    them. It returns a list of dicts in the canonical schema: ``prompt``
+    (the first user ask), ``steps`` (a list of ``{"user": str}``,
+    ``{"tool": str, "arguments": dict, "result": Any}`` and
+    ``{"text": str}`` agent turns), ``final_text`` (the agent's last
+    message) and, optionally, ``reward`` (0 or 1). Every other key
+    carries through untouched, and ungraded traces are first-class.
+
+    * ``source``: a JSONL path or an iterable of dicts. Rows carrying
+      ``tool_trace``/``trace`` instead of ``steps``,
+      ``final``/``output``/``response`` instead of ``final_text``, or only
+      OpenAI-style ``messages`` are converted (``PROMPT_KEYS``,
+      ``STEP_KEYS``, ``FINAL_KEYS``, ``ARG_KEYS`` and ``RESULT_KEYS`` list
+      the spellings read); ``reward`` is kept only when it coerces cleanly
+      to 0 or 1, and its absence is fine. Rows that are not dicts or carry
+      neither an ask nor any steps are dropped.
+
+    >>> rows = wai.load_traces([{"question": "Where is order 4473?", "output": "Shipped."}])
+    >>> rows[0]["prompt"], rows[0]["final_text"]
+    ('Where is order 4473?', 'Shipped.')
     """
     from pathlib import Path as _Path
 

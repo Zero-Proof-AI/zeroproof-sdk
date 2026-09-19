@@ -348,6 +348,11 @@ class PassAt:
             tail += f"; {self.note}"
         return f"{head} {tail})"
 
+    def _repr_html_(self) -> str:
+        """The same line, as a notebook cell (style.md rule 5)."""
+        escaped = str(self).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<pre>{escaped}</pre>"
+
 
 def _nothing_to_score(rows: Sequence[dict]) -> str:
     """Why no row carried a binary reward.
@@ -375,7 +380,17 @@ def pass_at(
     min_k: int = ROLLOUTS_PER_TASK,
     unanimous_short: bool = False,
 ) -> PassAt:
-    """pass@1, pass^k and pass@k from graded rows, grouped by task.
+    """Compute pass@1, pass^k and pass@k from graded rows, grouped by task.
+
+    Reach for it after grading a ``mode="rl"`` run to read the three
+    numbers a task family gives: pass@1 is the mean per-task pass rate
+    (the headline), pass^k the chance all k repeats pass (reliability),
+    pass@k the chance at least one of k passes; headroom is pass@k minus
+    pass@1. It returns a ``PassAt`` with those three, their task-bootstrap
+    ``ci95`` intervals, ``n_groups``, ``n_rows``, ``per_task`` (a dict
+    keyed by task), a ``note`` when a number is missing and why, and
+    ``config`` (how the rows were made); ``str(result)`` prints the line
+    and ``to_dict()`` gives the keys.
 
     A task is a situation, not a string. Rows group under ``task_key``:
     the engine's ``scenario_id`` when the row has one, else ``task_id``,
@@ -386,30 +401,35 @@ def pass_at(
     ``compare_runs``, ``delta_report``, ``eval_variance``, ``curriculum``
     and ``group_signal`` count tasks with the same key, so
     ``pass_at(rows).n_groups`` and ``delta_report(...)["n_paired_tasks"]``
-    agree on the same rows.
+    agree on the same rows. Only binary ``reward`` (or ``qwen_reward``)
+    rows count; partial and unjudged rows are skipped, the same rule
+    ``group_signal`` uses.
 
-    Only binary ``reward`` (or ``qwen_reward``) rows count; partial and
-    unjudged rows are skipped, the same rule ``group_signal`` uses.
-    ``k`` defaults to the smallest group of two or more repeats, so every
-    such group contributes to the ``k``-way estimators; groups with fewer
-    than ``k`` graded repeats are left out of pass^k and pass@k (counted
-    in ``n_groups_at_k``). pass@1 always averages every group.
-
-    Below ``min_k`` repeats (``ROLLOUTS_PER_TASK``, 4: the smallest k
-    tau-bench and tau2-bench report a pass^k on, arXiv:2406.12045 and
-    arXiv:2506.07982) the ``k``-way numbers are ``None`` with a ``note``
-    instead of a number too noisy to act on. Pass ``k=`` to choose the
-    draw size yourself.
-
-    ``unanimous_short=True`` counts a unanimous group shorter than ``k``
-    as if it stayed unanimous (pass^k and pass@k equal to its pass rate,
-    1 or 0). That is the assumption a successive-allocation run stopped
-    on, and leaving those groups out would score only the tasks that
-    split and inflate the headroom. Mixed short groups still stay out.
+    * ``rows``: graded rows, or the ``SimulationData`` holding them.
+    * ``k``: the draw size for the k-way numbers. It defaults to the
+      smallest group of two or more repeats, so every such group
+      contributes; groups with fewer than ``k`` graded repeats are left
+      out of pass^k and pass@k and counted in ``n_groups_at_k``. pass@1
+      always averages every group.
+    * ``min_k``: 4 (``ROLLOUTS_PER_TASK``), the smallest k tau-bench and
+      tau2-bench report a pass^k on (arXiv:2406.12045 and
+      arXiv:2506.07982). Below it the k-way numbers are ``None`` with a
+      ``note`` instead of a number too noisy to act on.
+    * ``unanimous_short``: ``True`` counts a unanimous group shorter than
+      ``k`` as if it stayed unanimous (pass^k and pass@k equal to its pass
+      rate, 1 or 0). That is the assumption a successive-allocation run
+      stopped on, and leaving those groups out would score only the tasks
+      that split and inflate the headroom. Mixed short groups still stay
+      out.
 
     ``.config`` says how the rows were produced (``run_config``): task
     count, k, temperature, max_tokens, policy and judge versions, prompt
     hash, with a ``mixed`` list naming any the rows disagree on.
+
+    >>> import whileai.simulations as wai
+    >>> rows = [{"task_id": t, "reward": r} for t in "abcd" for r in (1, 1, 0, 1)]
+    >>> wai.pass_at(rows).pass_at_1
+    0.75
     """
     from .optimize import _group_label_lists
 

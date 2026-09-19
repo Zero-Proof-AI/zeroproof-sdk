@@ -13,6 +13,16 @@ class Gate:
         self.calls = []
 
     def __call__(self, method, path, api_key=None, body=None, **kw):
+        if path.endswith("/profile"):
+            return {
+                "profile": {
+                    "rows": 160,
+                    "split": {"pass": 80, "fail": 80, "ungraded": 0},
+                    "tasks": 40,
+                    "tasks_with_repeats": 40,
+                    "mixed_tasks": 40,
+                }
+            }
         self.calls.append((method, path, body))
         if path == "/runs" and method == "POST":
             return {"runId": "run_k", "status": "running"}

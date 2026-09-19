@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "While",
-  "description": "The whileai Python SDK: post-training data, evals and training loops for language-model agents.",
+  "description": "The whileai Python SDK: a scientific post-training library for language models. SFT and RL on open models, with the measurement that says whether training helped.",
   "colors": {
     "primary": "#3F8F6B",
     "light": "#5CB08A",
@@ -14,13 +14,52 @@
     "href": "https://withwhile.com"
   },
   "favicon": "/favicon.png",
+  "appearance": {
+    "default": "light"
+  },
+  "background": {
+    "color": {
+      "light": "#FFFFFF",
+      "dark": "#0B1220"
+    }
+  },
   "fonts": {
     "heading": {
-      "family": "Inter"
+      "family": "Inter",
+      "weight": 600
     },
     "body": {
       "family": "Inter"
     }
+  },
+  "styling": {
+    "eyebrows": "breadcrumbs",
+    "codeblocks": {
+      "theme": "vitesse-dark"
+    }
+  },
+  "metadata": {
+    "timestamp": true
+  },
+  "search": {
+    "prompt": "Search calls, knobs and guides"
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "claude",
+      "chatgpt",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "markdown": {
+    "instructions": [
+      "Install with `pip install whileai`; import as `import whileai as wai`.",
+      "Run the offline path first (`simulator=False`, `wai.seeded_agent`, a callable judge); no key is needed for it.",
+      "Report every pass rate with its interval and n, as `scored.pass_at` prints it."
+    ]
   },
   "navbar": {
     "links": [
@@ -36,53 +75,96 @@
     "primary": {
       "type": "button",
       "label": "Platform",
-      "href": "https://withwhile.com/platform"
+      "href": "https://withwhile.com"
     }
   },
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Start",
-        "pages": [
-          "index",
-          "evals"
+        "tab": "Library",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "get-started/install",
+              "get-started/your-model-and-key",
+              "get-started/quickstart",
+              "get-started/connect-your-agent"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "simulations",
+              "engine",
+              "evals",
+              "reward-hacking",
+              "safety-evals",
+              "character-training"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/constitution",
+              "concepts/how-it-works",
+              "concepts/engine",
+              "concepts/faq"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/constitution",
+              "reference/overview",
+              "reference/five-calls",
+              "reference/style",
+              "reference/design",
+              "reference/what-to-run",
+              "reference/parameters",
+              "reference/development"
+            ]
+          }
         ]
       },
       {
-        "group": "Guides",
-        "pages": [
-          "simulations",
-          "engine",
-          "character-training",
-          "reward-hacking",
-          "safety-evals"
+        "tab": "Platform",
+        "groups": [
+          {
+            "group": "Platform",
+            "pages": [
+              "platform/index",
+              "get-started/cli",
+              "reference/platform"
+            ]
+          }
         ]
       },
       {
-        "group": "Reference",
-        "pages": [
-          "reference"
-        ]
-      },
-      {
-        "group": "API",
-        "pages": [
-          "api/index",
-          "api/whileai",
-          "api/constants",
-          "api/data",
-          "api/environment",
-          "api/export",
-          "api/generate",
-          "api/ingest",
-          "api/monitor",
-          "api/run",
-          "api/schema",
-          "api/score",
-          "api/simulation",
-          "api/training",
-          "api/verify",
-          "api/world"
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "API",
+            "pages": [
+              "api/index",
+              "api/whileai",
+              "api/data",
+              "api/score",
+              "api/generate",
+              "api/world",
+              "api/verify",
+              "api/constants",
+              "api/environment",
+              "api/export",
+              "api/ingest",
+              "api/monitor",
+              "api/run",
+              "api/schema",
+              "api/simulation",
+              "api/training"
+            ]
+          }
         ]
       }
     ]
@@ -90,7 +172,72 @@
   "footer": {
     "socials": {
       "github": "https://github.com/whilehq/whileai-sdk"
-    }
+    },
+    "links": [
+      {
+        "header": "Library",
+        "items": [
+          {
+            "label": "Quickstart",
+            "href": "https://docs.withwhile.com/get-started/quickstart"
+          },
+          {
+            "label": "Evals",
+            "href": "https://docs.withwhile.com/evals"
+          },
+          {
+            "label": "The five calls",
+            "href": "https://docs.withwhile.com/reference/five-calls"
+          },
+          {
+            "label": "Recipes",
+            "href": "https://github.com/whilehq/whileai-sdk/tree/main/recipes"
+          }
+        ]
+      },
+      {
+        "header": "Reference",
+        "items": [
+          {
+            "label": "API",
+            "href": "https://docs.withwhile.com/api/index"
+          },
+          {
+            "label": "Parameters",
+            "href": "https://docs.withwhile.com/reference/parameters"
+          },
+          {
+            "label": "Style",
+            "href": "https://docs.withwhile.com/reference/style"
+          },
+          {
+            "label": "Design",
+            "href": "https://docs.withwhile.com/reference/design"
+          }
+        ]
+      },
+      {
+        "header": "Project",
+        "items": [
+          {
+            "label": "Constitution",
+            "href": "https://github.com/whilehq/whileai-sdk/blob/main/CONSTITUTION.md"
+          },
+          {
+            "label": "Changelog",
+            "href": "https://github.com/whilehq/whileai-sdk/blob/main/CHANGELOG.md"
+          },
+          {
+            "label": "PyPI",
+            "href": "https://pypi.org/project/whileai/"
+          },
+          {
+            "label": "rlhfbook.com",
+            "href": "https://rlhfbook.com"
+          }
+        ]
+      }
+    ]
   },
   "seo": {
     "indexing": "all"

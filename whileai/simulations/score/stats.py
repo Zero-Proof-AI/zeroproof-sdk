@@ -52,6 +52,7 @@ from ..defaults import (
     ALPHA,
     BASE_PASS_RATE,
     BOOTSTRAP_DRAWS,
+    CEILING_PASS_RATE,
     CI_LEVEL,
     DECONTAM_NGRAM,
     DECONTAM_OVERLAP,
@@ -523,6 +524,7 @@ def holdout_size(
     after: Sequence[dict] | None = None,
     task_std: float | None = None,
     rows: Sequence[dict] | None = None,
+    ceiling_pass_rate: float = CEILING_PASS_RATE,
 ) -> dict[str, Any]:
     """How many paired tasks a holdout needs to prove a gain of ``effect``.
 
@@ -575,9 +577,26 @@ def holdout_size(
     name) reads ``base`` and ``k`` off the data. Returns ``n_tasks``
     plus the inputs, ``task_std``, ``sd_source``, ``half_width`` (the 95%
     band on the delta at that ``n``), ``n_tasks_concentrated``,
-    ``base_spread``, ``n_paired`` and ``notes``; every key is present on
-    every path (``None`` or ``[]`` where it does not apply). The default
-    answer is unchanged; the honest paths are the two that measure.
+    ``base_spread``, ``n_paired``, ``saturated``, ``notes`` and
+    ``warnings``; every key is present on every path (``None``, ``False``
+    or ``[]`` where it does not apply). The default answer is unchanged;
+    the honest paths are the two that measure.
+
+    A saturated baseline cannot size anything. Rows whose tasks all pass
+    give ``p = 1``, the binomial variance ``p(1-p)`` is 0, and both arms
+    all passing give a measured paired sd of 0; the formula then returns
+    the floor, ``MIN_HOLDOUT_TASKS``, which is the model collapsing, not
+    evidence that two tasks are enough (#392). When the measured base is
+    at or above ``ceiling_pass_rate`` (``CEILING_PASS_RATE``, the share
+    ``delta_report`` flags as ``ceiling``) or the measured sd is 0 (the
+    paired difference identical on every task, ``DEGENERATE``), the
+    rows are not used: ``n_tasks`` is the binomial model's answer at
+    ``BASE_PASS_RATE`` and the rows' ``k``, ``sd_source`` is ``"model"``,
+    ``saturated`` is ``True``, and ``warnings`` names the ceiling and the
+    fix: harder situations, so the baseline sits inside the 20-80
+    difficulty band (rlhfbook.com/c/14-reasoning.html; DAPO, arXiv
+    2503.14476, drops prompts at accuracy 0 and 1 because they carry no
+    signal), then size again on those rows.
 
     The recipe that asked for this had 140 tasks at k=4 around 0.6: a
     band of about +-0.06, so a real 3-point gain reads
@@ -599,9 +618,11 @@ def holdout_size(
             "(agent rubrics sit near 0.38)"
         )
     notes: list[str] = []
+    warnings: list[str] = []
     spread: float | None = None
     ratio: float | None = None
     n_paired: int | None = None
+    saturated = False
     if before is not None:
         base, k, spread, ratio = _rows_base_and_k(before)
     if before is not None and after is not None:
@@ -618,6 +639,36 @@ def holdout_size(
     else:
         sd = _paired_task_sd(base, effect, k)
         source = "model"
+    if before is not None and source != "given" and (base >= ceiling_pass_rate or sd <= 0):
+        # The rows cannot size anything: at the ceiling p(1-p) is (near)
+        # zero and a measured sd of 0 says both arms agreed on every task.
+        # Answer with the model at the default base, and say so.
+        saturated = True
+        measured = f"task_std {sd:.3f} measured" if source == "rows" else "the binomial variance"
+        band_lo, band_hi = DIFFICULTY_BAND
+        if base >= ceiling_pass_rate:
+            head = (
+                f"CEILING: the before rows pass {base:.2f} of tasks, at or above the ceiling "
+                f"{ceiling_pass_rate:.2f}, so this suite cannot show a {float(effect):.2f} gain; "
+                f"{measured} collapses to 0"
+            )
+        else:
+            head = (
+                f"DEGENERATE: the paired difference is the same on every one of the "
+                f"{n_paired} tasks ({measured} is 0) at a base of {base:.2f}, so the rows carry "
+                "no spread to size from"
+            )
+        warnings.append(
+            f"{head} and the sizing formula returns its floor ({MIN_HOLDOUT_TASKS} tasks), which "
+            "is the model collapsing, not evidence. n_tasks is the binomial model's answer at "
+            f"the default base {BASE_PASS_RATE:.2f} with these rows' k={int(k)}, not a "
+            "measurement. Fix: harder situations, so the baseline sits inside the "
+            f"{band_lo:.0%}-{band_hi:.0%} difficulty band (simulate(hard_share=...) or a higher "
+            "fault_rate; rlhfbook.com/c/14-reasoning.html), then size again on those rows."
+        )
+        sd = _paired_task_sd(BASE_PASS_RATE, effect, k)
+        source = "model"
+        n_paired = None
     z = _z(1 - alpha / 2) + _z(power)
 
     def _n(s: float) -> int:
@@ -626,7 +677,8 @@ def holdout_size(
     n = _n(sd)
     concentrated: int | None = None
     if source == "model":
-        concentrated = _n(_concentrated_task_sd(base, effect, k))
+        model_base = BASE_PASS_RATE if saturated else base
+        concentrated = _n(_concentrated_task_sd(model_base, effect, k))
         notes.append(
             f"n_tasks {n} assumes the gain is spread evenly across tasks and the two arms are "
             f"independent draws. If the gain is carried by a few tasks (a trait only some "
@@ -634,7 +686,7 @@ def holdout_size(
             f"tasks (n_tasks_concentrated). Pass before= and after= from a previous eval to "
             f"measure the paired sd, or task_std= read off a delta_report interval."
         )
-        if spread is not None and spread > 0:
+        if spread is not None and spread > 0 and not saturated:
             if ratio is None:
                 how = (
                     "every task is a sure pass or a sure fail, so the model's per-task "
@@ -663,7 +715,9 @@ def holdout_size(
         "n_tasks_concentrated": concentrated,
         "base_spread": round(spread, 4) if spread is not None else None,
         "n_paired": n_paired,
+        "saturated": saturated,
         "notes": notes,
+        "warnings": warnings,
     }
 
 
@@ -1053,21 +1107,37 @@ def compare_runs(
     min_paired: int = MIN_PAIRED_TASKS,
     level: float = CI_LEVEL,
 ) -> dict[str, Any]:
-    """Is run ``b`` different from run ``a`` on ``metric``?
+    """Test whether run ``b`` differs from run ``a`` on one metric, paired by task.
+
+    Reach for it for a quick A/B on a single number; ``delta_report`` is
+    the full report with markers, the noise floor and the comparability
+    checks. It returns a dict: ``delta`` (b minus a), ``ci95`` (the
+    interval, with ``level`` beside it), ``p_value``, ``verdict``,
+    ``n_paired``, ``n_only_a``, ``n_only_b``, ``paired_share``,
+    ``mean_a``, ``mean_b``, and a ``note``.
 
     Tasks the two runs share are compared as paired differences (b minus
-    a, per task); the interval is a ``level`` bootstrap over those pairs
-    (``ci95`` at the default, with ``level`` reported beside it) and the
-    p-value is a sign-flip permutation test. With fewer than ``min_paired``
-    shared tasks the comparison falls back to unpaired task means and says
-    so. ``verdict`` is one of ``"b_better"``, ``"a_better"``,
-    ``"no_difference_detected"``: the last means the interval covers zero,
-    not that the runs are equal.
+    a, per task, keyed the way ``pass_at`` groups); the interval is a
+    ``level`` bootstrap over those pairs and the p-value is a sign-flip
+    permutation test. ``verdict`` is one of ``"b_better"``,
+    ``"a_better"``, ``"no_difference_detected"``: the last means the
+    interval covers zero, not that the runs are equal. Tasks on one side
+    only are dropped from a paired comparison, and ``note`` says how
+    many, since a verdict over a quarter of the tasks is not a verdict
+    over the eval. ``paired_share`` is the shared fraction of every task
+    either run saw.
 
-    Tasks on one side only are dropped from a paired comparison, and
-    ``note`` says how many, since a verdict over a quarter of the tasks is
-    not a verdict over the eval. ``paired_share`` is the shared fraction
-    of every task either run saw.
+    * ``metric``: ``"pass_at_1"`` (the default, binary reward) or
+      ``"marker:name"`` for a marker.
+    * ``min_paired`` (5): with fewer shared tasks the comparison falls
+      back to unpaired task means and says so.
+    * ``level`` (0.95): the interval's coverage (``ci95`` at the default).
+      ``n_boot`` (2000) and ``seed`` (0) fix the bootstrap.
+
+    >>> a = [{"task_id": t, "reward": 0} for t in "abcdef"]
+    >>> b = [{"task_id": t, "reward": 1} for t in "abcdef"]
+    >>> wai.compare_runs(a, b)["verdict"]
+    'b_better'
     """
     if not 0 < level < 1:
         raise ValueError("level is the interval's coverage, strictly between 0 and 1")
@@ -1252,54 +1322,71 @@ def decontaminate(
     embedder: Callable[[list[str]], Sequence[Sequence[float]]] | None = None,
     similarity: float = SEMANTIC_SIMILARITY,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """Drop rows whose prompt overlaps an evaluation set (rlhf-book ch. 16).
+    """Drop training rows whose prompt overlaps an evaluation set.
 
-    ``against`` is one or more evaluation sources: row lists, JSONL paths,
-    or platform dataset ids (``ds_...``). Evaluation prompts, answers and
-    references are the texts (not the eval set's own replies). Four rules,
-    applied in this order, and a row flagged by one is not counted again
-    by the next, so ``n_contaminated`` is the number of rows dropped:
+    Reach for it before any train-versus-holdout comparison: a held-out
+    task that also sits in the training data measures memory, not the
+    change (rlhf-book ch. 16). It returns ``(clean_rows, report)``: the
+    rows that survived, and a report with the count under each rule
+    (``n_contaminated`` in total), hits per field, the eval text count,
+    and the first offenders with their coverage (or ``similarity`` for
+    semantic hits).
+
+    * ``rows``: the training rows.
+    * ``against``: one or more evaluation sources: row lists, JSONL paths,
+      or platform dataset ids (``ds_...``). Evaluation prompts, answers
+      and references are the texts compared (not the eval set's own
+      replies).
+    * ``fields`` (``("prompt",)``): which row texts are checked, the
+      book's method. Add ``"final_text"`` to ask the stricter question of
+      whether replies reproduce eval answers or references.
+    * ``n`` (8) and ``overlap`` (0.8): the near-copy rule, the Llama 2
+      rule of 8-grams covering 80% of tokens. ``overlap=0`` restores
+      any-n-gram.
+    * ``embedder`` and ``similarity`` (0.85): a callable from a list of
+      texts to one vector per text turns on the semantic rule at that
+      cosine threshold; nothing here imports a model.
+
+    Four rules, applied in this order, and a row flagged by one is not
+    counted again by the next, so ``n_contaminated`` is the number of
+    rows dropped:
 
     * ``same_task`` (``n_same_task``): the row's ``scenario_id`` or
       ``task_id`` is an evaluation row's. A task is a situation, not a
       string (``task_key``), so a rephrasing of an eval situation is the
       eval situation whatever the words say. Rows with no recorded id
       skip this rule.
-    * ``exact`` (``n_exact``): one of the row's ``fields`` is an evaluation
-      text verbatim after normalization (case and whitespace).
+    * ``exact`` (``n_exact``): one of the row's ``fields`` is an
+      evaluation text verbatim after normalization (case and whitespace).
     * near copy (``n_near``): one evaluation text covers at least
-      ``overlap`` of the row's words with shared word ``n``-grams (the
-      Llama 2 rule: 8-grams, 80% of tokens). Texts shorter than ``n``
-      words match verbatim only.
+      ``overlap`` of the row's words with shared word ``n``-grams. Texts
+      shorter than ``n`` words match verbatim only.
     * ``semantic`` (``n_semantic``), only with ``embedder``: the cosine
       similarity between the row's text and an evaluation prompt is at
       least ``similarity``, and the two carry different task ids or none.
-
-    The default field is the prompt, the book's method; add
-    ``"final_text"`` to ask the stricter question of whether replies
-    reproduce eval answers or references.
 
     One shared n-gram is the book's test for free-form sets. Situations
     written from templates share whole sentences that say nothing about
     which question was asked, so any-n-gram flags every row of a
     template-written set; the coverage rule counts a row when one eval
-    text accounts for most of it. ``overlap=0`` restores any-n-gram.
+    text accounts for most of it.
 
     Word overlap does not see a paraphrase. A holdout written by
     re-running the generator on the same briefs was 70% within 0.85
     cosine of the training batch and 5 of 133 byte-identical; the 8-gram
-    rule flagged 4 of 101 prompts and the semantic pass 16 (#286).
-    ``embedder`` is any callable from a list of texts to one vector per
-    text, so nothing here imports a model; with sentence-transformers::
+    rule flagged 4 of 101 prompts and the semantic pass 16. With
+    sentence-transformers:
 
-        from sentence_transformers import SentenceTransformer
+    ```python
+    from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer("BAAI/bge-small-en-v1.5")
-        clean, report = wai.decontaminate(
-            train,
-            against=[holdout],
-            embedder=lambda texts: model.encode(texts, normalize_embeddings=True).tolist(),
-        )
+    model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    clean, report = wai.decontaminate(
+        train,
+        against=[holdout],
+        embedder=lambda texts: model.encode(texts, normalize_embeddings=True).tolist(),
+    )
+    ```
 
     A semantic flag means the two prompts read alike, not that they are
     the same task: "cancel one reservation" and "cancel three
@@ -1309,16 +1396,17 @@ def decontaminate(
     the report's ``notes`` say the flag is a question to check, not a
     verdict. The default stays lexical: ``similarity`` 0.85 was read off
     BGE (unrelated prompts score about 0.55 there) and does not transfer
-    to every model, so the pass calibrates it for yours when it can: with
+    to every model, so the pass calibrates it for yours when it can. With
     eval rows that carry task ids, the 99th percentile of similarity over
     eval-prompt pairs with different task ids is how alike distinct tasks
-    read to this embedder, and ``notes`` says it. A threshold below that
+    read to this embedder, and ``notes`` says it; a threshold below that
     number flags tasks that merely share a domain, and the note says so
     when ``similarity`` is.
 
-    Returns the clean rows and a report: the count under each rule, hits
-    per field, the eval text count, and the first offenders with their
-    coverage (or ``similarity`` for semantic hits).
+    >>> train = [{"prompt": "Where is order 4473?"}, {"prompt": "Cancel order 9911."}]
+    >>> clean, report = wai.decontaminate(train, against=[[{"prompt": "Cancel order 9911."}]])
+    >>> len(clean), report["n_contaminated"]
+    (1, 1)
     """
     if embedder is not None and not 0 <= float(similarity) <= 1:
         raise ValueError(

@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import re
+import sys
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -103,12 +104,14 @@ from ..generate.generator import (
     write_scene_brief,
 )
 from ..generate.scenarios import (
+    RULE_CAP,
     SEARCH_ARMS,
     complete_yields,
     intent_for_tool,
     keep_fault_plan,
     reallocate_search_arms,
     retarget_regions,
+    rule_axis,
 )
 from ..ingest.traces import (
     behavior_state,
@@ -218,6 +221,31 @@ def _stop_reason(side: str, message: str) -> str:
 
 
 log = logging.getLogger("whileai.simulations")
+
+
+def someone_listens(logger: logging.Logger = log) -> bool:
+    """Is any handler other than the library's ``NullHandler`` attached to
+    ``logger`` or an ancestor it propagates to? ``logging.basicConfig()``,
+    a caplog, a root ``StreamHandler``: any of them counts."""
+    current: logging.Logger | None = logger
+    while current is not None:
+        if any(not isinstance(h, logging.NullHandler) for h in current.handlers):
+            return True
+        if not current.propagate:
+            return False
+        current = current.parent
+    return False
+
+
+def _say(message: str) -> None:
+    """A progress line goes to the ``whileai.simulations`` logger at INFO.
+    When nothing is listening it also goes to stderr, so a script with no
+    logging setup can tell a working run from a stuck one (#400); attach
+    any handler (``logging.basicConfig()``) to take the stream over."""
+    log.info("%s", message)
+    if not someone_listens():
+        print(message, file=sys.stderr, flush=True)
+
 
 # Every number this module reads lives in ``whileai.simulations.defaults``
 # with the reason for its value; the per-run ones are ``advanced`` keys on
@@ -397,6 +425,7 @@ class Run:
         self._start_scene_thread()
         self._build_runner()
         self._build_generator()
+        self._note_rule_axis_cap()
         self._init_loop_state()
         self._seed_pool()
         if c.out_path is not None:
@@ -810,6 +839,28 @@ class Run:
             self.user_model = (
                 parse_backend_spec(c.user_model)[1] if c.user_model else self.agent_model
             )
+
+    def _note_rule_axis_cap(self) -> None:
+        """Say, once per run, when the policy has more clauses than the
+        grid's rule axis holds: the rows cover the first ``RULE_CAP``
+        clauses and none of the rest, and nothing else in the run says so
+        (#391). A caller who set ``dimensions={"rule": [...]}`` chose the
+        axis, so the note is theirs to skip."""
+        dims = self.c.dimensions
+        if isinstance(dims, Mapping) and dims.get("rule"):
+            return
+        rules, total = rule_axis(self.policy, cap=RULE_CAP)
+        if total <= len(rules):
+            return
+        note = (
+            f"The policy has {total} clauses and the grid's rule axis holds {RULE_CAP} "
+            f"(RULE_AXIS_CAP_GRID; ZP_RULE_CAP overrides), so the rows cover the first "
+            f"{RULE_CAP} clauses in document order and none of the other {total - len(rules)}. "
+            "Pass dimensions={'rule': [...]} with the clauses that matter, or split the "
+            "policy and run each part."
+        )
+        self.data.warnings.append(note)
+        log.warning(note)
 
     def _build_generator(self) -> None:
         c = self.c
@@ -1658,9 +1709,7 @@ class Run:
         many = rows - self.progress_rows >= self.progress_every_rows
         if not (force or stale or many):
             return
-        log.info(
-            "%s", progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started)
-        )
+        _say(progress_line(rows, self.c.cap, len(self.generated_pool), now - self.started))
         self.progress_rows, self.progress_at = rows, now
 
     def _note_writer_start(self) -> None:
@@ -1669,12 +1718,9 @@ class Run:
         if not self.progress_on:
             return
         if isinstance(self.simulator, str) and self.simulator not in ("hosted", "default"):
-            log.info(
-                "writing situations with %s; first rows in about a minute",
-                self.simulator,
-            )
+            _say(f"writing situations with {self.simulator}; first rows in about a minute")
             return
-        log.info("writing situations with the hosted writer; first rows in about a minute")
+        _say("writing situations with the hosted writer; first rows in about a minute")
 
     def _write_progress(self, payload: dict) -> None:
         Path(str(self.c.out_path) + ".progress.json").write_text(json.dumps(payload, default=str))
@@ -3311,6 +3357,19 @@ class Run:
                 data.degraded.append("rollouts_lost")
             data.warnings.append(note)
             log.warning(note)
+        empty = int(self.lost_by.get("empty_reply", 0))
+        if not data.trajectories and empty and empty >= sum(self.lost_by.values()) * 0.9:
+            # Every rollout came back without a reply, so the run spent its
+            # budget on nothing. Name the cause and the one fix (#375).
+            self._all_replies_empty = True
+            note = (
+                f"no rows: the agent returned an empty reply on all {empty} rollouts; "
+                "return {'final_text': <what it said>, 'steps': [...]} from the agent "
+                "callable (or check the endpoint answers) and run again"
+            )
+            if note not in data.warnings:
+                data.warnings.append(note)
+            log.warning(note)
         if self.agent_errors:
             # The callable raised (or returned nothing usable). The rows
             # were built and dropped; without this the run reports zero
@@ -3513,6 +3572,10 @@ class Run:
             )
         self._record_tier_mix()
         data.writer_model = self.writer_model
+        if not data.trajectories and getattr(self, "_all_replies_empty", False):
+            # Set last: earlier wrap-up names the writer, but the writer did
+            # its job; the agent never answered (#375).
+            data.stopped_because = "empty_replies"
         data.user_model = self.user_model
         # One model writing the exam, sitting it, and playing the examiner's
         # stand-in is the regime the rlhf-book warns about (ch. 12: a model

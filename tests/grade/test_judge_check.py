@@ -104,7 +104,7 @@ def test_judge_trust_has_floors():
     attach_labels(good, _labels(good), annotator="ana")
     report = judge_trust(good)
     assert report["ok"] is True and report["gold_kind"] == "human"
-    assert report["floors"] == {"min_agreement": 0.8, "min_kappa": 0.6}
+    assert report["floors"] == {"min_agreement": 0.8, "min_kappa": 0.6, "max_skipped_share": 0.1}
     # 80% agreement: lower bound around 0.71, under the floor, kappa 0.6 on the line
     shaky = _rows(100, miss=2)
     attach_labels(shaky, _labels(shaky), annotator="ana")

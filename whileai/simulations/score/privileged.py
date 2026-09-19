@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ...report import Report
 from ..defaults import LEAK_MIN_QUOTE_CHARS
 from .style import assistant_text
 
@@ -52,7 +53,7 @@ def _needles(privileged: Any, *, min_len: int) -> list[tuple[str, str]]:
     return out
 
 
-def leak_report(rows: Any, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> dict[str, Any]:
+def leak_report(rows: Any, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> LeakReport:
     """Which rows quote their own ``privileged`` block in the agent's text.
 
     Takes the ``SimulationData`` itself, ``data.trajectories``, or any list
@@ -123,15 +124,32 @@ def leak_report(rows: Any, *, min_len: int = LEAK_MIN_QUOTE_CHARS) -> dict[str, 
             f"checked {n_checked} of {n_rows} rows: {n_leaked} quoted privileged context "
             f"({rate:.0%})"
         )
-    return {
-        "n_rows": n_rows,
-        "n_checked": n_checked,
-        "n_leaked": n_leaked,
-        "rate": round(rate, 4),
-        "checked": n_checked > 0,
-        "leaked": leaked[:20],
-        "summary": summary,
-    }
+    return LeakReport(
+        {
+            "n_rows": n_rows,
+            "n_checked": n_checked,
+            "n_leaked": n_leaked,
+            "rate": round(rate, 4),
+            "checked": n_checked > 0,
+            "leaked": leaked[:20],
+            "summary": summary,
+        }
+    )
+
+
+class LeakReport(Report):
+    """Which rows quote their own privileged context, as an object that
+    prints itself.
+
+    Still the dict it always was: ``report["leaked"]`` is the list the
+    export error tells you to read. ``print(report)`` is now the block
+    ``format_leak_report`` writes.
+    """
+
+    _summary_keys = ("n_leaked", "n_checked")
+
+    def __str__(self) -> str:
+        return format_leak_report(self)
 
 
 def format_leak_report(report: dict[str, Any]) -> str:

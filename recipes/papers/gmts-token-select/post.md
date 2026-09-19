@@ -1,0 +1,1 @@
+Reproduced Lv et al. (2608.30632), one L40S, 45 min: pass@1 0.49 -> 0.18 (-0.310 [-0.383, -0.235], flat) on 120 held-out tasks, Qwen2.5-1.5B. Recipe: https://github.com/whilehq/whileai-sdk/tree/main/recipes/papers/gmts-token-select Paper: https://arxiv.org/abs/2608.30632
