@@ -8,13 +8,12 @@ description: "Training runs, trainer callbacks, TRL export."
 
 Training runs, trainer callbacks, TRL export.
 
-16 public names. `import whileai.simulations as wai`, then `wai.name`.
+14 public names. `import whileai.simulations as wai`, then `wai.name`.
 
 | Name | What it does |
 |---|---|
 | [`TrainerCallback`](#trainercallback) | One line on a Transformers or TRL trainer: `trainer.add_callback(wai.TrainerCallback(run))`. |
 | [`TrainingRun`](#trainingrun) | One fine-tune, as the platform sees it. |
-| [`TrainingSelectionError`](#trainingselectionerror) | `train(check="require")` refused to start: the hosted trainer would learn the failure (SFT on failing rows) or nothing at all (a grouped method with no mixed task). |
 | [`attach_delta`](#attach_delta) | Compute `delta_report` for a finished run and put it on the run page: the summary is re-sent with `delta` added, status unchanged. |
 | [`attach_holdout`](#attach_holdout) | Did it work? Put the held-out pass rate before and after on a run that has already finished — the two numbers its page opens with:: |
 | [`delete_model`](#delete_model) | Stop hosting `name`: removes the model row from the account, so `models()` no longer lists it and its endpoint stops answering for that name. |
@@ -23,7 +22,6 @@ Training runs, trainer callbacks, TRL export.
 | [`list_runs`](#list_runs) |  |
 | [`models`](#models) | The account's hosted models: `name`, `baseModel`, `adapter`, `adapterRunId`, `version`, `endpoint` (an OpenAI-compatible base URL; send the account key as the bearer and `name` as the model). |
 | [`reward_model`](#reward_model) | A judge backed by a finished reward-model run. |
-| [`selection_report`](#selection_report) | What the hosted trainer will use of a profiled set, before the GPU. |
 | [`serve`](#serve) | Host a finished run's adapter under `name`. |
 | [`train`](#train) | Start a hosted fine-tune on a pushed dataset and return the run. |
 | [`training_run`](#training_run) | Create a run on the platform and return the handle to log into. |
@@ -172,14 +170,6 @@ Block until a hosted run ends, reading its state every `poll`
 seconds (never under `TRAINING_POLL_MIN_S`). Returns the final
 status; raises `TimeoutError` when `timeout` seconds pass first.
 
-### TrainingSelectionError
-
-
-`train(check="require")` refused to start: the hosted trainer would
-learn the failure (SFT on failing rows) or nothing at all (a grouped
-method with no mixed task). The message names the counts, the reason
-per dropped class, and the knob.
-
 ### attach_delta
 
 ```python
@@ -294,35 +284,6 @@ picks the score threshold that best separates the held-out pairs.
 `wai.judge_trust(scored.rows, judge=judge)`. Pass `threshold=` to
 override the run's own cut. The scores are the model's; a reward
 model trained on one agent's pairs says nothing about another agent.
-
-### selection_report
-
-```python
-selection_report(
-    profile: Mapping[str, Any],
-    method: str,
-    dataset: str = 'ds',
-    steps: int | None = None,
-    min_mixed_tasks: int = 32,
-) -> dict[str, Any]
-```
-
-What the hosted trainer will use of a profiled set, before the GPU.
-
-`profile` is `wai.profile(dataset)` (`rows`, `split`, `tasks`,
-`tasks_with_repeats`, `mixed_tasks`, `per_task`). Returns
-`given` and `used` (rows for `sft`, tasks for a grouped method,
-with `used_rows` when the per-task table is complete), `dropped`
-(count per reason), `refuse` (lines that stop a `check="require"`
-run) and `warn` (lines said either way). Pure: `train` reads the
-profile and decides.
-
-`sft` clones every row it is given, so a failing row is a refusal
-(rejection sampling keeps the passes,
-rlhfbook.com/c/10-rejection-sampling.html). `grpo`, `dpo` and
-`rm` learn from prompts with both a pass and a fail; none is a
-refusal, fewer than `min_mixed_tasks` (`TRAIN_MIN_MIXED_TASKS`,
-32) is a warning with the count.
 
 ### serve
 

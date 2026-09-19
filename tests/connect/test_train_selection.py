@@ -223,6 +223,6 @@ def test_selection_report_is_pure_and_public():
     assert report["warn"] and "6 of 21 tasks" in report["warn"][0]
     report = selection_report(ISSUE_PROFILE, method="sft")
     assert report["used"] == 84 and len(report["refuse"]) == 1
-    assert wai.selection_report is selection_report
-    assert wai.TrainingSelectionError is TrainingSelectionError
+    assert wai.training.selection_report is selection_report  # one dot down (style.md)
+    assert wai.training.TrainingSelectionError is TrainingSelectionError
     assert issubclass(TrainingSelectionError, ValueError)
